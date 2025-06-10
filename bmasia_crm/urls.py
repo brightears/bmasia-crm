@@ -25,19 +25,45 @@ import os
 def reset_admin_view(request):
     """Reset admin user - for troubleshooting"""
     try:
-        # Run the reset script
-        result = subprocess.run(['python', 'reset_admin.py'], 
-                              capture_output=True, text=True, 
-                              cwd=os.path.dirname(__file__))
+        from crm_app.models import User
+        
+        # Delete existing admin users
+        deleted_count = User.objects.filter(username='admin').delete()[0]
+        
+        # Create fresh admin user
+        admin_user = User.objects.create_superuser(
+            username='admin',
+            email='admin@bmasia.com',
+            password='bmasia123',
+            first_name='BMAsia',
+            last_name='Admin',
+            role='Admin'
+        )
+        
         return HttpResponse(f'''
-        <h2>Admin Reset Result:</h2>
-        <pre>{result.stdout}</pre>
-        <pre>{result.stderr}</pre>
-        <br>
-        <a href="/admin/" style="background: #1976d2; color: white; padding: 10px 20px; text-decoration: none;">Try Admin Login</a>
+        <h2>✅ Admin Reset Successful!</h2>
+        <p>Deleted {deleted_count} existing admin users</p>
+        <p>Created fresh admin user:</p>
+        <strong>Username:</strong> admin<br>
+        <strong>Password:</strong> bmasia123<br><br>
+        <a href="/admin/" style="background: #1976d2; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Go to Admin Login</a>
         ''')
+        
     except Exception as e:
-        return HttpResponse(f'Error: {e}')
+        # Try fallback with Django's built-in User
+        try:
+            from django.contrib.auth.models import User as BaseUser
+            BaseUser.objects.filter(username='admin').delete()
+            BaseUser.objects.create_superuser('admin', 'admin@bmasia.com', 'bmasia123')
+            return HttpResponse(f'''
+            <h2>✅ Fallback Admin Created!</h2>
+            <p>Created using Django's base User model:</p>
+            <strong>Username:</strong> admin<br>
+            <strong>Password:</strong> bmasia123<br><br>
+            <a href="/admin/" style="background: #1976d2; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Go to Admin Login</a>
+            ''')
+        except Exception as e2:
+            return HttpResponse(f'❌ Error: {e}<br>❌ Fallback Error: {e2}')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
