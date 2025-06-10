@@ -17,11 +17,14 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from django.views.generic import RedirectView
+from crm_app.admin_setup import create_admin_view
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('crm_app.urls')),
     path('api-auth/', include('rest_framework.urls')),
+    # Setup endpoint to create admin user
+    path('setup-admin/', create_admin_view, name='setup_admin'),
     # Redirect root to admin for now
     path('', RedirectView.as_view(url='/admin/', permanent=False)),
 ]
