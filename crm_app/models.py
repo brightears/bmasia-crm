@@ -565,3 +565,41 @@ class Invoice(TimestampedModel):
         # Auto-calculate total amount
         self.total_amount = self.amount + self.tax_amount - self.discount_amount
         super().save(*args, **kwargs)
+
+
+class SubscriptionPlan(TimestampedModel):
+    """Track multiple subscription tiers for a company"""
+    TIER_CHOICES = [
+        ('Soundtrack Essential (Serviced)', 'Soundtrack Essential (Serviced)'),
+        ('Soundtrack Essential (Self-Managed)', 'Soundtrack Essential (Self-Managed)'),
+        ('Soundtrack Unlimited (Serviced)', 'Soundtrack Unlimited (Serviced)'),
+        ('Soundtrack Unlimited (Self-Managed)', 'Soundtrack Unlimited (Self-Managed)'),
+        ('Beat Breeze', 'Beat Breeze'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='subscription_plans')
+    tier = models.CharField(max_length=100, choices=TIER_CHOICES)
+    zone_count = models.IntegerField(default=1, help_text="Number of music zones for this tier")
+    monthly_price_per_zone = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Monthly price per zone for this tier")
+    is_active = models.BooleanField(default=True)
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    
+    class Meta:
+        ordering = ['company', 'tier']
+        indexes = [
+            models.Index(fields=['company', 'is_active']),
+            models.Index(fields=['tier']),
+        ]
+    
+    def __str__(self):
+        return f"{self.company.name} - {self.tier} ({self.zone_count} zones)"
+    
+    @property
+    def total_monthly_value(self):
+        """Calculate total monthly value for this tier"""
+        if self.monthly_price_per_zone:
+            return self.zone_count * self.monthly_price_per_zone
+        return 0

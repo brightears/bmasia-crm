@@ -11,11 +11,27 @@ export interface User {
   date_joined: string;
 }
 
+export interface SubscriptionPlan {
+  id: string;
+  company: string;
+  company_name: string;
+  tier: 'Soundtrack Essential (Serviced)' | 'Soundtrack Essential (Self-Managed)' | 
+       'Soundtrack Unlimited (Serviced)' | 'Soundtrack Unlimited (Self-Managed)' | 'Beat Breeze';
+  zone_count: number;
+  monthly_price_per_zone?: number;
+  total_monthly_value: number;
+  is_active: boolean;
+  start_date?: string;
+  end_date?: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Company {
   id: string;
   name: string;
   country?: string;
-  current_plan?: string;
   website?: string;
   industry?: string;
   location_count: number;
@@ -32,6 +48,9 @@ export interface Company {
   full_address?: string;
   total_contract_value: number;
   contacts: Contact[];
+  subscription_plans: SubscriptionPlan[];
+  active_subscription_plans: SubscriptionPlan[];
+  subscription_summary: string;
   primary_contact?: Contact;
   opportunities_count: number;
   active_contracts_count: number;

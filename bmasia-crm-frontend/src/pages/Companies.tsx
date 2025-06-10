@@ -127,7 +127,7 @@ const Companies: React.FC = () => {
               <TableCell>Company Name</TableCell>
               <TableCell>Country</TableCell>
               <TableCell>Industry</TableCell>
-              <TableCell>Current Plan</TableCell>
+              <TableCell>Subscription Plans</TableCell>
               <TableCell>Opportunities</TableCell>
               <TableCell>Contracts</TableCell>
               <TableCell>Status</TableCell>
@@ -175,7 +175,11 @@ const Companies: React.FC = () => {
                   </TableCell>
                   <TableCell>{company.country || '-'}</TableCell>
                   <TableCell>{company.industry || '-'}</TableCell>
-                  <TableCell>{company.current_plan || '-'}</TableCell>
+                  <TableCell>
+                    <Typography variant="caption" sx={{ maxWidth: 200, display: 'block' }}>
+                      {company.subscription_summary || 'No active subscriptions'}
+                    </Typography>
+                  </TableCell>
                   <TableCell>
                     <Chip 
                       label={company.opportunities_count} 

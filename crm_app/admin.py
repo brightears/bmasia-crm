@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
-    Opportunity, OpportunityActivity, Contract, Invoice
+    Opportunity, OpportunityActivity, Contract, Invoice, SubscriptionPlan
 )
 
 
@@ -34,18 +34,46 @@ class TaskInline(admin.TabularInline):
     fields = ['title', 'assigned_to', 'priority', 'status', 'due_date']
 
 
+class SubscriptionPlanInline(admin.TabularInline):
+    model = SubscriptionPlan
+    extra = 1
+    fields = ['tier', 'zone_count', 'monthly_price_per_zone', 'is_active', 'start_date', 'end_date']
+    verbose_name = "Subscription Tier"
+    verbose_name_plural = "Subscription Tiers (can have multiple tiers)"
+
+
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
     list_display = ['name', 'country', 'industry', 'location_count', 'music_zone_count', 'is_active']
     list_filter = ['country', 'industry', 'is_active']
     search_fields = ['name', 'website', 'notes']
-    readonly_fields = ['created_at', 'updated_at']
-    inlines = [ContactInline, NoteInline, TaskInline]
+    readonly_fields = ['created_at', 'updated_at', 'current_subscription_summary']
+    inlines = [SubscriptionPlanInline, ContactInline, NoteInline, TaskInline]
+    
+    def current_subscription_summary(self, obj):
+        """Display a summary of current subscription plans"""
+        plans = obj.subscription_plans.filter(is_active=True)
+        if not plans:
+            return "No active subscription plans"
+        
+        summary = []
+        total_zones = 0
+        for plan in plans:
+            summary.append(f"{plan.tier}: {plan.zone_count} zones")
+            total_zones += plan.zone_count
+        
+        return " | ".join(summary) + f" (Total: {total_zones} zones)"
+    
+    current_subscription_summary.short_description = "Current Subscription Plans"
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('name', 'country', 'industry', 'website', 'current_plan', 'location_count', 'music_zone_count', 'is_active'),
+            'fields': ('name', 'country', 'industry', 'website', 'location_count', 'music_zone_count', 'is_active'),
             'description': 'Essential company details and BMAsia-specific tracking'
+        }),
+        ('Subscription Details', {
+            'fields': ('current_subscription_summary',),
+            'description': 'View active subscription tiers (edit in the Subscription Tiers section below)'
         }),
         ('Address', {
             'fields': ('address_line1', 'address_line2', 'city', 'state', 'postal_code'),
@@ -230,3 +258,34 @@ class AuditLogAdmin(admin.ModelAdmin):
     
     def has_change_permission(self, request, obj=None):
         return False
+
+
+@admin.register(SubscriptionPlan)
+class SubscriptionPlanAdmin(admin.ModelAdmin):
+    list_display = ['company', 'tier', 'zone_count', 'monthly_price_per_zone', 'total_monthly_value', 'is_active']
+    list_filter = ['tier', 'is_active', 'start_date', 'end_date']
+    search_fields = ['company__name', 'tier', 'notes']
+    readonly_fields = ['created_at', 'updated_at', 'total_monthly_value']
+    
+    def total_monthly_value(self, obj):
+        return f"${obj.total_monthly_value:.2f}" if obj.total_monthly_value else "-"
+    total_monthly_value.short_description = "Total Monthly Value"
+    
+    fieldsets = (
+        ('Company & Tier', {
+            'fields': ('company', 'tier')
+        }),
+        ('Pricing', {
+            'fields': ('zone_count', 'monthly_price_per_zone', 'total_monthly_value')
+        }),
+        ('Duration', {
+            'fields': ('is_active', 'start_date', 'end_date')
+        }),
+        ('Additional Info', {
+            'fields': ('notes',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
