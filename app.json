@@ -1,0 +1,29 @@
+{
+  "name": "BMAsia CRM",
+  "description": "Custom CRM system for BMAsia background music licensing",
+  "repository": "https://github.com/your-username/bmasia-crm",
+  "logo": "https://cdn.iconscout.com/icon/free/png-256/music-note-1826435-1548886.png",
+  "keywords": ["django", "crm", "music", "licensing"],
+  "env": {
+    "SECRET_KEY": {
+      "description": "Django secret key for security",
+      "generator": "secret"
+    },
+    "DEBUG": {
+      "description": "Debug mode",
+      "value": "True"
+    },
+    "ALLOWED_HOSTS": {
+      "description": "Allowed hosts",
+      "value": "*"
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ],
+  "addons": [
+    "heroku-postgresql:mini"
+  ]
+}
