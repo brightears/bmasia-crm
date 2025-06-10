@@ -37,7 +37,7 @@ class TaskInline(admin.TabularInline):
 class SubscriptionPlanInline(admin.TabularInline):
     model = SubscriptionPlan
     extra = 1
-    fields = ['tier', 'zone_count', 'monthly_price_per_zone', 'is_active', 'start_date', 'end_date']
+    fields = ['tier', 'zone_count', 'billing_period', 'price_per_zone', 'currency', 'is_active', 'start_date', 'end_date']
     verbose_name = "Subscription Tier"
     verbose_name_plural = "Subscription Tiers (can have multiple tiers)"
 
@@ -262,21 +262,36 @@ class AuditLogAdmin(admin.ModelAdmin):
 
 @admin.register(SubscriptionPlan)
 class SubscriptionPlanAdmin(admin.ModelAdmin):
-    list_display = ['company', 'tier', 'zone_count', 'monthly_price_per_zone', 'total_monthly_value', 'is_active']
-    list_filter = ['tier', 'is_active', 'start_date', 'end_date']
+    list_display = ['company', 'tier', 'zone_count', 'billing_period', 'display_price_per_zone', 'display_total_value', 'currency', 'is_active']
+    list_filter = ['tier', 'billing_period', 'currency', 'is_active', 'start_date', 'end_date']
     search_fields = ['company__name', 'tier', 'notes']
-    readonly_fields = ['created_at', 'updated_at', 'total_monthly_value']
+    readonly_fields = ['created_at', 'updated_at', 'display_total_value', 'display_monthly_value']
     
-    def total_monthly_value(self, obj):
-        return f"${obj.total_monthly_value:.2f}" if obj.total_monthly_value else "-"
-    total_monthly_value.short_description = "Total Monthly Value"
+    def display_price_per_zone(self, obj):
+        if obj.price_per_zone:
+            return f"{obj.currency} {obj.price_per_zone:,}"
+        return "-"
+    display_price_per_zone.short_description = "Price per Zone"
+    
+    def display_total_value(self, obj):
+        if obj.total_value:
+            return f"{obj.currency} {obj.total_value:,} ({obj.billing_period})"
+        return "-"
+    display_total_value.short_description = "Total Value"
+    
+    def display_monthly_value(self, obj):
+        if obj.monthly_value:
+            return f"{obj.currency} {obj.monthly_value:,.0f}/month"
+        return "-"
+    display_monthly_value.short_description = "Monthly Equivalent"
     
     fieldsets = (
         ('Company & Tier', {
             'fields': ('company', 'tier')
         }),
         ('Pricing', {
-            'fields': ('zone_count', 'monthly_price_per_zone', 'total_monthly_value')
+            'fields': ('zone_count', 'billing_period', 'price_per_zone', 'currency', 'display_total_value', 'display_monthly_value'),
+            'description': 'Enter whole numbers only for pricing (e.g., 25 for USD 25, 900 for THB 900)'
         }),
         ('Duration', {
             'fields': ('is_active', 'start_date', 'end_date')

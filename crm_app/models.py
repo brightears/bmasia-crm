@@ -577,11 +577,23 @@ class SubscriptionPlan(TimestampedModel):
         ('Beat Breeze', 'Beat Breeze'),
     ]
     
+    BILLING_PERIOD_CHOICES = [
+        ('Monthly', 'Monthly'),
+        ('Yearly', 'Yearly'),
+    ]
+    
+    CURRENCY_CHOICES = [
+        ('USD', 'USD - US Dollar'),
+        ('THB', 'THB - Thai Baht'),
+    ]
+    
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='subscription_plans')
     tier = models.CharField(max_length=100, choices=TIER_CHOICES)
     zone_count = models.IntegerField(default=1, help_text="Number of music zones for this tier")
-    monthly_price_per_zone = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Monthly price per zone for this tier")
+    billing_period = models.CharField(max_length=20, choices=BILLING_PERIOD_CHOICES, default='Monthly')
+    price_per_zone = models.IntegerField(null=True, blank=True, help_text="Price per zone (no decimals)")
+    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
     is_active = models.BooleanField(default=True)
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
@@ -598,8 +610,25 @@ class SubscriptionPlan(TimestampedModel):
         return f"{self.company.name} - {self.tier} ({self.zone_count} zones)"
     
     @property
-    def total_monthly_value(self):
-        """Calculate total monthly value for this tier"""
-        if self.monthly_price_per_zone:
-            return self.zone_count * self.monthly_price_per_zone
+    def total_value(self):
+        """Calculate total value for this tier"""
+        if self.price_per_zone:
+            return self.zone_count * self.price_per_zone
         return 0
+    
+    @property
+    def monthly_value(self):
+        """Calculate monthly value for comparison"""
+        if not self.price_per_zone:
+            return 0
+        total = self.zone_count * self.price_per_zone
+        if self.billing_period == 'Yearly':
+            return total / 12
+        return total
+    
+    @property
+    def display_price(self):
+        """Display price with currency"""
+        if self.price_per_zone:
+            return f"{self.currency} {self.price_per_zone:,}"
+        return "Not set"

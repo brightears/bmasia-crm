@@ -63,13 +63,16 @@ class ContactSerializer(serializers.ModelSerializer):
 class SubscriptionPlanSerializer(serializers.ModelSerializer):
     """Serializer for SubscriptionPlan model"""
     company_name = serializers.CharField(source='company.name', read_only=True)
-    total_monthly_value = serializers.ReadOnlyField()
+    total_value = serializers.ReadOnlyField()
+    monthly_value = serializers.ReadOnlyField()
+    display_price = serializers.ReadOnlyField()
     
     class Meta:
         model = SubscriptionPlan
         fields = [
             'id', 'company', 'company_name', 'tier', 'zone_count',
-            'monthly_price_per_zone', 'total_monthly_value', 'is_active',
+            'billing_period', 'price_per_zone', 'currency', 'total_value',
+            'monthly_value', 'display_price', 'is_active',
             'start_date', 'end_date', 'notes', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']

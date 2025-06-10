@@ -18,8 +18,12 @@ export interface SubscriptionPlan {
   tier: 'Soundtrack Essential (Serviced)' | 'Soundtrack Essential (Self-Managed)' | 
        'Soundtrack Unlimited (Serviced)' | 'Soundtrack Unlimited (Self-Managed)' | 'Beat Breeze';
   zone_count: number;
-  monthly_price_per_zone?: number;
-  total_monthly_value: number;
+  billing_period: 'Monthly' | 'Yearly';
+  price_per_zone?: number;
+  currency: 'USD' | 'THB';
+  total_value: number;
+  monthly_value: number;
+  display_price: string;
   is_active: boolean;
   start_date?: string;
   end_date?: string;
