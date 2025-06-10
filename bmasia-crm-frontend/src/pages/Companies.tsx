@@ -125,7 +125,7 @@ const Companies: React.FC = () => {
           <TableHead>
             <TableRow>
               <TableCell>Company Name</TableCell>
-              <TableCell>Region</TableCell>
+              <TableCell>Country</TableCell>
               <TableCell>Industry</TableCell>
               <TableCell>Current Plan</TableCell>
               <TableCell>Opportunities</TableCell>
@@ -173,7 +173,7 @@ const Companies: React.FC = () => {
                       </Box>
                     </Box>
                   </TableCell>
-                  <TableCell>{company.region || '-'}</TableCell>
+                  <TableCell>{company.country || '-'}</TableCell>
                   <TableCell>{company.industry || '-'}</TableCell>
                   <TableCell>{company.current_plan || '-'}</TableCell>
                   <TableCell>

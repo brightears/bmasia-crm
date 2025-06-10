@@ -86,17 +86,15 @@ class Company(TimestampedModel):
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255, unique=True, db_index=True)
-    region = models.CharField(max_length=100, blank=True, db_index=True)
+    country = models.CharField(max_length=100, blank=True, db_index=True)
     current_plan = models.CharField(max_length=100, blank=True)
     website = models.URLField(blank=True)
     industry = models.CharField(max_length=50, choices=INDUSTRY_CHOICES, blank=True)
-    company_size = models.CharField(max_length=20, choices=COMPANY_SIZE_CHOICES, blank=True)
     annual_revenue = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     
     # BMAsia specific fields
     location_count = models.IntegerField(default=1, help_text="Number of physical locations")
     music_zone_count = models.IntegerField(default=1, help_text="Total number of music zones across all locations")
-    is_corporate_account = models.BooleanField(default=False, help_text="Is this a corporate account managing multiple locations?")
     
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
@@ -113,8 +111,8 @@ class Company(TimestampedModel):
         verbose_name_plural = 'Companies'
         ordering = ['name']
         indexes = [
-            models.Index(fields=['name', 'region']),
-            models.Index(fields=['industry', 'company_size']),
+            models.Index(fields=['name', 'country']),
+            models.Index(fields=['industry']),
         ]
     
     def __str__(self):

@@ -73,10 +73,10 @@ class CompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = Company
         fields = [
-            'id', 'name', 'region', 'current_plan', 'website', 'industry',
-            'company_size', 'location_count', 'music_zone_count', 'is_corporate_account',
-            'avg_zones_per_location', 'annual_revenue', 'is_active', 'notes',
-            'address_line1', 'address_line2', 'city', 'state', 'postal_code', 'country',
+            'id', 'name', 'country', 'current_plan', 'website', 'industry',
+            'location_count', 'music_zone_count', 'avg_zones_per_location', 
+            'annual_revenue', 'is_active', 'notes',
+            'address_line1', 'address_line2', 'city', 'state', 'postal_code',
             'full_address', 'total_contract_value', 'contacts', 'primary_contact',
             'opportunities_count', 'active_contracts_count', 'created_at', 'updated_at'
         ]

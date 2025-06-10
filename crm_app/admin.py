@@ -36,25 +36,19 @@ class TaskInline(admin.TabularInline):
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
-    list_display = ['name', 'region', 'industry', 'location_count', 'music_zone_count', 'is_corporate_account', 'is_active']
-    list_filter = ['region', 'industry', 'company_size', 'is_corporate_account', 'is_active']
+    list_display = ['name', 'country', 'industry', 'location_count', 'music_zone_count', 'is_active']
+    list_filter = ['country', 'industry', 'is_active']
     search_fields = ['name', 'website', 'notes']
     readonly_fields = ['created_at', 'updated_at']
     inlines = [ContactInline, NoteInline, TaskInline]
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('name', 'website', 'current_plan', 'is_active')
-        }),
-        ('Classification', {
-            'fields': ('region', 'industry', 'company_size')
-        }),
-        ('BMAsia Details', {
-            'fields': ('is_corporate_account', 'location_count', 'music_zone_count'),
-            'description': 'Track locations vs. music zones for accurate billing'
+            'fields': ('name', 'country', 'industry', 'website', 'current_plan', 'location_count', 'music_zone_count', 'is_active'),
+            'description': 'Essential company details and BMAsia-specific tracking'
         }),
         ('Address', {
-            'fields': ('address_line1', 'address_line2', 'city', 'state', 'postal_code', 'country'),
+            'fields': ('address_line1', 'address_line2', 'city', 'state', 'postal_code'),
             'classes': ('collapse',)
         }),
         ('Additional Details', {
@@ -71,7 +65,7 @@ class CompanyAdmin(admin.ModelAdmin):
 @admin.register(Contact)
 class ContactAdmin(admin.ModelAdmin):
     list_display = ['name', 'company', 'email', 'phone', 'contact_type', 'is_primary', 'is_active']
-    list_filter = ['contact_type', 'is_primary', 'is_active', 'company__region']
+    list_filter = ['contact_type', 'is_primary', 'is_active', 'company__country']
     search_fields = ['name', 'email', 'company__name']
     readonly_fields = ['created_at', 'updated_at']
 

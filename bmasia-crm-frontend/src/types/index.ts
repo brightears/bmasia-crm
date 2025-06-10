@@ -14,14 +14,12 @@ export interface User {
 export interface Company {
   id: string;
   name: string;
-  region?: string;
+  country?: string;
   current_plan?: string;
   website?: string;
   industry?: string;
-  company_size?: string;
   location_count: number;
   music_zone_count: number;
-  is_corporate_account: boolean;
   avg_zones_per_location: number;
   annual_revenue?: number;
   is_active: boolean;
@@ -31,7 +29,6 @@ export interface Company {
   city?: string;
   state?: string;
   postal_code?: string;
-  country?: string;
   full_address?: string;
   total_contract_value: number;
   contacts: Contact[];
