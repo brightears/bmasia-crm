@@ -4,9 +4,5 @@ django-cors-headers==4.6.0
 django-filter==24.3
 python-decouple==3.8
 dj-database-url==2.2.0
-psycopg2-binary==2.9.9
-celery==5.4.0
-redis==5.2.0
 gunicorn==23.0.0
 whitenoise==6.8.2
-Pillow==10.4.0
