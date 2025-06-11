@@ -39,14 +39,17 @@ class TaskInline(admin.TabularInline):
 class SubscriptionPlanInline(admin.TabularInline):
     model = SubscriptionPlan
     extra = 1
-    fields = ['tier', 'zone_count', 'price_per_zone', 'currency']
+    fields = ['tier', 'zone_count', 'billing_period', 'price_per_zone', 'currency']
     verbose_name = "Subscription Tier"
     verbose_name_plural = "Subscription Tiers (can have multiple tiers)"
     
     def formfield_for_dbfield(self, db_field, request, **kwargs):
-        # Remove spinners from numeric fields
+        # Remove spinners from numeric fields and make them smaller
         if db_field.name in ['price_per_zone', 'zone_count']:
-            kwargs['widget'] = admin.widgets.AdminTextInputWidget(attrs={'type': 'text'})
+            kwargs['widget'] = admin.widgets.AdminTextInputWidget(attrs={
+                'type': 'text',
+                'style': 'width: 80px;'
+            })
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
 
