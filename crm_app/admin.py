@@ -235,12 +235,17 @@ class CompanyAdmin(admin.ModelAdmin):
             return "No active subscription plans"
         
         summary = []
-        total_zones = 0
         for plan in plans:
-            summary.append(f"{plan.tier}: {plan.zone_count} zones")
-            total_zones += plan.zone_count
+            # Format dates if they exist
+            date_info = ""
+            if plan.start_date and plan.end_date:
+                date_info = f" ({plan.start_date.strftime('%d/%m/%Y')} - {plan.end_date.strftime('%d/%m/%Y')})"
+            elif plan.start_date:
+                date_info = f" (from {plan.start_date.strftime('%d/%m/%Y')})"
+            
+            summary.append(f"{plan.tier}: {plan.zone_count} zones{date_info}")
         
-        return " | ".join(summary) + f" (Total: {total_zones} zones)"
+        return " | ".join(summary)
     
     current_subscription_summary.short_description = "Current Subscription Plans"
     
