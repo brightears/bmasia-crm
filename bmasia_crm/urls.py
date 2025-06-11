@@ -18,6 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 from django.views.generic import RedirectView
 from crm_app.admin_setup import create_admin_view
+from crm_app.views import debug_soundtrack_api
 from django.http import HttpResponse
 import subprocess
 import os
@@ -72,6 +73,7 @@ urlpatterns = [
     # Setup endpoint to create admin user
     path('setup-admin/', create_admin_view, name='setup_admin'),
     path('reset-admin/', reset_admin_view, name='reset_admin'),
+    path('debug-soundtrack/', debug_soundtrack_api, name='debug_soundtrack'),
     # Redirect root to admin for now
     path('', RedirectView.as_view(url='/admin/', permanent=False)),
 ]

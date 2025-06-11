@@ -9,9 +9,13 @@ from datetime import datetime, timedelta
 from django.contrib.auth import login, logout
 from rest_framework.authtoken.models import Token
 from django.db import transaction
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.contrib.admin.views.decorators import staff_member_required
+from django.contrib.auth import get_user_model
 import csv
 import json
+import os
 
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
@@ -567,3 +571,78 @@ class AuthViewSet(viewsets.ViewSet):
         else:
             ip = request.META.get('REMOTE_ADDR')
         return ip
+
+
+@csrf_exempt
+def reset_admin(request):
+    """Reset admin password to default"""
+    User = get_user_model()
+    
+    # Delete any existing admin users
+    deleted_count = User.objects.filter(username='admin').delete()[0]
+    
+    # Create new admin user
+    admin_user = User.objects.create_superuser(
+        username='admin',
+        email='admin@bmasia.com',
+        password='bmasia123',
+        role='Admin'
+    )
+    
+    return HttpResponse(f"""
+        <h2>✅ Admin Reset Successful\!</h2>
+        <p>Deleted {deleted_count} existing admin users</p>
+        <p>Created fresh admin user:</p>
+        <strong>Username:</strong> admin<br>
+        <strong>Password:</strong> bmasia123<br><br>
+        <a href="/admin/" style="background: #1976d2; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Go to Admin Login</a>
+    """)
+
+
+@staff_member_required
+def debug_soundtrack_api(request):
+    """Debug endpoint to check Soundtrack API configuration and test connection"""
+    from .services.soundtrack_api import soundtrack_api
+    
+    # Check environment variables
+    env_vars = {
+        'SOUNDTRACK_API_TOKEN': os.environ.get('SOUNDTRACK_API_TOKEN', 'NOT SET'),
+        'SOUNDTRACK_CLIENT_ID': os.environ.get('SOUNDTRACK_CLIENT_ID', 'NOT SET'),
+        'SOUNDTRACK_CLIENT_SECRET': os.environ.get('SOUNDTRACK_CLIENT_SECRET', 'NOT SET'),
+    }
+    
+    # Check if they're loaded in the service
+    service_config = {
+        'api_token': 'SET' if soundtrack_api.api_token else 'NOT SET',
+        'client_id': 'SET' if soundtrack_api.client_id else 'NOT SET',
+        'client_secret': 'SET' if soundtrack_api.client_secret else 'NOT SET',
+        'base_url': soundtrack_api.base_url,
+    }
+    
+    # Test API connection if requested
+    test_results = {}
+    if request.GET.get('test') == '1':
+        test_account_id = request.GET.get('account_id', 'QWNjb3VudCwsMXN4N242NTZyeTgv')
+        
+        # Test account details
+        account_data = soundtrack_api.get_account_details(test_account_id)
+        test_results['account_details'] = {
+            'success': account_data is not None,
+            'data': account_data if account_data else 'Failed to fetch'
+        }
+        
+        # Test zones
+        zones = soundtrack_api.get_account_zones(test_account_id)
+        test_results['zones'] = {
+            'success': zones is not None,
+            'count': len(zones) if zones else 0,
+            'data': zones if zones else 'Failed to fetch'
+        }
+    
+    return JsonResponse({
+        'environment_variables': env_vars,
+        'service_configuration': service_config,
+        'test_results': test_results,
+        'instructions': 'Add ?test=1&account_id=YOUR_ACCOUNT_ID to test API connection'
+    }, json_dumps_params={'indent': 2})
+EOF < /dev/null
