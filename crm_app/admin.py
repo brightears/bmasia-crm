@@ -228,7 +228,6 @@ class CompanyAdmin(admin.ModelAdmin):
         }),
         ('Subscription Details', {
             'fields': ('current_subscription_summary',),
-            'description': 'View active subscription tiers (edit in the Subscription Tiers section below)'
         }),
         ('Address', {
             'fields': ('address_line1', 'address_line2', 'city', 'state', 'postal_code'),
