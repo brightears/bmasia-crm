@@ -47,11 +47,18 @@ class SubscriptionPlanInline(admin.TabularInline):
 class CompanyZoneInline(admin.TabularInline):
     model = Zone
     extra = 0
-    fields = ['name', 'platform', 'status', 'device_name', 'last_seen_online', 'soundtrack_zone_id']
-    readonly_fields = ['name', 'status', 'last_seen_online', 'soundtrack_zone_id', 'platform']
+    fields = ['name', 'currently_playing_display', 'status', 'device_name', 'last_seen_online']
+    readonly_fields = ['name', 'currently_playing_display', 'status', 'last_seen_online', 'platform']
     verbose_name = "Music Zone"
     verbose_name_plural = "Music Zones (auto-synced from Soundtrack)"
     can_delete = False
+    
+    def currently_playing_display(self, obj):
+        """Display what's currently playing instead of zone ID"""
+        if obj.api_raw_data and obj.api_raw_data.get('currently_playing'):
+            return obj.api_raw_data.get('currently_playing')
+        return "No active playlist/schedule"
+    currently_playing_display.short_description = "Currently Playing"
     
     def has_add_permission(self, request, obj):
         # Don't allow manual adding for Soundtrack companies
@@ -459,15 +466,22 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
 
 @admin.register(Zone)
 class ZoneAdmin(admin.ModelAdmin):
-    list_display = ["zone_name_with_company", "platform", "status_badge", "last_seen_online", "last_api_sync"]
+    list_display = ["zone_name_with_company", "platform", "currently_playing_admin", "status_badge", "last_seen_online", "last_api_sync"]
     list_filter = ["platform", "status", "company"]
     search_fields = ["name", "company__name", "company__soundtrack_account_id"]
-    readonly_fields = ["created_at", "updated_at", "last_api_sync", "api_raw_data", "status_badge", "soundtrack_account_id"]
+    readonly_fields = ["created_at", "updated_at", "last_api_sync", "api_raw_data", "status_badge", "soundtrack_account_id", "currently_playing_admin"]
     
     def zone_name_with_company(self, obj):
         return f"{obj.company.name} - {obj.name}"
     zone_name_with_company.short_description = "Zone"
     zone_name_with_company.admin_order_field = "company__name"
+    
+    def currently_playing_admin(self, obj):
+        """Display what's currently playing"""
+        if obj.api_raw_data and obj.api_raw_data.get('currently_playing'):
+            return obj.api_raw_data.get('currently_playing')
+        return "No active playlist/schedule"
+    currently_playing_admin.short_description = "Currently Playing"
     
     def status_badge(self, obj):
         colors = {
@@ -489,7 +503,7 @@ class ZoneAdmin(admin.ModelAdmin):
             "fields": ("company", "name", "platform")
         }),
         ("Status", {
-            "fields": ("status", "status_badge", "last_seen_online", "device_name")
+            "fields": ("status", "status_badge", "currently_playing_admin", "last_seen_online", "device_name")
         }),
         ("Soundtrack Integration", {
             "fields": ("soundtrack_account_id", "soundtrack_zone_id", "soundtrack_admin_email"),
