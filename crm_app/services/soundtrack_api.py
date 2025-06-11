@@ -105,6 +105,94 @@ class SoundtrackAPIService:
     
     def get_account_zones(self, account_id: str = None) -> List[Dict]:
         """Get zones for a specific account or all accounts if no account_id provided"""
+        if account_id:
+            # Use specific account query when account ID is provided
+            return self._get_specific_account_zones(account_id)
+        else:
+            # Fall back to getting all accounts
+            return self._get_all_account_zones()
+    
+    def _get_specific_account_zones(self, account_id: str) -> List[Dict]:
+        """Get zones for a specific account ID using direct account query"""
+        query = """
+        query($accountId: ID!) {
+            account(id: $accountId) {
+                id
+                businessName
+                locations(first: 100) {
+                    edges {
+                        node {
+                            id
+                            name
+                            soundZones(first: 100) {
+                                edges {
+                                    node {
+                                        id
+                                        name
+                                        isPaired
+                                        device {
+                                            id
+                                            name
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        """
+        
+        variables = {"accountId": account_id}
+        result = self._make_graphql_query(query, variables)
+        
+        if not result or 'account' not in result:
+            logger.error(f"Failed to get account info for ID: {account_id}")
+            return []
+        
+        zones = []
+        account = result['account']
+        business_name = account.get('businessName', 'Unknown Business')
+        
+        # Iterate through all locations in this account
+        for location_edge in account.get('locations', {}).get('edges', []):
+            location = location_edge['node']
+            location_name = location.get('name', 'Unknown Location')
+            
+            # Iterate through all sound zones in this location
+            for zone_edge in location.get('soundZones', {}).get('edges', []):
+                zone = zone_edge['node']
+                
+                # Determine zone status based on isPaired and device presence
+                if zone.get('isPaired', False) and zone.get('device'):
+                    status = 'online'
+                    is_online = True
+                elif zone.get('device'):
+                    status = 'offline'  # Has device but not paired
+                    is_online = False
+                else:
+                    status = 'no_device'
+                    is_online = False
+                
+                zones.append({
+                    'id': zone['id'],
+                    'name': f"{location_name} - {zone['name']}",
+                    'zone_name': zone['name'],
+                    'location_name': location_name,
+                    'account_name': business_name,
+                    'account_id': account_id,
+                    'is_online': is_online,
+                    'is_paired': zone.get('isPaired', False),
+                    'device_name': zone.get('device', {}).get('name', '') if zone.get('device') else '',
+                    'device_id': zone.get('device', {}).get('id', '') if zone.get('device') else '',
+                    'status': status,
+                })
+        
+        return zones
+    
+    def _get_all_account_zones(self) -> List[Dict]:
+        """Get zones for all accounts using me query"""
         account_info = self.get_account_info()
         
         if not account_info or 'me' not in account_info:
@@ -119,10 +207,6 @@ class SoundtrackAPIService:
             account = account_edge['node']
             current_account_id = account['id']
             business_name = account.get('businessName', 'Unknown Business')
-            
-            # If account_id is specified, only process matching account
-            if account_id and current_account_id != account_id:
-                continue
             
             # Iterate through all locations in this account
             for location_edge in account.get('locations', {}).get('edges', []):
