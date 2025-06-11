@@ -226,7 +226,6 @@ class CompanyAdmin(admin.ModelAdmin):
         }),
         ('Soundtrack Integration', {
             'fields': ('soundtrack_account_id', 'zones_status_summary'),
-            'description': 'Enter Soundtrack account ID (e.g., QWNjb3VudCwsMXN4N242NTZyeTgv for Hilton Pattaya) to enable zone tracking'
         }),
         ('Subscription Details', {
             'fields': ('current_subscription_summary',),
