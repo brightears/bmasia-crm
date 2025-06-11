@@ -11,3 +11,9 @@ services:
         value: "True"
       - key: ALLOWED_HOSTS
         value: "*"
+      - key: SOUNDTRACK_API_TOKEN
+        value: your-soundtrack-api-token-here
+      - key: SOUNDTRACK_CLIENT_ID
+        value: your-soundtrack-client-id-here
+      - key: SOUNDTRACK_CLIENT_SECRET
+        value: your-soundtrack-client-secret-here

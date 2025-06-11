@@ -192,3 +192,31 @@ if not DEBUG:
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+
+# Soundtrack API Configuration
+SOUNDTRACK_API_TOKEN = config('SOUNDTRACK_API_TOKEN', default='')
+SOUNDTRACK_CLIENT_ID = config('SOUNDTRACK_CLIENT_ID', default='')
+SOUNDTRACK_CLIENT_SECRET = config('SOUNDTRACK_CLIENT_SECRET', default='')
+
+# Validate Soundtrack API configuration
+if not SOUNDTRACK_API_TOKEN:
+    import warnings
+    warnings.warn("SOUNDTRACK_API_TOKEN not configured - Soundtrack API integration will not work")
+
+# Logging Configuration
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'crm_app.services.soundtrack_api': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+    },
+}
