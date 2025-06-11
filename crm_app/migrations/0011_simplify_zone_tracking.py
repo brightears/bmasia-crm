@@ -18,27 +18,7 @@ class Migration(migrations.Migration):
             field=models.CharField(blank=True, help_text='Soundtrack Your Brand account ID for API integration', max_length=100),
         ),
         
-        # Remove the foreign key to SubscriptionPlan from Zone
-        migrations.RemoveField(
-            model_name='zone',
-            name='subscription_plan',
-        ),
-        
-        # Add foreign key to Company
-        migrations.AddField(
-            model_name='zone',
-            name='company',
-            field=models.ForeignKey(default=None, on_delete=django.db.models.deletion.CASCADE, related_name='zones', to='crm_app.company'),
-            preserve_default=False,
-        ),
-        
-        # Remove soundtrack_account_id from Zone (now using company's)
-        migrations.RemoveField(
-            model_name='zone',
-            name='soundtrack_account_id',
-        ),
-        
-        # Update indexes
+        # Remove indexes first (before removing fields they reference)
         migrations.RemoveIndex(
             model_name='zone',
             name='crm_app_zon_subscri_9876ab_idx',
@@ -47,6 +27,28 @@ class Migration(migrations.Migration):
             model_name='zone',
             name='crm_app_zon_platfor_5432cd_idx',
         ),
+        
+        # Add foreign key to Company
+        migrations.AddField(
+            model_name='zone',
+            name='company',
+            field=models.ForeignKey(default=1, on_delete=django.db.models.deletion.CASCADE, related_name='zones', to='crm_app.company'),
+            preserve_default=False,
+        ),
+        
+        # Remove the foreign key to SubscriptionPlan from Zone
+        migrations.RemoveField(
+            model_name='zone',
+            name='subscription_plan',
+        ),
+        
+        # Remove soundtrack_account_id from Zone (now using company's)
+        migrations.RemoveField(
+            model_name='zone',
+            name='soundtrack_account_id',
+        ),
+        
+        # Add new indexes
         migrations.AddIndex(
             model_name='zone',
             index=models.Index(fields=['company', 'status'], name='crm_app_zon_company_1234ab_idx'),
