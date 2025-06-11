@@ -47,16 +47,38 @@ class SubscriptionPlanInline(admin.TabularInline):
 class CompanyZoneInline(admin.TabularInline):
     model = Zone
     extra = 0
-    fields = ['name', 'platform', 'status', 'device_name', 'last_seen_online']
-    readonly_fields = ['status', 'last_seen_online']
+    fields = ['name', 'platform', 'status', 'device_name', 'last_seen_online', 'soundtrack_zone_id']
+    readonly_fields = ['name', 'status', 'last_seen_online', 'soundtrack_zone_id', 'platform']
     verbose_name = "Music Zone"
-    verbose_name_plural = "Music Zones"
+    verbose_name_plural = "Music Zones (auto-synced from Soundtrack)"
+    can_delete = False
     
     def has_add_permission(self, request, obj):
-        # Only allow adding zones if company has Soundtrack account ID
-        if obj and obj.soundtrack_account_id:
-            return True
-        return super().has_add_permission(request, obj)
+        # Don't allow manual adding for Soundtrack companies
+        return False
+    
+    def get_queryset(self, request):
+        # Only show Soundtrack zones
+        qs = super().get_queryset(request)
+        return qs.filter(platform='soundtrack')
+
+
+class BeatBreezeZoneInline(admin.TabularInline):
+    model = Zone
+    extra = 1
+    fields = ['name', 'status', 'device_name', 'notes']
+    verbose_name = "Beat Breeze Zone"
+    verbose_name_plural = "Beat Breeze Zones (manual entry)"
+    
+    def get_queryset(self, request):
+        # Only show Beat Breeze zones
+        qs = super().get_queryset(request)
+        return qs.filter(platform='beatbreeze')
+    
+    def formfield_for_choice_field(self, db_field, request, **kwargs):
+        if db_field.name == 'platform':
+            kwargs['initial'] = 'beatbreeze'
+        return super().formfield_for_choice_field(db_field, request, **kwargs)
 
 
 @admin.register(Company)
@@ -65,8 +87,14 @@ class CompanyAdmin(admin.ModelAdmin):
     list_filter = ['country', 'industry', 'is_active']
     search_fields = ['name', 'website', 'notes', 'soundtrack_account_id']
     readonly_fields = ['created_at', 'updated_at', 'current_subscription_summary', 'zones_status_summary']
-    inlines = [CompanyZoneInline, SubscriptionPlanInline, ContactInline, NoteInline, TaskInline]
     actions = ['sync_soundtrack_zones']
+    
+    def get_inlines(self, request, obj):
+        """Show different inlines based on whether company has Soundtrack account"""
+        if obj and obj.soundtrack_account_id:
+            return [CompanyZoneInline, SubscriptionPlanInline, ContactInline, NoteInline, TaskInline]
+        else:
+            return [BeatBreezeZoneInline, SubscriptionPlanInline, ContactInline, NoteInline, TaskInline]
     
     def soundtrack_status(self, obj):
         if obj.soundtrack_account_id:
@@ -94,17 +122,47 @@ class CompanyAdmin(admin.ModelAdmin):
     
     def sync_soundtrack_zones(self, request, queryset):
         """Sync zones with Soundtrack API for selected companies"""
-        from django.utils import timezone
-        synced = 0
+        from .services.soundtrack_api import soundtrack_api
+        
+        total_synced = 0
+        total_errors = 0
+        
         for company in queryset:
             if company.soundtrack_account_id:
-                # In production, this would call the Soundtrack API
-                # For now, just mark zones as synced
-                company.zones.update(last_api_sync=timezone.now())
-                synced += 1
+                try:
+                    synced, errors = soundtrack_api.sync_company_zones(company)
+                    total_synced += synced
+                    total_errors += errors
+                    if synced > 0:
+                        self.message_user(request, f"✓ {company.name}: Synced {synced} zones")
+                except Exception as e:
+                    self.message_user(request, f"✗ {company.name}: Error - {str(e)}", level='ERROR')
+                    total_errors += 1
+            else:
+                self.message_user(request, f"✗ {company.name}: No Soundtrack account ID", level='WARNING')
         
-        self.message_user(request, f"Synced zones for {synced} companies")
+        if total_synced > 0:
+            self.message_user(request, f"Successfully synced {total_synced} zones total")
     sync_soundtrack_zones.short_description = "Sync Soundtrack zones"
+    
+    def save_model(self, request, obj, form, change):
+        """Auto-sync zones when Soundtrack account ID is added or changed"""
+        old_account_id = None
+        if change and obj.pk:
+            old_obj = Company.objects.get(pk=obj.pk)
+            old_account_id = old_obj.soundtrack_account_id
+        
+        super().save_model(request, obj, form, change)
+        
+        # If Soundtrack account ID was added or changed, sync zones
+        if obj.soundtrack_account_id and obj.soundtrack_account_id != old_account_id:
+            from .services.soundtrack_api import soundtrack_api
+            try:
+                synced, errors = soundtrack_api.sync_company_zones(obj)
+                if synced > 0:
+                    self.message_user(request, f"✓ Automatically synced {synced} zones from Soundtrack", 'SUCCESS')
+            except Exception as e:
+                self.message_user(request, f"Could not sync zones: {str(e)}", 'WARNING')
     
     def current_subscription_summary(self, obj):
         """Display a summary of current subscription plans"""
@@ -425,17 +483,22 @@ class ZoneAdmin(admin.ModelAdmin):
         from django.utils import timezone
         from .services.soundtrack_api import soundtrack_api
         
-        synced = 0
+        # Group zones by company for efficient syncing
+        companies_to_sync = set()
         for zone in queryset.filter(platform="soundtrack"):
-            if zone.soundtrack_account_id:
-                try:
-                    # This would call the API sync
-                    # For now, just mark as synced
-                    zone.last_api_sync = timezone.now()
-                    zone.save()
-                    synced += 1
-                except Exception as e:
-                    self.message_user(request, f"Error syncing {zone.name}: {str(e)}", level="ERROR")
+            if zone.company.soundtrack_account_id:
+                companies_to_sync.add(zone.company)
         
-        self.message_user(request, f"Successfully synced {synced} zones")
+        total_synced = 0
+        for company in companies_to_sync:
+            try:
+                synced, errors = soundtrack_api.sync_company_zones(company)
+                total_synced += synced
+                if synced > 0:
+                    self.message_user(request, f"✓ Synced {synced} zones for {company.name}")
+            except Exception as e:
+                self.message_user(request, f"Error syncing {company.name}: {str(e)}", level="ERROR")
+        
+        if total_synced > 0:
+            self.message_user(request, f"Successfully synced {total_synced} zones total")
     sync_with_soundtrack_api.short_description = "Sync with Soundtrack API"

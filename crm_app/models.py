@@ -140,6 +140,14 @@ class Company(TimestampedModel):
         if self.location_count > 0:
             return round(self.music_zone_count / self.location_count, 1)
         return 0
+    
+    def sync_soundtrack_zones(self):
+        """Sync zones from Soundtrack API"""
+        if not self.soundtrack_account_id:
+            return 0, 0
+        
+        from .services.soundtrack_api import soundtrack_api
+        return soundtrack_api.sync_company_zones(self)
 
 
 class Contact(TimestampedModel):
