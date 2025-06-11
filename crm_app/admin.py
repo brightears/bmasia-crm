@@ -90,8 +90,8 @@ class BeatBreezeZoneInline(admin.TabularInline):
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
-    list_display = ['name', 'country', 'industry', 'location_count', 'music_zone_count', 'soundtrack_status', 'is_active']
-    list_filter = ['country', 'industry', 'is_active']
+    list_display = ['name', 'country', 'industry', 'location_count', 'music_zone_count', 'soundtrack_status']
+    list_filter = ['country', 'industry']
     search_fields = ['name', 'website', 'notes', 'soundtrack_account_id']
     readonly_fields = ['created_at', 'updated_at', 'current_subscription_summary', 'zones_status_summary']
     actions = ['sync_soundtrack_zones']
@@ -221,7 +221,7 @@ class CompanyAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('name', 'country', 'industry', 'website', 'location_count', 'music_zone_count', 'is_active'),
+            'fields': ('name', 'country', 'industry', 'website', 'location_count', 'music_zone_count'),
         }),
         ('Soundtrack Integration', {
             'fields': ('soundtrack_account_id', 'zones_status_summary'),
