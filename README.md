@@ -251,6 +251,16 @@ For development questions or issues, refer to:
 
 ## Recent Changelog
 
+### v1.1-admin-ui-improvements (2025-06-11)
+- ✅ **Fixed horizontal overflow** in admin inline sections
+- ✅ **Streamlined Contact fields** - removed phone, contact_type, is_primary, is_active
+- ✅ **Simplified Notes display** - removed note_type and priority fields
+- ✅ **Optimized Subscription Tiers** - reduced field widths, kept billing_period
+- ✅ **Removed duplicate Notes section** from Company admin
+- ✅ **Enhanced subscription summary** - removed redundant totals, added dates
+- ✅ **Improved mobile responsiveness** of admin interface
+- ✅ All changes deployed to https://bmasia-crm.onrender.com
+
 ### v1.0-soundtrack-working (2025-06-11)
 - ✅ Fixed Soundtrack API GraphQL queries
 - ✅ Implemented account-specific zone queries
