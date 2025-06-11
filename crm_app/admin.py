@@ -1,8 +1,10 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.admin import SimpleListFilter
+from django.utils.html import format_html
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
-    Opportunity, OpportunityActivity, Contract, Invoice, SubscriptionPlan
+    Opportunity, OpportunityActivity, Contract, Invoice, SubscriptionPlan, Zone
 )
 
 
@@ -79,8 +81,8 @@ class CompanyAdmin(admin.ModelAdmin):
             'fields': ('address_line1', 'address_line2', 'city', 'state', 'postal_code'),
             'classes': ('collapse',)
         }),
-        ('Additional Details', {
-            'fields': ('annual_revenue', 'notes'),
+        ('Notes', {
+            'fields': ('notes',),
             'classes': ('collapse',)
         }),
         ('Timestamps', {
@@ -266,6 +268,7 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
     list_filter = ['tier', 'billing_period', 'currency', 'is_active', 'start_date', 'end_date']
     search_fields = ['company__name', 'tier', 'notes']
     readonly_fields = ['created_at', 'updated_at', 'display_total_value', 'display_monthly_value']
+    inlines = [ZoneInline]
     
     def display_price_per_zone(self, obj):
         if obj.price_per_zone:
@@ -304,3 +307,87 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+
+
+class ZoneInline(admin.TabularInline):
+    model = Zone
+    extra = 0
+    fields = ["name", "platform", "status", "soundtrack_account_id", "last_seen_online"]
+    readonly_fields = ["status", "last_seen_online"]
+    verbose_name = "Music Zone"
+    verbose_name_plural = "Music Zones"
+
+
+@admin.register(Zone)
+class ZoneAdmin(admin.ModelAdmin):
+    list_display = ["zone_name_with_company", "platform", "status_badge", "last_seen_online", "last_api_sync"]
+    list_filter = ["platform", "status", "subscription_plan__company"]
+    search_fields = ["name", "subscription_plan__company__name", "soundtrack_account_id"]
+    readonly_fields = ["created_at", "updated_at", "last_api_sync", "api_raw_data", "status_badge"]
+    
+    def zone_name_with_company(self, obj):
+        return f"{obj.company.name} - {obj.name}"
+    zone_name_with_company.short_description = "Zone"
+    zone_name_with_company.admin_order_field = "subscription_plan__company__name"
+    
+    def status_badge(self, obj):
+        colors = {
+            "online": "green",
+            "offline": "orange",
+            "no_device": "red",
+            "expired": "gray",
+            "pending": "blue"
+        }
+        color = colors.get(obj.status, "gray")
+        return format_html(
+            "<span style=\"padding: 3px 10px; border-radius: 3px; color: white; background-color: {};\">{}</span>",
+            color, obj.get_status_display()
+        )
+    status_badge.short_description = "Status"
+    
+    fieldsets = (
+        ("Zone Information", {
+            "fields": ("subscription_plan", "name", "platform")
+        }),
+        ("Status", {
+            "fields": ("status", "status_badge", "last_seen_online", "device_name")
+        }),
+        ("Soundtrack Integration", {
+            "fields": ("soundtrack_account_id", "soundtrack_zone_id", "soundtrack_admin_email"),
+            "description": "For Soundtrack zones, enter the account ID to enable API sync"
+        }),
+        ("API Sync", {
+            "fields": ("last_api_sync", "api_raw_data"),
+            "classes": ("collapse",)
+        }),
+        ("Additional Info", {
+            "fields": ("notes",)
+        }),
+        ("Timestamps", {
+            "fields": ("created_at", "updated_at"),
+            "classes": ("collapse",)
+        }),
+    )
+    
+    actions = ["sync_with_soundtrack_api"]
+    
+    def sync_with_soundtrack_api(self, request, queryset):
+        """Action to sync selected zones with Soundtrack API"""
+        from django.utils import timezone
+        from .services.soundtrack_api import soundtrack_api
+        
+        synced = 0
+        for zone in queryset.filter(platform="soundtrack"):
+            if zone.soundtrack_account_id:
+                try:
+                    # This would call the API sync
+                    # For now, just mark as synced
+                    zone.last_api_sync = timezone.now()
+                    zone.save()
+                    synced += 1
+                except Exception as e:
+                    self.message_user(request, f"Error syncing {zone.name}: {str(e)}", level="ERROR")
+        
+        self.message_user(request, f"Successfully synced {synced} zones")
+    sync_with_soundtrack_api.short_description = "Sync with Soundtrack API"

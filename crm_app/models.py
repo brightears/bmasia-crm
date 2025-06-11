@@ -90,7 +90,7 @@ class Company(TimestampedModel):
     current_plan = models.CharField(max_length=100, blank=True)
     website = models.URLField(blank=True)
     industry = models.CharField(max_length=50, choices=INDUSTRY_CHOICES, blank=True)
-    annual_revenue = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
+    # Removed annual_revenue - not needed for BMAsia
     
     # BMAsia specific fields
     location_count = models.IntegerField(default=1, help_text="Number of physical locations")
@@ -632,3 +632,80 @@ class SubscriptionPlan(TimestampedModel):
         if self.price_per_zone:
             return f"{self.currency} {self.price_per_zone:,}"
         return "Not set"
+
+
+class Zone(TimestampedModel):
+    """Track individual music zones for companies"""
+    STATUS_CHOICES = [
+        ('online', 'Online'),
+        ('offline', 'Offline'),
+        ('no_device', 'No Device Paired'),
+        ('expired', 'Subscription Expired'),
+        ('pending', 'Pending Activation'),
+    ]
+    
+    PLATFORM_CHOICES = [
+        ('soundtrack', 'Soundtrack Your Brand'),
+        ('beatbreeze', 'Beat Breeze'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    subscription_plan = models.ForeignKey(SubscriptionPlan, on_delete=models.CASCADE, related_name='zones')
+    name = models.CharField(max_length=100, help_text="Zone name (e.g., 'Lobby', 'Restaurant', 'Pool Area')")
+    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    
+    # For Soundtrack integration
+    soundtrack_account_id = models.CharField(max_length=100, blank=True, help_text="Soundtrack account ID for API integration")
+    soundtrack_zone_id = models.CharField(max_length=100, blank=True)
+    soundtrack_admin_email = models.EmailField(blank=True, help_text="Admin email from Soundtrack API")
+    
+    # Manual tracking fields
+    device_name = models.CharField(max_length=100, blank=True)
+    last_seen_online = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    
+    # Auto-update from API
+    last_api_sync = models.DateTimeField(null=True, blank=True)
+    api_raw_data = models.JSONField(null=True, blank=True)
+    
+    class Meta:
+        ordering = ['subscription_plan__company', 'name']
+        indexes = [
+            models.Index(fields=['subscription_plan', 'status']),
+            models.Index(fields=['platform', 'soundtrack_account_id']),
+        ]
+    
+    def __str__(self):
+        return f"{self.subscription_plan.company.name} - {self.name} ({self.get_status_display()})"
+    
+    @property
+    def company(self):
+        return self.subscription_plan.company
+    
+    @property
+    def is_online(self):
+        return self.status == 'online'
+    
+    def update_from_api(self, api_data):
+        """Update zone status from Soundtrack API data"""
+        self.api_raw_data = api_data
+        self.last_api_sync = timezone.now()
+        
+        # Parse API data to update status
+        # This will be implemented based on actual API response structure
+        if api_data.get('is_online'):
+            self.status = 'online'
+            self.last_seen_online = timezone.now()
+        elif api_data.get('device_paired') is False:
+            self.status = 'no_device'
+        elif api_data.get('subscription_active') is False:
+            self.status = 'expired'
+        else:
+            self.status = 'offline'
+        
+        # Update admin email if available
+        if api_data.get('admin_email'):
+            self.soundtrack_admin_email = api_data['admin_email']
+        
+        self.save()
