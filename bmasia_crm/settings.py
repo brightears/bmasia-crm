@@ -65,6 +65,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'crm_app.middleware.DevelopmentAuthMiddleware',  # Auto-login for development
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -202,6 +203,9 @@ SOUNDTRACK_CLIENT_SECRET = config('SOUNDTRACK_CLIENT_SECRET', default='')
 if not SOUNDTRACK_API_TOKEN:
     import warnings
     warnings.warn("SOUNDTRACK_API_TOKEN not configured - Soundtrack API integration will not work")
+
+# Disable admin authentication for development
+ADMIN_ENABLED = config('ADMIN_ENABLED', default='False', cast=bool)
 
 # Logging Configuration
 LOGGING = {
