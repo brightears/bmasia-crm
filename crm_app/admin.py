@@ -21,13 +21,13 @@ class UserAdmin(BaseUserAdmin):
 class ContactInline(admin.TabularInline):
     model = Contact
     extra = 0
-    fields = ['name', 'email', 'phone', 'title', 'contact_type', 'is_primary', 'is_active']
+    fields = ['name', 'email', 'title']
 
 
 class NoteInline(admin.TabularInline):
     model = Note
     extra = 0
-    fields = ['title', 'note_type', 'priority', 'text']
+    fields = ['title', 'note_type', 'text']
 
 
 class TaskInline(admin.TabularInline):
@@ -39,7 +39,7 @@ class TaskInline(admin.TabularInline):
 class SubscriptionPlanInline(admin.TabularInline):
     model = SubscriptionPlan
     extra = 1
-    fields = ['tier', 'zone_count', 'billing_period', 'price_per_zone', 'currency', 'is_active', 'start_date', 'end_date']
+    fields = ['tier', 'zone_count', 'price_per_zone', 'currency']
     verbose_name = "Subscription Tier"
     verbose_name_plural = "Subscription Tiers (can have multiple tiers)"
     
