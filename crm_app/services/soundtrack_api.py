@@ -65,38 +65,54 @@ class SoundtrackAPIService:
         """Get current account information"""
         query = """
         query {
-            me {
+            account {
+                id
                 businessName
-                accounts(first: 100) {
+                locations(first: 100) {
                     edges {
                         node {
                             id
                             name
-                            locations(first: 100) {
+                            soundZones(first: 100) {
                                 edges {
                                     node {
                                         id
                                         name
-                                        soundZones(first: 100) {
-                                            edges {
-                                                node {
-                                                    id
-                                                    name
-                                                    currentlyPlaying {
-                                                        track {
-                                                            name
-                                                        }
-                                                    }
-                                                    isOnline
-                                                    isPaired
-                                                    subscription {
-                                                        validUntil
-                                                        isExpired
-                                                    }
-                                                }
+                                        currentPlayback {
+                                            track {
+                                                name
                                             }
                                         }
+                                        hardware {
+                                            isOnline
+                                        }
+                                        device {
+                                            name
+                                        }
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+                soundZones(first: 100) {
+                    edges {
+                        node {
+                            id
+                            name
+                            location {
+                                id
+                                name
+                            }
+                            hardware {
+                                isOnline
+                            }
+                            device {
+                                name
+                            }
+                            currentPlayback {
+                                track {
+                                    name
                                 }
                             }
                         }
@@ -113,49 +129,38 @@ class SoundtrackAPIService:
         # For now, we'll get all zones since we don't have the GraphQL ID structure
         account_info = self.get_account_info()
         
-        if not account_info or 'me' not in account_info:
+        if not account_info or 'account' not in account_info:
             logger.error("Failed to get account info")
             return []
         
         zones = []
-        me = account_info['me']
+        account = account_info['account']
+        business_name = account.get('businessName', 'Unknown Business')
         
-        # Iterate through accounts
-        for account_edge in me.get('accounts', {}).get('edges', []):
-            account = account_edge['node']
-            account_name = account['name']
+        # Get zones directly from account
+        for zone_edge in account.get('soundZones', {}).get('edges', []):
+            zone = zone_edge['node']
+            location_name = zone.get('location', {}).get('name', 'Unknown Location')
             
-            # Iterate through locations
-            for location_edge in account.get('locations', {}).get('edges', []):
-                location = location_edge['node']
-                location_name = location['name']
-                
-                # Iterate through sound zones
-                for zone_edge in location.get('soundZones', {}).get('edges', []):
-                    zone = zone_edge['node']
-                    
-                    # Determine zone status
-                    status = 'offline'
-                    if zone.get('isOnline'):
-                        status = 'online'
-                    elif not zone.get('isPaired'):
-                        status = 'no_device'
-                    elif zone.get('subscription', {}).get('isExpired', False):
-                        status = 'expired'
-                    
-                    zones.append({
-                        'id': zone['id'],
-                        'name': f"{location_name} - {zone['name']}",
-                        'zone_name': zone['name'],
-                        'location_name': location_name,
-                        'account_name': account_name,
-                        'is_online': zone.get('isOnline', False),
-                        'is_paired': zone.get('isPaired', False),
-                        'status': status,
-                        'currently_playing': zone.get('currentlyPlaying', {}).get('track', {}).get('name') if zone.get('currentlyPlaying') else None,
-                        'subscription_valid_until': zone.get('subscription', {}).get('validUntil'),
-                        'subscription_expired': zone.get('subscription', {}).get('isExpired', False),
-                    })
+            # Determine zone status
+            status = 'offline'
+            hardware = zone.get('hardware', {})
+            if hardware.get('isOnline'):
+                status = 'online'
+            elif not zone.get('device'):
+                status = 'no_device'
+            
+            zones.append({
+                'id': zone['id'],
+                'name': f"{location_name} - {zone['name']}",
+                'zone_name': zone['name'],
+                'location_name': location_name,
+                'account_name': business_name,
+                'is_online': hardware.get('isOnline', False),
+                'device_name': zone.get('device', {}).get('name', '') if zone.get('device') else '',
+                'status': status,
+                'currently_playing': zone.get('currentPlayback', {}).get('track', {}).get('name') if zone.get('currentPlayback') else None,
+            })
         
         return zones
     

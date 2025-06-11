@@ -628,18 +628,23 @@ def debug_soundtrack_api(request):
         try:
             import requests
             headers = {
-                'Authorization': f'Bearer {soundtrack_api.api_token}',
+                'Authorization': f'Basic {soundtrack_api.api_token}',
                 'Content-Type': 'application/json',
             }
             
-            # Try a simple API call
-            test_url = f"{soundtrack_api.base_url}/accounts/{test_account_id}"
-            response = requests.get(test_url, headers=headers, timeout=10)
+            # Try a GraphQL query
+            test_url = soundtrack_api.base_url
+            test_query = {
+                'query': '{ account { id businessName } }'
+            }
+            response = requests.post(test_url, json=test_query, headers=headers, timeout=10)
             
             test_results['raw_api_test'] = {
                 'url': test_url,
                 'status_code': response.status_code,
                 'headers_sent': {k: v[:20] + '...' if len(v) > 20 else v for k, v in headers.items()},
+                'query': test_query,
+                'response_json': response.json() if response.status_code == 200 else None,
                 'response_text': response.text[:500] if response.text else 'No response body',
                 'response_headers': dict(response.headers)
             }
