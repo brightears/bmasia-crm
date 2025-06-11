@@ -645,4 +645,3 @@ def debug_soundtrack_api(request):
         'test_results': test_results,
         'instructions': 'Add ?test=1&account_id=YOUR_ACCOUNT_ID to test API connection'
     }, json_dumps_params={'indent': 2})
-EOF < /dev/null
