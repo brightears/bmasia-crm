@@ -687,7 +687,9 @@ class Zone(TimestampedModel):
         ]
     
     def __str__(self):
-        # Simple display for inline admin headers
+        # Extract just the zone name (after " - ") for minimal header display
+        if " - " in self.name:
+            return self.name.split(" - ")[-1]  # Return just "Drift Bar", "Edge", etc.
         return self.name
     
     @property
