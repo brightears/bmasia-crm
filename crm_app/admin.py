@@ -103,21 +103,40 @@ class CompanyAdmin(admin.ModelAdmin):
     soundtrack_status.short_description = "Soundtrack"
     
     def zones_status_summary(self, obj):
-        """Display summary of zone statuses"""
-        zones = obj.zones.all()
-        if not zones:
-            return "No zones configured"
+        """Display summary of zone statuses from Soundtrack API"""
+        if not obj.soundtrack_account_id:
+            return "No Soundtrack account ID configured"
         
-        status_counts = {}
-        for zone in zones:
-            status = zone.get_status_display()
-            status_counts[status] = status_counts.get(status, 0) + 1
-        
-        summary_parts = []
-        for status, count in status_counts.items():
-            summary_parts.append(f"{count} {status}")
-        
-        return ", ".join(summary_parts)
+        try:
+            from .services.soundtrack_api import soundtrack_api
+            # Get zones specifically for this account ID
+            api_zones = soundtrack_api.get_account_zones(obj.soundtrack_account_id)
+            
+            if not api_zones:
+                return "No zones found for this account ID"
+            
+            status_counts = {}
+            zone_details = []
+            
+            for zone in api_zones:
+                status = zone.get('status', 'unknown')
+                status_counts[status] = status_counts.get(status, 0) + 1
+                zone_details.append(f"• {zone.get('name', 'Unknown')} ({status})")
+            
+            # Create summary with counts
+            summary_parts = []
+            for status, count in status_counts.items():
+                summary_parts.append(f"{count} {status.title()}")
+            
+            summary = ", ".join(summary_parts)
+            
+            # Add detailed zone list
+            details = "<br>".join(zone_details)
+            
+            return format_html(f"{summary}<br><br><small>{details}</small>")
+            
+        except Exception as e:
+            return f"Error fetching zones: {str(e)}"
     zones_status_summary.short_description = "Zone Status Summary"
     
     def sync_soundtrack_zones(self, request, queryset):

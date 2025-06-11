@@ -104,7 +104,7 @@ class SoundtrackAPIService:
         return self._make_graphql_query(query)
     
     def get_account_zones(self, account_id: str = None) -> List[Dict]:
-        """Get all zones across all accounts and locations"""
+        """Get zones for a specific account or all accounts if no account_id provided"""
         account_info = self.get_account_info()
         
         if not account_info or 'me' not in account_info:
@@ -117,7 +117,12 @@ class SoundtrackAPIService:
         # Iterate through all accounts
         for account_edge in me.get('accounts', {}).get('edges', []):
             account = account_edge['node']
+            current_account_id = account['id']
             business_name = account.get('businessName', 'Unknown Business')
+            
+            # If account_id is specified, only process matching account
+            if account_id and current_account_id != account_id:
+                continue
             
             # Iterate through all locations in this account
             for location_edge in account.get('locations', {}).get('edges', []):
@@ -145,7 +150,7 @@ class SoundtrackAPIService:
                         'zone_name': zone['name'],
                         'location_name': location_name,
                         'account_name': business_name,
-                        'account_id': account['id'],
+                        'account_id': current_account_id,
                         'is_online': is_online,
                         'is_paired': zone.get('isPaired', False),
                         'device_name': zone.get('device', {}).get('name', '') if zone.get('device') else '',
