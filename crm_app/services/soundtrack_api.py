@@ -335,7 +335,7 @@ class SoundtrackAPIService:
             # Update zone with latest data
             zone.soundtrack_zone_id = zone_id
             zone.status = api_zone.get('status', 'offline')
-            zone.device_name = api_zone.get('zone_name', '')
+            zone.device_name = api_zone.get('device_name', '')  # Store actual device name
             if api_zone.get('is_online'):
                 zone.last_seen_online = timezone.now()
             zone.api_raw_data = api_zone
