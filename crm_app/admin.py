@@ -262,6 +262,15 @@ class AuditLogAdmin(admin.ModelAdmin):
         return False
 
 
+class ZoneInline(admin.TabularInline):
+    model = Zone
+    extra = 0
+    fields = ["name", "platform", "status", "soundtrack_account_id", "last_seen_online"]
+    readonly_fields = ["status", "last_seen_online"]
+    verbose_name = "Music Zone"
+    verbose_name_plural = "Music Zones"
+
+
 @admin.register(SubscriptionPlan)
 class SubscriptionPlanAdmin(admin.ModelAdmin):
     list_display = ['company', 'tier', 'zone_count', 'billing_period', 'display_price_per_zone', 'display_total_value', 'currency', 'is_active']
@@ -308,15 +317,6 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
         }),
     )
 
-
-
-class ZoneInline(admin.TabularInline):
-    model = Zone
-    extra = 0
-    fields = ["name", "platform", "status", "soundtrack_account_id", "last_seen_online"]
-    readonly_fields = ["status", "last_seen_online"]
-    verbose_name = "Music Zone"
-    verbose_name_plural = "Music Zones"
 
 
 @admin.register(Zone)
