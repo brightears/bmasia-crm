@@ -648,9 +648,9 @@ def debug_soundtrack_api(request):
                 'error': str(e)
             }
         
-        # Test account details
-        account_data = soundtrack_api.get_account_details(test_account_id)
-        test_results['account_details'] = {
+        # Test account info with GraphQL
+        account_data = soundtrack_api.get_account_info()
+        test_results['account_info'] = {
             'success': account_data is not None,
             'data': account_data if account_data else 'Failed to fetch'
         }
@@ -658,9 +658,9 @@ def debug_soundtrack_api(request):
         # Test zones
         zones = soundtrack_api.get_account_zones(test_account_id)
         test_results['zones'] = {
-            'success': zones is not None,
+            'success': zones is not None and len(zones) > 0,
             'count': len(zones) if zones else 0,
-            'data': zones if zones else 'Failed to fetch'
+            'data': zones[:5] if zones else 'Failed to fetch'  # Show first 5 zones
         }
     
     return JsonResponse({

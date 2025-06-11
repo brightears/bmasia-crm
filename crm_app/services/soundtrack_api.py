@@ -20,84 +20,152 @@ class SoundtrackAPIService:
         self.client_secret = os.environ.get('SOUNDTRACK_CLIENT_SECRET', '')
         self.base_url = 'https://api.soundtrackyourbrand.com/v2'
         
-        if not all([self.api_token, self.client_id, self.client_secret]):
-            logger.warning("Soundtrack API credentials not fully configured")
+        if not all([self.api_token]):
+            logger.warning("Soundtrack API token not configured")
     
     def _get_headers(self) -> Dict[str, str]:
         """Get headers for API requests"""
+        # The API uses Basic authentication with the token
         return {
-            'Authorization': f'Bearer {self.api_token}',
+            'Authorization': f'Basic {self.api_token}',
             'Content-Type': 'application/json',
         }
     
-    def get_account_details(self, account_id: str) -> Optional[Dict]:
-        """Get details for a specific account"""
+    def _make_graphql_query(self, query: str, variables: Optional[Dict] = None) -> Optional[Dict]:
+        """Execute a GraphQL query against the Soundtrack API"""
         try:
-            url = f"{self.base_url}/accounts/{account_id}"
-            response = requests.get(url, headers=self._get_headers(), timeout=10)
+            payload = {
+                'query': query,
+                'variables': variables or {}
+            }
+            
+            response = requests.post(
+                self.base_url,
+                json=payload,
+                headers=self._get_headers(),
+                timeout=10
+            )
             
             if response.status_code == 200:
-                return response.json()
+                data = response.json()
+                if 'errors' in data:
+                    logger.error(f"GraphQL errors: {data['errors']}")
+                    return None
+                return data.get('data')
             else:
-                logger.error(f"Failed to get account {account_id}: {response.status_code}")
+                logger.error(f"API request failed: {response.status_code}")
                 logger.error(f"Response: {response.text}")
                 return None
                 
         except Exception as e:
-            logger.error(f"Error fetching account {account_id}: {str(e)}")
+            logger.error(f"Error making GraphQL query: {str(e)}")
             return None
     
-    def get_account_zones(self, account_id: str) -> List[Dict]:
-        """Get all zones for an account"""
-        try:
-            url = f"{self.base_url}/accounts/{account_id}/zones"
-            response = requests.get(url, headers=self._get_headers(), timeout=10)
-            
-            if response.status_code == 200:
-                return response.json().get('zones', [])
-            else:
-                logger.error(f"Failed to get zones for account {account_id}: {response.status_code}")
-                return []
-                
-        except Exception as e:
-            logger.error(f"Error fetching zones for account {account_id}: {str(e)}")
+    def get_account_info(self) -> Optional[Dict]:
+        """Get current account information"""
+        query = """
+        query {
+            me {
+                businessName
+                accounts(first: 100) {
+                    edges {
+                        node {
+                            id
+                            name
+                            locations(first: 100) {
+                                edges {
+                                    node {
+                                        id
+                                        name
+                                        soundZones(first: 100) {
+                                            edges {
+                                                node {
+                                                    id
+                                                    name
+                                                    currentlyPlaying {
+                                                        track {
+                                                            name
+                                                        }
+                                                    }
+                                                    isOnline
+                                                    isPaired
+                                                    subscription {
+                                                        validUntil
+                                                        isExpired
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        """
+        
+        return self._make_graphql_query(query)
+    
+    def get_account_zones(self, account_id: str = None) -> List[Dict]:
+        """Get all zones across all accounts and locations"""
+        # For now, we'll get all zones since we don't have the GraphQL ID structure
+        account_info = self.get_account_info()
+        
+        if not account_info or 'me' not in account_info:
+            logger.error("Failed to get account info")
             return []
-    
-    def get_zone_status(self, account_id: str, zone_id: str) -> Optional[Dict]:
-        """Get detailed status for a specific zone"""
-        try:
-            url = f"{self.base_url}/accounts/{account_id}/zones/{zone_id}/status"
-            response = requests.get(url, headers=self._get_headers(), timeout=10)
+        
+        zones = []
+        me = account_info['me']
+        
+        # Iterate through accounts
+        for account_edge in me.get('accounts', {}).get('edges', []):
+            account = account_edge['node']
+            account_name = account['name']
             
-            if response.status_code == 200:
-                return response.json()
-            else:
-                logger.error(f"Failed to get zone status {zone_id}: {response.status_code}")
-                return None
+            # Iterate through locations
+            for location_edge in account.get('locations', {}).get('edges', []):
+                location = location_edge['node']
+                location_name = location['name']
                 
-        except Exception as e:
-            logger.error(f"Error fetching zone status {zone_id}: {str(e)}")
-            return None
+                # Iterate through sound zones
+                for zone_edge in location.get('soundZones', {}).get('edges', []):
+                    zone = zone_edge['node']
+                    
+                    # Determine zone status
+                    status = 'offline'
+                    if zone.get('isOnline'):
+                        status = 'online'
+                    elif not zone.get('isPaired'):
+                        status = 'no_device'
+                    elif zone.get('subscription', {}).get('isExpired', False):
+                        status = 'expired'
+                    
+                    zones.append({
+                        'id': zone['id'],
+                        'name': f"{location_name} - {zone['name']}",
+                        'zone_name': zone['name'],
+                        'location_name': location_name,
+                        'account_name': account_name,
+                        'is_online': zone.get('isOnline', False),
+                        'is_paired': zone.get('isPaired', False),
+                        'status': status,
+                        'currently_playing': zone.get('currentlyPlaying', {}).get('track', {}).get('name') if zone.get('currentlyPlaying') else None,
+                        'subscription_valid_until': zone.get('subscription', {}).get('validUntil'),
+                        'subscription_expired': zone.get('subscription', {}).get('isExpired', False),
+                    })
+        
+        return zones
     
     def parse_zone_status(self, zone_data: Dict) -> Dict:
         """Parse zone data from API into our status format"""
-        status = 'offline'  # default
-        
-        # Parse based on actual API response structure
-        # This is a template - adjust based on real API response
-        if zone_data.get('online', False):
-            status = 'online'
-        elif not zone_data.get('device_paired', True):
-            status = 'no_device'
-        elif not zone_data.get('subscription_active', True):
-            status = 'expired'
-        
         return {
-            'status': status,
-            'device_name': zone_data.get('device_name', ''),
-            'last_seen': zone_data.get('last_seen'),
-            'admin_email': zone_data.get('admin_email', ''),
-            'is_online': zone_data.get('online', False),
+            'status': zone_data.get('status', 'offline'),
+            'device_name': zone_data.get('zone_name', ''),
+            'last_seen': timezone.now() if zone_data.get('is_online') else None,
+            'is_online': zone_data.get('is_online', False),
             'raw_data': zone_data
         }
     
@@ -108,6 +176,10 @@ class SoundtrackAPIService:
         
         # Get all zones from the API
         api_zones = self.get_account_zones(company.soundtrack_account_id)
+        
+        if not api_zones:
+            logger.warning(f"No zones found for company {company.name}")
+            return 0, 0
         
         # Create or update zones based on API data
         synced_count = 0
@@ -125,9 +197,16 @@ class SoundtrackAPIService:
                 }
             )
             
-            # Update zone status
-            parsed_data = self.parse_zone_status(api_zone)
-            zone.update_from_api(parsed_data)
+            # Update zone with latest data
+            zone.soundtrack_zone_id = zone_id
+            zone.status = api_zone.get('status', 'offline')
+            zone.device_name = api_zone.get('zone_name', '')
+            if api_zone.get('is_online'):
+                zone.last_seen_online = timezone.now()
+            zone.api_raw_data = api_zone
+            zone.last_api_sync = timezone.now()
+            zone.save()
+            
             synced_count += 1
         
         logger.info(f"Synced {synced_count} zones for {company.name}")
