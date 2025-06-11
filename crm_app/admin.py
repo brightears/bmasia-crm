@@ -42,6 +42,12 @@ class SubscriptionPlanInline(admin.TabularInline):
     fields = ['tier', 'zone_count', 'billing_period', 'price_per_zone', 'currency', 'is_active', 'start_date', 'end_date']
     verbose_name = "Subscription Tier"
     verbose_name_plural = "Subscription Tiers (can have multiple tiers)"
+    
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        # Remove spinners from numeric fields
+        if db_field.name in ['price_per_zone', 'zone_count']:
+            kwargs['widget'] = admin.widgets.AdminTextInputWidget(attrs={'type': 'text'})
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
 
 
 class CompanyZoneInline(admin.TabularInline):
