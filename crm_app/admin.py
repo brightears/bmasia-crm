@@ -27,7 +27,7 @@ class ContactInline(admin.TabularInline):
 class NoteInline(admin.TabularInline):
     model = Note
     extra = 0
-    fields = ['title', 'note_type', 'text']
+    fields = ['title', 'text']
 
 
 class TaskInline(admin.TabularInline):
