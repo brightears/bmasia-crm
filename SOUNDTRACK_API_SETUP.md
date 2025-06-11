@@ -1,5 +1,14 @@
 # Soundtrack API Setup
 
+## ✅ WORKING AS OF v1.0-soundtrack-working (2025-06-11)
+
+The Soundtrack API integration is fully functional with the following confirmed features:
+- Account-specific zone queries using GraphQL
+- Real-time zone status tracking (online/offline/no_device)
+- Device pairing status
+- Bulk synchronization for multiple companies
+- Tested and working with Hilton Pattaya (4 zones)
+
 ## Environment Variables
 
 To enable Soundtrack API integration, you need to set the following environment variables:
