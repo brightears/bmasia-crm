@@ -1,7 +1,7 @@
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Sum, Count, Avg
 from django.utils import timezone
@@ -35,13 +35,17 @@ from .permissions import (
 
 class BaseModelViewSet(viewsets.ModelViewSet):
     """Base viewset with common functionality"""
-    permission_classes = [IsAuthenticated, RoleBasedPermission]
+    permission_classes = [AllowAny]  # Disabled auth for development
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     
     def get_queryset(self):
         """Override to apply role-based filtering"""
         queryset = super().get_queryset()
         user = self.request.user
+        
+        # For development: if no authenticated user, return all
+        if not user.is_authenticated:
+            return queryset
         
         # Admin sees everything
         if user.role == 'Admin':
@@ -599,7 +603,6 @@ def reset_admin(request):
     """)
 
 
-@staff_member_required
 def debug_soundtrack_api(request):
     """Debug endpoint to check Soundtrack API configuration and test connection"""
     from .services.soundtrack_api import soundtrack_api
