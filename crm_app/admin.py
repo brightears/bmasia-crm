@@ -124,9 +124,9 @@ class CompanyAdmin(admin.ModelAdmin):
     def get_inlines(self, request, obj):
         """Show different inlines based on whether company has Soundtrack account"""
         if obj and obj.soundtrack_account_id:
-            return [CompanyZoneInline, SubscriptionPlanInline, ContactInline, NoteInline, TaskInline]
+            return [CompanyZoneInline, SubscriptionPlanInline, ContactInline, TaskInline]
         else:
-            return [BeatBreezeZoneInline, SubscriptionPlanInline, ContactInline, NoteInline, TaskInline]
+            return [BeatBreezeZoneInline, SubscriptionPlanInline, ContactInline, TaskInline]
     
     def soundtrack_status(self, obj):
         if obj.soundtrack_account_id:
