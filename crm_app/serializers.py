@@ -64,16 +64,17 @@ class ZoneSerializer(serializers.ModelSerializer):
     """Serializer for Zone model"""
     company_name = serializers.CharField(source='company.name', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    soundtrack_account_id = serializers.CharField(source='company.soundtrack_account_id', read_only=True)
     
     class Meta:
         model = Zone
         fields = [
-            'id', 'subscription_plan', 'name', 'platform', 'status', 'status_display',
+            'id', 'company', 'company_name', 'name', 'platform', 'status', 'status_display',
             'soundtrack_account_id', 'soundtrack_zone_id', 'soundtrack_admin_email',
             'device_name', 'last_seen_online', 'notes', 'last_api_sync',
-            'is_online', 'company_name', 'created_at', 'updated_at'
+            'is_online', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'last_api_sync', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'soundtrack_account_id', 'last_api_sync', 'created_at', 'updated_at']
 
 
 class SubscriptionPlanSerializer(serializers.ModelSerializer):
@@ -82,40 +83,23 @@ class SubscriptionPlanSerializer(serializers.ModelSerializer):
     total_value = serializers.ReadOnlyField()
     monthly_value = serializers.ReadOnlyField()
     display_price = serializers.ReadOnlyField()
-    zones = ZoneSerializer(many=True, read_only=True)
-    zones_summary = serializers.SerializerMethodField()
     
     class Meta:
         model = SubscriptionPlan
         fields = [
             'id', 'company', 'company_name', 'tier', 'zone_count',
             'billing_period', 'price_per_zone', 'currency', 'total_value',
-            'monthly_value', 'display_price', 'is_active', 'zones', 'zones_summary',
+            'monthly_value', 'display_price', 'is_active',
             'start_date', 'end_date', 'notes', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
-    
-    def get_zones_summary(self, obj):
-        """Get a summary of zone statuses"""
-        zones = obj.zones.all()
-        if not zones:
-            return "No zones configured"
-        
-        status_counts = {}
-        for zone in zones:
-            status = zone.get_status_display()
-            status_counts[status] = status_counts.get(status, 0) + 1
-        
-        summary_parts = []
-        for status, count in status_counts.items():
-            summary_parts.append(f"{count} {status}")
-        
-        return ", ".join(summary_parts)
 
 
 class CompanySerializer(serializers.ModelSerializer):
     """Serializer for Company model with related data"""
     contacts = ContactSerializer(many=True, read_only=True)
+    zones = ZoneSerializer(many=True, read_only=True)
+    zones_summary = serializers.SerializerMethodField()
     subscription_plans = SubscriptionPlanSerializer(many=True, read_only=True)
     active_subscription_plans = serializers.SerializerMethodField()
     subscription_summary = serializers.SerializerMethodField()
@@ -131,11 +115,12 @@ class CompanySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'country', 'website', 'industry',
             'location_count', 'music_zone_count', 'avg_zones_per_location', 
-            'is_active', 'notes',
+            'soundtrack_account_id', 'is_active', 'notes',
             'address_line1', 'address_line2', 'city', 'state', 'postal_code',
-            'full_address', 'total_contract_value', 'contacts', 'subscription_plans',
-            'active_subscription_plans', 'subscription_summary', 'primary_contact',
-            'opportunities_count', 'active_contracts_count', 'created_at', 'updated_at'
+            'full_address', 'total_contract_value', 'contacts', 'zones', 'zones_summary',
+            'subscription_plans', 'active_subscription_plans', 'subscription_summary', 
+            'primary_contact', 'opportunities_count', 'active_contracts_count', 
+            'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
     
@@ -168,6 +153,23 @@ class CompanySerializer(serializers.ModelSerializer):
             total_zones += plan.zone_count
         
         return " | ".join(summary) + f" (Total: {total_zones} zones)"
+    
+    def get_zones_summary(self, obj):
+        """Get a summary of zone statuses"""
+        zones = obj.zones.all()
+        if not zones:
+            return "No zones configured"
+        
+        status_counts = {}
+        for zone in zones:
+            status = zone.get_status_display()
+            status_counts[status] = status_counts.get(status, 0) + 1
+        
+        summary_parts = []
+        for status, count in status_counts.items():
+            summary_parts.append(f"{count} {status}")
+        
+        return ", ".join(summary_parts)
 
 
 class NoteSerializer(serializers.ModelSerializer):

@@ -96,6 +96,9 @@ class Company(TimestampedModel):
     location_count = models.IntegerField(default=1, help_text="Number of physical locations")
     music_zone_count = models.IntegerField(default=1, help_text="Total number of music zones across all locations")
     
+    # Soundtrack integration
+    soundtrack_account_id = models.CharField(max_length=100, blank=True, help_text="Soundtrack Your Brand account ID for API integration")
+    
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
     
@@ -650,14 +653,13 @@ class Zone(TimestampedModel):
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    subscription_plan = models.ForeignKey(SubscriptionPlan, on_delete=models.CASCADE, related_name='zones')
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='zones')
     name = models.CharField(max_length=100, help_text="Zone name (e.g., 'Lobby', 'Restaurant', 'Pool Area')")
-    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
+    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES, default='soundtrack')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     
-    # For Soundtrack integration
-    soundtrack_account_id = models.CharField(max_length=100, blank=True, help_text="Soundtrack account ID for API integration")
-    soundtrack_zone_id = models.CharField(max_length=100, blank=True)
+    # For Soundtrack integration - zone specific data
+    soundtrack_zone_id = models.CharField(max_length=100, blank=True, help_text="Zone ID from Soundtrack API")
     soundtrack_admin_email = models.EmailField(blank=True, help_text="Admin email from Soundtrack API")
     
     # Manual tracking fields
@@ -670,18 +672,19 @@ class Zone(TimestampedModel):
     api_raw_data = models.JSONField(null=True, blank=True)
     
     class Meta:
-        ordering = ['subscription_plan__company', 'name']
+        ordering = ['company', 'name']
         indexes = [
-            models.Index(fields=['subscription_plan', 'status']),
-            models.Index(fields=['platform', 'soundtrack_account_id']),
+            models.Index(fields=['company', 'status']),
+            models.Index(fields=['platform', 'company']),
         ]
     
     def __str__(self):
-        return f"{self.subscription_plan.company.name} - {self.name} ({self.get_status_display()})"
+        return f"{self.company.name} - {self.name} ({self.get_status_display()})"
     
     @property
-    def company(self):
-        return self.subscription_plan.company
+    def soundtrack_account_id(self):
+        """Get soundtrack account ID from company"""
+        return self.company.soundtrack_account_id
     
     @property
     def is_online(self):

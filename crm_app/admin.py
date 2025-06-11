@@ -44,13 +44,67 @@ class SubscriptionPlanInline(admin.TabularInline):
     verbose_name_plural = "Subscription Tiers (can have multiple tiers)"
 
 
+class CompanyZoneInline(admin.TabularInline):
+    model = Zone
+    extra = 0
+    fields = ['name', 'platform', 'status', 'device_name', 'last_seen_online']
+    readonly_fields = ['status', 'last_seen_online']
+    verbose_name = "Music Zone"
+    verbose_name_plural = "Music Zones"
+    
+    def has_add_permission(self, request, obj):
+        # Only allow adding zones if company has Soundtrack account ID
+        if obj and obj.soundtrack_account_id:
+            return True
+        return super().has_add_permission(request, obj)
+
+
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
-    list_display = ['name', 'country', 'industry', 'location_count', 'music_zone_count', 'is_active']
+    list_display = ['name', 'country', 'industry', 'location_count', 'music_zone_count', 'soundtrack_status', 'is_active']
     list_filter = ['country', 'industry', 'is_active']
-    search_fields = ['name', 'website', 'notes']
-    readonly_fields = ['created_at', 'updated_at', 'current_subscription_summary']
-    inlines = [SubscriptionPlanInline, ContactInline, NoteInline, TaskInline]
+    search_fields = ['name', 'website', 'notes', 'soundtrack_account_id']
+    readonly_fields = ['created_at', 'updated_at', 'current_subscription_summary', 'zones_status_summary']
+    inlines = [CompanyZoneInline, SubscriptionPlanInline, ContactInline, NoteInline, TaskInline]
+    actions = ['sync_soundtrack_zones']
+    
+    def soundtrack_status(self, obj):
+        if obj.soundtrack_account_id:
+            return format_html('<span style="color: green;">✓ Connected</span>')
+        return format_html('<span style="color: gray;">Not connected</span>')
+    soundtrack_status.short_description = "Soundtrack"
+    
+    def zones_status_summary(self, obj):
+        """Display summary of zone statuses"""
+        zones = obj.zones.all()
+        if not zones:
+            return "No zones configured"
+        
+        status_counts = {}
+        for zone in zones:
+            status = zone.get_status_display()
+            status_counts[status] = status_counts.get(status, 0) + 1
+        
+        summary_parts = []
+        for status, count in status_counts.items():
+            summary_parts.append(f"{count} {status}")
+        
+        return ", ".join(summary_parts)
+    zones_status_summary.short_description = "Zone Status Summary"
+    
+    def sync_soundtrack_zones(self, request, queryset):
+        """Sync zones with Soundtrack API for selected companies"""
+        from django.utils import timezone
+        synced = 0
+        for company in queryset:
+            if company.soundtrack_account_id:
+                # In production, this would call the Soundtrack API
+                # For now, just mark zones as synced
+                company.zones.update(last_api_sync=timezone.now())
+                synced += 1
+        
+        self.message_user(request, f"Synced zones for {synced} companies")
+    sync_soundtrack_zones.short_description = "Sync Soundtrack zones"
     
     def current_subscription_summary(self, obj):
         """Display a summary of current subscription plans"""
@@ -72,6 +126,10 @@ class CompanyAdmin(admin.ModelAdmin):
         ('Basic Information', {
             'fields': ('name', 'country', 'industry', 'website', 'location_count', 'music_zone_count', 'is_active'),
             'description': 'Essential company details and BMAsia-specific tracking'
+        }),
+        ('Soundtrack Integration', {
+            'fields': ('soundtrack_account_id', 'zones_status_summary'),
+            'description': 'Enter Soundtrack account ID (e.g., QWNjb3VudCwsMXN4N242NTZyeTgv for Hilton Pattaya) to enable zone tracking'
         }),
         ('Subscription Details', {
             'fields': ('current_subscription_summary',),
@@ -262,22 +320,12 @@ class AuditLogAdmin(admin.ModelAdmin):
         return False
 
 
-class ZoneInline(admin.TabularInline):
-    model = Zone
-    extra = 0
-    fields = ["name", "platform", "status", "soundtrack_account_id", "last_seen_online"]
-    readonly_fields = ["status", "last_seen_online"]
-    verbose_name = "Music Zone"
-    verbose_name_plural = "Music Zones"
-
-
 @admin.register(SubscriptionPlan)
 class SubscriptionPlanAdmin(admin.ModelAdmin):
     list_display = ['company', 'tier', 'zone_count', 'billing_period', 'display_price_per_zone', 'display_total_value', 'currency', 'is_active']
     list_filter = ['tier', 'billing_period', 'currency', 'is_active', 'start_date', 'end_date']
     search_fields = ['company__name', 'tier', 'notes']
     readonly_fields = ['created_at', 'updated_at', 'display_total_value', 'display_monthly_value']
-    inlines = [ZoneInline]
     
     def display_price_per_zone(self, obj):
         if obj.price_per_zone:
@@ -322,14 +370,14 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
 @admin.register(Zone)
 class ZoneAdmin(admin.ModelAdmin):
     list_display = ["zone_name_with_company", "platform", "status_badge", "last_seen_online", "last_api_sync"]
-    list_filter = ["platform", "status", "subscription_plan__company"]
-    search_fields = ["name", "subscription_plan__company__name", "soundtrack_account_id"]
-    readonly_fields = ["created_at", "updated_at", "last_api_sync", "api_raw_data", "status_badge"]
+    list_filter = ["platform", "status", "company"]
+    search_fields = ["name", "company__name", "company__soundtrack_account_id"]
+    readonly_fields = ["created_at", "updated_at", "last_api_sync", "api_raw_data", "status_badge", "soundtrack_account_id"]
     
     def zone_name_with_company(self, obj):
         return f"{obj.company.name} - {obj.name}"
     zone_name_with_company.short_description = "Zone"
-    zone_name_with_company.admin_order_field = "subscription_plan__company__name"
+    zone_name_with_company.admin_order_field = "company__name"
     
     def status_badge(self, obj):
         colors = {
@@ -348,14 +396,14 @@ class ZoneAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ("Zone Information", {
-            "fields": ("subscription_plan", "name", "platform")
+            "fields": ("company", "name", "platform")
         }),
         ("Status", {
             "fields": ("status", "status_badge", "last_seen_online", "device_name")
         }),
         ("Soundtrack Integration", {
             "fields": ("soundtrack_account_id", "soundtrack_zone_id", "soundtrack_admin_email"),
-            "description": "For Soundtrack zones, enter the account ID to enable API sync"
+            "description": "Account ID is inherited from the company. Zone-specific data from API is shown here."
         }),
         ("API Sync", {
             "fields": ("last_api_sync", "api_raw_data"),

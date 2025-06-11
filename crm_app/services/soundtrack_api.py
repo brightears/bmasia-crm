@@ -100,50 +100,56 @@ class SoundtrackAPIService:
             'raw_data': zone_data
         }
     
-    def sync_all_zones(self):
-        """Sync all zones that have Soundtrack account IDs"""
-        from crm_app.models import Zone
+    def sync_company_zones(self, company):
+        """Sync all zones for a company with Soundtrack"""
+        if not company.soundtrack_account_id:
+            return 0, 0
         
-        zones = Zone.objects.filter(
-            platform='soundtrack',
+        # Get all zones from the API
+        api_zones = self.get_account_zones(company.soundtrack_account_id)
+        
+        # Create or update zones based on API data
+        synced_count = 0
+        for api_zone in api_zones:
+            zone_name = api_zone.get('name', 'Unknown Zone')
+            zone_id = api_zone.get('id', '')
+            
+            # Get or create zone
+            zone, created = company.zones.get_or_create(
+                name=zone_name,
+                platform='soundtrack',
+                defaults={
+                    'soundtrack_zone_id': zone_id,
+                    'status': 'pending'
+                }
+            )
+            
+            # Update zone status
+            parsed_data = self.parse_zone_status(api_zone)
+            zone.update_from_api(parsed_data)
+            synced_count += 1
+        
+        logger.info(f"Synced {synced_count} zones for {company.name}")
+        return synced_count, 0
+    
+    def sync_all_zones(self):
+        """Sync all zones for companies with Soundtrack account IDs"""
+        from crm_app.models import Company
+        
+        companies = Company.objects.filter(
             soundtrack_account_id__isnull=False
         ).exclude(soundtrack_account_id='')
         
-        synced_count = 0
-        error_count = 0
+        total_synced = 0
+        total_errors = 0
         
-        for zone in zones:
-            try:
-                # Get zone data from API
-                if zone.soundtrack_zone_id:
-                    zone_data = self.get_zone_status(
-                        zone.soundtrack_account_id,
-                        zone.soundtrack_zone_id
-                    )
-                else:
-                    # Get all zones for account and try to match by name
-                    all_zones = self.get_account_zones(zone.soundtrack_account_id)
-                    zone_data = None
-                    for api_zone in all_zones:
-                        if api_zone.get('name', '').lower() == zone.name.lower():
-                            zone_data = api_zone
-                            zone.soundtrack_zone_id = api_zone.get('id', '')
-                            break
-                
-                if zone_data:
-                    parsed_data = self.parse_zone_status(zone_data)
-                    zone.update_from_api(parsed_data)
-                    synced_count += 1
-                else:
-                    logger.warning(f"No data found for zone {zone.name}")
-                    error_count += 1
-                    
-            except Exception as e:
-                logger.error(f"Error syncing zone {zone.name}: {str(e)}")
-                error_count += 1
+        for company in companies:
+            synced, errors = self.sync_company_zones(company)
+            total_synced += synced
+            total_errors += errors
         
-        logger.info(f"Zone sync complete: {synced_count} synced, {error_count} errors")
-        return synced_count, error_count
+        logger.info(f"Total sync complete: {total_synced} synced, {total_errors} errors")
+        return total_synced, total_errors
 
 
 # Singleton instance
