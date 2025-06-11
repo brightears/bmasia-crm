@@ -222,7 +222,6 @@ class CompanyAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Basic Information', {
             'fields': ('name', 'country', 'industry', 'website', 'location_count', 'music_zone_count', 'is_active'),
-            'description': 'Essential company details and BMAsia-specific tracking'
         }),
         ('Soundtrack Integration', {
             'fields': ('soundtrack_account_id', 'zones_status_summary'),
