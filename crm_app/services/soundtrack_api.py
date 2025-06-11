@@ -87,6 +87,21 @@ class SoundtrackAPIService:
                                                             id
                                                             name
                                                         }
+                                                        schedule {
+                                                            id
+                                                            name
+                                                        }
+                                                        playFrom {
+                                                            __typename
+                                                            ... on Playlist {
+                                                                id
+                                                                name
+                                                            }
+                                                            ... on Schedule {
+                                                                id
+                                                                name
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
@@ -134,6 +149,21 @@ class SoundtrackAPIService:
                                             id
                                             name
                                         }
+                                        schedule {
+                                            id
+                                            name
+                                        }
+                                        playFrom {
+                                            __typename
+                                            ... on Playlist {
+                                                id
+                                                name
+                                            }
+                                            ... on Schedule {
+                                                id
+                                                name
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -175,6 +205,12 @@ class SoundtrackAPIService:
                     status = 'no_device'
                     is_online = False
                 
+                # Get schedule and playFrom information
+                schedule_name = zone.get('schedule', {}).get('name', '') if zone.get('schedule') else ''
+                play_from = zone.get('playFrom', {})
+                play_from_type = play_from.get('__typename', '') if play_from else ''
+                play_from_name = play_from.get('name', '') if play_from else ''
+                
                 zones.append({
                     'id': zone['id'],
                     'name': f"{location_name} - {zone['name']}",
@@ -187,6 +223,10 @@ class SoundtrackAPIService:
                     'device_name': zone.get('device', {}).get('name', '') if zone.get('device') else '',
                     'device_id': zone.get('device', {}).get('id', '') if zone.get('device') else '',
                     'status': status,
+                    'schedule_name': schedule_name,
+                    'play_from_type': play_from_type,
+                    'play_from_name': play_from_name,
+                    'currently_playing': f"{play_from_type}: {play_from_name}" if play_from_name else 'No active playlist/schedule',
                 })
         
         return zones
@@ -228,6 +268,12 @@ class SoundtrackAPIService:
                         status = 'no_device'
                         is_online = False
                     
+                    # Get schedule and playFrom information
+                    schedule_name = zone.get('schedule', {}).get('name', '') if zone.get('schedule') else ''
+                    play_from = zone.get('playFrom', {})
+                    play_from_type = play_from.get('__typename', '') if play_from else ''
+                    play_from_name = play_from.get('name', '') if play_from else ''
+                    
                     zones.append({
                         'id': zone['id'],
                         'name': f"{location_name} - {zone['name']}",
@@ -240,6 +286,10 @@ class SoundtrackAPIService:
                         'device_name': zone.get('device', {}).get('name', '') if zone.get('device') else '',
                         'device_id': zone.get('device', {}).get('id', '') if zone.get('device') else '',
                         'status': status,
+                        'schedule_name': schedule_name,
+                        'play_from_type': play_from_type,
+                        'play_from_name': play_from_name,
+                        'currently_playing': f"{play_from_type}: {play_from_name}" if play_from_name else 'No active playlist/schedule',
                     })
         
         return zones

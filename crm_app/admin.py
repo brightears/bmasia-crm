@@ -121,7 +121,10 @@ class CompanyAdmin(admin.ModelAdmin):
             for zone in api_zones:
                 status = zone.get('status', 'unknown')
                 status_counts[status] = status_counts.get(status, 0) + 1
-                zone_details.append(f"• {zone.get('name', 'Unknown')} ({status})")
+                
+                # Create detailed zone info with playlist/schedule
+                currently_playing = zone.get('currently_playing', 'No active playlist/schedule')
+                zone_details.append(f"• <strong>{zone.get('zone_name', 'Unknown')}</strong>: {currently_playing} <em>({status})</em>")
             
             # Create summary with counts
             summary_parts = []
