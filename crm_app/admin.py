@@ -53,8 +53,8 @@ class SubscriptionPlanInline(admin.TabularInline):
 class CompanyZoneInline(admin.TabularInline):
     model = Zone
     extra = 0
-    fields = ['name', 'currently_playing_display', 'status', 'device_name', 'last_seen_online']
-    readonly_fields = ['name', 'currently_playing_display', 'status', 'last_seen_online', 'platform']
+    fields = ['name', 'currently_playing_display', 'status_badge_inline', 'device_name', 'last_seen_online']
+    readonly_fields = ['name', 'currently_playing_display', 'status_badge_inline', 'last_seen_online', 'platform']
     verbose_name = "Music Zone"
     verbose_name_plural = "Music Zones (auto-synced from Soundtrack)"
     can_delete = False
@@ -65,6 +65,22 @@ class CompanyZoneInline(admin.TabularInline):
             return obj.api_raw_data.get('currently_playing')
         return "No active playlist/schedule"
     currently_playing_display.short_description = "Currently Playing"
+    
+    def status_badge_inline(self, obj):
+        """Display status with color coding"""
+        colors = {
+            "online": "green",
+            "offline": "red", 
+            "no_device": "#DAA520",  # Golden yellow
+            "expired": "gray",
+            "pending": "gray"
+        }
+        color = colors.get(obj.status, "gray")
+        return format_html(
+            "<span style=\"padding: 3px 8px; border-radius: 3px; color: white; background-color: {}; font-size: 11px;\">{}</span>",
+            color, obj.get_status_display()
+        )
+    status_badge_inline.short_description = "Status"
     
     def has_add_permission(self, request, obj):
         # Don't allow manual adding for Soundtrack companies
