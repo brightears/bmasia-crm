@@ -147,6 +147,9 @@ class CompanyAdmin(admin.ModelAdmin):
     
     def save_model(self, request, obj, form, change):
         """Auto-sync zones when Soundtrack account ID is added or changed"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         old_account_id = None
         if change and obj.pk:
             old_obj = Company.objects.get(pk=obj.pk)
@@ -154,14 +157,21 @@ class CompanyAdmin(admin.ModelAdmin):
         
         super().save_model(request, obj, form, change)
         
+        logger.info(f"Saving company {obj.name}, soundtrack_account_id: {obj.soundtrack_account_id}, old: {old_account_id}")
+        
         # If Soundtrack account ID was added or changed, sync zones
         if obj.soundtrack_account_id and obj.soundtrack_account_id != old_account_id:
             from .services.soundtrack_api import soundtrack_api
             try:
+                logger.info(f"Attempting to sync zones for {obj.name}")
                 synced, errors = soundtrack_api.sync_company_zones(obj)
+                logger.info(f"Sync result: {synced} synced, {errors} errors")
                 if synced > 0:
                     self.message_user(request, f"✓ Automatically synced {synced} zones from Soundtrack", 'SUCCESS')
+                else:
+                    self.message_user(request, f"No zones synced. Check the API connection.", 'WARNING')
             except Exception as e:
+                logger.error(f"Error syncing zones: {str(e)}")
                 self.message_user(request, f"Could not sync zones: {str(e)}", 'WARNING')
     
     def current_subscription_summary(self, obj):

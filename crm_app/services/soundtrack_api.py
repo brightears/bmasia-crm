@@ -40,6 +40,7 @@ class SoundtrackAPIService:
                 return response.json()
             else:
                 logger.error(f"Failed to get account {account_id}: {response.status_code}")
+                logger.error(f"Response: {response.text}")
                 return None
                 
         except Exception as e:

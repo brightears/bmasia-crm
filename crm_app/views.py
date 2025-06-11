@@ -624,6 +624,30 @@ def debug_soundtrack_api(request):
     if request.GET.get('test') == '1':
         test_account_id = request.GET.get('account_id', 'QWNjb3VudCwsMXN4N242NTZyeTgv')
         
+        # Test basic authentication first
+        try:
+            import requests
+            headers = {
+                'Authorization': f'Bearer {soundtrack_api.api_token}',
+                'Content-Type': 'application/json',
+            }
+            
+            # Try a simple API call
+            test_url = f"{soundtrack_api.base_url}/accounts/{test_account_id}"
+            response = requests.get(test_url, headers=headers, timeout=10)
+            
+            test_results['raw_api_test'] = {
+                'url': test_url,
+                'status_code': response.status_code,
+                'headers_sent': {k: v[:20] + '...' if len(v) > 20 else v for k, v in headers.items()},
+                'response_text': response.text[:500] if response.text else 'No response body',
+                'response_headers': dict(response.headers)
+            }
+        except Exception as e:
+            test_results['raw_api_test'] = {
+                'error': str(e)
+            }
+        
         # Test account details
         account_data = soundtrack_api.get_account_details(test_account_id)
         test_results['account_details'] = {
