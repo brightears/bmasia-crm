@@ -662,7 +662,7 @@ class Zone(TimestampedModel):
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='zones')
-    name = models.CharField(max_length=100, help_text="Zone name (e.g., 'Lobby', 'Restaurant', 'Pool Area')")
+    name = models.CharField(max_length=100)
     platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES, default='soundtrack')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     
