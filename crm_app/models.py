@@ -687,11 +687,8 @@ class Zone(TimestampedModel):
         ]
     
     def __str__(self):
-        # For display in admin lists, show currently playing if available
-        if self.api_raw_data and self.api_raw_data.get('currently_playing'):
-            currently_playing = self.api_raw_data.get('currently_playing')
-            return f"{self.name}: {currently_playing}"
-        return f"{self.name} ({self.get_status_display()})"
+        # Simple display for inline admin headers
+        return self.name
     
     @property
     def soundtrack_account_id(self):
