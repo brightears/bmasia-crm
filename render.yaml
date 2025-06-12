@@ -3,7 +3,7 @@ services:
     name: bmasia-crm
     env: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "python manage.py migrate && python manage.py collectstatic --noinput && python manage.py createadmin && python manage.py runserver 0.0.0.0:$PORT"
+    startCommand: "python manage.py migrate && python manage.py collectstatic --noinput && python manage.py createadmin && python manage.py create_email_templates && python manage.py runserver 0.0.0.0:$PORT"
     envVars:
       - key: SECRET_KEY
         value: django-insecure-demo-key-replace-in-production
