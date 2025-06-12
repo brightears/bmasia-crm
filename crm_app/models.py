@@ -176,6 +176,13 @@ class Contact(TimestampedModel):
     notes = models.TextField(blank=True)
     last_contacted = models.DateTimeField(null=True, blank=True)
     
+    # Email notification preferences
+    receives_notifications = models.BooleanField(default=True, help_text="Whether this contact receives automated emails")
+    notification_types = models.JSONField(default=list, blank=True, help_text="List of notification types this contact should receive")
+    preferred_language = models.CharField(max_length=2, choices=[('en', 'English'), ('th', 'Thai')], default='en')
+    unsubscribed = models.BooleanField(default=False, help_text="Has unsubscribed from all emails")
+    unsubscribe_token = models.CharField(max_length=64, blank=True, help_text="Token for unsubscribe links")
+    
     class Meta:
         unique_together = ['company', 'email']
         ordering = ['name']
@@ -191,7 +198,31 @@ class Contact(TimestampedModel):
         if self.is_primary:
             # Ensure only one primary contact per company
             Contact.objects.filter(company=self.company, is_primary=True).exclude(pk=self.pk).update(is_primary=False)
+        
+        # Generate unsubscribe token if not set
+        if not self.unsubscribe_token:
+            import secrets
+            self.unsubscribe_token = secrets.token_urlsafe(32)
+        
         super().save(*args, **kwargs)
+    
+    def get_notification_preferences(self):
+        """Get notification preferences for this contact"""
+        if self.unsubscribed or not self.receives_notifications:
+            return []
+        
+        # Default notification types based on contact type
+        default_types = {
+            'Primary': ['renewal', 'quarterly', 'seasonal'],
+            'Billing': ['invoice', 'payment'],
+            'Technical': ['support', 'zone_alerts'],
+            'Decision Maker': ['renewal', 'quarterly'],
+        }
+        
+        if self.notification_types:
+            return self.notification_types
+        
+        return default_types.get(self.contact_type, ['renewal'])
 
 
 class Note(TimestampedModel):
@@ -735,3 +766,208 @@ class Zone(TimestampedModel):
             self.soundtrack_admin_email = api_data['admin_email']
         
         self.save()
+
+
+# Email System Models
+class EmailTemplate(TimestampedModel):
+    """Store reusable email templates for different communication types"""
+    TEMPLATE_TYPE_CHOICES = [
+        # Sales templates
+        ('renewal_30_days', '30-Day Renewal Reminder'),
+        ('renewal_14_days', '14-Day Renewal Reminder'),
+        ('renewal_7_days', '7-Day Renewal Reminder'),
+        ('renewal_urgent', 'Urgent Renewal Notice'),
+        
+        # Finance templates
+        ('invoice_new', 'New Invoice'),
+        ('payment_reminder_7_days', '7-Day Payment Reminder'),
+        ('payment_reminder_14_days', '14-Day Payment Reminder'),
+        ('payment_overdue', 'Payment Overdue Notice'),
+        
+        # Music Design templates
+        ('quarterly_checkin', 'Quarterly Check-in'),
+        ('seasonal_christmas', 'Christmas Season Preparation'),
+        ('seasonal_newyear', 'Chinese New Year Preparation'),
+        ('seasonal_songkran', 'Songkran Preparation'),
+        ('seasonal_ramadan', 'Ramadan Preparation'),
+        
+        # Technical Support templates
+        ('zone_offline_48h', 'Zone Offline 48 Hours'),
+        ('zone_offline_7d', 'Zone Offline 7 Days'),
+        
+        # General templates
+        ('welcome', 'Welcome Email'),
+        ('contract_signed', 'Contract Signed Confirmation'),
+    ]
+    
+    LANGUAGE_CHOICES = [
+        ('en', 'English'),
+        ('th', 'Thai'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100, unique=True)
+    template_type = models.CharField(max_length=50, choices=TEMPLATE_TYPE_CHOICES, unique=True)
+    language = models.CharField(max_length=2, choices=LANGUAGE_CHOICES, default='en')
+    subject = models.CharField(max_length=200)
+    body_html = models.TextField(help_text="HTML email body. Use variables like {{company_name}}, {{contact_name}}, {{days_until_expiry}}")
+    body_text = models.TextField(help_text="Plain text email body for non-HTML clients")
+    is_active = models.BooleanField(default=True)
+    
+    # Template metadata
+    department = models.CharField(max_length=20, choices=User.ROLE_CHOICES, blank=True)
+    notes = models.TextField(blank=True, help_text="Internal notes about when to use this template")
+    
+    class Meta:
+        ordering = ['template_type', 'language']
+        indexes = [
+            models.Index(fields=['template_type', 'language', 'is_active']),
+        ]
+    
+    def __str__(self):
+        return f"{self.name} ({self.language})"
+    
+    def render(self, context):
+        """Render template with context variables"""
+        from django.template import Template, Context
+        
+        # Render subject
+        subject_template = Template(self.subject)
+        rendered_subject = subject_template.render(Context(context))
+        
+        # Render HTML body
+        html_template = Template(self.body_html)
+        rendered_html = html_template.render(Context(context))
+        
+        # Render text body
+        text_template = Template(self.body_text)
+        rendered_text = text_template.render(Context(context))
+        
+        return {
+            'subject': rendered_subject,
+            'body_html': rendered_html,
+            'body_text': rendered_text
+        }
+
+
+class EmailLog(TimestampedModel):
+    """Track all emails sent by the system"""
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('sent', 'Sent'),
+        ('failed', 'Failed'),
+        ('bounced', 'Bounced'),
+        ('opened', 'Opened'),
+        ('clicked', 'Clicked'),
+        ('unsubscribed', 'Unsubscribed'),
+    ]
+    
+    EMAIL_TYPE_CHOICES = [
+        ('renewal', 'Renewal Reminder'),
+        ('invoice', 'Invoice'),
+        ('payment', 'Payment Reminder'),
+        ('quarterly', 'Quarterly Check-in'),
+        ('seasonal', 'Seasonal Campaign'),
+        ('support', 'Technical Support'),
+        ('manual', 'Manual Email'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='email_logs')
+    contact = models.ForeignKey(Contact, on_delete=models.SET_NULL, null=True, related_name='email_logs')
+    email_type = models.CharField(max_length=20, choices=EMAIL_TYPE_CHOICES)
+    template_used = models.ForeignKey(EmailTemplate, on_delete=models.SET_NULL, null=True)
+    
+    # Email details
+    from_email = models.EmailField()
+    to_email = models.EmailField()
+    cc_emails = models.TextField(blank=True, help_text="Comma-separated CC emails")
+    subject = models.CharField(max_length=200)
+    body_html = models.TextField()
+    body_text = models.TextField()
+    
+    # Status tracking
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    sent_at = models.DateTimeField(null=True, blank=True)
+    opened_at = models.DateTimeField(null=True, blank=True)
+    clicked_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True)
+    
+    # Related objects
+    contract = models.ForeignKey(Contract, on_delete=models.SET_NULL, null=True, blank=True, related_name='email_logs')
+    invoice = models.ForeignKey(Invoice, on_delete=models.SET_NULL, null=True, blank=True, related_name='email_logs')
+    
+    # Tracking
+    message_id = models.CharField(max_length=255, blank=True, help_text="Email message ID for tracking")
+    in_reply_to = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='replies')
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['company', 'status', '-created_at']),
+            models.Index(fields=['email_type', 'status']),
+            models.Index(fields=['contact', '-created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.email_type} to {self.to_email} - {self.status}"
+    
+    def mark_as_sent(self):
+        """Mark email as sent"""
+        self.status = 'sent'
+        self.sent_at = timezone.now()
+        self.save()
+        
+        # Also create a Note for tracking
+        Note.objects.create(
+            company=self.company,
+            contact=self.contact,
+            title=f"Email sent: {self.subject}",
+            text=f"Email sent to {self.to_email}\nType: {self.get_email_type_display()}\nStatus: Sent",
+            note_type='Email',
+            created_by=None  # System generated
+        )
+    
+    def mark_as_failed(self, error_message):
+        """Mark email as failed"""
+        self.status = 'failed'
+        self.error_message = error_message
+        self.save()
+
+
+class EmailCampaign(TimestampedModel):
+    """Track email campaigns and sequences"""
+    CAMPAIGN_TYPE_CHOICES = [
+        ('renewal_sequence', 'Renewal Reminder Sequence'),
+        ('payment_sequence', 'Payment Reminder Sequence'),
+        ('seasonal', 'Seasonal Campaign'),
+        ('quarterly', 'Quarterly Check-in'),
+        ('custom', 'Custom Campaign'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100)
+    campaign_type = models.CharField(max_length=20, choices=CAMPAIGN_TYPE_CHOICES)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='email_campaigns')
+    contract = models.ForeignKey(Contract, on_delete=models.SET_NULL, null=True, blank=True, related_name='email_campaigns')
+    
+    # Campaign settings
+    is_active = models.BooleanField(default=True)
+    start_date = models.DateField()
+    end_date = models.DateField(null=True, blank=True)
+    
+    # Tracking
+    emails_sent = models.IntegerField(default=0)
+    last_email_sent = models.DateTimeField(null=True, blank=True)
+    stop_on_reply = models.BooleanField(default=True)
+    replied = models.BooleanField(default=False)
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['company', 'is_active']),
+            models.Index(fields=['campaign_type', 'is_active']),
+        ]
+    
+    def __str__(self):
+        return f"{self.name} - {self.company.name}"

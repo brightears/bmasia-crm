@@ -4,7 +4,8 @@ from django.contrib.admin import SimpleListFilter
 from django.utils.html import format_html
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
-    Opportunity, OpportunityActivity, Contract, Invoice, SubscriptionPlan, Zone
+    Opportunity, OpportunityActivity, Contract, Invoice, SubscriptionPlan, Zone,
+    EmailTemplate, EmailLog, EmailCampaign
 )
 
 
@@ -276,10 +277,31 @@ class CompanyAdmin(admin.ModelAdmin):
 
 @admin.register(Contact)
 class ContactAdmin(admin.ModelAdmin):
-    list_display = ['name', 'company', 'email', 'phone', 'contact_type', 'is_primary', 'is_active']
-    list_filter = ['contact_type', 'is_primary', 'is_active', 'company__country']
+    list_display = ['name', 'company', 'email', 'phone', 'contact_type', 'is_primary', 'is_active', 'receives_notifications']
+    list_filter = ['contact_type', 'is_primary', 'is_active', 'receives_notifications', 'preferred_language', 'company__country']
     search_fields = ['name', 'email', 'company__name']
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields = ['created_at', 'updated_at', 'unsubscribe_token']
+    
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('company', 'name', 'email', 'phone', 'title', 'department')
+        }),
+        ('Contact Details', {
+            'fields': ('contact_type', 'is_primary', 'is_active', 'linkedin_url')
+        }),
+        ('Email Preferences', {
+            'fields': ('receives_notifications', 'notification_types', 'preferred_language', 'unsubscribed', 'unsubscribe_token'),
+            'description': 'Control which automated emails this contact receives'
+        }),
+        ('Notes', {
+            'fields': ('notes', 'last_contacted'),
+            'classes': ('collapse',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
 
 
 @admin.register(Note)
@@ -575,3 +597,125 @@ class ZoneAdmin(admin.ModelAdmin):
         if total_synced > 0:
             self.message_user(request, f"Successfully synced {total_synced} zones total")
     sync_with_soundtrack_api.short_description = "Sync with Soundtrack API"
+
+
+# Email System Admin
+@admin.register(EmailTemplate)
+class EmailTemplateAdmin(admin.ModelAdmin):
+    list_display = ['name', 'template_type', 'language', 'department', 'is_active']
+    list_filter = ['template_type', 'language', 'department', 'is_active']
+    search_fields = ['name', 'subject', 'body_html', 'body_text']
+    readonly_fields = ['created_at', 'updated_at']
+    
+    fieldsets = (
+        ('Template Info', {
+            'fields': ('name', 'template_type', 'language', 'department', 'is_active')
+        }),
+        ('Email Content', {
+            'fields': ('subject', 'body_html', 'body_text'),
+            'description': 'Use template variables like {{company_name}}, {{contact_name}}, {{days_until_expiry}}'
+        }),
+        ('Notes', {
+            'fields': ('notes',),
+            'classes': ('collapse',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+
+@admin.register(EmailLog)
+class EmailLogAdmin(admin.ModelAdmin):
+    list_display = ['subject', 'to_email', 'email_type', 'status', 'sent_at', 'company']
+    list_filter = ['status', 'email_type', 'created_at', 'sent_at']
+    search_fields = ['subject', 'to_email', 'from_email', 'company__name', 'contact__name']
+    readonly_fields = [
+        'created_at', 'updated_at', 'sent_at', 'opened_at', 'clicked_at',
+        'message_id', 'status_badge'
+    ]
+    date_hierarchy = 'created_at'
+    
+    def status_badge(self, obj):
+        colors = {
+            'pending': '#ffc107',
+            'sent': '#28a745',
+            'failed': '#dc3545',
+            'bounced': '#dc3545',
+            'opened': '#17a2b8',
+            'clicked': '#007bff',
+            'unsubscribed': '#6c757d',
+        }
+        color = colors.get(obj.status, '#6c757d')
+        return format_html(
+            '<span style="padding: 3px 10px; border-radius: 3px; color: white; background-color: {};">{}</span>',
+            color, obj.get_status_display()
+        )
+    status_badge.short_description = 'Status'
+    
+    fieldsets = (
+        ('Email Details', {
+            'fields': ('email_type', 'template_used', 'from_email', 'to_email', 'cc_emails', 'subject')
+        }),
+        ('Recipients', {
+            'fields': ('company', 'contact', 'contract', 'invoice')
+        }),
+        ('Status', {
+            'fields': ('status', 'status_badge', 'sent_at', 'opened_at', 'clicked_at', 'error_message')
+        }),
+        ('Content', {
+            'fields': ('body_html', 'body_text'),
+            'classes': ('collapse',)
+        }),
+        ('Tracking', {
+            'fields': ('message_id', 'in_reply_to'),
+            'classes': ('collapse',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def has_add_permission(self, request):
+        return False  # Emails should only be created by the system
+    
+    def has_change_permission(self, request, obj=None):
+        return False  # Email logs should not be edited
+
+
+@admin.register(EmailCampaign)
+class EmailCampaignAdmin(admin.ModelAdmin):
+    list_display = ['name', 'campaign_type', 'company', 'is_active', 'emails_sent', 'last_email_sent']
+    list_filter = ['campaign_type', 'is_active', 'created_at']
+    search_fields = ['name', 'company__name']
+    readonly_fields = ['created_at', 'updated_at', 'emails_sent', 'last_email_sent']
+    
+    fieldsets = (
+        ('Campaign Info', {
+            'fields': ('name', 'campaign_type', 'company', 'contract')
+        }),
+        ('Settings', {
+            'fields': ('is_active', 'start_date', 'end_date', 'stop_on_reply', 'replied')
+        }),
+        ('Statistics', {
+            'fields': ('emails_sent', 'last_email_sent')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    actions = ['pause_campaigns', 'resume_campaigns']
+    
+    def pause_campaigns(self, request, queryset):
+        count = queryset.update(is_active=False)
+        self.message_user(request, f'Paused {count} campaign(s)')
+    pause_campaigns.short_description = 'Pause selected campaigns'
+    
+    def resume_campaigns(self, request, queryset):
+        count = queryset.update(is_active=True)
+        self.message_user(request, f'Resumed {count} campaign(s)')
+    resume_campaigns.short_description = 'Resume selected campaigns'

@@ -224,3 +224,24 @@ LOGGING = {
         },
     },
 }
+
+# Email Configuration
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='notifications@bmasiamusic.com')
+SERVER_EMAIL = config('SERVER_EMAIL', default='server@bmasiamusic.com')
+
+# Email settings for different departments
+SALES_EMAIL = config('SALES_EMAIL', default='sales@bmasiamusic.com')
+FINANCE_EMAIL = config('FINANCE_EMAIL', default='finance@bmasiamusic.com')
+SUPPORT_EMAIL = config('SUPPORT_EMAIL', default='support@bmasiamusic.com')
+MUSIC_DESIGN_EMAIL = config('MUSIC_DESIGN_EMAIL', default='music@bmasiamusic.com')
+
+# Business hours for email sending (Bangkok timezone)
+BUSINESS_HOURS_START = 9  # 9 AM
+BUSINESS_HOURS_END = 17   # 5 PM
+BUSINESS_TIMEZONE = 'Asia/Bangkok'
