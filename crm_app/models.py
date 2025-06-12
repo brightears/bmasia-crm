@@ -460,6 +460,11 @@ class Contract(TimestampedModel):
         ('Renewed', 'Renewed'),
     ]
     
+    CURRENCY_CHOICES = [
+        ('USD', 'USD - US Dollar'),
+        ('THB', 'THB - Thai Baht'),
+    ]
+    
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='contracts')
     opportunity = models.ForeignKey(Opportunity, on_delete=models.SET_NULL, null=True, blank=True, related_name='contracts')
@@ -469,7 +474,7 @@ class Contract(TimestampedModel):
     start_date = models.DateField()
     end_date = models.DateField()
     value = models.DecimalField(max_digits=12, decimal_places=2)
-    currency = models.CharField(max_length=3, default='USD')
+    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
     auto_renew = models.BooleanField(default=False)
     renewal_period_months = models.IntegerField(default=12)
     is_active = models.BooleanField(default=True)
@@ -513,7 +518,9 @@ class Contract(TimestampedModel):
         if self.end_date and self.start_date:
             months = ((self.end_date.year - self.start_date.year) * 12 + 
                      (self.end_date.month - self.start_date.month))
-            return self.value / months if months > 0 else 0
+            if months > 0:
+                return round(float(self.value) / months, 2)
+            return 0
         return 0
 
 
@@ -528,6 +535,11 @@ class Invoice(TimestampedModel):
         ('Refunded', 'Refunded'),
     ]
     
+    CURRENCY_CHOICES = [
+        ('USD', 'USD - US Dollar'),
+        ('THB', 'THB - Thai Baht'),
+    ]
+    
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     contract = models.ForeignKey(Contract, on_delete=models.CASCADE, related_name='invoices')
     invoice_number = models.CharField(max_length=50, unique=True)
@@ -539,7 +551,7 @@ class Invoice(TimestampedModel):
     tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2)
-    currency = models.CharField(max_length=3, default='USD')
+    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
     payment_method = models.CharField(max_length=50, blank=True)
     transaction_id = models.CharField(max_length=100, blank=True)
     notes = models.TextField(blank=True)
