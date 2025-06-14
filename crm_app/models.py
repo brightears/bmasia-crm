@@ -810,7 +810,7 @@ class EmailTemplate(TimestampedModel):
     template_type = models.CharField(max_length=50, choices=TEMPLATE_TYPE_CHOICES, unique=True)
     language = models.CharField(max_length=2, choices=LANGUAGE_CHOICES, default='en')
     subject = models.CharField(max_length=200)
-    body_html = models.TextField(help_text="HTML email body. Use variables like {{company_name}}, {{contact_name}}, {{days_until_expiry}}")
+    body_html = models.TextField(blank=True, help_text="HTML email body. Use variables like {{company_name}}, {{contact_name}}, {{days_until_expiry}}")
     body_text = models.TextField(help_text="Plain text email body for non-HTML clients")
     is_active = models.BooleanField(default=True)
     
