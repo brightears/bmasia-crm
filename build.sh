@@ -8,12 +8,17 @@ pip install -r requirements.txt
 # Collect static files
 python manage.py collectstatic --no-input
 
-# Try to run migrations
+# Handle migrations
 echo "Running migrations..."
-python manage.py migrate || {
-    echo "Initial migration failed, trying with reset..."
-    python reset_migrations.py
-}
+if [ "$RESET_DB" = "true" ]; then
+    echo "RESET_DB is set, dropping and recreating tables..."
+    python fix_postgres_migrations.py
+else
+    python manage.py migrate || {
+        echo "Migration failed, attempting to fix..."
+        python fix_postgres_migrations.py
+    }
+fi
 
 # Create superuser if it doesn't exist
 python manage.py shell << EOF
