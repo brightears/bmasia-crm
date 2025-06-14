@@ -3,7 +3,7 @@ services:
     name: bmasia-crm
     env: python
     buildCommand: "./build.sh"
-    startCommand: "gunicorn bmasia_crm.wsgi:application"
+    startCommand: "./start.sh"
     envVars:
       - key: SECRET_KEY
         value: django-insecure-demo-key-replace-in-production
