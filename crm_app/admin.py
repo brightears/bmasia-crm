@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.admin import SimpleListFilter
 from django.utils.html import format_html
+from django import forms
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice, SubscriptionPlan, Zone,
@@ -290,8 +291,45 @@ class CompanyAdmin(admin.ModelAdmin):
     )
 
 
+class ContactAdminForm(forms.ModelForm):
+    """Custom form for Contact admin with multi-select for notification types"""
+    NOTIFICATION_TYPE_CHOICES = [
+        ('renewal', 'Renewal Reminders'),
+        ('payment', 'Payment Reminders'),
+        ('invoice', 'New Invoices'),
+        ('quarterly', 'Quarterly Check-ins'),
+        ('seasonal', 'Seasonal Campaigns'),
+        ('support', 'Support Updates'),
+        ('zone_alerts', 'Zone Alerts'),
+        ('promotions', 'Promotional Offers'),
+        ('newsletters', 'Company Newsletter'),
+    ]
+    
+    notification_types = forms.MultipleChoiceField(
+        choices=NOTIFICATION_TYPE_CHOICES,
+        widget=forms.CheckboxSelectMultiple,
+        required=False,
+        help_text="Select which types of automated emails this contact should receive"
+    )
+    
+    class Meta:
+        model = Contact
+        fields = '__all__'
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk:
+            # Load existing notification types
+            self.initial['notification_types'] = self.instance.notification_types or []
+    
+    def clean_notification_types(self):
+        # Convert to list for JSON field
+        return self.cleaned_data.get('notification_types', [])
+
+
 @admin.register(Contact)
 class ContactAdmin(admin.ModelAdmin):
+    form = ContactAdminForm
     list_display = ['name', 'company', 'email', 'phone', 'contact_type', 'is_primary', 'is_active', 'receives_notifications']
     list_filter = ['contact_type', 'is_primary', 'is_active', 'receives_notifications', 'preferred_language', 'company__country']
     search_fields = ['name', 'email', 'company__name']
