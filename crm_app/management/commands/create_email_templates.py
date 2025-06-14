@@ -212,7 +212,7 @@ BMAsia Finance Team
                 'name': 'Quarterly Check-in (EN)',
                 'template_type': 'quarterly_checkin',
                 'language': 'en',
-                'department': 'Music Design',
+                'department': 'Music',
                 'subject': 'How is your music experience with BMAsia?',
                 'body_html': '''
 <html>
