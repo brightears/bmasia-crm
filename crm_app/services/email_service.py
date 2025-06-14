@@ -268,7 +268,7 @@ class EmailService:
                     unsubscribed=False
                 ).filter(
                     Q(contact_type__in=['Primary', 'Decision Maker']) |
-                    Q(notification_types__contains=['renewal'])
+                    Q(notification_types__contains='renewal')
                 )
                 
                 for contact in contacts:
@@ -346,7 +346,7 @@ class EmailService:
                 unsubscribed=False
             ).filter(
                 Q(contact_type='Billing') |
-                Q(notification_types__contains=['payment'])
+                Q(notification_types__contains='payment')
             )
             
             for contact in contacts:
@@ -401,7 +401,7 @@ class EmailService:
                 unsubscribed=False
             ).filter(
                 Q(contact_type='Primary') |
-                Q(notification_types__contains=['quarterly'])
+                Q(notification_types__contains='quarterly')
             )
             
             for contact in contacts:
