@@ -835,19 +835,32 @@ class EmailTemplate(TimestampedModel):
         subject_template = Template(self.subject)
         rendered_subject = subject_template.render(Context(context))
         
-        # Render HTML body
-        html_template = Template(self.body_html)
-        rendered_html = html_template.render(Context(context))
-        
         # Render text body
         text_template = Template(self.body_text)
         rendered_text = text_template.render(Context(context))
+        
+        # Generate HTML from text if HTML is empty
+        if not self.body_html or self.body_html.strip() == '':
+            from crm_app.utils.email_utils import text_to_html
+            rendered_html = text_to_html(rendered_text)
+        else:
+            # Render HTML body
+            html_template = Template(self.body_html)
+            rendered_html = html_template.render(Context(context))
         
         return {
             'subject': rendered_subject,
             'body_html': rendered_html,
             'body_text': rendered_text
         }
+    
+    def save(self, *args, **kwargs):
+        """Auto-generate HTML from text if not provided"""
+        if not self.body_html or self.body_html.strip() == '':
+            from crm_app.utils.email_utils import text_to_html
+            # Don't render template variables yet, just convert format
+            self.body_html = text_to_html(self.body_text)
+        super().save(*args, **kwargs)
 
 
 class EmailLog(TimestampedModel):
@@ -900,6 +913,9 @@ class EmailLog(TimestampedModel):
     # Tracking
     message_id = models.CharField(max_length=255, blank=True, help_text="Email message ID for tracking")
     in_reply_to = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='replies')
+    
+    # Attachments
+    attachments = models.ManyToManyField('DocumentAttachment', blank=True, related_name='email_logs')
     
     class Meta:
         ordering = ['-created_at']
@@ -967,6 +983,38 @@ class EmailCampaign(TimestampedModel):
         indexes = [
             models.Index(fields=['company', 'is_active']),
             models.Index(fields=['campaign_type', 'is_active']),
+        ]
+    
+    def __str__(self):
+        return f"{self.name} - {self.company.name}"
+
+
+class DocumentAttachment(TimestampedModel):
+    """Store documents that can be attached to emails"""
+    DOCUMENT_TYPE_CHOICES = [
+        ('contract', 'Contract'),
+        ('invoice', 'Invoice'),
+        ('proposal', 'Proposal'),
+        ('brochure', 'Brochure'),
+        ('other', 'Other'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='documents')
+    name = models.CharField(max_length=200)
+    document_type = models.CharField(max_length=20, choices=DOCUMENT_TYPE_CHOICES)
+    file = models.FileField(upload_to='documents/%Y/%m/')
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    
+    # Related objects
+    contract = models.ForeignKey(Contract, on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')
+    invoice = models.ForeignKey(Invoice, on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['company', 'document_type']),
         ]
     
     def __str__(self):

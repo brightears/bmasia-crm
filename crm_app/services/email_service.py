@@ -17,7 +17,7 @@ from django.db.models import Q
 
 from crm_app.models import (
     EmailTemplate, EmailLog, EmailCampaign, 
-    Contact, Company, Contract, Invoice
+    Contact, Company, Contract, Invoice, DocumentAttachment
 )
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,8 @@ class EmailService:
         template: EmailTemplate = None,
         contract: Contract = None,
         invoice: Invoice = None,
-        reply_to: str = None
+        reply_to: str = None,
+        attachments: List[DocumentAttachment] = None
     ) -> Tuple[bool, str]:
         """
         Send an email and log it
@@ -112,11 +113,24 @@ class EmailService:
             msg.extra_headers['X-BMAsia-Email-ID'] = str(email_log.id)
             msg.extra_headers['List-Unsubscribe'] = self._get_unsubscribe_url(contact)
             
+            # Add attachments if provided
+            if attachments:
+                for attachment in attachments:
+                    try:
+                        msg.attach_file(attachment.file.path)
+                        logger.info(f"Attached file: {attachment.name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to attach file {attachment.name}: {e}")
+            
             # Send email
             msg.send(fail_silently=False)
             
             # Mark as sent
             email_log.mark_as_sent()
+            
+            # Associate attachments with email log
+            if attachments:
+                email_log.attachments.set(attachments)
             
             logger.info(f"Email sent successfully to {to_email} - Type: {email_type}")
             return True, "Email sent successfully"

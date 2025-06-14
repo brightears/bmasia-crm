@@ -5,7 +5,7 @@ from django.utils.html import format_html
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice, SubscriptionPlan, Zone,
-    EmailTemplate, EmailLog, EmailCampaign
+    EmailTemplate, EmailLog, EmailCampaign, DocumentAttachment
 )
 
 
@@ -120,7 +120,7 @@ class CompanyAdmin(admin.ModelAdmin):
     list_filter = ['country', 'industry']
     search_fields = ['name', 'website', 'notes', 'soundtrack_account_id']
     readonly_fields = ['created_at', 'updated_at', 'current_subscription_summary', 'zones_status_summary']
-    actions = ['sync_soundtrack_zones']
+    actions = ['sync_soundtrack_zones', 'send_email_to_contacts']
     
     def get_inlines(self, request, obj):
         """Show different inlines based on whether company has Soundtrack account"""
@@ -199,6 +199,21 @@ class CompanyAdmin(admin.ModelAdmin):
         if total_synced > 0:
             self.message_user(request, f"Successfully synced {total_synced} zones total")
     sync_soundtrack_zones.short_description = "Sync Soundtrack zones"
+    
+    def send_email_to_contacts(self, request, queryset):
+        """Send email to contacts of selected companies"""
+        if queryset.count() != 1:
+            self.message_user(request, 'Please select exactly one company', level='ERROR')
+            return
+        
+        company = queryset.first()
+        # Redirect to send email form
+        from django.urls import reverse
+        from django.http import HttpResponseRedirect
+        return HttpResponseRedirect(
+            reverse('admin_send_email') + f'?company_id={company.pk}'
+        )
+    send_email_to_contacts.short_description = 'Send email to company contacts'
     
     def save_model(self, request, obj, form, change):
         """Auto-sync zones when Soundtrack account ID is added or changed"""
@@ -604,7 +619,7 @@ class ZoneAdmin(admin.ModelAdmin):
 class EmailTemplateAdmin(admin.ModelAdmin):
     list_display = ['name', 'template_type', 'language', 'department', 'is_active']
     list_filter = ['template_type', 'language', 'department', 'is_active']
-    search_fields = ['name', 'subject', 'body_html', 'body_text']
+    search_fields = ['name', 'subject', 'body_text']
     readonly_fields = ['created_at', 'updated_at']
     
     fieldsets = (
@@ -612,8 +627,13 @@ class EmailTemplateAdmin(admin.ModelAdmin):
             'fields': ('name', 'template_type', 'language', 'department', 'is_active')
         }),
         ('Email Content', {
-            'fields': ('subject', 'body_html', 'body_text'),
-            'description': 'Use template variables like {{company_name}}, {{contact_name}}, {{days_until_expiry}}'
+            'fields': ('subject', 'body_text'),
+            'description': 'Write your email in plain text. HTML will be generated automatically. Use variables like {{company_name}}, {{contact_name}}, {{days_until_expiry}}'
+        }),
+        ('Advanced', {
+            'fields': ('body_html',),
+            'classes': ('collapse',),
+            'description': 'Optional: Custom HTML template (leave empty to auto-generate from text)'
         }),
         ('Notes', {
             'fields': ('notes',),
@@ -624,6 +644,32 @@ class EmailTemplateAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+    
+    actions = ['send_email', 'duplicate_template']
+    
+    def send_email(self, request, queryset):
+        """Send email using selected template"""
+        if queryset.count() != 1:
+            self.message_user(request, 'Please select exactly one template', level='ERROR')
+            return
+        
+        template = queryset.first()
+        # Redirect to send email form
+        from django.urls import reverse
+        from django.http import HttpResponseRedirect
+        return HttpResponseRedirect(
+            reverse('admin_send_email') + f'?template_id={template.pk}'
+        )
+    send_email.short_description = 'Send email using this template'
+    
+    def duplicate_template(self, request, queryset):
+        """Duplicate selected templates"""
+        for template in queryset:
+            template.pk = None
+            template.name = f"{template.name} (Copy)"
+            template.save()
+        self.message_user(request, f'Duplicated {queryset.count()} template(s)')
+    duplicate_template.short_description = 'Duplicate selected templates'
 
 
 @admin.register(EmailLog)
@@ -633,7 +679,7 @@ class EmailLogAdmin(admin.ModelAdmin):
     search_fields = ['subject', 'to_email', 'from_email', 'company__name', 'contact__name']
     readonly_fields = [
         'created_at', 'updated_at', 'sent_at', 'opened_at', 'clicked_at',
-        'message_id', 'status_badge'
+        'message_id', 'status_badge', 'attachments'
     ]
     date_hierarchy = 'created_at'
     
@@ -663,6 +709,10 @@ class EmailLogAdmin(admin.ModelAdmin):
         }),
         ('Status', {
             'fields': ('status', 'status_badge', 'sent_at', 'opened_at', 'clicked_at', 'error_message')
+        }),
+        ('Attachments', {
+            'fields': ('attachments',),
+            'description': 'Documents attached to this email'
         }),
         ('Content', {
             'fields': ('body_html', 'body_text'),
@@ -719,3 +769,28 @@ class EmailCampaignAdmin(admin.ModelAdmin):
         count = queryset.update(is_active=True)
         self.message_user(request, f'Resumed {count} campaign(s)')
     resume_campaigns.short_description = 'Resume selected campaigns'
+
+
+@admin.register(DocumentAttachment)
+class DocumentAttachmentAdmin(admin.ModelAdmin):
+    list_display = ['name', 'company', 'document_type', 'file', 'is_active', 'created_at']
+    list_filter = ['document_type', 'is_active', 'created_at']
+    search_fields = ['name', 'description', 'company__name']
+    readonly_fields = ['created_at', 'updated_at']
+    
+    fieldsets = (
+        ('Document Info', {
+            'fields': ('company', 'name', 'document_type', 'file', 'is_active')
+        }),
+        ('Related Objects', {
+            'fields': ('contract', 'invoice'),
+            'classes': ('collapse',)
+        }),
+        ('Details', {
+            'fields': ('description',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )

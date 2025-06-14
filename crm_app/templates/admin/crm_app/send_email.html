@@ -1,0 +1,106 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static admin_modify %}
+
+{% block extrahead %}
+{{ block.super }}
+<script src="{% url 'admin:jsi18n' %}"></script>
+{{ form.media }}
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <form method="post" id="send-email-form">
+        {% csrf_token %}
+        
+        <div>
+            <fieldset class="module aligned">
+                <h2>
+                    {% if template %}
+                        Send Email Using Template: {{ template.name }}
+                    {% elif company %}
+                        Send Email to {{ company.name }} Contacts
+                    {% else %}
+                        Send Email
+                    {% endif %}
+                </h2>
+                
+                {% if template %}
+                <div class="form-row">
+                    <div class="help">
+                        <strong>Template Type:</strong> {{ template.get_template_type_display }}<br>
+                        <strong>Language:</strong> {{ template.get_language_display }}<br>
+                        <strong>Department:</strong> {{ template.get_department_display }}
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if form.non_field_errors %}
+                <div class="errornote">
+                    {{ form.non_field_errors }}
+                </div>
+                {% endif %}
+                
+                <div class="form-row">
+                    <label for="{{ form.contacts.id_for_label }}" class="required">Recipients:</label>
+                    {{ form.contacts }}
+                    {% if form.contacts.errors %}
+                        <ul class="errorlist">{{ form.contacts.errors }}</ul>
+                    {% endif %}
+                    <p class="help">{{ form.contacts.help_text }}</p>
+                </div>
+                
+                <div class="form-row">
+                    <label for="{{ form.subject.id_for_label }}" class="required">Subject:</label>
+                    {{ form.subject }}
+                    {% if form.subject.errors %}
+                        <ul class="errorlist">{{ form.subject.errors }}</ul>
+                    {% endif %}
+                </div>
+                
+                <div class="form-row">
+                    <label for="{{ form.body.id_for_label }}" class="required">Email Body:</label>
+                    {{ form.body }}
+                    {% if form.body.errors %}
+                        <ul class="errorlist">{{ form.body.errors }}</ul>
+                    {% endif %}
+                    <p class="help">{{ form.body.help_text }}</p>
+                    <p class="help">
+                        <strong>Available Variables:</strong><br>
+                        {% verbatim %}
+                        {{contact_name}} - Contact's name<br>
+                        {{company_name}} - Company name<br>
+                        {{days_until_expiry}} - Days until contract expires<br>
+                        {{contract_value}} - Contract value with currency<br>
+                        {{monthly_value}} - Monthly value with currency<br>
+                        {{invoice_amount}} - Invoice amount with currency<br>
+                        {{zone_count}} - Number of music zones
+                        {% endverbatim %}
+                    </p>
+                </div>
+                
+                <div class="form-row">
+                    <label for="{{ form.attachments.id_for_label }}">Attachments:</label>
+                    {{ form.attachments }}
+                    {% if form.attachments.errors %}
+                        <ul class="errorlist">{{ form.attachments.errors }}</ul>
+                    {% endif %}
+                    <p class="help">{{ form.attachments.help_text }}</p>
+                </div>
+                
+                <div class="form-row">
+                    {{ form.send_test }}
+                    <label for="{{ form.send_test.id_for_label }}" class="vCheckboxLabel">
+                        Send test email to myself ({{ user.email }})
+                    </label>
+                    <p class="help">{{ form.send_test.help_text }}</p>
+                </div>
+            </fieldset>
+        </div>
+        
+        <div class="submit-row">
+            <input type="submit" value="Send Email" class="default" name="_send">
+            <a href="{% if template %}{% url 'admin:crm_app_emailtemplate_changelist' %}{% elif company %}{% url 'admin:crm_app_company_change' company.pk %}{% else %}{% url 'admin:index' %}{% endif %}" class="button cancel-link">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
