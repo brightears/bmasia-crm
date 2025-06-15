@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.admin import SimpleListFilter
 from django.utils.html import format_html
+from django.utils.formats import number_format
 from django import forms
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
@@ -417,20 +418,10 @@ class InvoiceInline(admin.TabularInline):
 
 class ContractAdminForm(forms.ModelForm):
     """Custom form for Contract admin with better number formatting"""
-    value = forms.DecimalField(
-        max_digits=12, 
-        decimal_places=2,
-        required=False,
-        localize=True,
-        widget=forms.NumberInput(attrs={
-            'class': 'vTextField',
-            'style': 'text-align: right;'
-        })
-    )
-    
     class Meta:
         model = Contract
         fields = '__all__'
+        localized_fields = ['value']  # This will apply number formatting
 
 
 @admin.register(Contract)
@@ -441,16 +432,6 @@ class ContractAdmin(admin.ModelAdmin):
     search_fields = ['contract_number', 'company__name']
     readonly_fields = ['created_at', 'updated_at', 'days_until_expiry', 'formatted_monthly_value']
     inlines = [InvoiceInline]
-    
-    def formfield_for_dbfield(self, db_field, **kwargs):
-        """Customize form fields"""
-        field = super().formfield_for_dbfield(db_field, **kwargs)
-        if db_field.name == 'value':
-            # Add localization to format with thousands separator
-            field.localize = True
-            field.widget.attrs['class'] = 'vTextField'
-            field.widget.attrs['style'] = 'text-align: right;'
-        return field
     
     def is_expiring_soon(self, obj):
         return obj.is_expiring_soon
@@ -480,9 +461,10 @@ class ContractAdmin(admin.ModelAdmin):
             if months > 0:
                 monthly = round(float(obj.value) / months, 2)
                 # Format with thousands separator and 2 decimal places
+                formatted_value = "{:,.2f}".format(monthly)
                 return format_html(
-                    '<span style="font-weight: normal;">{:,.2f}</span>',
-                    monthly
+                    '<span style="font-weight: normal;">{}</span>',
+                    formatted_value
                 )
             else:
                 return format_html('<span style="color: #999;">Invalid date range</span>')
