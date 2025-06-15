@@ -415,13 +415,42 @@ class InvoiceInline(admin.TabularInline):
     fields = ['invoice_number', 'status', 'issue_date', 'due_date', 'total_amount']
 
 
+class ContractAdminForm(forms.ModelForm):
+    """Custom form for Contract admin with better number formatting"""
+    value = forms.DecimalField(
+        max_digits=12, 
+        decimal_places=2,
+        required=False,
+        localize=True,
+        widget=forms.NumberInput(attrs={
+            'class': 'vTextField',
+            'style': 'text-align: right;'
+        })
+    )
+    
+    class Meta:
+        model = Contract
+        fields = '__all__'
+
+
 @admin.register(Contract)
 class ContractAdmin(admin.ModelAdmin):
+    form = ContractAdminForm
     list_display = ['contract_number', 'company', 'service_type', 'contract_type', 'status', 'start_date', 'end_date', 'value', 'is_expiring_soon']
     list_filter = ['service_type', 'contract_type', 'status', 'auto_renew', 'is_active']
     search_fields = ['contract_number', 'company__name']
     readonly_fields = ['created_at', 'updated_at', 'days_until_expiry', 'formatted_monthly_value']
     inlines = [InvoiceInline]
+    
+    def formfield_for_dbfield(self, db_field, **kwargs):
+        """Customize form fields"""
+        field = super().formfield_for_dbfield(db_field, **kwargs)
+        if db_field.name == 'value':
+            # Add localization to format with thousands separator
+            field.localize = True
+            field.widget.attrs['class'] = 'vTextField'
+            field.widget.attrs['style'] = 'text-align: right;'
+        return field
     
     def is_expiring_soon(self, obj):
         return obj.is_expiring_soon
@@ -429,17 +458,37 @@ class ContractAdmin(admin.ModelAdmin):
     
     def formatted_monthly_value(self, obj):
         """Display monthly value with proper currency formatting"""
-        monthly = obj.monthly_value
-        if monthly and monthly > 0:
-            # Format with thousands separator and 2 decimal places
-            return format_html(
-                '<span style="font-weight: normal;">{:,.2f}</span>',
-                monthly
-            )
-        # If no monthly value can be calculated, show a helpful message
-        if not obj.start_date or not obj.end_date:
-            return format_html('<span style="color: #999;">Set dates to calculate</span>')
-        return format_html('<span style="color: #999;">-</span>')
+        try:
+            # Make sure we have the object
+            if not obj or not obj.pk:
+                return format_html('<span style="color: #999;">-</span>')
+            
+            # Check if we have required fields
+            if not obj.start_date:
+                return format_html('<span style="color: #999;">No start date</span>')
+            if not obj.end_date:
+                return format_html('<span style="color: #999;">No end date</span>')
+            if not obj.value:
+                return format_html('<span style="color: #999;">No value set</span>')
+            
+            # Calculate monthly value manually here to debug
+            months = ((obj.end_date.year - obj.start_date.year) * 12 + 
+                     (obj.end_date.month - obj.start_date.month))
+            if obj.end_date.day >= obj.start_date.day:
+                months += 1
+            
+            if months > 0:
+                monthly = round(float(obj.value) / months, 2)
+                # Format with thousands separator and 2 decimal places
+                return format_html(
+                    '<span style="font-weight: normal;">{:,.2f}</span>',
+                    monthly
+                )
+            else:
+                return format_html('<span style="color: #999;">Invalid date range</span>')
+                
+        except Exception as e:
+            return format_html('<span style="color: red;">Error: {}</span>', str(e))
     formatted_monthly_value.short_description = 'Monthly value'
     
     fieldsets = (
