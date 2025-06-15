@@ -429,13 +429,17 @@ class ContractAdmin(admin.ModelAdmin):
     
     def formatted_monthly_value(self, obj):
         """Display monthly value with proper currency formatting"""
-        if obj.monthly_value:
+        monthly = obj.monthly_value
+        if monthly and monthly > 0:
             # Format with thousands separator and 2 decimal places
             return format_html(
                 '<span style="font-weight: normal;">{:,.2f}</span>',
-                obj.monthly_value
+                monthly
             )
-        return '-'
+        # If no monthly value can be calculated, show a helpful message
+        if not obj.start_date or not obj.end_date:
+            return format_html('<span style="color: #999;">Set dates to calculate</span>')
+        return format_html('<span style="color: #999;">-</span>')
     formatted_monthly_value.short_description = 'Monthly value'
     
     fieldsets = (
