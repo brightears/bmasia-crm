@@ -495,9 +495,12 @@ class Contract(TimestampedModel):
         # Soundtrack Plans
         ('soundtrack_essential_monthly', 'Soundtrack Essential (Monthly)'),
         ('soundtrack_essential_yearly', 'Soundtrack Essential (Yearly)'),
-        ('soundtrack_premium_monthly', 'Soundtrack Premium (Monthly)'),
-        ('soundtrack_premium_yearly', 'Soundtrack Premium (Yearly)'),
+        ('soundtrack_unlimited_monthly', 'Soundtrack Unlimited (Monthly)'),
+        ('soundtrack_unlimited_yearly', 'Soundtrack Unlimited (Yearly)'),
         ('soundtrack_enterprise', 'Soundtrack Enterprise (Custom)'),
+        # Beat Breeze
+        ('beat_breeze_monthly', 'Beat Breeze (Monthly)'),
+        ('beat_breeze_yearly', 'Beat Breeze (Yearly)'),
         # Other Services
         ('custom_package', 'Custom Package'),
         ('one_time_setup', 'One-time Setup'),
