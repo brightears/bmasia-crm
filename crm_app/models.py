@@ -491,6 +491,20 @@ class Contract(TimestampedModel):
         ('Renewed', 'Renewed'),
     ]
     
+    SERVICE_TYPE_CHOICES = [
+        # Soundtrack Plans
+        ('soundtrack_essential_monthly', 'Soundtrack Essential (Monthly)'),
+        ('soundtrack_essential_yearly', 'Soundtrack Essential (Yearly)'),
+        ('soundtrack_premium_monthly', 'Soundtrack Premium (Monthly)'),
+        ('soundtrack_premium_yearly', 'Soundtrack Premium (Yearly)'),
+        ('soundtrack_enterprise', 'Soundtrack Enterprise (Custom)'),
+        # Other Services
+        ('custom_package', 'Custom Package'),
+        ('one_time_setup', 'One-time Setup'),
+        ('consulting', 'Consulting Services'),
+        ('maintenance', 'Maintenance & Support'),
+    ]
+    
     CURRENCY_CHOICES = [
         ('USD', 'USD - US Dollar'),
         ('THB', 'THB - Thai Baht'),
@@ -501,6 +515,7 @@ class Contract(TimestampedModel):
     opportunity = models.ForeignKey(Opportunity, on_delete=models.SET_NULL, null=True, blank=True, related_name='contracts')
     contract_number = models.CharField(max_length=50, unique=True)
     contract_type = models.CharField(max_length=20, choices=CONTRACT_TYPE_CHOICES, default='Annual')
+    service_type = models.CharField(max_length=50, choices=SERVICE_TYPE_CHOICES, blank=True, help_text="Specific service or plan")
     status = models.CharField(max_length=20, choices=CONTRACT_STATUS_CHOICES, default='Draft')
     start_date = models.DateField()
     end_date = models.DateField()
@@ -621,8 +636,10 @@ class Invoice(TimestampedModel):
         super().save(*args, **kwargs)
 
 
+# DEPRECATED: Use Contract model with service_type field instead
+"""
 class SubscriptionPlan(TimestampedModel):
-    """Track multiple subscription tiers for a company"""
+    # Track multiple subscription tiers for a company
     TIER_CHOICES = [
         ('Soundtrack Essential (Serviced)', 'Soundtrack Essential (Serviced)'),
         ('Soundtrack Essential (Self-Managed)', 'Soundtrack Essential (Self-Managed)'),
@@ -665,14 +682,14 @@ class SubscriptionPlan(TimestampedModel):
     
     @property
     def total_value(self):
-        """Calculate total value for this tier"""
+        # Calculate total value for this tier
         if self.price_per_zone:
             return self.zone_count * self.price_per_zone
         return 0
     
     @property
     def monthly_value(self):
-        """Calculate monthly value for comparison"""
+        # Calculate monthly value for comparison
         if not self.price_per_zone:
             return 0
         total = self.zone_count * self.price_per_zone
@@ -682,10 +699,11 @@ class SubscriptionPlan(TimestampedModel):
     
     @property
     def display_price(self):
-        """Display price with currency"""
+        # Display price with currency
         if self.price_per_zone:
             return f"{self.currency} {self.price_per_zone:,}"
         return "Not set"
+"""
 
 
 class Zone(TimestampedModel):

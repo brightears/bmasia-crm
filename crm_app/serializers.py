@@ -3,7 +3,7 @@ from django.contrib.auth import authenticate
 from django.utils import timezone
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
-    Opportunity, OpportunityActivity, Contract, Invoice, SubscriptionPlan, Zone
+    Opportunity, OpportunityActivity, Contract, Invoice, Zone
 )
 
 
@@ -77,22 +77,7 @@ class ZoneSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'soundtrack_account_id', 'last_api_sync', 'created_at', 'updated_at']
 
 
-class SubscriptionPlanSerializer(serializers.ModelSerializer):
-    """Serializer for SubscriptionPlan model"""
-    company_name = serializers.CharField(source='company.name', read_only=True)
-    total_value = serializers.ReadOnlyField()
-    monthly_value = serializers.ReadOnlyField()
-    display_price = serializers.ReadOnlyField()
-    
-    class Meta:
-        model = SubscriptionPlan
-        fields = [
-            'id', 'company', 'company_name', 'tier', 'zone_count',
-            'billing_period', 'price_per_zone', 'currency', 'total_value',
-            'monthly_value', 'display_price', 'is_active',
-            'start_date', 'end_date', 'notes', 'created_at', 'updated_at'
-        ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+# SubscriptionPlanSerializer removed - use ContractSerializer with service_type instead
 
 
 class CompanySerializer(serializers.ModelSerializer):
@@ -100,9 +85,7 @@ class CompanySerializer(serializers.ModelSerializer):
     contacts = ContactSerializer(many=True, read_only=True)
     zones = ZoneSerializer(many=True, read_only=True)
     zones_summary = serializers.SerializerMethodField()
-    subscription_plans = SubscriptionPlanSerializer(many=True, read_only=True)
-    active_subscription_plans = serializers.SerializerMethodField()
-    subscription_summary = serializers.SerializerMethodField()
+    # subscription_plans removed - use contracts with service_type instead
     primary_contact = serializers.SerializerMethodField()
     total_contract_value = serializers.ReadOnlyField()
     full_address = serializers.ReadOnlyField()
@@ -118,7 +101,6 @@ class CompanySerializer(serializers.ModelSerializer):
             'soundtrack_account_id', 'is_active', 'notes',
             'address_line1', 'address_line2', 'city', 'state', 'postal_code',
             'full_address', 'total_contract_value', 'contacts', 'zones', 'zones_summary',
-            'subscription_plans', 'active_subscription_plans', 'subscription_summary', 
             'primary_contact', 'opportunities_count', 'active_contracts_count', 
             'created_at', 'updated_at'
         ]
@@ -136,23 +118,7 @@ class CompanySerializer(serializers.ModelSerializer):
     def get_active_contracts_count(self, obj):
         return obj.contracts.filter(is_active=True).count()
     
-    def get_active_subscription_plans(self, obj):
-        active_plans = obj.subscription_plans.filter(is_active=True)
-        return SubscriptionPlanSerializer(active_plans, many=True).data
-    
-    def get_subscription_summary(self, obj):
-        """Get a summary of active subscription plans"""
-        plans = obj.subscription_plans.filter(is_active=True)
-        if not plans:
-            return "No active subscriptions"
-        
-        summary = []
-        total_zones = 0
-        for plan in plans:
-            summary.append(f"{plan.tier}: {plan.zone_count} zones")
-            total_zones += plan.zone_count
-        
-        return " | ".join(summary) + f" (Total: {total_zones} zones)"
+    # Subscription methods removed - use contracts with service_type instead
     
     def get_zones_summary(self, obj):
         """Get a summary of zone statuses"""
