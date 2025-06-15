@@ -420,12 +420,23 @@ class ContractAdmin(admin.ModelAdmin):
     list_display = ['contract_number', 'company', 'service_type', 'contract_type', 'status', 'start_date', 'end_date', 'value', 'is_expiring_soon']
     list_filter = ['service_type', 'contract_type', 'status', 'auto_renew', 'is_active']
     search_fields = ['contract_number', 'company__name']
-    readonly_fields = ['created_at', 'updated_at', 'days_until_expiry', 'monthly_value']
+    readonly_fields = ['created_at', 'updated_at', 'days_until_expiry', 'formatted_monthly_value']
     inlines = [InvoiceInline]
     
     def is_expiring_soon(self, obj):
         return obj.is_expiring_soon
     is_expiring_soon.boolean = True
+    
+    def formatted_monthly_value(self, obj):
+        """Display monthly value with proper currency formatting"""
+        if obj.monthly_value:
+            # Format with thousands separator and 2 decimal places
+            return format_html(
+                '<span style="font-weight: normal;">{:,.2f}</span>',
+                obj.monthly_value
+            )
+        return '-'
+    formatted_monthly_value.short_description = 'Monthly value'
     
     fieldsets = (
         ('Basic Information', {
@@ -435,7 +446,7 @@ class ContractAdmin(admin.ModelAdmin):
             'fields': ('start_date', 'end_date', 'days_until_expiry')
         }),
         ('Financial', {
-            'fields': ('value', 'monthly_value', 'currency', 'discount_percentage')
+            'fields': ('value', 'formatted_monthly_value', 'currency', 'discount_percentage')
         }),
         ('Terms', {
             'fields': ('payment_terms', 'billing_frequency', 'auto_renew', 'renewal_period_months')
