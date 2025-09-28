@@ -16,8 +16,7 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include, re_path
-from django.views.generic import RedirectView, TemplateView
-from django.views.static import serve
+from django.views.generic import RedirectView
 from django.conf import settings
 from crm_app.admin_setup import create_admin_view
 from crm_app.views import debug_soundtrack_api
@@ -70,13 +69,12 @@ def reset_admin_view(request):
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include('crm_app.urls')),  # Move API endpoints under /api/
+    path('api/', include('crm_app.urls')),  # API endpoints under /api/
     path('api-auth/', include('rest_framework.urls')),
     # Setup endpoint to create admin user
     path('setup-admin/', create_admin_view, name='setup_admin'),
     path('reset-admin/', reset_admin_view, name='reset_admin'),
     path('debug-soundtrack/', debug_soundtrack_api, name='debug_soundtrack'),
-    # Serve React app for all other routes
-    re_path(r'^(?!admin|api|setup-admin|reset-admin|debug-soundtrack|static|media).*$',
-            TemplateView.as_view(template_name='index.html'), name='react_app'),
+    # For now, redirect root to admin until React frontend is properly deployed
+    path('', RedirectView.as_view(url='/admin/', permanent=False)),
 ]
