@@ -1,0 +1,254 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static admin_list %}
+
+{% block title %}{{ title|capfirst }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+.bulk-preview-container {
+    margin-top: 20px;
+}
+
+.summary-panel {
+    background: #e7f3ff;
+    border: 1px solid #b3d7ff;
+    border-radius: 6px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.summary-panel h4 {
+    margin: 0 0 15px 0;
+    color: #0066cc;
+}
+
+.summary-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.stat-item {
+    background: white;
+    padding: 15px;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.stat-number {
+    font-size: 24px;
+    font-weight: bold;
+    color: #007bff;
+}
+
+.stat-label {
+    font-size: 14px;
+    color: #6c757d;
+    margin-top: 5px;
+}
+
+.recipients-panel {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 20px;
+}
+
+.recipients-header {
+    background: #e9ecef;
+    padding: 15px 20px;
+    border-bottom: 1px solid #dee2e6;
+    font-weight: 500;
+}
+
+.recipients-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.recipient-item {
+    padding: 12px 20px;
+    border-bottom: 1px solid #dee2e6;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.recipient-item:last-child {
+    border-bottom: none;
+}
+
+.recipient-info {
+    flex: 1;
+}
+
+.recipient-name {
+    font-weight: 500;
+    color: #495057;
+}
+
+.recipient-details {
+    font-size: 13px;
+    color: #6c757d;
+    margin-top: 2px;
+}
+
+.recipient-company {
+    font-size: 13px;
+    color: #007bff;
+}
+
+.actions-panel {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+
+.btn-send {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    margin-right: 10px;
+}
+
+.btn-send:hover {
+    background: #218838;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn-secondary:hover {
+    background: #545b62;
+    color: white;
+    text-decoration: none;
+}
+
+.warning-notice {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 4px;
+    padding: 15px;
+    margin-bottom: 20px;
+    color: #856404;
+}
+
+.warning-notice strong {
+    color: #856404;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+
+{% if messages %}
+    {% for message in messages %}
+        <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+    {% endfor %}
+{% endif %}
+
+<div class="bulk-preview-container">
+    <!-- Summary Panel -->
+    <div class="summary-panel">
+        <h4>Bulk Email Summary</h4>
+
+        <div class="summary-stats">
+            <div class="stat-item">
+                <div class="stat-number">{{ contact_count }}</div>
+                <div class="stat-label">Recipients</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">{{ contacts|length }}</div>
+                <div class="stat-label">Active Contacts</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">{{ template.get_template_type_display }}</div>
+                <div class="stat-label">Email Type</div>
+            </div>
+        </div>
+
+        <p><strong>Template:</strong> {{ template.name }}</p>
+        <p><strong>Subject:</strong> {{ template.subject }}</p>
+    </div>
+
+    {% if contact_count > 0 %}
+        <div class="warning-notice">
+            <strong>Important:</strong> This will send {{ contact_count }} email(s) to the recipients listed below.
+            Please review the list carefully before proceeding.
+        </div>
+
+        <!-- Recipients List -->
+        <div class="recipients-panel">
+            <div class="recipients-header">
+                Recipients ({{ contact_count }} contacts)
+            </div>
+            <div class="recipients-list">
+                {% for contact in contacts %}
+                <div class="recipient-item">
+                    <div class="recipient-info">
+                        <div class="recipient-name">{{ contact.name }}</div>
+                        <div class="recipient-details">{{ contact.email }} • {{ contact.get_contact_type_display }}</div>
+                        <div class="recipient-company">{{ contact.company.name }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="actions-panel">
+            <form method="post" style="display: inline;">
+                {% csrf_token %}
+                {% for field in form %}
+                    {% if field.name != 'preview_only' %}
+                        {{ field.as_hidden }}
+                    {% endif %}
+                {% endfor %}
+                <input type="hidden" name="confirm_send" value="1">
+                <button type="submit" class="btn-send" onclick="return confirm('Are you sure you want to send {{ contact_count }} emails? This action cannot be undone.')">
+                    Send {{ contact_count }} Email(s)
+                </button>
+            </form>
+
+            <a href="{% url 'admin_bulk_email' template.pk %}" class="btn-secondary">
+                Back to Edit Recipients
+            </a>
+            <a href="{% url 'admin:crm_app_emailtemplate_changelist' %}" class="btn-secondary">
+                Cancel
+            </a>
+        </div>
+    {% else %}
+        <div class="warning-notice">
+            <strong>No recipients found.</strong> Please adjust your selection criteria and try again.
+        </div>
+
+        <div class="actions-panel">
+            <a href="{% url 'admin_bulk_email' template.pk %}" class="btn-secondary">
+                Back to Edit Recipients
+            </a>
+            <a href="{% url 'admin:crm_app_emailtemplate_changelist' %}" class="btn-secondary">
+                Cancel
+            </a>
+        </div>
+    {% endif %}
+</div>
+
+{% endblock %}

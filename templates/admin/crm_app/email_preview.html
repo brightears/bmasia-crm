@@ -1,0 +1,405 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static admin_list %}
+
+{% block title %}{{ title|capfirst }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+.email-preview-container {
+    display: flex;
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.email-form-panel {
+    flex: 1;
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+
+.email-preview-panel {
+    flex: 1;
+    background: #ffffff;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+    overflow: hidden;
+}
+
+.preview-tabs {
+    display: flex;
+    background: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.preview-tab {
+    padding: 12px 20px;
+    background: #f8f9fa;
+    border: none;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    font-weight: 500;
+}
+
+.preview-tab.active {
+    background: #ffffff;
+    border-bottom-color: #007bff;
+    color: #007bff;
+}
+
+.preview-content {
+    padding: 20px;
+    min-height: 500px;
+}
+
+.preview-content.hidden {
+    display: none;
+}
+
+.email-header {
+    background: #f8f9fa;
+    padding: 15px 20px;
+    border-bottom: 1px solid #dee2e6;
+    font-size: 14px;
+}
+
+.email-header strong {
+    color: #495057;
+    margin-right: 10px;
+}
+
+.email-body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.6;
+    color: #212529;
+}
+
+.email-body h1, .email-body h2, .email-body h3 {
+    color: #2c3e50;
+    margin-top: 0;
+}
+
+.email-body p {
+    margin-bottom: 16px;
+}
+
+.context-info {
+    background: #e7f3ff;
+    border: 1px solid #b3d7ff;
+    border-radius: 6px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.context-info h4 {
+    margin: 0 0 10px 0;
+    color: #0066cc;
+}
+
+.context-variables {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 13px;
+    background: #f8f9fa;
+    padding: 10px;
+    border-radius: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.test-email-section {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #dee2e6;
+}
+
+.btn-test-email {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-right: 10px;
+}
+
+.btn-test-email:hover {
+    background: #218838;
+}
+
+.btn-send-email {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn-send-email:hover {
+    background: #0056b3;
+    color: white;
+    text-decoration: none;
+}
+
+.form-row {
+    margin-bottom: 15px;
+}
+
+.form-row label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 5px;
+    color: #495057;
+}
+
+.test-email-input {
+    width: 250px;
+    padding: 8px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+#test-email-status {
+    margin-left: 10px;
+    font-weight: 500;
+}
+
+.success { color: #28a745; }
+.error { color: #dc3545; }
+.info { color: #17a2b8; }
+
+@media (max-width: 768px) {
+    .email-preview-container {
+        flex-direction: column;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+
+{% if messages %}
+    {% for message in messages %}
+        <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+    {% endfor %}
+{% endif %}
+
+<div class="email-preview-container">
+    <!-- Email Form Panel -->
+    <div class="email-form-panel">
+        <h3>Email Configuration</h3>
+
+        <form method="post" id="email-form">
+            {% csrf_token %}
+            {% for field in form %}
+                <div class="form-row">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}
+                        <small class="help-text">{{ field.help_text }}</small>
+                    {% endif %}
+                    {% if field.errors %}
+                        <div class="error">{{ field.errors }}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+
+            <div class="form-row">
+                <button type="submit" class="btn-send-email">Update Preview</button>
+            </div>
+        </form>
+
+        {% if sample_context %}
+        <div class="context-info">
+            <h4>Available Template Variables</h4>
+            <div class="context-variables">
+                {% for key, value in sample_context.items %}
+                    <div><strong>{{ key }}:</strong> {{ value }}</div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="test-email-section">
+            <h4>Test & Send Options</h4>
+            <div class="form-row">
+                <label for="test-email-address">Test Email Address:</label>
+                <input type="email" id="test-email-address" class="test-email-input" value="{{ request.user.email }}" placeholder="Enter email address">
+            </div>
+            <div class="form-row">
+                <button type="button" class="btn-test-email" onclick="sendTestEmail()">Send Test Email</button>
+                <span id="test-email-status"></span>
+            </div>
+
+            <div class="form-row" style="border-top: 1px solid #dee2e6; padding-top: 15px; margin-top: 15px;">
+                {% if template %}
+                    <a href="{% url 'admin_send_email_template' template.pk %}?skip_preview=1" class="btn-send-email">
+                        Proceed to Send Email
+                    </a>
+                {% elif company %}
+                    <a href="{% url 'admin_send_email_company' company.pk %}?skip_preview=1" class="btn-send-email">
+                        Proceed to Send Email
+                    </a>
+                {% else %}
+                    <a href="{% url 'admin_send_email' %}?skip_preview=1" class="btn-send-email">
+                        Proceed to Send Email
+                    </a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Email Preview Panel -->
+    <div class="email-preview-panel">
+        <div class="preview-tabs">
+            <button class="preview-tab active" onclick="showPreview('html')">HTML Preview</button>
+            <button class="preview-tab" onclick="showPreview('text')">Plain Text</button>
+            <button class="preview-tab" onclick="showPreview('raw')">Raw HTML</button>
+        </div>
+
+        {% if rendered_email %}
+            <!-- Email Header -->
+            <div class="email-header">
+                <div><strong>To:</strong> {{ sample_contact.email }} ({{ sample_contact.name }})</div>
+                <div><strong>Subject:</strong> {{ rendered_email.subject }}</div>
+                {% if template %}
+                    <div><strong>Template:</strong> {{ template.name }}</div>
+                {% endif %}
+            </div>
+
+            <!-- HTML Preview -->
+            <div id="html-preview" class="preview-content">
+                <div class="email-body">
+                    {{ rendered_email.body_html|safe }}
+                </div>
+            </div>
+
+            <!-- Plain Text Preview -->
+            <div id="text-preview" class="preview-content hidden">
+                <pre style="white-space: pre-wrap; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.6;">{{ rendered_email.body_text }}</pre>
+            </div>
+
+            <!-- Raw HTML Preview -->
+            <div id="raw-preview" class="preview-content hidden">
+                <pre style="background: #f8f9fa; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 12px; line-height: 1.4;"><code>{{ rendered_email.body_html|escape }}</code></pre>
+            </div>
+        {% else %}
+            <div class="preview-content">
+                <p style="color: #6c757d; text-align: center; margin-top: 50px;">
+                    {% if template %}
+                        Configure the email settings and click "Update Preview" to see how your email will look.
+                    {% else %}
+                        Select an email template or enter email content to see the preview.
+                    {% endif %}
+                </p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function showPreview(type) {
+    // Hide all previews
+    document.getElementById('html-preview').classList.add('hidden');
+    document.getElementById('text-preview').classList.add('hidden');
+    document.getElementById('raw-preview').classList.add('hidden');
+
+    // Remove active class from all tabs
+    document.querySelectorAll('.preview-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+
+    // Show selected preview
+    document.getElementById(type + '-preview').classList.remove('hidden');
+
+    // Add active class to selected tab
+    event.target.classList.add('active');
+}
+
+function sendTestEmail() {
+    const emailAddress = document.getElementById('test-email-address').value;
+    const statusElement = document.getElementById('test-email-status');
+    const button = document.querySelector('.btn-test-email');
+
+    if (!emailAddress) {
+        statusElement.innerHTML = '<span class="error">Please enter an email address</span>';
+        return;
+    }
+
+    // Disable button and show loading
+    button.disabled = true;
+    button.textContent = 'Sending...';
+    statusElement.innerHTML = '<span class="info">Sending test email...</span>';
+
+    // Get email content
+    const emailData = {
+        to_email: emailAddress,
+        {% if rendered_email %}
+        subject: {{ rendered_email.subject|safe|escapejs }},
+        body_html: {{ rendered_email.body_html|safe|escapejs }},
+        body_text: {{ rendered_email.body_text|safe|escapejs }}
+        {% else %}
+        subject: 'Test Email',
+        body_html: '<p>Test email content</p>',
+        body_text: 'Test email content'
+        {% endif %}
+    };
+
+    // Send AJAX request
+    fetch('{% url "admin_send_test_email" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify(emailData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            statusElement.innerHTML = '<span class="success">Test email sent successfully!</span>';
+        } else {
+            statusElement.innerHTML = '<span class="error">Error: ' + data.message + '</span>';
+        }
+    })
+    .catch(error => {
+        statusElement.innerHTML = '<span class="error">Error sending test email</span>';
+        console.error('Error:', error);
+    })
+    .finally(() => {
+        // Re-enable button
+        button.disabled = false;
+        button.textContent = 'Send Test Email';
+    });
+}
+
+// Auto-update preview when form fields change
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('email-form');
+    const subjectField = form.querySelector('[name="subject"]');
+    const bodyField = form.querySelector('[name="body"]');
+
+    if (subjectField && bodyField) {
+        let timeout;
+        function scheduleUpdate() {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => {
+                form.submit();
+            }, 1000); // Update preview 1 second after user stops typing
+        }
+
+        subjectField.addEventListener('input', scheduleUpdate);
+        bodyField.addEventListener('input', scheduleUpdate);
+    }
+});
+</script>
+
+{% endblock %}

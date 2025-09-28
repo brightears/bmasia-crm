@@ -1,6 +1,6 @@
 # Email System Implementation Status
 
-## Last Updated: June 14, 2025
+## Last Updated: June 15, 2025
 
 ### Summary
 Successfully implemented a comprehensive email automation system for BMAsia CRM with the following features:
@@ -102,39 +102,103 @@ BUSINESS_HOURS_END = 18
 4. ✅ Automated renewal reminders (30, 14, 7, 2 days)
 5. ✅ Payment reminders for overdue invoices
 6. ✅ Quarterly customer check-ins
-7. ✅ Contact notification preferences
+7. ✅ Contact notification preferences (now with checkbox UI)
 8. ✅ Business hours checking
 9. ✅ Email tracking and logging
 
-### Recent Changes (June 14, 2025)
-1. Fixed HTML field to be optional in EmailTemplate model
-2. Added document attachment functionality
-3. Created admin interface for sending emails
-4. Added custom admin actions for email sending
-5. Implemented text-to-HTML conversion utility
+### Recent Changes (June 15, 2025)
+
+#### Infrastructure Updates
+1. **Database Migration to PostgreSQL**
+   - Migrated from SQLite to PostgreSQL on Render
+   - Fixed migration conflicts with orphaned columns (region, company_size, is_corporate_account)
+   - Database now persists data between deployments
+   - PostgreSQL URL configured with internal connection
+
+2. **CRM Model Simplification**
+   - Merged SubscriptionPlan functionality into Contract model
+   - Added comprehensive service_type field to Contract with choices:
+     - Soundtrack Essential (Monthly/Yearly)
+     - Soundtrack Unlimited (Monthly/Yearly) - corrected from "Premium"
+     - Soundtrack Enterprise (Custom)
+     - Beat Breeze (Monthly/Yearly)
+     - Custom Package, One-time Setup, Consulting, Maintenance
+   - Removed redundant SubscriptionPlan model and all references
+
+#### UI/UX Improvements
+1. **Contact Form - Notification Types**
+   - Changed from confusing text input to checkbox selection
+   - Clear notification type options:
+     - Renewal Reminders
+     - Payment Reminders
+     - New Invoices
+     - Quarterly Check-ins
+     - Seasonal Campaigns
+     - Support Updates
+     - Zone Alerts
+     - Promotional Offers
+     - Company Newsletter
+   - Implemented with ContactAdminForm using MultipleChoiceField
+
+2. **Contract Financial Display**
+   - Fixed monthly_value calculation (now inclusive of start/end months)
+   - Added proper currency formatting with thousands separators
+   - Value field displays as "56,000.00" instead of "56000.00"
+   - Monthly value shows calculated amount (e.g., "4,666.67")
+   - Better error handling for missing dates
 
 ### Environment Variables Required
+- `DATABASE_URL`: PostgreSQL connection string
 - `EMAIL_HOST_USER`: Gmail address for sending
 - `EMAIL_HOST_PASSWORD`: Gmail app password (not regular password)
+- `SOUNDTRACK_API_TOKEN`: For Soundtrack API integration
 
-### Next Steps (Optional)
-1. Set up cron job for automated daily email sending:
-   ```bash
-   0 9 * * * cd /path/to/project && python manage.py send_emails
-   ```
+### Database Information
+- **Provider**: Render PostgreSQL
+- **Connection**: Internal URL ending with `.singapore-postgres.render.com`
+- **Latest Migration**: 0019_update_service_types.py
+- **Admin Credentials**: 
+  - Username: admin
+  - Password: bmasia123
 
-2. Create more email templates for seasonal campaigns
+### Deployment Information
+- **Live URL**: https://bmasia-crm.onrender.com
+- **GitHub Repo**: https://github.com/brightears/bmasia-crm
+- **Auto-deploy**: Enabled on push to main branch
 
-3. Implement email tracking (opens, clicks) using tracking pixels
+### Next Steps (When Returning)
 
-4. Add bulk email preview before sending
+#### Potential Enhancements
+1. **Email System**
+   - Add more email template types
+   - Implement email analytics dashboard
+   - Add bulk email scheduling interface
 
-5. Create email dashboard for monitoring campaigns
+2. **Financial Features**
+   - Invoice generation from contracts
+   - Payment tracking and reconciliation
+   - Financial reporting dashboard
+
+3. **Zone Management**
+   - Zone health monitoring alerts
+   - Playlist analytics integration
+   - Zone grouping for multi-location management
+
+4. **Customer Portal**
+   - Self-service portal for customers
+   - Online contract signing
+   - Invoice payment gateway
+
+5. **Reporting**
+   - Custom report builder
+   - Automated monthly reports
+   - Sales pipeline analytics
 
 ### File Locations
-- Models: `/crm_app/models.py` (EmailTemplate, EmailLog, EmailCampaign, DocumentAttachment)
+- Models: `/crm_app/models.py`
 - Email Service: `/crm_app/services/email_service.py`
 - Admin Views: `/crm_app/admin_views.py`
+- Admin Configuration: `/crm_app/admin.py`
 - Forms: `/crm_app/forms.py`
 - Templates: `/crm_app/templates/admin/crm_app/send_email.html`
 - Utilities: `/crm_app/utils/email_utils.py`
@@ -146,17 +210,21 @@ BUSINESS_HOURS_END = 18
 3. **Send Email to Company**: Companies → Select → "Send email to company contacts"
 4. **Upload Documents**: Admin → Document attachments → Add
 5. **View Sent Emails**: Admin → Email logs
+6. **Manage Contracts**: Admin → Contracts → Add (with service_type selection)
 
-### Testing
-To test email configuration:
-```bash
-python manage.py test_email your-email@example.com
-```
+### Testing Checklist
+- [ ] Create new company with Soundtrack account
+- [ ] Sync zones from Soundtrack API
+- [ ] Create contract with proper financial values
+- [ ] Send test email to contact
+- [ ] Verify email tracking works
+- [ ] Check monthly value calculations
+- [ ] Test PostgreSQL data persistence
 
 ### Known Issues
-- None currently
+- None currently - all major issues resolved
 
 ### Git Status
 - All changes committed and pushed
-- Latest commit: Fixed HTML field to be optional
+- Latest commit: Fix format error in monthly value display
 - Branch: main

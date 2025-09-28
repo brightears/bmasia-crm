@@ -28,4 +28,14 @@ urlpatterns = [
     path('admin/send-email/<uuid:template_id>/', admin_views.send_email_view, name='admin_send_email_template'),
     path('admin/send-email/company/<uuid:company_id>/', admin_views.send_email_view, name='admin_send_email_company'),
     path('admin/bulk-email/<uuid:template_id>/', admin_views.preview_bulk_email_view, name='admin_bulk_email'),
+
+    # Email preview views
+    path('admin/preview-email/', admin_views.preview_email_view, name='admin_preview_email'),
+    path('admin/preview-email/<uuid:template_id>/', admin_views.preview_email_view, name='admin_preview_email_template'),
+    path('admin/preview-email/company/<uuid:company_id>/', admin_views.preview_email_view, name='admin_preview_email_company'),
+    path('admin/preview-template/<uuid:template_id>/', admin_views.preview_template_view, name='admin_preview_template'),
+    path('admin/send-test-email/', admin_views.send_test_email_view, name='admin_send_test_email'),
+
+    # Database initialization endpoint (one-time use)
+    path('initialize-database/', views.initialize_database, name='initialize_database'),
 ]

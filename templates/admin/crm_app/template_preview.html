@@ -1,0 +1,397 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static admin_list %}
+
+{% block title %}{{ title|capfirst }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+.template-preview-container {
+    margin-top: 20px;
+}
+
+.template-info {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.template-info h3 {
+    margin: 0 0 15px 0;
+    color: #495057;
+}
+
+.template-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.meta-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.meta-label {
+    font-weight: 500;
+    color: #6c757d;
+    font-size: 12px;
+    text-transform: uppercase;
+    margin-bottom: 5px;
+}
+
+.meta-value {
+    color: #495057;
+    font-size: 14px;
+}
+
+.template-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.btn {
+    padding: 8px 16px;
+    border-radius: 4px;
+    text-decoration: none;
+    font-size: 14px;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.btn-primary {
+    background: #007bff;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #0056b3;
+    color: white;
+    text-decoration: none;
+}
+
+.btn-success {
+    background: #28a745;
+    color: white;
+}
+
+.btn-success:hover {
+    background: #218838;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #545b62;
+    color: white;
+    text-decoration: none;
+}
+
+.email-preview-panel {
+    background: #ffffff;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+    overflow: hidden;
+}
+
+.preview-tabs {
+    display: flex;
+    background: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.preview-tab {
+    padding: 12px 20px;
+    background: #f8f9fa;
+    border: none;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    font-weight: 500;
+}
+
+.preview-tab.active {
+    background: #ffffff;
+    border-bottom-color: #007bff;
+    color: #007bff;
+}
+
+.preview-content {
+    padding: 20px;
+    min-height: 400px;
+}
+
+.preview-content.hidden {
+    display: none;
+}
+
+.email-header {
+    background: #f8f9fa;
+    padding: 15px 20px;
+    border-bottom: 1px solid #dee2e6;
+    font-size: 14px;
+}
+
+.email-header strong {
+    color: #495057;
+    margin-right: 10px;
+}
+
+.email-body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.6;
+    color: #212529;
+}
+
+.email-body h1, .email-body h2, .email-body h3 {
+    color: #2c3e50;
+    margin-top: 0;
+}
+
+.email-body p {
+    margin-bottom: 16px;
+}
+
+.context-info {
+    background: #e7f3ff;
+    border: 1px solid #b3d7ff;
+    border-radius: 6px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.context-info h4 {
+    margin: 0 0 10px 0;
+    color: #0066cc;
+}
+
+.context-variables {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 13px;
+    background: #f8f9fa;
+    padding: 10px;
+    border-radius: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.test-email-section {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 15px;
+    margin-top: 20px;
+}
+
+.test-email-input {
+    padding: 8px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 14px;
+    width: 250px;
+    margin-right: 10px;
+}
+
+#test-email-status {
+    margin-left: 10px;
+    font-weight: 500;
+}
+
+.success { color: #28a745; }
+.error { color: #dc3545; }
+.info { color: #17a2b8; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+
+{% if messages %}
+    {% for message in messages %}
+        <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+    {% endfor %}
+{% endif %}
+
+<div class="template-preview-container">
+    <!-- Template Information -->
+    <div class="template-info">
+        <h3>{{ template.name }}</h3>
+
+        <div class="template-meta">
+            <div class="meta-item">
+                <span class="meta-label">Template Type</span>
+                <span class="meta-value">{{ template.get_template_type_display }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Language</span>
+                <span class="meta-value">{{ template.get_language_display }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Department</span>
+                <span class="meta-value">{{ template.get_department_display|default:"Not specified" }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">Status</span>
+                <span class="meta-value">{% if template.is_active %}Active{% else %}Inactive{% endif %}</span>
+            </div>
+        </div>
+
+        {% if template.notes %}
+            <div class="meta-item">
+                <span class="meta-label">Notes</span>
+                <span class="meta-value">{{ template.notes }}</span>
+            </div>
+        {% endif %}
+
+        <div class="template-actions">
+            <a href="{% url 'admin:crm_app_emailtemplate_change' template.pk %}" class="btn btn-primary">
+                Edit Template
+            </a>
+            <a href="{% url 'admin_send_email_template' template.pk %}?skip_preview=1" class="btn btn-success">
+                Send Email
+            </a>
+            <a href="{% url 'admin_preview_email_template' template.pk %}" class="btn btn-secondary">
+                Full Preview Editor
+            </a>
+        </div>
+    </div>
+
+    <!-- Sample Context Variables -->
+    {% if sample_context %}
+    <div class="context-info">
+        <h4>Sample Data Used for Preview</h4>
+        <div class="context-variables">
+            {% for key, value in sample_context.items %}
+                <div><strong>{{ key }}:</strong> {{ value }}</div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Email Preview -->
+    <div class="email-preview-panel">
+        <div class="preview-tabs">
+            <button class="preview-tab active" onclick="showPreview('html')">HTML Preview</button>
+            <button class="preview-tab" onclick="showPreview('text')">Plain Text</button>
+            <button class="preview-tab" onclick="showPreview('raw')">Raw HTML</button>
+        </div>
+
+        <!-- Email Header -->
+        <div class="email-header">
+            <div><strong>To:</strong> {{ sample_contact.email }} ({{ sample_contact.name }})</div>
+            <div><strong>Subject:</strong> {{ rendered_email.subject }}</div>
+            <div><strong>Template:</strong> {{ template.name }}</div>
+        </div>
+
+        <!-- HTML Preview -->
+        <div id="html-preview" class="preview-content">
+            <div class="email-body">
+                {{ rendered_email.body_html|safe }}
+            </div>
+        </div>
+
+        <!-- Plain Text Preview -->
+        <div id="text-preview" class="preview-content hidden">
+            <pre style="white-space: pre-wrap; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.6;">{{ rendered_email.body_text }}</pre>
+        </div>
+
+        <!-- Raw HTML Preview -->
+        <div id="raw-preview" class="preview-content hidden">
+            <pre style="background: #f8f9fa; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 12px; line-height: 1.4;"><code>{{ rendered_email.body_html|escape }}</code></pre>
+        </div>
+    </div>
+
+    <!-- Test Email Section -->
+    <div class="test-email-section">
+        <h4>Send Test Email</h4>
+        <p>Send a test version of this template to verify how it appears in email clients.</p>
+
+        <div style="margin-top: 15px;">
+            <input type="email" id="test-email-address" class="test-email-input" value="{{ request.user.email }}" placeholder="Enter email address">
+            <button type="button" class="btn btn-success" onclick="sendTestEmail()">Send Test Email</button>
+            <span id="test-email-status"></span>
+        </div>
+    </div>
+</div>
+
+<script>
+function showPreview(type) {
+    // Hide all previews
+    document.getElementById('html-preview').classList.add('hidden');
+    document.getElementById('text-preview').classList.add('hidden');
+    document.getElementById('raw-preview').classList.add('hidden');
+
+    // Remove active class from all tabs
+    document.querySelectorAll('.preview-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+
+    // Show selected preview
+    document.getElementById(type + '-preview').classList.remove('hidden');
+
+    // Add active class to selected tab
+    event.target.classList.add('active');
+}
+
+function sendTestEmail() {
+    const emailAddress = document.getElementById('test-email-address').value;
+    const statusElement = document.getElementById('test-email-status');
+    const button = event.target;
+
+    if (!emailAddress) {
+        statusElement.innerHTML = '<span class="error">Please enter an email address</span>';
+        return;
+    }
+
+    // Disable button and show loading
+    button.disabled = true;
+    button.textContent = 'Sending...';
+    statusElement.innerHTML = '<span class="info">Sending test email...</span>';
+
+    // Get email content
+    const emailData = {
+        to_email: emailAddress,
+        subject: {{ rendered_email.subject|safe|escapejs }},
+        body_html: {{ rendered_email.body_html|safe|escapejs }},
+        body_text: {{ rendered_email.body_text|safe|escapejs }}
+    };
+
+    // Send AJAX request
+    fetch('{% url "admin_send_test_email" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify(emailData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            statusElement.innerHTML = '<span class="success">Test email sent successfully!</span>';
+        } else {
+            statusElement.innerHTML = '<span class="error">Error: ' + data.message + '</span>';
+        }
+    })
+    .catch(error => {
+        statusElement.innerHTML = '<span class="error">Error sending test email</span>';
+        console.error('Error:', error);
+    })
+    .finally(() => {
+        // Re-enable button
+        button.disabled = false;
+        button.textContent = 'Send Test Email';
+    });
+}
+</script>
+
+{% endblock %}

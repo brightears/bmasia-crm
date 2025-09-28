@@ -4,6 +4,15 @@ from django.contrib.admin import SimpleListFilter
 from django.utils.html import format_html
 from django.utils.formats import number_format
 from django import forms
+from django.http import HttpResponse, HttpResponseRedirect
+from django.urls import reverse
+from django.contrib import messages
+from django.db.models import Count, Sum, Q
+from django.utils import timezone
+import csv
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice, Zone,
@@ -24,19 +33,31 @@ class UserAdmin(BaseUserAdmin):
 class ContactInline(admin.TabularInline):
     model = Contact
     extra = 0
-    fields = ['name', 'email', 'title']
+    fields = ['name', 'email', 'title', 'is_active']
+
+    def get_queryset(self, request):
+        """Optimize inline queries"""
+        return super().get_queryset(request).select_related('company')
 
 
 class NoteInline(admin.TabularInline):
     model = Note
     extra = 0
-    fields = ['title', 'text']
+    fields = ['title', 'text', 'note_type', 'priority']
+
+    def get_queryset(self, request):
+        """Optimize inline queries"""
+        return super().get_queryset(request).select_related('company', 'author', 'contact')
 
 
 class TaskInline(admin.TabularInline):
     model = Task
     extra = 0
     fields = ['title', 'assigned_to', 'priority', 'status', 'due_date']
+
+    def get_queryset(self, request):
+        """Optimize inline queries"""
+        return super().get_queryset(request).select_related('company', 'assigned_to', 'created_by')
 
 
 # SubscriptionPlanInline removed - use Contract model with service_type instead
@@ -105,10 +126,11 @@ class BeatBreezeZoneInline(admin.TabularInline):
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
     list_display = ['name', 'country', 'industry', 'location_count', 'music_zone_count', 'soundtrack_status']
-    list_filter = ['country', 'industry']
+    list_filter = ['country', 'industry', 'is_active', 'created_at']
+    list_select_related = []  # Company has no ForeignKey fields to select_related on
     search_fields = ['name', 'website', 'notes', 'soundtrack_account_id']
     readonly_fields = ['created_at', 'updated_at', 'current_subscription_summary', 'zones_status_summary']
-    actions = ['sync_soundtrack_zones', 'send_email_to_contacts']
+    actions = ['sync_soundtrack_zones', 'preview_email_to_contacts', 'send_email_to_contacts', 'bulk_send_email_to_contacts', 'bulk_sync_soundtrack_zones', 'export_companies_csv', 'export_companies_excel']
     
     def get_inlines(self, request, obj):
         """Show different inlines based on whether company has Soundtrack account"""
@@ -188,18 +210,33 @@ class CompanyAdmin(admin.ModelAdmin):
             self.message_user(request, f"Successfully synced {total_synced} zones total")
     sync_soundtrack_zones.short_description = "Sync Soundtrack zones"
     
+    def preview_email_to_contacts(self, request, queryset):
+        """Preview email to contacts of selected companies"""
+        if queryset.count() != 1:
+            self.message_user(request, 'Please select exactly one company', level='ERROR')
+            return
+
+        company = queryset.first()
+        # Redirect to preview email form
+        from django.urls import reverse
+        from django.http import HttpResponseRedirect
+        return HttpResponseRedirect(
+            reverse('admin_preview_email_company', args=[company.pk])
+        )
+    preview_email_to_contacts.short_description = 'Preview email to company contacts'
+
     def send_email_to_contacts(self, request, queryset):
         """Send email to contacts of selected companies"""
         if queryset.count() != 1:
             self.message_user(request, 'Please select exactly one company', level='ERROR')
             return
-        
+
         company = queryset.first()
         # Redirect to send email form
         from django.urls import reverse
         from django.http import HttpResponseRedirect
         return HttpResponseRedirect(
-            reverse('admin_send_email') + f'?company_id={company.pk}'
+            reverse('admin_send_email_company', args=[company.pk])
         )
     send_email_to_contacts.short_description = 'Send email to company contacts'
     
@@ -231,6 +268,183 @@ class CompanyAdmin(admin.ModelAdmin):
             except Exception as e:
                 logger.error(f"Error syncing zones: {str(e)}")
                 self.message_user(request, f"Could not sync zones: {str(e)}", 'WARNING')
+
+    def bulk_send_email_to_contacts(self, request, queryset):
+        """Send email to contacts of multiple selected companies"""
+        if queryset.count() > 20:
+            self.message_user(request, 'Please select 20 companies or fewer for bulk email sending', level='ERROR')
+            return
+
+        total_contacts = 0
+        companies_processed = 0
+
+        for company in queryset:
+            contacts = company.contacts.filter(is_active=True, receives_notifications=True, unsubscribed=False)
+            contact_count = contacts.count()
+
+            if contact_count > 0:
+                total_contacts += contact_count
+                companies_processed += 1
+                self.message_user(request, f"✓ {company.name}: {contact_count} contacts ready for email")
+            else:
+                self.message_user(request, f"✗ {company.name}: No active contacts found", level='WARNING')
+
+        if companies_processed > 0:
+            # Redirect to bulk email form
+            company_ids = ','.join(str(c.pk) for c in queryset)
+            return HttpResponseRedirect(
+                reverse('admin_send_email') + f'?company_ids={company_ids}'
+            )
+        else:
+            self.message_user(request, 'No companies with active contacts found', level='ERROR')
+    bulk_send_email_to_contacts.short_description = 'Send bulk email to company contacts'
+
+    def bulk_sync_soundtrack_zones(self, request, queryset):
+        """Bulk sync zones for multiple companies with Soundtrack accounts"""
+        from .services.soundtrack_api import soundtrack_api
+
+        soundtrack_companies = queryset.filter(soundtrack_account_id__isnull=False).exclude(soundtrack_account_id='')
+
+        if not soundtrack_companies.exists():
+            self.message_user(request, 'No companies with Soundtrack account IDs found', level='WARNING')
+            return
+
+        total_synced = 0
+        total_errors = 0
+        companies_processed = 0
+
+        for company in soundtrack_companies:
+            try:
+                synced, errors = soundtrack_api.sync_company_zones(company)
+                total_synced += synced
+                total_errors += errors
+                companies_processed += 1
+
+                if synced > 0:
+                    self.message_user(request, f"✓ {company.name}: Synced {synced} zones")
+                elif errors > 0:
+                    self.message_user(request, f"⚠ {company.name}: {errors} errors during sync", level='WARNING')
+                else:
+                    self.message_user(request, f"→ {company.name}: No zones to sync")
+            except Exception as e:
+                self.message_user(request, f"✗ {company.name}: Error - {str(e)}", level='ERROR')
+                total_errors += 1
+
+        self.message_user(request, f"Bulk sync completed: {total_synced} zones synced across {companies_processed} companies")
+    bulk_sync_soundtrack_zones.short_description = 'Bulk sync Soundtrack zones'
+
+    def export_companies_csv(self, request, queryset):
+        """Export selected companies to CSV"""
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="companies_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.csv"'
+
+        writer = csv.writer(response)
+        # Write headers
+        writer.writerow([
+            'Company Name', 'Country', 'Industry', 'Website', 'Location Count',
+            'Music Zone Count', 'Soundtrack Account ID', 'Contact Count',
+            'Active Contract Count', 'Total Contract Value', 'Is Active',
+            'Address', 'Created Date', 'Last Updated'
+        ])
+
+        # Write data with optimized queries
+        companies = queryset.select_related().prefetch_related(
+            'contacts', 'contracts'
+        ).annotate(
+            contact_count=Count('contacts', filter=Q(contacts__is_active=True)),
+            active_contract_count=Count('contracts', filter=Q(contracts__is_active=True)),
+            total_contract_value=Sum('contracts__value', filter=Q(contracts__is_active=True))
+        )
+
+        for company in companies:
+            writer.writerow([
+                company.name,
+                company.country,
+                company.get_industry_display() if company.industry else '',
+                company.website,
+                company.location_count,
+                company.music_zone_count,
+                company.soundtrack_account_id,
+                company.contact_count or 0,
+                company.active_contract_count or 0,
+                f"{company.total_contract_value or 0:.2f}",
+                'Yes' if company.is_active else 'No',
+                company.full_address,
+                company.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                company.updated_at.strftime('%Y-%m-%d %H:%M:%S')
+            ])
+
+        self.message_user(request, f'Successfully exported {queryset.count()} companies to CSV')
+        return response
+    export_companies_csv.short_description = 'Export selected companies to CSV'
+
+    def export_companies_excel(self, request, queryset):
+        """Export selected companies to Excel with formatting"""
+        # Create workbook and worksheet
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Companies Export"
+
+        # Define styles
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+
+        # Write headers
+        headers = [
+            'Company Name', 'Country', 'Industry', 'Website', 'Location Count',
+            'Music Zone Count', 'Soundtrack Account ID', 'Contact Count',
+            'Active Contract Count', 'Total Contract Value (USD)', 'Is Active',
+            'Full Address', 'Created Date', 'Last Updated'
+        ]
+
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+
+        # Write data with optimized queries
+        companies = queryset.select_related().prefetch_related(
+            'contacts', 'contracts'
+        ).annotate(
+            contact_count=Count('contacts', filter=Q(contacts__is_active=True)),
+            active_contract_count=Count('contracts', filter=Q(contracts__is_active=True)),
+            total_contract_value=Sum('contracts__value', filter=Q(contracts__is_active=True))
+        )
+
+        for row, company in enumerate(companies, 2):
+            ws.cell(row=row, column=1, value=company.name)
+            ws.cell(row=row, column=2, value=company.country)
+            ws.cell(row=row, column=3, value=company.get_industry_display() if company.industry else '')
+            ws.cell(row=row, column=4, value=company.website)
+            ws.cell(row=row, column=5, value=company.location_count)
+            ws.cell(row=row, column=6, value=company.music_zone_count)
+            ws.cell(row=row, column=7, value=company.soundtrack_account_id)
+            ws.cell(row=row, column=8, value=company.contact_count or 0)
+            ws.cell(row=row, column=9, value=company.active_contract_count or 0)
+            ws.cell(row=row, column=10, value=float(company.total_contract_value or 0))
+            ws.cell(row=row, column=11, value='Yes' if company.is_active else 'No')
+            ws.cell(row=row, column=12, value=company.full_address)
+            ws.cell(row=row, column=13, value=company.created_at)
+            ws.cell(row=row, column=14, value=company.updated_at)
+
+        # Auto-adjust column widths
+        for col in range(1, len(headers) + 1):
+            column_letter = get_column_letter(col)
+            max_length = max(len(str(ws.cell(row=1, column=col).value)), 15)
+            ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
+
+        # Create response
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = f'attachment; filename="companies_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
+
+        wb.save(response)
+        self.message_user(request, f'Successfully exported {queryset.count()} companies to Excel')
+        return response
+    export_companies_excel.short_description = 'Export selected companies to Excel'
     
     def current_subscription_summary(self, obj):
         """Display a summary of current subscription plans"""
@@ -252,6 +466,12 @@ class CompanyAdmin(admin.ModelAdmin):
         return " | ".join(summary)
     
     current_subscription_summary.short_description = "Current Subscription Plans"
+
+    def get_queryset(self, request):
+        """Optimize queries for list display"""
+        return super().get_queryset(request).prefetch_related(
+            'contacts', 'zones', 'contracts'
+        )
     
     fieldsets = (
         ('Basic Information', {
@@ -319,8 +539,10 @@ class ContactAdmin(admin.ModelAdmin):
     form = ContactAdminForm
     list_display = ['name', 'company', 'email', 'phone', 'contact_type', 'is_primary', 'is_active', 'receives_notifications']
     list_filter = ['contact_type', 'is_primary', 'is_active', 'receives_notifications', 'preferred_language', 'company__country']
+    list_select_related = ['company']
     search_fields = ['name', 'email', 'company__name']
     readonly_fields = ['created_at', 'updated_at', 'unsubscribe_token']
+    actions = ['bulk_send_email_to_contacts', 'export_contacts_csv', 'export_contacts_excel']
     
     fieldsets = (
         ('Basic Information', {
@@ -343,11 +565,140 @@ class ContactAdmin(admin.ModelAdmin):
         }),
     )
 
+    def bulk_send_email_to_contacts(self, request, queryset):
+        """Send email to selected contacts"""
+        active_contacts = queryset.filter(is_active=True, receives_notifications=True, unsubscribed=False)
+
+        if not active_contacts.exists():
+            self.message_user(request, 'No active contacts found (contacts must be active, receive notifications, and not unsubscribed)', level='WARNING')
+            return
+
+        if active_contacts.count() > 50:
+            self.message_user(request, 'Please select 50 contacts or fewer for bulk email sending', level='ERROR')
+            return
+
+        # Redirect to email form with contact IDs
+        contact_ids = ','.join(str(c.pk) for c in active_contacts)
+        return HttpResponseRedirect(
+            reverse('admin_send_email') + f'?contact_ids={contact_ids}'
+        )
+    bulk_send_email_to_contacts.short_description = 'Send bulk email to selected contacts'
+
+    def export_contacts_csv(self, request, queryset):
+        """Export selected contacts to CSV"""
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="contacts_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.csv"'
+
+        writer = csv.writer(response)
+        # Write headers
+        writer.writerow([
+            'Name', 'Company', 'Email', 'Phone', 'Title', 'Department',
+            'Contact Type', 'Is Primary', 'Is Active', 'Receives Notifications',
+            'Notification Types', 'Preferred Language', 'LinkedIn URL',
+            'Last Contacted', 'Notes', 'Created Date', 'Last Updated'
+        ])
+
+        # Write data with optimized queries
+        contacts = queryset.select_related('company')
+
+        for contact in contacts:
+            writer.writerow([
+                contact.name,
+                contact.company.name,
+                contact.email,
+                contact.phone,
+                contact.title,
+                contact.department,
+                contact.get_contact_type_display(),
+                'Yes' if contact.is_primary else 'No',
+                'Yes' if contact.is_active else 'No',
+                'Yes' if contact.receives_notifications else 'No',
+                ', '.join(contact.notification_types) if contact.notification_types else '',
+                contact.get_preferred_language_display(),
+                contact.linkedin_url,
+                contact.last_contacted.strftime('%Y-%m-%d %H:%M:%S') if contact.last_contacted else '',
+                contact.notes,
+                contact.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                contact.updated_at.strftime('%Y-%m-%d %H:%M:%S')
+            ])
+
+        self.message_user(request, f'Successfully exported {queryset.count()} contacts to CSV')
+        return response
+    export_contacts_csv.short_description = 'Export selected contacts to CSV'
+
+    def export_contacts_excel(self, request, queryset):
+        """Export selected contacts to Excel with formatting"""
+        # Create workbook and worksheet
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Contacts Export"
+
+        # Define styles
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+
+        # Write headers
+        headers = [
+            'Name', 'Company', 'Email', 'Phone', 'Title', 'Department',
+            'Contact Type', 'Is Primary', 'Is Active', 'Receives Notifications',
+            'Notification Types', 'Preferred Language', 'LinkedIn URL',
+            'Last Contacted', 'Notes', 'Created Date', 'Last Updated'
+        ]
+
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+
+        # Write data with optimized queries
+        contacts = queryset.select_related('company')
+
+        for row, contact in enumerate(contacts, 2):
+            ws.cell(row=row, column=1, value=contact.name)
+            ws.cell(row=row, column=2, value=contact.company.name)
+            ws.cell(row=row, column=3, value=contact.email)
+            ws.cell(row=row, column=4, value=contact.phone)
+            ws.cell(row=row, column=5, value=contact.title)
+            ws.cell(row=row, column=6, value=contact.department)
+            ws.cell(row=row, column=7, value=contact.get_contact_type_display())
+            ws.cell(row=row, column=8, value='Yes' if contact.is_primary else 'No')
+            ws.cell(row=row, column=9, value='Yes' if contact.is_active else 'No')
+            ws.cell(row=row, column=10, value='Yes' if contact.receives_notifications else 'No')
+            ws.cell(row=row, column=11, value=', '.join(contact.notification_types) if contact.notification_types else '')
+            ws.cell(row=row, column=12, value=contact.get_preferred_language_display())
+            ws.cell(row=row, column=13, value=contact.linkedin_url)
+            ws.cell(row=row, column=14, value=contact.last_contacted)
+            ws.cell(row=row, column=15, value=contact.notes)
+            ws.cell(row=row, column=16, value=contact.created_at)
+            ws.cell(row=row, column=17, value=contact.updated_at)
+
+        # Auto-adjust column widths
+        for col in range(1, len(headers) + 1):
+            column_letter = get_column_letter(col)
+            max_length = max(len(str(ws.cell(row=1, column=col).value)), 15)
+            ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
+
+        # Create response
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = f'attachment; filename="contacts_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
+
+        wb.save(response)
+        self.message_user(request, f'Successfully exported {queryset.count()} contacts to Excel')
+        return response
+    export_contacts_excel.short_description = 'Export selected contacts to Excel'
+
+    # list_select_related handles the optimization
+
 
 @admin.register(Note)
 class NoteAdmin(admin.ModelAdmin):
     list_display = ['title', 'company', 'author', 'note_type', 'priority', 'created_at']
     list_filter = ['note_type', 'priority', 'is_private', 'created_at']
+    list_select_related = ['company', 'author', 'contact']
     search_fields = ['title', 'text', 'company__name']
     readonly_fields = ['created_at', 'updated_at']
 
@@ -356,12 +707,50 @@ class NoteAdmin(admin.ModelAdmin):
 class TaskAdmin(admin.ModelAdmin):
     list_display = ['title', 'company', 'assigned_to', 'priority', 'status', 'due_date', 'is_overdue']
     list_filter = ['priority', 'status', 'department', 'created_at']
+    list_select_related = ['company', 'assigned_to', 'created_by']
     search_fields = ['title', 'description', 'company__name']
     readonly_fields = ['created_at', 'updated_at', 'completed_at']
+    actions = ['bulk_mark_completed', 'bulk_mark_in_progress', 'bulk_assign_to_user']
     
     def is_overdue(self, obj):
         return obj.is_overdue
     is_overdue.boolean = True
+
+    def bulk_mark_completed(self, request, queryset):
+        """Mark selected tasks as completed"""
+        updated_count = 0
+        for task in queryset:
+            if task.status != 'Completed':
+                task.status = 'Completed'
+                task.completed_at = timezone.now()
+                task.save()
+                updated_count += 1
+
+        if updated_count > 0:
+            self.message_user(request, f'Successfully marked {updated_count} tasks as completed')
+        else:
+            self.message_user(request, 'No tasks were updated (already completed)', level='WARNING')
+    bulk_mark_completed.short_description = 'Mark selected tasks as completed'
+
+    def bulk_mark_in_progress(self, request, queryset):
+        """Mark selected tasks as in progress"""
+        updated_count = queryset.exclude(status='In Progress').update(status='In Progress', completed_at=None)
+        self.message_user(request, f'Successfully marked {updated_count} tasks as in progress')
+    bulk_mark_in_progress.short_description = 'Mark selected tasks as in progress'
+
+    def bulk_assign_to_user(self, request, queryset):
+        """Bulk assign tasks to a user - redirect to form"""
+        if queryset.count() > 50:
+            self.message_user(request, 'Please select 50 tasks or fewer for bulk assignment', level='ERROR')
+            return
+
+        task_ids = ','.join(str(t.pk) for t in queryset)
+        return HttpResponseRedirect(
+            reverse('admin:crm_app_task_changelist') + f'?task_ids={task_ids}&action=assign'
+        )
+    bulk_assign_to_user.short_description = 'Bulk assign selected tasks to user'
+
+    # list_select_related handles the optimization
 
 
 class OpportunityActivityInline(admin.TabularInline):
@@ -370,11 +759,16 @@ class OpportunityActivityInline(admin.TabularInline):
     fields = ['activity_type', 'subject', 'user', 'contact', 'created_at']
     readonly_fields = ['created_at']
 
+    def get_queryset(self, request):
+        """Optimize inline queries"""
+        return super().get_queryset(request).select_related('opportunity', 'user', 'contact')
+
 
 @admin.register(Opportunity)
 class OpportunityAdmin(admin.ModelAdmin):
     list_display = ['name', 'company', 'stage', 'expected_value', 'probability', 'owner', 'expected_close_date']
     list_filter = ['stage', 'lead_source', 'is_active', 'created_at']
+    list_select_related = ['company', 'owner']
     search_fields = ['name', 'company__name', 'notes']
     readonly_fields = ['created_at', 'updated_at', 'weighted_value', 'days_in_stage']
     inlines = [OpportunityActivityInline]
@@ -406,6 +800,7 @@ class OpportunityAdmin(admin.ModelAdmin):
 class OpportunityActivityAdmin(admin.ModelAdmin):
     list_display = ['subject', 'opportunity', 'activity_type', 'user', 'created_at']
     list_filter = ['activity_type', 'created_at']
+    list_select_related = ['opportunity', 'opportunity__company', 'user', 'contact']
     search_fields = ['subject', 'description', 'opportunity__name']
     readonly_fields = ['created_at', 'updated_at']
 
@@ -414,6 +809,10 @@ class InvoiceInline(admin.TabularInline):
     model = Invoice
     extra = 0
     fields = ['invoice_number', 'status', 'issue_date', 'due_date', 'total_amount']
+
+    def get_queryset(self, request):
+        """Optimize inline queries"""
+        return super().get_queryset(request).select_related('contract')
 
 
 class ContractAdminForm(forms.ModelForm):
@@ -429,9 +828,11 @@ class ContractAdmin(admin.ModelAdmin):
     form = ContractAdminForm
     list_display = ['contract_number', 'company', 'service_type', 'contract_type', 'status', 'start_date', 'end_date', 'value', 'is_expiring_soon']
     list_filter = ['service_type', 'contract_type', 'status', 'auto_renew', 'is_active']
+    list_select_related = ['company', 'opportunity']
     search_fields = ['contract_number', 'company__name']
     readonly_fields = ['created_at', 'updated_at', 'days_until_expiry', 'formatted_monthly_value']
     inlines = [InvoiceInline]
+    actions = ['bulk_update_status_active', 'bulk_update_status_inactive', 'export_contracts_csv', 'export_contracts_excel']
     
     def is_expiring_soon(self, obj):
         return obj.is_expiring_soon
@@ -499,13 +900,144 @@ class ContractAdmin(admin.ModelAdmin):
         }),
     )
 
+    def bulk_update_status_active(self, request, queryset):
+        """Mark selected contracts as active"""
+        updated_count = queryset.update(status='Active', is_active=True)
+        self.message_user(request, f'Successfully marked {updated_count} contracts as active')
+    bulk_update_status_active.short_description = 'Mark selected contracts as active'
+
+    def bulk_update_status_inactive(self, request, queryset):
+        """Mark selected contracts as inactive"""
+        updated_count = queryset.update(status='Terminated', is_active=False)
+        self.message_user(request, f'Successfully marked {updated_count} contracts as inactive')
+    bulk_update_status_inactive.short_description = 'Mark selected contracts as inactive'
+
+    def export_contracts_csv(self, request, queryset):
+        """Export selected contracts to CSV"""
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="contracts_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.csv"'
+
+        writer = csv.writer(response)
+        # Write headers
+        writer.writerow([
+            'Contract Number', 'Company', 'Service Type', 'Contract Type', 'Status',
+            'Start Date', 'End Date', 'Value', 'Currency', 'Monthly Value',
+            'Payment Terms', 'Billing Frequency', 'Auto Renew', 'Is Active',
+            'Days Until Expiry', 'Created Date', 'Last Updated'
+        ])
+
+        # Write data with optimized queries
+        contracts = queryset.select_related('company', 'opportunity')
+
+        for contract in contracts:
+            writer.writerow([
+                contract.contract_number,
+                contract.company.name,
+                contract.get_service_type_display() if contract.service_type else '',
+                contract.get_contract_type_display(),
+                contract.get_status_display(),
+                contract.start_date.strftime('%Y-%m-%d'),
+                contract.end_date.strftime('%Y-%m-%d'),
+                f"{contract.value:.2f}",
+                contract.currency,
+                f"{contract.monthly_value:.2f}",
+                contract.payment_terms,
+                contract.billing_frequency,
+                'Yes' if contract.auto_renew else 'No',
+                'Yes' if contract.is_active else 'No',
+                contract.days_until_expiry,
+                contract.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                contract.updated_at.strftime('%Y-%m-%d %H:%M:%S')
+            ])
+
+        self.message_user(request, f'Successfully exported {queryset.count()} contracts to CSV')
+        return response
+    export_contracts_csv.short_description = 'Export selected contracts to CSV'
+
+    def export_contracts_excel(self, request, queryset):
+        """Export selected contracts to Excel with formatting"""
+        # Create workbook and worksheet
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Contracts Export"
+
+        # Define styles
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+        currency_format = '#,##0.00'
+
+        # Write headers
+        headers = [
+            'Contract Number', 'Company', 'Service Type', 'Contract Type', 'Status',
+            'Start Date', 'End Date', 'Value', 'Currency', 'Monthly Value',
+            'Payment Terms', 'Billing Frequency', 'Auto Renew', 'Is Active',
+            'Days Until Expiry', 'Created Date', 'Last Updated'
+        ]
+
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+
+        # Write data with optimized queries
+        contracts = queryset.select_related('company', 'opportunity')
+
+        for row, contract in enumerate(contracts, 2):
+            ws.cell(row=row, column=1, value=contract.contract_number)
+            ws.cell(row=row, column=2, value=contract.company.name)
+            ws.cell(row=row, column=3, value=contract.get_service_type_display() if contract.service_type else '')
+            ws.cell(row=row, column=4, value=contract.get_contract_type_display())
+            ws.cell(row=row, column=5, value=contract.get_status_display())
+            ws.cell(row=row, column=6, value=contract.start_date)
+            ws.cell(row=row, column=7, value=contract.end_date)
+
+            # Format currency values
+            value_cell = ws.cell(row=row, column=8, value=float(contract.value))
+            value_cell.number_format = currency_format
+
+            ws.cell(row=row, column=9, value=contract.currency)
+
+            monthly_cell = ws.cell(row=row, column=10, value=float(contract.monthly_value))
+            monthly_cell.number_format = currency_format
+
+            ws.cell(row=row, column=11, value=contract.payment_terms)
+            ws.cell(row=row, column=12, value=contract.billing_frequency)
+            ws.cell(row=row, column=13, value='Yes' if contract.auto_renew else 'No')
+            ws.cell(row=row, column=14, value='Yes' if contract.is_active else 'No')
+            ws.cell(row=row, column=15, value=contract.days_until_expiry)
+            ws.cell(row=row, column=16, value=contract.created_at)
+            ws.cell(row=row, column=17, value=contract.updated_at)
+
+        # Auto-adjust column widths
+        for col in range(1, len(headers) + 1):
+            column_letter = get_column_letter(col)
+            max_length = max(len(str(ws.cell(row=1, column=col).value)), 15)
+            ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
+
+        # Create response
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = f'attachment; filename="contracts_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
+
+        wb.save(response)
+        self.message_user(request, f'Successfully exported {queryset.count()} contracts to Excel')
+        return response
+    export_contracts_excel.short_description = 'Export selected contracts to Excel'
+
+    # list_select_related handles the optimization
+
 
 @admin.register(Invoice)
 class InvoiceAdmin(admin.ModelAdmin):
     list_display = ['invoice_number', 'contract', 'status', 'issue_date', 'due_date', 'total_amount', 'days_overdue']
     list_filter = ['status', 'issue_date', 'due_date']
+    list_select_related = ['contract', 'contract__company']
     search_fields = ['invoice_number', 'contract__company__name', 'contract__contract_number']
     readonly_fields = ['created_at', 'updated_at', 'total_amount', 'days_overdue']
+    actions = ['bulk_mark_paid', 'bulk_mark_unpaid', 'export_invoices_csv', 'export_invoices_excel']
     
     def days_overdue(self, obj):
         return obj.days_overdue if obj.is_overdue else 0
@@ -536,6 +1068,150 @@ class InvoiceAdmin(admin.ModelAdmin):
         }),
     )
 
+    def bulk_mark_paid(self, request, queryset):
+        """Mark selected invoices as paid"""
+        updated_count = 0
+        for invoice in queryset:
+            if invoice.status != 'Paid':
+                invoice.status = 'Paid'
+                invoice.paid_date = timezone.now().date()
+                invoice.save()
+                updated_count += 1
+
+        if updated_count > 0:
+            self.message_user(request, f'Successfully marked {updated_count} invoices as paid')
+        else:
+            self.message_user(request, 'No invoices were updated (already paid)', level='WARNING')
+    bulk_mark_paid.short_description = 'Mark selected invoices as paid'
+
+    def bulk_mark_unpaid(self, request, queryset):
+        """Mark selected invoices as unpaid"""
+        updated_count = queryset.exclude(status='Sent').update(status='Sent', paid_date=None)
+        self.message_user(request, f'Successfully marked {updated_count} invoices as unpaid')
+    bulk_mark_unpaid.short_description = 'Mark selected invoices as unpaid'
+
+    def export_invoices_csv(self, request, queryset):
+        """Export selected invoices to CSV"""
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="invoices_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.csv"'
+
+        writer = csv.writer(response)
+        # Write headers
+        writer.writerow([
+            'Invoice Number', 'Contract Number', 'Company', 'Status', 'Issue Date',
+            'Due Date', 'Paid Date', 'Amount', 'Tax Amount', 'Discount Amount',
+            'Total Amount', 'Currency', 'Payment Method', 'Days Overdue',
+            'Transaction ID', 'Notes', 'Created Date', 'Last Updated'
+        ])
+
+        # Write data with optimized queries
+        invoices = queryset.select_related('contract', 'contract__company')
+
+        for invoice in invoices:
+            writer.writerow([
+                invoice.invoice_number,
+                invoice.contract.contract_number,
+                invoice.contract.company.name,
+                invoice.get_status_display(),
+                invoice.issue_date.strftime('%Y-%m-%d'),
+                invoice.due_date.strftime('%Y-%m-%d'),
+                invoice.paid_date.strftime('%Y-%m-%d') if invoice.paid_date else '',
+                f"{invoice.amount:.2f}",
+                f"{invoice.tax_amount:.2f}",
+                f"{invoice.discount_amount:.2f}",
+                f"{invoice.total_amount:.2f}",
+                invoice.currency,
+                invoice.payment_method,
+                invoice.days_overdue,
+                invoice.transaction_id,
+                invoice.notes,
+                invoice.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                invoice.updated_at.strftime('%Y-%m-%d %H:%M:%S')
+            ])
+
+        self.message_user(request, f'Successfully exported {queryset.count()} invoices to CSV')
+        return response
+    export_invoices_csv.short_description = 'Export selected invoices to CSV'
+
+    def export_invoices_excel(self, request, queryset):
+        """Export selected invoices to Excel with formatting"""
+        # Create workbook and worksheet
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Invoices Export"
+
+        # Define styles
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+        currency_format = '#,##0.00'
+
+        # Write headers
+        headers = [
+            'Invoice Number', 'Contract Number', 'Company', 'Status', 'Issue Date',
+            'Due Date', 'Paid Date', 'Amount', 'Tax Amount', 'Discount Amount',
+            'Total Amount', 'Currency', 'Payment Method', 'Days Overdue',
+            'Transaction ID', 'Notes', 'Created Date', 'Last Updated'
+        ]
+
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+
+        # Write data with optimized queries
+        invoices = queryset.select_related('contract', 'contract__company')
+
+        for row, invoice in enumerate(invoices, 2):
+            ws.cell(row=row, column=1, value=invoice.invoice_number)
+            ws.cell(row=row, column=2, value=invoice.contract.contract_number)
+            ws.cell(row=row, column=3, value=invoice.contract.company.name)
+            ws.cell(row=row, column=4, value=invoice.get_status_display())
+            ws.cell(row=row, column=5, value=invoice.issue_date)
+            ws.cell(row=row, column=6, value=invoice.due_date)
+            ws.cell(row=row, column=7, value=invoice.paid_date)
+
+            # Format currency values
+            amount_cell = ws.cell(row=row, column=8, value=float(invoice.amount))
+            amount_cell.number_format = currency_format
+
+            tax_cell = ws.cell(row=row, column=9, value=float(invoice.tax_amount))
+            tax_cell.number_format = currency_format
+
+            discount_cell = ws.cell(row=row, column=10, value=float(invoice.discount_amount))
+            discount_cell.number_format = currency_format
+
+            total_cell = ws.cell(row=row, column=11, value=float(invoice.total_amount))
+            total_cell.number_format = currency_format
+
+            ws.cell(row=row, column=12, value=invoice.currency)
+            ws.cell(row=row, column=13, value=invoice.payment_method)
+            ws.cell(row=row, column=14, value=invoice.days_overdue)
+            ws.cell(row=row, column=15, value=invoice.transaction_id)
+            ws.cell(row=row, column=16, value=invoice.notes)
+            ws.cell(row=row, column=17, value=invoice.created_at)
+            ws.cell(row=row, column=18, value=invoice.updated_at)
+
+        # Auto-adjust column widths
+        for col in range(1, len(headers) + 1):
+            column_letter = get_column_letter(col)
+            max_length = max(len(str(ws.cell(row=1, column=col).value)), 15)
+            ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
+
+        # Create response
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = f'attachment; filename="invoices_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
+
+        wb.save(response)
+        self.message_user(request, f'Successfully exported {queryset.count()} invoices to Excel')
+        return response
+    export_invoices_excel.short_description = 'Export selected invoices to Excel'
+
+    # list_select_related handles the optimization
+
 
 @admin.register(AuditLog)
 class AuditLogAdmin(admin.ModelAdmin):
@@ -560,6 +1236,7 @@ class AuditLogAdmin(admin.ModelAdmin):
 class ZoneAdmin(admin.ModelAdmin):
     list_display = ["zone_name_with_company", "platform", "currently_playing_admin", "status_badge", "last_seen_online", "last_api_sync"]
     list_filter = ["platform", "status", "company"]
+    list_select_related = ["company"]
     search_fields = ["name", "company__name", "company__soundtrack_account_id"]
     readonly_fields = ["created_at", "updated_at", "last_api_sync", "api_raw_data", "status_badge", "soundtrack_account_id", "currently_playing_admin"]
     
@@ -647,6 +1324,7 @@ class ZoneAdmin(admin.ModelAdmin):
 class EmailTemplateAdmin(admin.ModelAdmin):
     list_display = ['name', 'template_type', 'language', 'department', 'is_active']
     list_filter = ['template_type', 'language', 'department', 'is_active']
+    list_select_related = []  # EmailTemplate has no ForeignKey fields to select_related on
     search_fields = ['name', 'subject', 'body_text']
     readonly_fields = ['created_at', 'updated_at']
     
@@ -673,20 +1351,35 @@ class EmailTemplateAdmin(admin.ModelAdmin):
         }),
     )
     
-    actions = ['send_email', 'duplicate_template']
-    
+    actions = ['preview_template', 'send_email', 'duplicate_template']
+
+    def preview_template(self, request, queryset):
+        """Preview selected template"""
+        if queryset.count() != 1:
+            self.message_user(request, 'Please select exactly one template', level='ERROR')
+            return
+
+        template = queryset.first()
+        # Redirect to preview template
+        from django.urls import reverse
+        from django.http import HttpResponseRedirect
+        return HttpResponseRedirect(
+            reverse('admin_preview_template', args=[template.pk])
+        )
+    preview_template.short_description = 'Preview template with sample data'
+
     def send_email(self, request, queryset):
         """Send email using selected template"""
         if queryset.count() != 1:
             self.message_user(request, 'Please select exactly one template', level='ERROR')
             return
-        
+
         template = queryset.first()
         # Redirect to send email form
         from django.urls import reverse
         from django.http import HttpResponseRedirect
         return HttpResponseRedirect(
-            reverse('admin_send_email') + f'?template_id={template.pk}'
+            reverse('admin_send_email_template', args=[template.pk])
         )
     send_email.short_description = 'Send email using this template'
     
@@ -704,6 +1397,7 @@ class EmailTemplateAdmin(admin.ModelAdmin):
 class EmailLogAdmin(admin.ModelAdmin):
     list_display = ['subject', 'to_email', 'email_type', 'status', 'sent_at', 'company']
     list_filter = ['status', 'email_type', 'created_at', 'sent_at']
+    list_select_related = ['company', 'contact', 'template_used', 'contract', 'invoice']
     search_fields = ['subject', 'to_email', 'from_email', 'company__name', 'contact__name']
     readonly_fields = [
         'created_at', 'updated_at', 'sent_at', 'opened_at', 'clicked_at',
@@ -767,6 +1461,7 @@ class EmailLogAdmin(admin.ModelAdmin):
 class EmailCampaignAdmin(admin.ModelAdmin):
     list_display = ['name', 'campaign_type', 'company', 'is_active', 'emails_sent', 'last_email_sent']
     list_filter = ['campaign_type', 'is_active', 'created_at']
+    list_select_related = ['company', 'contract']
     search_fields = ['name', 'company__name']
     readonly_fields = ['created_at', 'updated_at', 'emails_sent', 'last_email_sent']
     
@@ -803,6 +1498,7 @@ class EmailCampaignAdmin(admin.ModelAdmin):
 class DocumentAttachmentAdmin(admin.ModelAdmin):
     list_display = ['name', 'company', 'document_type', 'file', 'is_active', 'created_at']
     list_filter = ['document_type', 'is_active', 'created_at']
+    list_select_related = ['company', 'contract', 'invoice']
     search_fields = ['name', 'description', 'company__name']
     readonly_fields = ['created_at', 'updated_at']
     

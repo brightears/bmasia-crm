@@ -907,6 +907,7 @@ class EmailLog(TimestampedModel):
         ('seasonal', 'Seasonal Campaign'),
         ('support', 'Technical Support'),
         ('manual', 'Manual Email'),
+        ('test', 'Test Email'),
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

@@ -13,6 +13,7 @@ from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 import csv
 import json
 import os
@@ -677,3 +678,31 @@ def debug_soundtrack_api(request):
         'test_results': test_results,
         'instructions': 'Add ?test=1&account_id=YOUR_ACCOUNT_ID to test API connection'
     }, json_dumps_params={'indent': 2})
+
+
+@csrf_exempt
+def initialize_database(request):
+    """
+    One-time database initialization endpoint.
+    Access with: /initialize-database/?key=bmasia2024init
+    """
+    # Simple security check
+    init_key = request.GET.get('key', '')
+    if init_key != 'bmasia2024init':
+        return HttpResponse('Unauthorized', status=401)
+
+    try:
+        # Run the initialization command
+        call_command('initialize_database')
+        return HttpResponse("""
+            <h1>✓ Database Initialized Successfully!</h1>
+            <p>The database has been set up with:</p>
+            <ul>
+                <li>All migrations applied</li>
+                <li>Admin superuser created (admin/bmasia123)</li>
+                <li>Email templates configured</li>
+            </ul>
+            <p><a href="/admin/">Go to Admin Login</a></p>
+        """, content_type='text/html')
+    except Exception as e:
+        return HttpResponse(f'Initialization failed: {str(e)}', status=500)

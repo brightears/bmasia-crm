@@ -7,8 +7,10 @@ from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import permission_required
 from django.urls import reverse
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseRedirect, JsonResponse
 from django.db.models import Q
+from django.template import Template, Context
+import json
 
 from .models import EmailTemplate, Contact, Company, DocumentAttachment
 from .forms import SendEmailForm, BulkEmailForm
@@ -28,7 +30,16 @@ def send_email_view(request, template_id=None, company_id=None):
     
     if company_id:
         company = get_object_or_404(Company, pk=company_id)
-    
+
+    # Check if user wants to preview first (unless explicitly skipping)
+    skip_preview = request.GET.get('skip_preview', False)
+    if template and not skip_preview and request.method == 'GET':
+        # Redirect to preview page first
+        preview_url = reverse('admin_preview_email_template', args=[template.pk])
+        if company_id:
+            preview_url = reverse('admin_preview_email_company', args=[company_id])
+        return redirect(preview_url)
+
     if request.method == 'POST':
         form = SendEmailForm(
             request.POST,
@@ -235,3 +246,220 @@ def preview_bulk_email_view(request, template_id):
     }
     
     return render(request, 'admin/crm_app/send_bulk_email.html', context)
+
+
+@staff_member_required
+def preview_email_view(request, template_id=None, company_id=None):
+    """Preview email before sending with sample data"""
+
+    template = None
+    company = None
+
+    if template_id:
+        template = get_object_or_404(EmailTemplate, pk=template_id)
+
+    if company_id:
+        company = get_object_or_404(Company, pk=company_id)
+
+    # Get sample contact for preview
+    if company:
+        sample_contact = company.contacts.filter(is_active=True).first()
+    else:
+        sample_contact = Contact.objects.filter(is_active=True).first()
+
+    if not sample_contact:
+        messages.error(request, "No contacts available for preview")
+        return redirect('admin:crm_app_emailtemplate_changelist')
+
+    # Create sample context based on template type
+    sample_context = {
+        'contact_name': sample_contact.name,
+        'company_name': sample_contact.company.name,
+        'current_year': 2025,
+    }
+
+    # Add template-specific context
+    if template and 'renewal' in template.template_type:
+        # Get sample contract
+        contract = sample_contact.company.contracts.filter(
+            is_active=True,
+            status='Active'
+        ).first()
+
+        if contract:
+            sample_context.update({
+                'contract': contract,
+                'days_until_expiry': 30,
+                'contract_value': f"{contract.currency} {contract.value:,.2f}",
+                'monthly_value': f"{contract.currency} {contract.monthly_value:,.2f}",
+                'start_date': contract.start_date.strftime('%B %d, %Y'),
+                'end_date': contract.end_date.strftime('%B %d, %Y'),
+            })
+        else:
+            sample_context.update({
+                'days_until_expiry': 30,
+                'contract_value': 'USD 2,400.00',
+                'monthly_value': 'USD 200.00',
+                'start_date': 'January 1, 2025',
+                'end_date': 'December 31, 2025',
+            })
+
+    elif template and 'payment' in template.template_type:
+        sample_context.update({
+            'days_overdue': 7,
+            'invoice_amount': 'USD 200.00',
+            'due_date': 'January 15, 2025',
+        })
+
+    elif template and 'quarterly' in template.template_type:
+        sample_context.update({
+            'zone_count': sample_contact.company.zones.count() or 3,
+            'active_zones': sample_contact.company.zones.filter(status='online').count() or 2,
+        })
+
+    # Render the email if template is provided
+    rendered_email = None
+    if template:
+        rendered_email = template.render(sample_context)
+
+    # Handle form submission for custom email preview
+    if request.method == 'POST':
+        form = SendEmailForm(
+            request.POST,
+            template=template,
+            company=company,
+            user=request.user
+        )
+
+        if form.is_valid():
+            # Get form data
+            subject = form.cleaned_data['subject']
+            body_text = form.cleaned_data['body']
+            contacts = form.cleaned_data['contacts']
+
+            # Render with sample context
+            subject_template = Template(subject)
+            body_template = Template(body_text)
+
+            rendered_subject = subject_template.render(Context(sample_context))
+            rendered_body = body_template.render(Context(sample_context))
+            rendered_html = text_to_html(rendered_body)
+
+            # Create rendered email dict
+            rendered_email = {
+                'subject': rendered_subject,
+                'body_html': rendered_html,
+                'body_text': rendered_body
+            }
+    else:
+        form = SendEmailForm(
+            template=template,
+            company=company,
+            user=request.user
+        )
+
+    context = {
+        'form': form,
+        'template': template,
+        'company': company,
+        'sample_contact': sample_contact,
+        'sample_context': sample_context,
+        'rendered_email': rendered_email,
+        'title': 'Preview Email',
+        'opts': EmailTemplate._meta if template else Company._meta if company else None,
+    }
+
+    return render(request, 'admin/crm_app/email_preview.html', context)
+
+
+@staff_member_required
+def preview_template_view(request, template_id):
+    """Preview email template with sample data"""
+
+    template = get_object_or_404(EmailTemplate, pk=template_id)
+
+    # Get sample contact for preview
+    sample_contact = Contact.objects.filter(is_active=True).first()
+
+    if not sample_contact:
+        messages.error(request, "No contacts available for preview")
+        return redirect('admin:crm_app_emailtemplate_changelist')
+
+    # Create sample context based on template type
+    sample_context = {
+        'contact_name': sample_contact.name,
+        'company_name': sample_contact.company.name,
+        'current_year': 2025,
+    }
+
+    # Add template-specific sample data
+    if 'renewal' in template.template_type:
+        sample_context.update({
+            'days_until_expiry': 30,
+            'contract_value': 'USD 2,400.00',
+            'monthly_value': 'USD 200.00',
+            'start_date': 'January 1, 2025',
+            'end_date': 'December 31, 2025',
+        })
+    elif 'payment' in template.template_type:
+        sample_context.update({
+            'days_overdue': 7,
+            'invoice_amount': 'USD 200.00',
+            'due_date': 'January 15, 2025',
+        })
+    elif 'quarterly' in template.template_type:
+        sample_context.update({
+            'zone_count': 5,
+            'active_zones': 4,
+        })
+
+    # Render the template
+    rendered_email = template.render(sample_context)
+
+    context = {
+        'template': template,
+        'sample_contact': sample_contact,
+        'sample_context': sample_context,
+        'rendered_email': rendered_email,
+        'title': f'Preview Template - {template.name}',
+        'opts': EmailTemplate._meta,
+    }
+
+    return render(request, 'admin/crm_app/template_preview.html', context)
+
+
+@staff_member_required
+def send_test_email_view(request):
+    """Send test email via AJAX"""
+
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'message': 'Invalid request method'})
+
+    try:
+        data = json.loads(request.body)
+
+        to_email = data.get('to_email', request.user.email)
+        subject = data.get('subject', 'Test Email')
+        body_html = data.get('body_html', '')
+        body_text = data.get('body_text', '')
+
+        # Send test email
+        success, message = email_service.send_email(
+            to_email=to_email,
+            subject=f"[TEST] {subject}",
+            body_html=body_html,
+            body_text=body_text,
+            from_email=request.user.email,
+            email_type='test'
+        )
+
+        return JsonResponse({
+            'success': success,
+            'message': message
+        })
+
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'message': f'Error sending test email: {str(e)}'
+        })

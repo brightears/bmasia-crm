@@ -1,0 +1,134 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static admin_list %}
+
+{% block title %}{{ title|capfirst }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+.bulk-email-container {
+    margin-top: 20px;
+}
+
+.form-panel {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+    margin-bottom: 20px;
+}
+
+.form-row {
+    margin-bottom: 15px;
+}
+
+.form-row label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 5px;
+    color: #495057;
+}
+
+.template-info {
+    background: #e7f3ff;
+    border: 1px solid #b3d7ff;
+    border-radius: 6px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.template-info h4 {
+    margin: 0 0 10px 0;
+    color: #0066cc;
+}
+
+.btn-preview {
+    background: #17a2b8;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    margin-right: 10px;
+}
+
+.btn-preview:hover {
+    background: #138496;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn-secondary:hover {
+    background: #545b62;
+    color: white;
+    text-decoration: none;
+}
+
+.help-text {
+    font-size: 12px;
+    color: #6c757d;
+    margin-top: 5px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+
+{% if messages %}
+    {% for message in messages %}
+        <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+    {% endfor %}
+{% endif %}
+
+<div class="bulk-email-container">
+    <div class="template-info">
+        <h4>Bulk Email with Template: {{ template.name }}</h4>
+        <p><strong>Type:</strong> {{ template.get_template_type_display }}</p>
+        <p><strong>Subject:</strong> {{ template.subject }}</p>
+        {% if template.notes %}
+            <p><strong>Notes:</strong> {{ template.notes }}</p>
+        {% endif %}
+    </div>
+
+    <div class="form-panel">
+        <h3>Recipient Selection</h3>
+        <p>Select which companies and contact types should receive this bulk email.</p>
+
+        <form method="post" id="bulk-email-form">
+            {% csrf_token %}
+            {% for field in form %}
+                <div class="form-row">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}
+                        <div class="help-text">{{ field.help_text }}</div>
+                    {% endif %}
+                    {% if field.errors %}
+                        <div class="error">{{ field.errors }}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+
+            <div class="form-row" style="border-top: 1px solid #dee2e6; padding-top: 20px; margin-top: 30px;">
+                <button type="submit" class="btn-preview">Preview Recipients</button>
+                <a href="{% url 'admin:crm_app_emailtemplate_changelist' %}" class="btn-secondary">
+                    Back to Templates
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}

@@ -1,0 +1,193 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static admin_list %}
+
+{% block title %}{{ title|capfirst }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+.send-email-container {
+    margin-top: 20px;
+}
+
+.form-panel {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+    margin-bottom: 20px;
+}
+
+.form-row {
+    margin-bottom: 15px;
+}
+
+.form-row label {
+    display: block;
+    font-weight: 500;
+    margin-bottom: 5px;
+    color: #495057;
+}
+
+.preview-link {
+    display: inline-block;
+    margin-top: 20px;
+    padding: 10px 20px;
+    background: #17a2b8;
+    color: white;
+    text-decoration: none;
+    border-radius: 5px;
+    font-size: 14px;
+}
+
+.preview-link:hover {
+    background: #138496;
+    color: white;
+    text-decoration: none;
+}
+
+.btn-send {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    margin-right: 10px;
+}
+
+.btn-send:hover {
+    background: #0056b3;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn-secondary:hover {
+    background: #545b62;
+    color: white;
+    text-decoration: none;
+}
+
+.template-info {
+    background: #e7f3ff;
+    border: 1px solid #b3d7ff;
+    border-radius: 6px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.template-info h4 {
+    margin: 0 0 10px 0;
+    color: #0066cc;
+}
+
+.help-text {
+    font-size: 12px;
+    color: #6c757d;
+    margin-top: 5px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+
+{% if messages %}
+    {% for message in messages %}
+        <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+    {% endfor %}
+{% endif %}
+
+<div class="send-email-container">
+    {% if template %}
+    <div class="template-info">
+        <h4>Using Template: {{ template.name }}</h4>
+        <p><strong>Type:</strong> {{ template.get_template_type_display }}</p>
+        <p><strong>Subject:</strong> {{ template.subject }}</p>
+        {% if template.notes %}
+            <p><strong>Notes:</strong> {{ template.notes }}</p>
+        {% endif %}
+
+        <a href="{% url 'admin_preview_email_template' template.pk %}" class="preview-link">
+            Preview Email Before Sending
+        </a>
+    </div>
+    {% endif %}
+
+    {% if company %}
+    <div class="template-info">
+        <h4>Sending to Company: {{ company.name }}</h4>
+        <p><strong>Industry:</strong> {{ company.get_industry_display|default:"Not specified" }}</p>
+        <p><strong>Active Contacts:</strong> {{ company.contacts.filter(is_active=True).count }}</p>
+    </div>
+    {% endif %}
+
+    <div class="form-panel">
+        <h3>Email Configuration</h3>
+
+        <form method="post" id="email-form">
+            {% csrf_token %}
+            {% for field in form %}
+                <div class="form-row">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}
+                        <div class="help-text">{{ field.help_text }}</div>
+                    {% endif %}
+                    {% if field.errors %}
+                        <div class="error">{{ field.errors }}</div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+
+            <div class="form-row" style="border-top: 1px solid #dee2e6; padding-top: 20px; margin-top: 30px;">
+                <button type="submit" class="btn-send">Send Email</button>
+
+                {% if template %}
+                    <a href="{% url 'admin_preview_email_template' template.pk %}" class="btn-secondary">
+                        Preview First
+                    </a>
+                    <a href="{% url 'admin:crm_app_emailtemplate_changelist' %}" class="btn-secondary">
+                        Back to Templates
+                    </a>
+                {% elif company %}
+                    <a href="{% url 'admin:crm_app_company_change' company.pk %}" class="btn-secondary">
+                        Back to Company
+                    </a>
+                {% else %}
+                    <a href="{% url 'admin:crm_app_emaillog_changelist' %}" class="btn-secondary">
+                        Cancel
+                    </a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+// Auto-resize textareas
+document.addEventListener('DOMContentLoaded', function() {
+    const textareas = document.querySelectorAll('textarea');
+    textareas.forEach(textarea => {
+        textarea.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = this.scrollHeight + 'px';
+        });
+        // Trigger initial resize
+        textarea.style.height = textarea.scrollHeight + 'px';
+    });
+});
+</script>
+
+{% endblock %}
