@@ -15,8 +15,10 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path, include
-from django.views.generic import RedirectView
+from django.urls import path, include, re_path
+from django.views.generic import RedirectView, TemplateView
+from django.views.static import serve
+from django.conf import settings
 from crm_app.admin_setup import create_admin_view
 from crm_app.views import debug_soundtrack_api
 from django.http import HttpResponse
@@ -68,12 +70,13 @@ def reset_admin_view(request):
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('', include('crm_app.urls')),
+    path('api/', include('crm_app.urls')),  # Move API endpoints under /api/
     path('api-auth/', include('rest_framework.urls')),
     # Setup endpoint to create admin user
     path('setup-admin/', create_admin_view, name='setup_admin'),
     path('reset-admin/', reset_admin_view, name='reset_admin'),
     path('debug-soundtrack/', debug_soundtrack_api, name='debug_soundtrack'),
-    # Redirect root to admin for now
-    path('', RedirectView.as_view(url='/admin/', permanent=False)),
+    # Serve React app for all other routes
+    re_path(r'^(?!admin|api|setup-admin|reset-admin|debug-soundtrack|static|media).*$',
+            TemplateView.as_view(template_name='index.html'), name='react_app'),
 ]
