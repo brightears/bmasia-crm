@@ -8,12 +8,14 @@ pip install -r requirements.txt
 # Collect static files
 python manage.py collectstatic --no-input
 
-# Handle migrations
+# Handle migrations with forced execution
 echo "Running migrations..."
-python manage.py migrate || {
-    echo "WARNING: Migrations failed. This is expected on first PostgreSQL deployment."
-    echo "To fix this, run: python manage.py reset_database --force"
-    echo "Continuing with deployment..."
+python manage.py migrate --noinput --run-syncdb || {
+    echo "WARNING: Standard migration failed, trying with fake-initial..."
+    python manage.py migrate --fake-initial || {
+        echo "WARNING: Migrations failed. This might be a connection issue."
+        echo "Continuing with deployment..."
+    }
 }
 
 # Create superuser if it doesn't exist (may fail if tables don't exist)
@@ -21,7 +23,7 @@ python manage.py shell << EOF 2>/dev/null || echo "Skipping superuser creation (
 from django.contrib.auth import get_user_model
 User = get_user_model()
 if not User.objects.filter(username='admin').exists():
-    User.objects.create_superuser('admin', 'admin@bmasiamusic.com', 'BMAsia2024!')
+    User.objects.create_superuser('admin', 'admin@bmasiamusic.com', 'bmasia123')
     print('Superuser created')
 else:
     print('Superuser already exists')
