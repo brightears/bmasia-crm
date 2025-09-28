@@ -9,6 +9,8 @@ import {
   Container,
   Avatar,
   CssBaseline,
+  FormControlLabel,
+  Checkbox,
 } from '@mui/material';
 import { LockOutlined } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
@@ -18,13 +20,15 @@ const Login: React.FC = () => {
   const [credentials, setCredentials] = useState({
     username: '',
     password: '',
+    remember_me: false,
   });
   const [error, setError] = useState('');
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value, type, checked } = e.target;
     setCredentials({
       ...credentials,
-      [e.target.name]: e.target.value,
+      [name]: type === 'checkbox' ? checked : value,
     });
   };
 
@@ -95,6 +99,18 @@ const Login: React.FC = () => {
               autoComplete="current-password"
               value={credentials.password}
               onChange={handleChange}
+            />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  name="remember_me"
+                  checked={credentials.remember_me}
+                  onChange={handleChange}
+                  color="primary"
+                />
+              }
+              label="Remember me"
+              sx={{ mt: 1 }}
             />
             <Button
               type="submit"

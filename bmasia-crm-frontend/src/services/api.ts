@@ -1,8 +1,9 @@
 import axios, { AxiosResponse } from 'axios';
-import { 
-  User, Company, Contact, Note, Task, Opportunity, OpportunityActivity, 
-  Contract, Invoice, DashboardStats, AuditLog, ApiResponse, LoginCredentials, AuthResponse 
+import {
+  User, Company, Contact, Note, Task, Opportunity, OpportunityActivity,
+  Contract, Invoice, DashboardStats, AuditLog, ApiResponse
 } from '../types';
+import AuthService from './authService';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
@@ -17,36 +18,48 @@ class ApiService {
   constructor() {
     // Add token to requests
     this.api.interceptors.request.use((config) => {
-      const token = localStorage.getItem('token');
-      if (token) {
-        config.headers.Authorization = `Token ${token}`;
+      const token = AuthService.getAccessToken();
+      if (token && !AuthService.isTokenExpired(token)) {
+        config.headers.Authorization = `Bearer ${token}`;
       }
       return config;
     });
 
-    // Handle unauthorized responses
+    // Handle unauthorized responses with token refresh
     this.api.interceptors.response.use(
       (response) => response,
-      (error) => {
-        if (error.response?.status === 401) {
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          window.location.href = '/login';
+      async (error) => {
+        const originalRequest = error.config;
+
+        if (error.response?.status === 401 && !originalRequest._retry) {
+          originalRequest._retry = true;
+
+          try {
+            await AuthService.refreshToken();
+            const newToken = AuthService.getAccessToken();
+            if (newToken) {
+              originalRequest.headers.Authorization = `Bearer ${newToken}`;
+              return this.api(originalRequest);
+            }
+          } catch (refreshError) {
+            AuthService.clearAuthData();
+            window.location.href = '/login';
+            return Promise.reject(refreshError);
+          }
         }
+
+        if (error.response?.status === 403) {
+          // Handle forbidden responses (insufficient permissions)
+          console.error('Access forbidden:', error.response.data);
+        }
+
         return Promise.reject(error);
       }
     );
   }
 
-  // Authentication
-  async login(credentials: LoginCredentials): Promise<AuthResponse> {
-    const response = await this.api.post<AuthResponse>('/auth/login/', credentials);
-    return response.data;
-  }
-
-  async logout(): Promise<void> {
-    await this.api.post('/auth/logout/');
-  }
+  // Note: Authentication methods moved to AuthService
+  // This service now focuses on business data operations
 
   // Dashboard
   async getDashboardStats(): Promise<DashboardStats> {

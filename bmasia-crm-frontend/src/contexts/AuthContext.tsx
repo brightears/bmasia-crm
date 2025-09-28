@@ -1,15 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User, LoginCredentials } from '../types';
-import ApiService from '../services/api';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import { AuthContextType, AuthState, LoginCredentials } from '../types';
+import AuthService from '../services/authService';
+import { hasPermission, hasRole } from '../utils/permissions';
 
-interface AuthContextType {
-  user: User | null;
-  token: string | null;
-  loading: boolean;
-  isAuthenticated: boolean;
-  login: (credentials: LoginCredentials) => Promise<void>;
-  logout: () => Promise<void>;
-}
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -18,67 +11,151 @@ interface AuthProviderProps {
 }
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [authState, setAuthState] = useState<AuthState>({
+    user: null,
+    accessToken: null,
+    refreshToken: null,
+    isAuthenticated: false,
+    loading: true,
+    tokenExpiry: null,
+  });
 
+  // Initialize auth state from stored data
   useEffect(() => {
-    // Check for existing auth data on mount
-    const storedToken = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
-
-    if (storedToken && storedUser) {
+    const initializeAuth = async () => {
       try {
-        setToken(storedToken);
-        setUser(JSON.parse(storedUser));
+        const accessToken = AuthService.getAccessToken();
+        const refreshToken = AuthService.getRefreshToken();
+        const storedUser = AuthService.getStoredUser();
+
+        if (accessToken && refreshToken && storedUser) {
+          // Check if token is expired
+          if (AuthService.isTokenExpired(accessToken)) {
+            try {
+              // Try to refresh the token
+              await AuthService.refreshToken();
+              const newAccessToken = AuthService.getAccessToken();
+
+              setAuthState({
+                user: storedUser,
+                accessToken: newAccessToken,
+                refreshToken,
+                isAuthenticated: true,
+                loading: false,
+                tokenExpiry: AuthService.getTokenExpiry(),
+              });
+
+              // Schedule next refresh
+              AuthService.scheduleTokenRefresh();
+            } catch (error) {
+              console.error('Token refresh failed during initialization:', error);
+              AuthService.clearAuthData();
+              setAuthState(prev => ({ ...prev, loading: false }));
+            }
+          } else {
+            // Token is still valid
+            setAuthState({
+              user: storedUser,
+              accessToken,
+              refreshToken,
+              isAuthenticated: true,
+              loading: false,
+              tokenExpiry: AuthService.getTokenExpiry(),
+            });
+
+            // Schedule token refresh
+            AuthService.scheduleTokenRefresh();
+          }
+        } else {
+          // No valid auth data found
+          setAuthState(prev => ({ ...prev, loading: false }));
+        }
       } catch (error) {
-        console.error('Error parsing stored user data:', error);
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+        console.error('Auth initialization error:', error);
+        AuthService.clearAuthData();
+        setAuthState(prev => ({ ...prev, loading: false }));
       }
-    }
-    
-    setLoading(false);
+    };
+
+    initializeAuth();
   }, []);
 
-  const login = async (credentials: LoginCredentials) => {
+  const login = useCallback(async (credentials: LoginCredentials) => {
     try {
-      setLoading(true);
-      const response = await ApiService.login(credentials);
-      
-      setToken(response.token);
-      setUser(response.user);
-      
-      localStorage.setItem('token', response.token);
-      localStorage.setItem('user', JSON.stringify(response.user));
+      setAuthState(prev => ({ ...prev, loading: true }));
+
+      const response = await AuthService.login(credentials);
+
+      setAuthState({
+        user: response.user,
+        accessToken: response.access,
+        refreshToken: response.refresh,
+        isAuthenticated: true,
+        loading: false,
+        tokenExpiry: AuthService.getTokenExpiry(),
+      });
+
+      // Schedule automatic token refresh
+      AuthService.scheduleTokenRefresh();
     } catch (error) {
       console.error('Login error:', error);
+      setAuthState(prev => ({ ...prev, loading: false }));
       throw error;
-    } finally {
-      setLoading(false);
     }
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
-      await ApiService.logout();
+      await AuthService.logout();
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
-      setToken(null);
-      setUser(null);
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
+      setAuthState({
+        user: null,
+        accessToken: null,
+        refreshToken: null,
+        isAuthenticated: false,
+        loading: false,
+        tokenExpiry: null,
+      });
     }
-  };
+  }, []);
+
+  const refreshAccessToken = useCallback(async () => {
+    try {
+      const newAccessToken = await AuthService.refreshToken();
+      setAuthState(prev => ({
+        ...prev,
+        accessToken: newAccessToken,
+        tokenExpiry: AuthService.getTokenExpiry(),
+      }));
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      await logout();
+      throw error;
+    }
+  }, [logout]);
+
+  const hasPermissionCheck = useCallback((permission: string): boolean => {
+    return hasPermission(authState.user, permission);
+  }, [authState.user]);
+
+  const hasRoleCheck = useCallback((role: string | string[]): boolean => {
+    return hasRole(authState.user, role);
+  }, [authState.user]);
+
+  const isTokenExpired = useCallback((): boolean => {
+    return AuthService.isTokenExpired(authState.accessToken || undefined);
+  }, [authState.accessToken]);
 
   const value: AuthContextType = {
-    user,
-    token,
-    loading,
-    isAuthenticated: !!token && !!user,
+    ...authState,
     login,
     logout,
+    refreshAccessToken,
+    hasPermission: hasPermissionCheck,
+    hasRole: hasRoleCheck,
+    isTokenExpired,
   };
 
   return (

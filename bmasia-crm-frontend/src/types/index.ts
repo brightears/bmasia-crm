@@ -4,11 +4,13 @@ export interface User {
   email: string;
   first_name: string;
   last_name: string;
-  role: 'Sales' | 'Finance' | 'Tech' | 'Music' | 'Admin';
+  role: 'Sales' | 'Marketing' | 'Tech Support' | 'Admin';
   phone?: string;
   department?: string;
   is_active: boolean;
   date_joined: string;
+  permissions?: string[];
+  groups?: string[];
 }
 
 export interface SubscriptionPlan {
@@ -272,9 +274,43 @@ export interface ApiResponse<T> {
 export interface LoginCredentials {
   username: string;
   password: string;
+  remember_me?: boolean;
 }
 
 export interface AuthResponse {
-  token: string;
+  access: string;
+  refresh: string;
   user: User;
+}
+
+export interface RefreshTokenResponse {
+  access: string;
+}
+
+export interface JWTPayload {
+  token_type: string;
+  exp: number;
+  iat: number;
+  jti: string;
+  user_id: string;
+  username: string;
+  role: string;
+}
+
+export interface AuthState {
+  user: User | null;
+  accessToken: string | null;
+  refreshToken: string | null;
+  isAuthenticated: boolean;
+  loading: boolean;
+  tokenExpiry: number | null;
+}
+
+export interface AuthContextType extends AuthState {
+  login: (credentials: LoginCredentials) => Promise<void>;
+  logout: () => Promise<void>;
+  refreshAccessToken: () => Promise<void>;
+  hasPermission: (permission: string) => boolean;
+  hasRole: (role: string | string[]) => boolean;
+  isTokenExpired: () => boolean;
 }

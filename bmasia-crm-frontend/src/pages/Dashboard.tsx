@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
   Box,
-  Grid,
   Paper,
   Typography,
   Card,
@@ -24,6 +23,9 @@ import {
 import { DashboardStats, Task } from '../types';
 import ApiService from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import QuickActions from '../components/QuickActions';
+import LoadingSkeleton from '../components/LoadingSkeleton';
+import SalesDashboard from '../components/SalesDashboard';
 
 interface StatCardProps {
   title: string;
@@ -33,12 +35,12 @@ interface StatCardProps {
   format?: 'number' | 'currency';
 }
 
-const StatCard: React.FC<StatCardProps> = ({ 
-  title, 
-  value, 
-  icon, 
+const StatCard: React.FC<StatCardProps> = ({
+  title,
+  value,
+  icon,
   color = 'primary.main',
-  format = 'number' 
+  format = 'number'
 }) => {
   const formatValue = (val: number | string) => {
     if (format === 'currency' && typeof val === 'number') {
@@ -84,7 +86,7 @@ const Dashboard: React.FC = () => {
         ApiService.getDashboardStats(),
         ApiService.getMyTasks(),
       ]);
-      
+
       setStats(dashboardStats);
       setMyTasks(tasksData.slice(0, 5)); // Show only first 5 tasks
     } catch (err: any) {
@@ -96,11 +98,7 @@ const Dashboard: React.FC = () => {
   };
 
   if (loading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-        <CircularProgress />
-      </Box>
-    );
+    return <LoadingSkeleton variant="dashboard" />;
   }
 
   if (error) {
@@ -124,51 +122,78 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const getDepartmentGreeting = () => {
+    switch (user?.role) {
+      case 'Sales':
+        return 'Ready to close some deals today?';
+      case 'Marketing':
+        return 'Time to engage and convert!';
+      case 'Tech Support':
+        return 'Ready to solve customer challenges?';
+      case 'Admin':
+        return 'Everything running smoothly.';
+      default:
+        return 'Here\'s your overview.';
+    }
+  };
+
+  // Show Sales-specific dashboard for Sales users
+  if (user?.role === 'Sales') {
+    return <SalesDashboard />;
+  }
+
   return (
     <Box>
       <Typography variant="h4" component="h1" gutterBottom>
-        Dashboard
+        {user?.role} Dashboard
       </Typography>
       <Typography variant="subtitle1" color="text.secondary" gutterBottom>
-        Welcome back, {user?.first_name}! Here's your overview.
+        Welcome back, {user?.first_name}! {getDepartmentGreeting()}
       </Typography>
 
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
+      {/* Quick Actions */}
+      <Box sx={{ mb: 4 }}>
+        <QuickActions />
+      </Box>
+
+      {/* Main Stats */}
+      <Box sx={{ display: 'flex', gap: 3, mb: 3, flexWrap: 'wrap' }}>
+        <Box sx={{ flex: '1 1 250px', minWidth: 200 }}>
           <StatCard
             title="Total Companies"
             value={stats.total_companies}
             icon={<Business />}
           />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        </Box>
+        <Box sx={{ flex: '1 1 250px', minWidth: 200 }}>
           <StatCard
             title="Active Opportunities"
             value={stats.active_opportunities}
             icon={<Handshake />}
             color="success.main"
           />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        </Box>
+        <Box sx={{ flex: '1 1 250px', minWidth: 200 }}>
           <StatCard
             title="Active Contracts"
             value={stats.active_contracts}
             icon={<Assignment />}
             color="info.main"
           />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        </Box>
+        <Box sx={{ flex: '1 1 250px', minWidth: 200 }}>
           <StatCard
             title="Overdue Tasks"
             value={stats.overdue_tasks}
             icon={<Warning />}
             color="error.main"
           />
-        </Grid>
-      </Grid>
+        </Box>
+      </Box>
 
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={4}>
+      {/* Secondary Stats */}
+      <Box sx={{ display: 'flex', gap: 3, mb: 3, flexWrap: 'wrap' }}>
+        <Box sx={{ flex: '1 1 300px', minWidth: 250 }}>
           <StatCard
             title="Opportunities Value"
             value={stats.opportunities_value}
@@ -176,8 +201,8 @@ const Dashboard: React.FC = () => {
             format="currency"
             color="success.main"
           />
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
+        </Box>
+        <Box sx={{ flex: '1 1 300px', minWidth: 250 }}>
           <StatCard
             title="Contracts Value"
             value={stats.contracts_value}
@@ -185,73 +210,71 @@ const Dashboard: React.FC = () => {
             format="currency"
             color="info.main"
           />
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
+        </Box>
+        <Box sx={{ flex: '1 1 300px', minWidth: 250 }}>
           <StatCard
             title="Overdue Invoices"
             value={stats.overdue_invoices}
             icon={<Receipt />}
             color="error.main"
           />
-        </Grid>
-      </Grid>
+        </Box>
+      </Box>
 
       {/* Sales Funnel - only show for Sales users */}
-      {(user?.role === 'Sales' || user?.role === 'Admin') && (
-        <Grid container spacing={3} sx={{ mb: 3 }}>
-          <Grid item xs={12}>
-            <Paper sx={{ p: 2 }}>
-              <Typography variant="h6" gutterBottom>
-                Sales Pipeline
-              </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={6} sm={4} md={2}>
-                  <StatCard
-                    title="Contacted"
-                    value={stats.contacted_count}
-                    icon={<Handshake />}
-                  />
-                </Grid>
-                <Grid item xs={6} sm={4} md={2}>
-                  <StatCard
-                    title="Quotation Sent"
-                    value={stats.quotation_count}
-                    icon={<Handshake />}
-                  />
-                </Grid>
-                <Grid item xs={6} sm={4} md={2}>
-                  <StatCard
-                    title="Contract Sent"
-                    value={stats.contract_count}
-                    icon={<Handshake />}
-                  />
-                </Grid>
-                <Grid item xs={6} sm={4} md={2}>
-                  <StatCard
-                    title="Won"
-                    value={stats.won_count}
-                    icon={<Handshake />}
-                    color="success.main"
-                  />
-                </Grid>
-                <Grid item xs={6} sm={4} md={2}>
-                  <StatCard
-                    title="Lost"
-                    value={stats.lost_count}
-                    icon={<Handshake />}
-                    color="error.main"
-                  />
-                </Grid>
-              </Grid>
-            </Paper>
-          </Grid>
-        </Grid>
+      {(['Sales', 'Admin'] as const).includes(user?.role as any) && (
+        <Box sx={{ mb: 3 }}>
+          <Paper sx={{ p: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              Sales Pipeline
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+              <Box sx={{ flex: '1 1 180px', minWidth: 150 }}>
+                <StatCard
+                  title="Contacted"
+                  value={stats.contacted_count}
+                  icon={<Handshake />}
+                />
+              </Box>
+              <Box sx={{ flex: '1 1 180px', minWidth: 150 }}>
+                <StatCard
+                  title="Quotation Sent"
+                  value={stats.quotation_count}
+                  icon={<Handshake />}
+                />
+              </Box>
+              <Box sx={{ flex: '1 1 180px', minWidth: 150 }}>
+                <StatCard
+                  title="Contract Sent"
+                  value={stats.contract_count}
+                  icon={<Handshake />}
+                />
+              </Box>
+              <Box sx={{ flex: '1 1 180px', minWidth: 150 }}>
+                <StatCard
+                  title="Won"
+                  value={stats.won_count}
+                  icon={<Handshake />}
+                  color="success.main"
+                />
+              </Box>
+              <Box sx={{ flex: '1 1 180px', minWidth: 150 }}>
+                <StatCard
+                  title="Lost"
+                  value={stats.lost_count}
+                  icon={<Handshake />}
+                  color="error.main"
+                />
+              </Box>
+            </Box>
+          </Paper>
+        </Box>
       )}
 
-      {/* My Tasks */}
-      <Grid container spacing={3}>
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2 }}>
+      {/* My Tasks and Monthly Summary */}
+      <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+        <Box sx={{ flex: '1 1 400px', minWidth: 350 }}>
+          <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom>
               My Recent Tasks
             </Typography>
@@ -263,14 +286,14 @@ const Dashboard: React.FC = () => {
                       primary={task.title}
                       secondary={
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
-                          <Chip 
-                            label={task.priority} 
-                            size="small" 
+                          <Chip
+                            label={task.priority}
+                            size="small"
                             color={getTaskPriorityColor(task.priority) as any}
                           />
-                          <Chip 
-                            label={task.status} 
-                            size="small" 
+                          <Chip
+                            label={task.status}
+                            size="small"
                             variant="outlined"
                           />
                           {task.due_date && (
@@ -290,42 +313,42 @@ const Dashboard: React.FC = () => {
               </Typography>
             )}
           </Paper>
-        </Grid>
+        </Box>
 
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2 }}>
+        <Box sx={{ flex: '1 1 300px', minWidth: 250 }}>
+          <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom>
               Monthly Summary
             </Typography>
-            <Grid container spacing={2}>
-              <Grid item xs={12}>
-                <StatCard
-                  title="Monthly Revenue"
-                  value={stats.monthly_revenue}
-                  icon={<TrendingUp />}
-                  format="currency"
-                  color="success.main"
-                />
-              </Grid>
-              <Grid item xs={6}>
-                <StatCard
-                  title="New Opportunities"
-                  value={stats.monthly_new_opportunities}
-                  icon={<Handshake />}
-                />
-              </Grid>
-              <Grid item xs={6}>
-                <StatCard
-                  title="Closed Deals"
-                  value={stats.monthly_closed_deals}
-                  icon={<Assignment />}
-                  color="success.main"
-                />
-              </Grid>
-            </Grid>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <StatCard
+                title="Monthly Revenue"
+                value={stats.monthly_revenue}
+                icon={<TrendingUp />}
+                format="currency"
+                color="success.main"
+              />
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <Box sx={{ flex: 1 }}>
+                  <StatCard
+                    title="New Opportunities"
+                    value={stats.monthly_new_opportunities}
+                    icon={<Handshake />}
+                  />
+                </Box>
+                <Box sx={{ flex: 1 }}>
+                  <StatCard
+                    title="Closed Deals"
+                    value={stats.monthly_closed_deals}
+                    icon={<Assignment />}
+                    color="success.main"
+                  />
+                </Box>
+              </Box>
+            </Box>
           </Paper>
-        </Grid>
-      </Grid>
+        </Box>
+      </Box>
     </Box>
   );
 };

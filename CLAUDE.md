@@ -63,6 +63,36 @@ Use this agent when:
 - Adding email tracking features
 - Working with files: `crm_app/services/email_service.py`, email templates
 
+#### 7. **frontend-auth-specialist**
+Use this agent when:
+- Implementing JWT token management
+- Creating login/logout flows
+- Setting up protected routes in React
+- Managing authentication state with Context API
+- Implementing role-based component rendering
+- Adding session management features
+- Working with files: `bmasia-crm-frontend/src/contexts/AuthContext.tsx`, auth components
+
+#### 8. **ui-ux-designer**
+Use this agent when:
+- Creating consistent design systems
+- Implementing responsive layouts
+- Adding loading states and error handling
+- Designing navigation flows
+- Implementing accessibility features
+- Creating animations and transitions
+- Working with files: UI components, styles, layouts in `bmasia-crm-frontend/`
+
+#### 9. **data-visualization-expert**
+Use this agent when:
+- Building interactive dashboards with Recharts
+- Creating sales pipeline visualizations
+- Designing KPI cards and metrics displays
+- Implementing real-time data updates
+- Creating exportable reports with charts
+- Building comparison and trend analysis views
+- Working with files: Dashboard components, chart components in `bmasia-crm-frontend/`
+
 ## Key Project Files and Locations
 
 ### Backend (Django)
@@ -154,7 +184,11 @@ npm run build  # Production build
 | Export data to Excel | django-admin-expert |
 | Add database indexes | database-optimizer |
 | Create email templates | email-automation-specialist |
-| Build analytics charts | react-dashboard-builder |
+| Build analytics charts | data-visualization-expert |
+| Set up user authentication | frontend-auth-specialist |
+| Design responsive layouts | ui-ux-designer |
+| Create KPI dashboards | data-visualization-expert |
+| Implement role-based views | frontend-auth-specialist |
 
 ## Best Practices
 
