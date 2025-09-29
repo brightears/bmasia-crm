@@ -586,11 +586,17 @@ class AuthViewSet(viewsets.ViewSet):
         try:
             refresh_token = request.data.get('refresh')
             if refresh_token:
-                # Blacklist the refresh token
+                # Try to blacklist the refresh token if blacklisting is available
                 token = RefreshToken(refresh_token)
-                token.blacklist()
+                # Only attempt blacklisting if the token_blacklist app is available
+                if hasattr(token, 'blacklist'):
+                    try:
+                        token.blacklist()
+                    except Exception:
+                        # Blacklisting failed (probably missing database tables), continue anyway
+                        pass
         except Exception:
-            pass  # Continue with logout even if token blacklisting fails
+            pass  # Continue with logout even if token handling fails
 
         if request.user.is_authenticated:
             # Log logout action
