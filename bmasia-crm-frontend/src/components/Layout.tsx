@@ -125,6 +125,8 @@ const navigationConfig = {
         title: 'Sales Operations',
         items: [
           { text: 'Quotes', icon: <QuoteIcon />, path: '/quotes' },
+          { text: 'Contracts', icon: <AssignmentIcon />, path: '/contracts' },
+          { text: 'Invoices', icon: <ReceiptIcon />, path: '/invoices' },
           { text: 'Targets', icon: <TableChart />, path: '/targets' },
           { text: 'Tasks', icon: <TaskAltIcon />, path: '/tasks' },
         ],

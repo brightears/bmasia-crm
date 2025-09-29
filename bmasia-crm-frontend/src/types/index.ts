@@ -52,6 +52,9 @@ export interface Company {
   state?: string;
   postal_code?: string;
   full_address?: string;
+  phone?: string;
+  email?: string;
+  soundtrack_account_id?: string;
   total_contract_value: number;
   contacts: Contact[];
   subscription_plans: SubscriptionPlan[];

@@ -8,6 +8,8 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Companies from './pages/Companies';
 import CompanyDetail from './pages/CompanyDetail';
+import CompanyNew from './pages/CompanyNew';
+import CompanyEdit from './pages/CompanyEdit';
 import Opportunities from './pages/Opportunities';
 import OpportunityDetail from './pages/OpportunityDetail';
 import Tasks from './pages/Tasks';
@@ -74,10 +76,26 @@ function App() {
             }
           />
           <Route
+            path="/companies/new"
+            element={
+              <ProtectedRoute requiredModule="companies">
+                <CompanyNew />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/companies/:id"
             element={
               <ProtectedRoute requiredModule="companies">
                 <CompanyDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/companies/:id/edit"
+            element={
+              <ProtectedRoute requiredModule="companies">
+                <CompanyEdit />
               </ProtectedRoute>
             }
           />

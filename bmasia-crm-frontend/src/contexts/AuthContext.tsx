@@ -20,9 +20,38 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     tokenExpiry: null,
   });
 
+  // Development bypass
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  const bypassAuth = process.env.REACT_APP_BYPASS_AUTH === 'true';
+
   // Initialize auth state from stored data
   useEffect(() => {
     const initializeAuth = async () => {
+      // Development bypass
+      if (isDevelopment && bypassAuth) {
+        console.log('AuthContext: Development mode - bypassing authentication');
+        setAuthState({
+          user: {
+            id: 'dev-user',
+            username: 'developer',
+            email: 'dev@bmasia.com',
+            first_name: 'Developer',
+            last_name: 'User',
+            role: 'Admin',
+            is_active: true,
+            date_joined: new Date().toISOString(),
+            permissions: ['*'],
+            groups: ['admin'],
+          },
+          accessToken: 'dev-token',
+          refreshToken: 'dev-refresh',
+          isAuthenticated: true,
+          loading: false,
+          tokenExpiry: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
+        });
+        return;
+      }
+
       try {
         const accessToken = AuthService.getAccessToken();
         const refreshToken = AuthService.getRefreshToken();

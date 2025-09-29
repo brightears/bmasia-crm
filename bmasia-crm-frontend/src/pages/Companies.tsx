@@ -28,6 +28,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { Company, ApiResponse } from '../types';
 import ApiService from '../services/api';
+import CompanyForm from '../components/CompanyForm';
 
 const Companies: React.FC = () => {
   const navigate = useNavigate();
@@ -38,6 +39,8 @@ const Companies: React.FC = () => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [totalCount, setTotalCount] = useState(0);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingCompany, setEditingCompany] = useState<Company | null>(null);
 
   useEffect(() => {
     loadCompanies();
@@ -81,6 +84,27 @@ const Companies: React.FC = () => {
     navigate(`/companies/${id}`);
   };
 
+  const handleCreateCompany = () => {
+    setEditingCompany(null);
+    setFormOpen(true);
+  };
+
+  const handleEditCompany = (company: Company) => {
+    setEditingCompany(company);
+    setFormOpen(true);
+  };
+
+  const handleFormClose = () => {
+    setFormOpen(false);
+    setEditingCompany(null);
+  };
+
+  const handleFormSave = () => {
+    setFormOpen(false);
+    setEditingCompany(null);
+    loadCompanies(); // Refresh the list
+  };
+
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -90,7 +114,7 @@ const Companies: React.FC = () => {
         <Button
           variant="contained"
           startIcon={<Add />}
-          onClick={() => navigate('/companies/new')}
+          onClick={handleCreateCompany}
         >
           Add Company
         </Button>
@@ -211,7 +235,7 @@ const Companies: React.FC = () => {
                     </IconButton>
                     <IconButton
                       size="small"
-                      onClick={() => navigate(`/companies/${company.id}/edit`)}
+                      onClick={() => handleEditCompany(company)}
                       title="Edit Company"
                     >
                       <Edit />
@@ -232,6 +256,14 @@ const Companies: React.FC = () => {
           onRowsPerPageChange={handleChangeRowsPerPage}
         />
       </TableContainer>
+
+      {/* Company Form Modal */}
+      <CompanyForm
+        open={formOpen}
+        onClose={handleFormClose}
+        onSave={handleFormSave}
+        company={editingCompany}
+      />
     </Box>
   );
 };

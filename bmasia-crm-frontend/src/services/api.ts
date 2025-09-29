@@ -4,10 +4,12 @@ import {
   Contract, Invoice, DashboardStats, AuditLog, ApiResponse
 } from '../types';
 import AuthService from './authService';
+import { MockApiService } from './mockData';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://bmasia-crm.onrender.com';
 
 class ApiService {
+  private useMockData = process.env.REACT_APP_BYPASS_AUTH === 'true' && process.env.NODE_ENV === 'development';
   private api = axios.create({
     baseURL: `${API_BASE_URL}/api/v1`,
     headers: {
@@ -19,7 +21,12 @@ class ApiService {
     // Add token to requests
     this.api.interceptors.request.use((config) => {
       const token = AuthService.getAccessToken();
-      if (token && !AuthService.isTokenExpired(token)) {
+      const bypassAuth = process.env.REACT_APP_BYPASS_AUTH === 'true';
+
+      if (bypassAuth && process.env.NODE_ENV === 'development') {
+        // Use development bypass - no authorization header needed
+        console.log('API: Development mode - bypassing authorization');
+      } else if (token && !AuthService.isTokenExpired(token)) {
         config.headers.Authorization = `Bearer ${token}`;
       }
       return config;
@@ -29,7 +36,13 @@ class ApiService {
     this.api.interceptors.response.use(
       (response) => response,
       async (error) => {
+        const bypassAuth = process.env.REACT_APP_BYPASS_AUTH === 'true';
         const originalRequest = error.config;
+
+        if (bypassAuth && process.env.NODE_ENV === 'development' && error.response?.status === 401) {
+          console.warn('API: Ignoring 401 error in development mode');
+          return Promise.reject(error);
+        }
 
         if (error.response?.status === 401 && !originalRequest._retry) {
           originalRequest._retry = true;
@@ -69,21 +82,41 @@ class ApiService {
 
   // Companies
   async getCompanies(params?: any): Promise<ApiResponse<Company>> {
+    if (this.useMockData) {
+      console.log('ApiService: Using mock data for companies');
+      return MockApiService.getCompanies(params);
+    }
+
     const response = await this.api.get<ApiResponse<Company>>('/companies/', { params });
     return response.data;
   }
 
   async getCompany(id: string): Promise<Company> {
+    if (this.useMockData) {
+      console.log('ApiService: Using mock data for company detail');
+      return MockApiService.getCompany(id);
+    }
+
     const response = await this.api.get<Company>(`/companies/${id}/`);
     return response.data;
   }
 
   async createCompany(data: Partial<Company>): Promise<Company> {
+    if (this.useMockData) {
+      console.log('ApiService: Using mock data for company creation');
+      return MockApiService.createCompany(data);
+    }
+
     const response = await this.api.post<Company>('/companies/', data);
     return response.data;
   }
 
   async updateCompany(id: string, data: Partial<Company>): Promise<Company> {
+    if (this.useMockData) {
+      console.log('ApiService: Using mock data for company update');
+      return MockApiService.updateCompany(id, data);
+    }
+
     const response = await this.api.put<Company>(`/companies/${id}/`, data);
     return response.data;
   }
@@ -99,6 +132,11 @@ class ApiService {
 
   // Contacts
   async getContacts(params?: any): Promise<ApiResponse<Contact>> {
+    if (this.useMockData) {
+      console.log('ApiService: Using mock data for contacts');
+      return MockApiService.getContacts(params);
+    }
+
     const response = await this.api.get<ApiResponse<Contact>>('/contacts/', { params });
     return response.data;
   }
@@ -205,6 +243,11 @@ class ApiService {
 
   // Opportunities
   async getOpportunities(params?: any): Promise<ApiResponse<Opportunity>> {
+    if (this.useMockData) {
+      console.log('ApiService: Using mock data for opportunities');
+      return MockApiService.getOpportunities(params);
+    }
+
     const response = await this.api.get<ApiResponse<Opportunity>>('/opportunities/', { params });
     return response.data;
   }
@@ -275,6 +318,11 @@ class ApiService {
 
   // Contracts
   async getContracts(params?: any): Promise<ApiResponse<Contract>> {
+    if (this.useMockData) {
+      console.log('ApiService: Using mock data for contracts');
+      return MockApiService.getContracts(params);
+    }
+
     const response = await this.api.get<ApiResponse<Contract>>('/contracts/', { params });
     return response.data;
   }
