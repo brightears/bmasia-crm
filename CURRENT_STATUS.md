@@ -1,92 +1,177 @@
-# BMAsia CRM - Current Project Status
+# BMAsia CRM - Current Status
 
-**Last Updated:** June 11, 2025  
-**Current Phase:** Frontend UI/UX Improvements Complete  
-**Deployment:** https://bmasia-crm.onrender.com (Auto-deploy from main branch)
+## Last Updated: September 29, 2025
 
-## ✅ Recently Completed (v1.1-admin-ui-improvements)
+## ✅ Project Status: PHASE 3 COMPLETE - Sales CRM Fully Operational
 
-### Admin Interface Optimization Session
-**Context:** User reported horizontal overflow issues in Django admin inline sections, making the interface difficult to use on standard screen widths.
+### 🎯 Current Checkpoint: v3.0-complete-sales-crm
 
-**Issues Fixed:**
-1. **Horizontal Overflow Problem** - Inline tables (Contacts, Notes, Subscription Tiers) were extending beyond viewport
-2. **Redundant Information** - Duplicate Notes sections and unnecessary field displays
-3. **Poor Field Sizing** - Numeric fields taking too much horizontal space
-4. **Subscription Display Issues** - Redundant totals and missing date information
+The BMAsia CRM is now a fully functional sales and revenue management system with all core features implemented and deployed to production.
 
-**Solutions Implemented:**
-1. **Streamlined Contact Fields** (`crm_app/admin.py:24`)
-   - Removed: `phone`, `contact_type`, `is_primary`, `is_active`
-   - Kept: `name`, `email`, `title`
+## 🚀 What's Working Now
 
-2. **Simplified Notes Display** (`crm_app/admin.py:30`)
-   - Removed: `note_type`, `priority` 
-   - Kept: `title`, `text`
-   - Eliminated duplicate Notes inline section
+### Sales Features (100% Complete)
+- ✅ **Companies** - Full CRUD with Soundtrack integration
+- ✅ **Contacts** - Detailed profiles and communication tracking
+- ✅ **Opportunities** - Pipeline management with drag-and-drop
+- ✅ **Quotes** - Professional quotes with PDF generation
+- ✅ **Contracts** - Renewal tracking and management
+- ✅ **Invoices** - Payment tracking and reporting
+- ✅ **Sales Targets** - Advanced analytics and forecasting
+- ✅ **Tasks** - Kanban board and team collaboration
+- ✅ **Activities** - Comprehensive activity tracking
 
-3. **Optimized Subscription Tiers** (`crm_app/admin.py:42`)
-   - Added back `billing_period` (important business info)
-   - Reduced field widths for `zone_count` and `price_per_zone` to 80px
-   - Maintained: `tier`, `zone_count`, `billing_period`, `price_per_zone`, `currency`
+### Technical Features
+- ✅ JWT Authentication working
+- ✅ Role-based permissions configured
+- ✅ PostgreSQL database on Render
+- ✅ Email system configured
+- ✅ PDF generation operational
+- ✅ Real-time calculations in forms
+- ✅ Mobile responsive design
+- ✅ Dark mode support
 
-4. **Enhanced Subscription Summary** (`crm_app/admin.py:231-248`)
-   - Removed redundant "(Total: X zones)" text
-   - Added subscription date ranges (dd/mm/yyyy format)
-   - Example: "Soundtrack Essential (Serviced): 4 zones (01/06/2025 - 31/05/2026)"
+## 🔗 Access Information
 
-### Technical Details
-- **Files Modified:** `crm_app/admin.py`
-- **Deployment Method:** Git push to main branch → Auto-deploy on Render
-- **Testing:** Live testing on https://bmasia-crm.onrender.com
-- **Browser Compatibility:** Improved mobile and tablet responsiveness
+### Production URLs
+- **Frontend**: https://bmasia-crm-frontend.onrender.com
+- **Backend API**: https://bmasia-crm.onrender.com/api/v1/
+- **Admin Panel**: https://bmasia-crm.onrender.com/admin/
 
-### Git Commits Made
-```
-6c34dc6 - Improve subscription summary display by removing redundant total and adding dates
-2e07eab - Remove duplicate Notes inline section from Company admin  
-8444c6b - Remove note_type field from Notes inline for simpler layout
-cc47392 - Add billing_period back to subscription tiers and reduce field widths for better layout
-a7385c8 - Fix horizontal overflow in admin inline sections by reducing displayed fields
-```
+### Login Credentials
+- **Username**: admin
+- **Password**: bmasia123
 
-## 🎯 Current State
+## 📊 Completed Phases
 
-### Working Features
-- **Soundtrack API Integration** - Full GraphQL integration with real-time zone status
-- **Admin Interface** - Clean, responsive, no horizontal overflow
-- **Zone Management** - Auto-sync from Soundtrack API with status badges
-- **Company Management** - Streamlined inline sections for better UX
-- **Subscription Tracking** - Clear display with date ranges
+### Phase 1: Core CRM ✅
+- Opportunities Management
+- Contact Management
+- Activity Logging System
 
-### Live URLs
-- **Main Application:** https://bmasia-crm.onrender.com
-- **Admin Interface:** https://bmasia-crm.onrender.com/admin/
-- **Debug Endpoint:** https://bmasia-crm.onrender.com/debug-soundtrack/
+### Phase 2: Revenue Management ✅
+- Contract Management
+- Invoice Tracking
+- Task Management
 
-### Next Possible Improvements
-1. **Frontend React App** - Currently using Django admin, could build React frontend
-2. **Dashboard Analytics** - Add visual charts and reporting
-3. **User Authentication** - Currently disabled for development
-4. **Mobile App** - Consider React Native for mobile access
-5. **API Documentation** - Add Swagger/OpenAPI docs
-6. **Performance Optimization** - Database indexing, caching
+### Phase 3: Missing Features ✅
+- Company Management Forms
+- Quotes System
+- Sales Targets with Analytics
+- Permission Fixes
 
-## 📋 Project Context for Claude
+## 🔄 Recent Changes (September 29, 2025)
 
-When resuming work:
-1. **Current Focus:** Frontend improvements in Django admin interface
-2. **Deployment:** Auto-deploys from main branch to Render
-3. **Testing:** Use live site at https://bmasia-crm.onrender.com
-4. **Key Files:** `crm_app/admin.py` for UI changes, `crm_app/models.py` for data structure
-5. **User Preferences:** Simplified interfaces, no unnecessary fields, mobile-friendly
-6. **Workflow:** Make changes → git commit → git push → auto-deploy → test live
+### Latest Fixes
+1. **Fixed "Access Denied" for Quotes and Targets**
+   - Added permissions to all roles
+   - Updated modulePermissions mapping
 
-### Commands for Quick Setup
+2. **Fixed "Failed to load companies"**
+   - Disabled REACT_APP_BYPASS_AUTH
+   - Connected to real backend
+
+3. **Navigation Updates**
+   - Added Contracts and Invoices to Sales role menu
+   - All features now accessible to appropriate roles
+
+### Latest Features Added
+- Comprehensive Quotes management with line items
+- Sales Targets with predictive analytics
+- Company management with full CRUD
+- Advanced visualizations (gauges, heat maps, charts)
+- Export functionality (PDF, Excel, PNG)
+
+## 🎯 Next Phase: Marketing Features (Phase 4)
+
+### Planned Components
+1. **Lead Management**
+   - Lead capture and scoring
+   - Nurturing workflows
+   - Conversion tracking
+
+2. **Email Campaigns**
+   - Campaign builder
+   - Template management
+   - Segmentation
+   - Analytics
+
+3. **Marketing Analytics**
+   - Campaign performance
+   - ROI tracking
+   - Conversion funnels
+
+## 🛠️ Quick Commands
+
+### Local Development
 ```bash
-cd "/Users/benorbe/Library/Mobile Documents/com~apple~CloudDocs/Documents/Coding Projects/BMAsia CRM"
-git status                    # Check current state
-git log --oneline -5         # See recent commits
+# Frontend
+cd bmasia-crm-frontend
+npm start
+
+# Backend
+source venv/bin/activate
+python manage.py runserver
 ```
 
-**Ready for next development phase!** 🚀
+### Deployment
+```bash
+# Push to GitHub (auto-deploys)
+git add -A
+git commit -m "Your message"
+git push
+
+# Manual deployment trigger
+curl -X POST -H "Authorization: Bearer [RENDER_API_KEY]" \
+  "https://api.render.com/v1/services/[SERVICE_ID]/deploys"
+```
+
+### Rollback to This Checkpoint
+```bash
+git checkout v3.0-complete-sales-crm
+```
+
+## 📝 Important Files
+
+### Configuration
+- `.env` - Environment variables
+- `bmasia_crm/settings.py` - Django settings
+- `package.json` - Frontend dependencies
+
+### Documentation
+- `CRM_PROJECT_STATUS_2025_09.md` - Detailed status report
+- `CLAUDE.md` - AI agent instructions
+- `deploy_instructions.md` - Deployment guide
+
+## ⚠️ Known Limitations
+
+### Backend
+- No real-time notifications yet
+- Limited webhook support
+- Basic caching implementation
+
+### Frontend
+- Bundle size needs optimization
+- Limited offline support
+- No progressive web app features yet
+
+## 🔐 Security Notes
+
+- JWT tokens expire after 24 hours
+- CORS configured for production URLs
+- Environment variables properly secured
+- Database connections encrypted
+
+## 📞 Support
+
+For issues or questions:
+1. Check error logs in Render dashboard
+2. Review Django admin panel for data issues
+3. Use browser DevTools for frontend debugging
+
+---
+
+**Project Version**: 3.0
+**Git Tag**: v3.0-complete-sales-crm
+**Status**: Production Ready
+**Next Milestone**: Marketing Features Implementation
