@@ -7,7 +7,7 @@ import {
   Button,
   TextField,
   Box,
-  Grid,
+  GridLegacy as Grid,
   FormControl,
   InputLabel,
   Select,
@@ -28,7 +28,7 @@ import {
   Groups as GroupsIcon,
   Slideshow as SlideshowIcon,
   Description as ProposalIcon,
-  FollowUp as FollowUpIcon,
+  Update as FollowUpIcon,
   RequestQuote as QuoteIcon,
   Assignment as ContractIcon,
   MoreHoriz as OtherIcon,
@@ -135,6 +135,7 @@ const ActivityForm: React.FC<ActivityFormProps> = ({
     if (opportunity && open) {
       loadContactsForOpportunity(opportunity.id);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opportunity, open]);
 
   const loadOpportunities = async () => {

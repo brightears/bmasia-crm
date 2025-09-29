@@ -14,7 +14,7 @@ import Tasks from './pages/Tasks';
 import Contracts from './pages/Contracts';
 import Invoices from './pages/Invoices';
 import Contacts from './pages/Contacts';
-import LoadingSkeleton from './components/LoadingSkeleton';
+// import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
 const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => (

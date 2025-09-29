@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: bmasia-crm-frontend
+    env: static
+    buildCommand: cd bmasia-crm-frontend && npm ci && npm run build
+    staticPublishPath: ./bmasia-crm-frontend/build
+    pullRequestPreviewsEnabled: false
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
+      - key: NPM_CONFIG_PRODUCTION
+        value: false
+      - key: CI
+        value: false

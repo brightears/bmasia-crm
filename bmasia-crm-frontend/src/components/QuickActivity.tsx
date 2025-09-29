@@ -28,7 +28,7 @@ import {
   Groups as GroupsIcon,
   Slideshow as SlideshowIcon,
   Description as ProposalIcon,
-  FollowUp as FollowUpIcon,
+  Update as FollowUpIcon,
   RequestQuote as QuoteIcon,
   Assignment as ContractIcon,
   MoreHoriz as OtherIcon,

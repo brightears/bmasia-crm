@@ -9,7 +9,7 @@ import {
   Typography,
   Avatar,
   Chip,
-  Grid,
+  GridLegacy as Grid,
   Card,
   CardContent,
   IconButton,

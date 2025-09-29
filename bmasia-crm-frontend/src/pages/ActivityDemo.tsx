@@ -9,7 +9,7 @@ import {
   CardContent,
   Divider,
 } from '@mui/material';
-import { Grid } from '@mui/material';
+import { GridLegacy as Grid } from '@mui/material';
 import {
   Add as AddIcon,
   Timeline as TimelineIcon,

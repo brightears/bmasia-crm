@@ -13,7 +13,7 @@ import {
   DialogContent,
   DialogTitle,
   useTheme,
-  Grid,
+  GridLegacy as Grid,
   CircularProgress,
   Alert,
 } from '@mui/material';
@@ -420,7 +420,7 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
     setDetailDialogOpen(true);
   };
 
-  const handleStageChange = async (opportunityId: string, newStage: string) => {
+  const handleStageChange = async (opportunityId: string, newStage: 'Contacted' | 'Quotation Sent' | 'Contract Sent' | 'Won' | 'Lost') => {
     try {
       setUpdating(true);
       setError('');
@@ -445,7 +445,7 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
     setDraggedOver(null);
   };
 
-  const handleDrop = (e: React.DragEvent, newStage: string) => {
+  const handleDrop = (e: React.DragEvent, newStage: 'Contacted' | 'Quotation Sent' | 'Contract Sent' | 'Won' | 'Lost') => {
     e.preventDefault();
     setDraggedOver(null);
     
@@ -528,7 +528,7 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
             }}
             onDragOver={(e) => handleDragOver(e, stage.id)}
             onDragLeave={handleDragLeave}
-            onDrop={(e) => handleDrop(e, stage.id)}
+            onDrop={(e) => handleDrop(e, stage.id as 'Contacted' | 'Quotation Sent' | 'Contract Sent' | 'Won' | 'Lost')}
           >
             {/* Stage Header */}
             <Box sx={{ mb: 2 }}>
@@ -583,7 +583,7 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
                     opportunity={opportunity}
                     onView={handleOpportunityView}
                     onEdit={onOpportunityEdit}
-                    onStageChange={handleStageChange}
+                    onStageChange={(id: string, stage: string) => handleStageChange(id, stage as 'Contacted' | 'Quotation Sent' | 'Contract Sent' | 'Won' | 'Lost')}
                   />
                 ))
               )}

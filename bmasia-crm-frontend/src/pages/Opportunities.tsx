@@ -21,7 +21,7 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Grid,
+  GridLegacy as Grid,
   Tabs,
   Tab,
   Menu,

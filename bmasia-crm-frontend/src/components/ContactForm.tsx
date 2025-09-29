@@ -6,7 +6,7 @@ import {
   DialogActions,
   Button,
   TextField,
-  Grid,
+  GridLegacy as Grid,
   FormControl,
   InputLabel,
   Select,
@@ -139,21 +139,21 @@ const ContactForm: React.FC<ContactFormProps> = ({
     }
 
     if (formData.phone && formData.phone.trim()) {
-      const phoneRegex = /^[\+]?[0-9\s\-\(\)]+$/;
+      const phoneRegex = /^[+]?[0-9\s-()]+$/;
       if (!phoneRegex.test(formData.phone)) {
         newErrors.phone = 'Please enter a valid phone number';
       }
     }
 
     if (formData.mobile && formData.mobile.trim()) {
-      const phoneRegex = /^[\+]?[0-9\s\-\(\)]+$/;
+      const phoneRegex = /^[+]?[0-9\s-()]+$/;
       if (!phoneRegex.test(formData.mobile)) {
         newErrors.mobile = 'Please enter a valid mobile number';
       }
     }
 
     if (formData.linkedin_url && formData.linkedin_url.trim()) {
-      const linkedinRegex = /^https?:\/\/(www\.)?linkedin\.com\/in\/[a-zA-Z0-9\-]+\/?$/;
+      const linkedinRegex = /^https?:\/\/(www\.)?linkedin\.com\/in\/[a-zA-Z0-9-]+\/?$/;
       if (!linkedinRegex.test(formData.linkedin_url)) {
         newErrors.linkedin_url = 'Please enter a valid LinkedIn profile URL';
       }

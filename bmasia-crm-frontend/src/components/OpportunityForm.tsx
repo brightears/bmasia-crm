@@ -7,7 +7,7 @@ import {
   Button,
   TextField,
   Box,
-  Grid,
+  GridLegacy as Grid,
   FormControl,
   InputLabel,
   Select,
@@ -89,8 +89,8 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
     notes: '',
     competitors: '',
     pain_points: '',
-    expected_close_date: null,
-    follow_up_date: null,
+    expected_close_date: undefined,
+    follow_up_date: undefined,
   });
 
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -111,8 +111,8 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
       if (mode === 'edit' && opportunity) {
         setFormData({
           ...opportunity,
-          expected_close_date: opportunity.expected_close_date || null,
-          follow_up_date: opportunity.follow_up_date || null,
+          expected_close_date: opportunity.expected_close_date || undefined,
+          follow_up_date: opportunity.follow_up_date || undefined,
         });
         loadRecentActivities(opportunity.id);
       } else {
@@ -126,8 +126,8 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
           notes: '',
           competitors: '',
           pain_points: '',
-          expected_close_date: null,
-          follow_up_date: null,
+          expected_close_date: undefined,
+          follow_up_date: undefined,
         });
       }
       setError('');

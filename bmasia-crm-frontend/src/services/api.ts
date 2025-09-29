@@ -1,4 +1,4 @@
-import axios, { AxiosResponse } from 'axios';
+import axios from 'axios';
 import {
   User, Company, Contact, Note, Task, Opportunity, OpportunityActivity,
   Contract, Invoice, DashboardStats, AuditLog, ApiResponse
@@ -324,4 +324,5 @@ class ApiService {
   }
 }
 
-export default new ApiService();
+const apiService = new ApiService();
+export default apiService;
