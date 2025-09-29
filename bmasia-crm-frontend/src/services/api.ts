@@ -213,8 +213,32 @@ class ApiService {
     return response.data;
   }
 
+  async getOpportunityActivity(id: string): Promise<OpportunityActivity> {
+    const response = await this.api.get<OpportunityActivity>(`/opportunity-activities/${id}/`);
+    return response.data;
+  }
+
   async createOpportunityActivity(data: Partial<OpportunityActivity>): Promise<OpportunityActivity> {
     const response = await this.api.post<OpportunityActivity>('/opportunity-activities/', data);
+    return response.data;
+  }
+
+  async updateOpportunityActivity(id: string, data: Partial<OpportunityActivity>): Promise<OpportunityActivity> {
+    const response = await this.api.put<OpportunityActivity>(`/opportunity-activities/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteOpportunityActivity(id: string): Promise<void> {
+    await this.api.delete(`/opportunity-activities/${id}/`);
+  }
+
+  async getActivitiesByOpportunity(opportunityId: string): Promise<OpportunityActivity[]> {
+    const response = await this.api.get<OpportunityActivity[]>(`/opportunities/${opportunityId}/activities/`);
+    return response.data;
+  }
+
+  async getActivitiesByContact(contactId: string): Promise<OpportunityActivity[]> {
+    const response = await this.api.get<OpportunityActivity[]>(`/contacts/${contactId}/activities/`);
     return response.data;
   }
 

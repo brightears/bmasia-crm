@@ -68,16 +68,19 @@ export interface Contact {
   id: string;
   company: string;
   company_name: string;
-  name: string;
+  first_name: string;
+  last_name: string;
+  name: string; // computed full name
   email: string;
   phone?: string;
+  mobile?: string;
   title?: string;
   department?: string;
-  contact_type: 'Primary' | 'Technical' | 'Billing' | 'Decision Maker' | 'Other';
-  is_primary: boolean;
-  is_active: boolean;
+  status: 'Active' | 'Inactive';
+  is_decision_maker: boolean;
   linkedin_url?: string;
   notes?: string;
+  preferred_contact_method?: 'Email' | 'Phone' | 'Mobile' | 'LinkedIn';
   last_contacted?: string;
   created_at: string;
   updated_at: string;
@@ -166,6 +169,9 @@ export interface OpportunityActivity {
   subject: string;
   description: string;
   duration_minutes?: number;
+  date: string;
+  completed: boolean;
+  next_action_date?: string;
   outcome?: string;
   next_steps?: string;
   created_at: string;

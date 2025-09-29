@@ -25,6 +25,10 @@ import {
   AttachMoney as MoneyIcon,
   Person as PersonIcon,
   Business as BusinessIcon,
+  Timeline as TimelineIcon,
+  Phone as PhoneIcon,
+  Email as EmailIcon,
+  Groups as GroupsIcon,
 } from '@mui/icons-material';
 import { Opportunity } from '../types';
 import ApiService from '../services/api';
@@ -220,6 +224,37 @@ const OpportunityCard: React.FC<{
 
   const stageColor = stageConfig.find(s => s.id === opportunity.stage)?.color || '#2196f3';
 
+  const getLastActivityDate = (): string => {
+    if (!opportunity.recent_activities || opportunity.recent_activities.length === 0) {
+      return opportunity.last_contact_date || 'No activity';
+    }
+    const lastActivity = opportunity.recent_activities[0];
+    const date = new Date(lastActivity.date || lastActivity.created_at);
+    const now = new Date();
+    const diffTime = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  };
+
+  const getLastActivityIcon = () => {
+    if (!opportunity.recent_activities || opportunity.recent_activities.length === 0) {
+      return TimelineIcon;
+    }
+    const lastActivity = opportunity.recent_activities[0];
+    switch (lastActivity.activity_type) {
+      case 'Call': return PhoneIcon;
+      case 'Email': return EmailIcon;
+      case 'Meeting': case 'Demo': return GroupsIcon;
+      default: return TimelineIcon;
+    }
+  };
+
+  const LastActivityIcon = getLastActivityIcon();
+
   return (
     <Card 
       sx={{ 
@@ -270,10 +305,10 @@ const OpportunityCard: React.FC<{
         
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <Avatar 
-              sx={{ 
-                width: 24, 
-                height: 24, 
+            <Avatar
+              sx={{
+                width: 24,
+                height: 24,
                 fontSize: '0.75rem',
                 backgroundColor: stageColor
               }}
@@ -284,11 +319,38 @@ const OpportunityCard: React.FC<{
               {opportunity.days_in_stage}d
             </Typography>
           </Box>
-          
+
+          {/* Activity Indicator */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            <LastActivityIcon sx={{ fontSize: 12, color: 'text.secondary' }} />
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
+              {getLastActivityDate()}
+            </Typography>
+          </Box>
+        </Box>
+
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+            {opportunity.recent_activities && opportunity.recent_activities.length > 0 && (
+              <Chip
+                label={`${opportunity.recent_activities.length} activities`}
+                size="small"
+                variant="outlined"
+                sx={{
+                  height: 16,
+                  fontSize: '0.65rem',
+                  borderColor: stageColor,
+                  color: stageColor,
+                  '& .MuiChip-label': { px: 1 }
+                }}
+              />
+            )}
+          </Box>
+
           <Box>
             <Tooltip title="View Details">
-              <IconButton 
-                size="small" 
+              <IconButton
+                size="small"
                 onClick={(e) => {
                   e.stopPropagation();
                   onView(opportunity);
@@ -298,8 +360,8 @@ const OpportunityCard: React.FC<{
               </IconButton>
             </Tooltip>
             <Tooltip title="Edit">
-              <IconButton 
-                size="small" 
+              <IconButton
+                size="small"
                 onClick={(e) => {
                   e.stopPropagation();
                   onEdit(opportunity);

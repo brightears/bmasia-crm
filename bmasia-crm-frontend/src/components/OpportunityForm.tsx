@@ -23,12 +23,15 @@ import {
 import {
   Close as CloseIcon,
   AttachMoney as MoneyIcon,
+  Add as AddIcon,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFnsV2';
-import { Opportunity, Company, User } from '../types';
+import { Opportunity, Company, User, OpportunityActivity } from '../types';
 import ApiService from '../services/api';
+import ActivityForm from './ActivityForm';
+import ActivityTimeline from './ActivityTimeline';
 
 interface OpportunityFormProps {
   open: boolean;
@@ -97,6 +100,8 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
   const [usersLoading, setUsersLoading] = useState(false);
   const [error, setError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [activityFormOpen, setActivityFormOpen] = useState(false);
+  const [recentActivities, setRecentActivities] = useState<OpportunityActivity[]>([]);
 
   useEffect(() => {
     if (open) {
@@ -109,6 +114,7 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
           expected_close_date: opportunity.expected_close_date || null,
           follow_up_date: opportunity.follow_up_date || null,
         });
+        loadRecentActivities(opportunity.id);
       } else {
         setFormData({
           name: '',
@@ -150,6 +156,15 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
       console.error('Failed to load users:', err);
     } finally {
       setUsersLoading(false);
+    }
+  };
+
+  const loadRecentActivities = async (opportunityId: string) => {
+    try {
+      const activities = await ApiService.getActivitiesByOpportunity(opportunityId);
+      setRecentActivities(activities.slice(0, 3)); // Show only 3 most recent
+    } catch (err) {
+      console.error('Failed to load recent activities:', err);
     }
   };
 
@@ -234,6 +249,13 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
     return stageOptions.find(stage => stage.value === formData.stage);
   };
 
+  const handleActivityCreated = (activity: OpportunityActivity) => {
+    // Refresh recent activities if we're editing an opportunity
+    if (mode === 'edit' && opportunity) {
+      loadRecentActivities(opportunity.id);
+    }
+  };
+
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Dialog 
@@ -250,9 +272,21 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
             <Typography variant="h6">
               {mode === 'edit' ? 'Edit Opportunity' : 'Create New Opportunity'}
             </Typography>
-            <IconButton onClick={onClose} size="small">
-              <CloseIcon />
-            </IconButton>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              {mode === 'edit' && opportunity && (
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<AddIcon />}
+                  onClick={() => setActivityFormOpen(true)}
+                >
+                  Log Activity
+                </Button>
+              )}
+              <IconButton onClick={onClose} size="small">
+                <CloseIcon />
+              </IconButton>
+            </Box>
           </Box>
         </DialogTitle>
         
@@ -539,6 +573,28 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
                 placeholder="Customer challenges to address..."
               />
             </Grid>
+
+            {/* Recent Activities Section */}
+            {mode === 'edit' && opportunity && recentActivities.length > 0 && (
+              <>
+                <Grid item xs={12}>
+                  <Typography variant="h6" gutterBottom color="primary" sx={{ mt: 2 }}>
+                    Recent Activities
+                  </Typography>
+                </Grid>
+                <Grid item xs={12}>
+                  <ActivityTimeline
+                    activities={recentActivities}
+                    compact={true}
+                    showFilters={false}
+                    onEditActivity={(activity) => {
+                      // Could open activity form in edit mode
+                      console.log('Edit activity:', activity);
+                    }}
+                  />
+                </Grid>
+              </>
+            )}
           </Grid>
         </DialogContent>
         
@@ -556,6 +612,15 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Activity Form Dialog */}
+      <ActivityForm
+        open={activityFormOpen}
+        onClose={() => setActivityFormOpen(false)}
+        onSave={handleActivityCreated}
+        opportunity={opportunity}
+        mode="create"
+      />
     </LocalizationProvider>
   );
 };

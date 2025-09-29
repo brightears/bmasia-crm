@@ -13,6 +13,7 @@ import OpportunityDetail from './pages/OpportunityDetail';
 import Tasks from './pages/Tasks';
 import Contracts from './pages/Contracts';
 import Invoices from './pages/Invoices';
+import Contacts from './pages/Contacts';
 import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -122,7 +123,14 @@ function App() {
 
           {/* New navigation routes */}
           <Route path="/quick-actions" element={<PlaceholderPage title="Quick Actions" />} />
-          <Route path="/contacts" element={<PlaceholderPage title="Contacts" />} />
+          <Route
+            path="/contacts"
+            element={
+              <ProtectedRoute requiredModule="contacts">
+                <Contacts />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/quotes" element={<PlaceholderPage title="Quotes" />} />
           <Route path="/targets" element={<PlaceholderPage title="Sales Targets" />} />
           <Route path="/my-queue" element={<PlaceholderPage title="My Task Queue" />} />
