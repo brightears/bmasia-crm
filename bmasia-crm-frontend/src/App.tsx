@@ -12,6 +12,7 @@ import Opportunities from './pages/Opportunities';
 import OpportunityDetail from './pages/OpportunityDetail';
 import Tasks from './pages/Tasks';
 import Contracts from './pages/Contracts';
+import ContractDetail from './pages/ContractDetail';
 import Invoices from './pages/Invoices';
 import Contacts from './pages/Contacts';
 // import LoadingSkeleton from './components/LoadingSkeleton';
@@ -105,10 +106,26 @@ function App() {
             }
           />
           <Route
+            path="/tasks/:id"
+            element={
+              <ProtectedRoute requiredModule="tasks">
+                <Tasks />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/contracts"
             element={
               <ProtectedRoute requiredModule="contracts">
                 <Contracts />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/contracts/:id"
+            element={
+              <ProtectedRoute requiredModule="contracts">
+                <ContractDetail />
               </ProtectedRoute>
             }
           />

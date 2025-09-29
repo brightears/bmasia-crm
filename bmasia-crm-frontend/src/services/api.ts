@@ -158,6 +158,11 @@ class ApiService {
     return response.data;
   }
 
+  async getTask(id: string): Promise<Task> {
+    const response = await this.api.get<Task>(`/tasks/${id}/`);
+    return response.data;
+  }
+
   async createTask(data: Partial<Task>): Promise<Task> {
     const response = await this.api.post<Task>('/tasks/', data);
     return response.data;
@@ -170,6 +175,32 @@ class ApiService {
 
   async deleteTask(id: string): Promise<void> {
     await this.api.delete(`/tasks/${id}/`);
+  }
+
+  // Task Comments
+  async addTaskComment(taskId: string, comment: string): Promise<any> {
+    const response = await this.api.post(`/tasks/${taskId}/comments/`, { comment });
+    return response.data;
+  }
+
+  async getTaskComments(taskId: string): Promise<any[]> {
+    const response = await this.api.get(`/tasks/${taskId}/comments/`);
+    return response.data;
+  }
+
+  // Task Subtasks
+  async addTaskSubtask(taskId: string, title: string): Promise<any> {
+    const response = await this.api.post(`/tasks/${taskId}/subtasks/`, { title });
+    return response.data;
+  }
+
+  async updateTaskSubtask(taskId: string, subtaskId: string, data: any): Promise<any> {
+    const response = await this.api.put(`/tasks/${taskId}/subtasks/${subtaskId}/`, data);
+    return response.data;
+  }
+
+  async deleteTaskSubtask(taskId: string, subtaskId: string): Promise<void> {
+    await this.api.delete(`/tasks/${taskId}/subtasks/${subtaskId}/`);
   }
 
   // Opportunities
@@ -279,13 +310,54 @@ class ApiService {
     return response.data;
   }
 
+  async getInvoice(id: string): Promise<Invoice> {
+    const response = await this.api.get<Invoice>(`/invoices/${id}/`);
+    return response.data;
+  }
+
+  async createInvoice(data: Partial<Invoice>): Promise<Invoice> {
+    const response = await this.api.post<Invoice>('/invoices/', data);
+    return response.data;
+  }
+
+  async updateInvoice(id: string, data: Partial<Invoice>): Promise<Invoice> {
+    const response = await this.api.put<Invoice>(`/invoices/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteInvoice(id: string): Promise<void> {
+    await this.api.delete(`/invoices/${id}/`);
+  }
+
   async getOverdueInvoices(): Promise<Invoice[]> {
     const response = await this.api.get<Invoice[]>('/invoices/overdue/');
     return response.data;
   }
 
-  async markInvoicePaid(id: string): Promise<any> {
-    const response = await this.api.post(`/invoices/${id}/mark_paid/`);
+  async markInvoicePaid(id: string, data?: { payment_method?: string; transaction_id?: string; notes?: string }): Promise<any> {
+    const response = await this.api.post(`/invoices/${id}/mark_paid/`, data);
+    return response.data;
+  }
+
+  async sendInvoice(id: string, email?: string): Promise<any> {
+    const response = await this.api.post(`/invoices/${id}/send/`, { email });
+    return response.data;
+  }
+
+  async downloadInvoicePDF(id: string): Promise<Blob> {
+    const response = await this.api.get(`/invoices/${id}/pdf/`, {
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+
+  async addInvoicePayment(invoiceId: string, data: Partial<any>): Promise<any> {
+    const response = await this.api.post(`/invoices/${invoiceId}/payments/`, data);
+    return response.data;
+  }
+
+  async getInvoiceStats(): Promise<any> {
+    const response = await this.api.get('/invoices/stats/');
     return response.data;
   }
 

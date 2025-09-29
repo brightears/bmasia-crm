@@ -6,11 +6,6 @@ import {
   Card,
   CardContent,
   Alert,
-  CircularProgress,
-  List,
-  ListItem,
-  ListItemText,
-  Chip,
 } from '@mui/material';
 import {
   Business,
@@ -20,12 +15,15 @@ import {
   Warning,
   TrendingUp,
 } from '@mui/icons-material';
-import { DashboardStats, Task } from '../types';
+import { DashboardStats } from '../types';
 import ApiService from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import QuickActions from '../components/QuickActions';
 import LoadingSkeleton from '../components/LoadingSkeleton';
 import SalesDashboard from '../components/SalesDashboard';
+import ContractWidgets from '../components/ContractWidgets';
+import InvoiceWidgets from '../components/InvoiceWidgets';
+import TaskWidgets from '../components/TaskWidgets';
 
 interface StatCardProps {
   title: string;
@@ -71,7 +69,6 @@ const StatCard: React.FC<StatCardProps> = ({
 const Dashboard: React.FC = () => {
   const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [myTasks, setMyTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -82,13 +79,8 @@ const Dashboard: React.FC = () => {
   const loadDashboardData = async () => {
     try {
       setLoading(true);
-      const [dashboardStats, tasksData] = await Promise.all([
-        ApiService.getDashboardStats(),
-        ApiService.getMyTasks(),
-      ]);
-
+      const dashboardStats = await ApiService.getDashboardStats();
       setStats(dashboardStats);
-      setMyTasks(tasksData.slice(0, 5)); // Show only first 5 tasks
     } catch (err: any) {
       setError('Failed to load dashboard data');
       console.error('Dashboard error:', err);
@@ -112,15 +104,6 @@ const Dashboard: React.FC = () => {
   if (!stats) {
     return null;
   }
-
-  const getTaskPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'Urgent': return 'error';
-      case 'High': return 'warning';
-      case 'Medium': return 'info';
-      default: return 'default';
-    }
-  };
 
   const getDepartmentGreeting = () => {
     switch (user?.role) {
@@ -271,56 +254,42 @@ const Dashboard: React.FC = () => {
         </Box>
       )}
 
-      {/* My Tasks and Monthly Summary */}
-      <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-        <Box sx={{ flex: '1 1 400px', minWidth: 350 }}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              My Recent Tasks
-            </Typography>
-            {myTasks.length > 0 ? (
-              <List>
-                {myTasks.map((task) => (
-                  <ListItem key={task.id} divider>
-                    <ListItemText
-                      primary={task.title}
-                      secondary={
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
-                          <Chip
-                            label={task.priority}
-                            size="small"
-                            color={getTaskPriorityColor(task.priority) as any}
-                          />
-                          <Chip
-                            label={task.status}
-                            size="small"
-                            variant="outlined"
-                          />
-                          {task.due_date && (
-                            <Typography variant="caption" color="text.secondary">
-                              Due: {new Date(task.due_date).toLocaleDateString()}
-                            </Typography>
-                          )}
-                        </Box>
-                      }
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            ) : (
-              <Typography variant="body2" color="text.secondary">
-                No tasks assigned to you.
-              </Typography>
-            )}
-          </Paper>
+      {/* Contract Management Section - show for Admin, Sales */}
+      {(['Admin', 'Sales'] as const).includes(user?.role as any) && (
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h5" gutterBottom>
+            Contract Management
+          </Typography>
+          <ContractWidgets />
         </Box>
+      )}
 
-        <Box sx={{ flex: '1 1 300px', minWidth: 250 }}>
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Monthly Summary
-            </Typography>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {/* Invoice Management Section - show for Admin, Sales */}
+      {(['Admin', 'Sales'] as const).includes(user?.role as any) && (
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h5" gutterBottom>
+            Invoice Management
+          </Typography>
+          <InvoiceWidgets />
+        </Box>
+      )}
+
+      {/* Task Management Section */}
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h5" gutterBottom>
+          Task Management
+        </Typography>
+        <TaskWidgets />
+      </Box>
+
+      {/* Monthly Summary */}
+      <Box sx={{ mb: 3 }}>
+        <Paper sx={{ p: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Monthly Summary
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+            <Box sx={{ flex: '1 1 300px', minWidth: 250 }}>
               <StatCard
                 title="Monthly Revenue"
                 value={stats.monthly_revenue}
@@ -328,26 +297,24 @@ const Dashboard: React.FC = () => {
                 format="currency"
                 color="success.main"
               />
-              <Box sx={{ display: 'flex', gap: 2 }}>
-                <Box sx={{ flex: 1 }}>
-                  <StatCard
-                    title="New Opportunities"
-                    value={stats.monthly_new_opportunities}
-                    icon={<Handshake />}
-                  />
-                </Box>
-                <Box sx={{ flex: 1 }}>
-                  <StatCard
-                    title="Closed Deals"
-                    value={stats.monthly_closed_deals}
-                    icon={<Assignment />}
-                    color="success.main"
-                  />
-                </Box>
-              </Box>
             </Box>
-          </Paper>
-        </Box>
+            <Box sx={{ flex: '1 1 200px', minWidth: 150 }}>
+              <StatCard
+                title="New Opportunities"
+                value={stats.monthly_new_opportunities}
+                icon={<Handshake />}
+              />
+            </Box>
+            <Box sx={{ flex: '1 1 200px', minWidth: 150 }}>
+              <StatCard
+                title="Closed Deals"
+                value={stats.monthly_closed_deals}
+                icon={<Assignment />}
+                color="success.main"
+              />
+            </Box>
+          </Box>
+        </Paper>
       </Box>
     </Box>
   );

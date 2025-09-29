@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   Card,
@@ -26,6 +26,7 @@ import {
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import QuickTaskCreate from './QuickTaskCreate';
 
 interface QuickAction {
   title: string;
@@ -39,6 +40,7 @@ interface QuickAction {
 const QuickActions: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [quickTaskOpen, setQuickTaskOpen] = useState(false);
 
   const quickActions: QuickAction[] = [
     // Sales Actions
@@ -114,7 +116,7 @@ const QuickActions: React.FC = () => {
       title: 'Add Task',
       description: 'Create a new task',
       icon: <TaskIcon />,
-      action: () => navigate('/tasks/new'),
+      action: () => setQuickTaskOpen(true),
       color: '#388e3c',
       roles: ['Tech Support', 'Sales', 'Marketing', 'Admin'],
     },
@@ -275,6 +277,17 @@ const QuickActions: React.FC = () => {
           </Card>
         </Box>
       </Box>
+
+      {/* Quick Task Create Dialog */}
+      <QuickTaskCreate
+        open={quickTaskOpen}
+        onClose={() => setQuickTaskOpen(false)}
+        onSuccess={(task) => {
+          setQuickTaskOpen(false);
+          // Navigate to tasks page or show success message
+          navigate('/tasks');
+        }}
+      />
     </Box>
   );
 };

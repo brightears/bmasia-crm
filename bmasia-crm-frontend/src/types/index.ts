@@ -105,6 +105,36 @@ export interface Note {
   updated_at: string;
 }
 
+export interface TaskSubtask {
+  id?: string;
+  task?: string;
+  title: string;
+  completed: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface TaskComment {
+  id: string;
+  task: string;
+  user: string;
+  user_name: string;
+  comment: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskAttachment {
+  id: string;
+  task: string;
+  name: string;
+  file: string;
+  size: number;
+  uploaded_by: string;
+  uploaded_by_name: string;
+  created_at: string;
+}
+
 export interface Task {
   id: string;
   company: string;
@@ -117,13 +147,26 @@ export interface Task {
   title: string;
   description: string;
   priority: 'Low' | 'Medium' | 'High' | 'Urgent';
-  status: 'Pending' | 'In Progress' | 'Completed' | 'Cancelled' | 'On Hold';
+  status: 'To Do' | 'In Progress' | 'Review' | 'Done' | 'Cancelled' | 'On Hold';
+  task_type?: 'Follow-up' | 'Meeting' | 'Delivery' | 'Support' | 'Research' | 'Development' | 'Other';
   due_date?: string;
+  reminder_date?: string;
   completed_at?: string;
   estimated_hours?: number;
   actual_hours?: number;
   tags?: string;
   is_overdue: boolean;
+  related_opportunity?: string;
+  related_opportunity_name?: string;
+  related_contract?: string;
+  related_contract_number?: string;
+  related_contact?: string;
+  related_contact_name?: string;
+  subtasks?: TaskSubtask[];
+  comments?: TaskComment[];
+  attachments?: TaskAttachment[];
+  progress_percentage?: number;
+  watchers?: string[];  // user IDs who are watching this task
   created_at: string;
   updated_at: string;
 }
@@ -210,13 +253,40 @@ export interface Contract {
   updated_at: string;
 }
 
+export interface InvoiceLineItem {
+  id?: string;
+  invoice?: string;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  tax_rate: number;
+  total: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface InvoicePayment {
+  id: string;
+  invoice: string;
+  payment_date: string;
+  amount: number;
+  payment_method: 'Cash' | 'Check' | 'Credit Card' | 'Bank Transfer' | 'Online Payment' | 'Other';
+  transaction_id?: string;
+  notes?: string;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Invoice {
   id: string;
   contract: string;
   contract_number: string;
+  company: string;
   company_name: string;
   invoice_number: string;
-  status: 'Draft' | 'Sent' | 'Paid' | 'Overdue' | 'Cancelled' | 'Refunded';
+  status: 'Draft' | 'Sent' | 'Paid' | 'Overdue' | 'Cancelled' | 'Refunded' | 'Pending';
   issue_date: string;
   due_date: string;
   paid_date?: string;
@@ -226,6 +296,7 @@ export interface Invoice {
   total_amount: number;
   currency: string;
   payment_method?: string;
+  payment_terms?: string;
   transaction_id?: string;
   notes?: string;
   days_overdue: number;
@@ -233,6 +304,9 @@ export interface Invoice {
   first_reminder_sent: boolean;
   second_reminder_sent: boolean;
   final_notice_sent: boolean;
+  line_items: InvoiceLineItem[];
+  payments: InvoicePayment[];
+  remaining_amount: number;
   created_at: string;
   updated_at: string;
 }
@@ -254,6 +328,12 @@ export interface DashboardStats {
   monthly_revenue: number;
   monthly_new_opportunities: number;
   monthly_closed_deals: number;
+  total_invoices: number;
+  total_invoice_amount: number;
+  paid_invoice_amount: number;
+  pending_invoice_amount: number;
+  overdue_invoice_amount: number;
+  invoice_collection_rate: number;
 }
 
 export interface AuditLog {
