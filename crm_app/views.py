@@ -8,6 +8,7 @@ from django.utils import timezone
 from datetime import datetime, timedelta
 from django.contrib.auth import login, logout
 from rest_framework.authtoken.models import Token
+from rest_framework_simplejwt.tokens import RefreshToken
 from django.db import transaction
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -526,13 +527,14 @@ class AuthViewSet(viewsets.ViewSet):
         """User login"""
         serializer = LoginSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
-        
+
         user = serializer.validated_data['user']
         login(request, user)
-        
-        # Create or get token for API access
-        token, created = Token.objects.get_or_create(user=user)
-        
+
+        # Create JWT tokens
+        refresh = RefreshToken.for_user(user)
+        access = refresh.access_token
+
         # Log login action
         AuditLog.objects.create(
             user=user,
@@ -542,15 +544,53 @@ class AuthViewSet(viewsets.ViewSet):
             ip_address=self.get_client_ip(request),
             user_agent=request.META.get('HTTP_USER_AGENT', ''),
         )
-        
+
         return Response({
-            'token': token.key,
+            'access': str(access),
+            'refresh': str(refresh),
             'user': UserSerializer(user).data
         })
     
     @action(detail=False, methods=['post'])
+    def refresh(self, request):
+        """Refresh JWT token"""
+        try:
+            refresh_token = request.data.get('refresh')
+            if not refresh_token:
+                return Response(
+                    {'error': 'Refresh token is required'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            refresh = RefreshToken(refresh_token)
+            access = refresh.access_token
+
+            return Response({
+                'access': str(access)
+            })
+        except Exception as e:
+            return Response(
+                {'error': 'Invalid refresh token'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
+    def me(self, request):
+        """Get current user info"""
+        return Response(UserSerializer(request.user).data)
+
+    @action(detail=False, methods=['post'])
     def logout(self, request):
         """User logout"""
+        try:
+            refresh_token = request.data.get('refresh')
+            if refresh_token:
+                # Blacklist the refresh token
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+        except Exception:
+            pass  # Continue with logout even if token blacklisting fails
+
         if request.user.is_authenticated:
             # Log logout action
             AuditLog.objects.create(
@@ -561,11 +601,9 @@ class AuthViewSet(viewsets.ViewSet):
                 ip_address=self.get_client_ip(request),
                 user_agent=request.META.get('HTTP_USER_AGENT', ''),
             )
-            
-            # Delete token
-            Token.objects.filter(user=request.user).delete()
+
             logout(request)
-        
+
         return Response({'message': 'Logged out successfully'})
     
     def get_client_ip(self, request):
