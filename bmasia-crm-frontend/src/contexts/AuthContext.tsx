@@ -82,9 +82,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = useCallback(async (credentials: LoginCredentials) => {
     try {
+      console.log('AuthContext: Starting login process...');
       setAuthState(prev => ({ ...prev, loading: true }));
 
       const response = await AuthService.login(credentials);
+      console.log('AuthContext: Login successful, setting auth state...');
 
       setAuthState({
         user: response.user,
@@ -97,8 +99,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Schedule automatic token refresh
       AuthService.scheduleTokenRefresh();
+      console.log('AuthContext: Auth state updated successfully');
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('AuthContext: Login error:', error);
       setAuthState(prev => ({ ...prev, loading: false }));
       throw error;
     }

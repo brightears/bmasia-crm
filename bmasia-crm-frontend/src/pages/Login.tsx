@@ -38,8 +38,11 @@ const Login: React.FC = () => {
 
     try {
       await login(credentials);
+      // Login successful - AuthContext will handle state update and App.tsx will redirect
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Login failed. Please check your credentials.');
+      console.error('Login component error:', err);
+      // Get error message from the thrown Error object
+      setError(err.message || 'Login failed. Please check your credentials.');
     }
   };
 

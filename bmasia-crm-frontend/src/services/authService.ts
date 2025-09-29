@@ -18,6 +18,8 @@ class AuthService {
     headers: {
       'Content-Type': 'application/json',
     },
+    withCredentials: false, // Ensure we don't send credentials by default
+    timeout: 10000, // 10 second timeout
   });
 
   constructor() {
@@ -89,7 +91,26 @@ class AuthService {
 
       return response.data;
     } catch (error: any) {
-      throw new Error(error.response?.data?.detail || 'Login failed');
+      console.error('Login request failed:', error);
+
+      // Handle different error response formats
+      let errorMessage = 'Login failed';
+      if (error.response?.data) {
+        const data = error.response.data;
+        if (data.detail) {
+          errorMessage = data.detail;
+        } else if (data.non_field_errors && Array.isArray(data.non_field_errors)) {
+          errorMessage = data.non_field_errors[0];
+        } else if (data.message) {
+          errorMessage = data.message;
+        } else if (typeof data === 'string') {
+          errorMessage = data;
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      throw new Error(errorMessage);
     }
   }
 
