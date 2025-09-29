@@ -1,7 +1,7 @@
 import axios, { AxiosResponse } from 'axios';
 import { LoginCredentials, AuthResponse, RefreshTokenResponse, User, JWTPayload } from '../types';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://bmasia-crm.onrender.com';
 
 /**
  * JWT Token Management Service
