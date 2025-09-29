@@ -17,6 +17,9 @@ import Contracts from './pages/Contracts';
 import ContractDetail from './pages/ContractDetail';
 import Invoices from './pages/Invoices';
 import Contacts from './pages/Contacts';
+import Quotes from './pages/Quotes';
+import QuoteDetail from './pages/QuoteDetail';
+import SalesTargets from './pages/SalesTargets';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -166,8 +169,30 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/quotes" element={<PlaceholderPage title="Quotes" />} />
-          <Route path="/targets" element={<PlaceholderPage title="Sales Targets" />} />
+          <Route
+            path="/quotes"
+            element={
+              <ProtectedRoute requiredModule="quotes">
+                <Quotes />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/quotes/:id"
+            element={
+              <ProtectedRoute requiredModule="quotes">
+                <QuoteDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/targets"
+            element={
+              <ProtectedRoute requiredModule="targets">
+                <SalesTargets />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/my-queue" element={<PlaceholderPage title="My Task Queue" />} />
 
           {/* Marketing routes */}

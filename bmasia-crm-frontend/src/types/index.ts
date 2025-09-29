@@ -403,3 +403,242 @@ export interface AuthContextType extends AuthState {
   hasRole: (role: string | string[]) => boolean;
   isTokenExpired: () => boolean;
 }
+
+export interface QuoteLineItem {
+  id?: string;
+  quote?: string;
+  product_service: string;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  discount_percentage: number;
+  tax_rate: number;
+  line_total: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface QuoteAttachment {
+  id: string;
+  quote: string;
+  name: string;
+  file: string;
+  size: number;
+  uploaded_by: string;
+  uploaded_by_name: string;
+  created_at: string;
+}
+
+export interface QuoteActivity {
+  id: string;
+  quote: string;
+  user: string;
+  user_name: string;
+  activity_type: 'Created' | 'Sent' | 'Viewed' | 'Accepted' | 'Rejected' | 'Expired' | 'Updated' | 'Converted';
+  description: string;
+  created_at: string;
+}
+
+export interface Quote {
+  id: string;
+  quote_number: string;
+  company: string;
+  company_name: string;
+  contact?: string;
+  contact_name?: string;
+  opportunity?: string;
+  opportunity_name?: string;
+  status: 'Draft' | 'Sent' | 'Accepted' | 'Rejected' | 'Expired';
+  valid_from: string;
+  valid_until: string;
+  subtotal: number;
+  tax_amount: number;
+  discount_amount: number;
+  total_value: number;
+  currency: string;
+  terms_conditions?: string;
+  notes?: string;
+  is_expired: boolean;
+  days_until_expiry: number;
+  acceptance_rate?: number;
+  sent_date?: string;
+  accepted_date?: string;
+  rejected_date?: string;
+  expired_date?: string;
+  line_items: QuoteLineItem[];
+  attachments?: QuoteAttachment[];
+  activities?: QuoteActivity[];
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Sales Target Types
+export interface SalesTarget {
+  id: string;
+  name: string;
+  period_type: 'Monthly' | 'Quarterly' | 'Yearly';
+  period_start: string;
+  period_end: string;
+  target_type: 'Revenue' | 'Units' | 'Customers' | 'Contracts';
+  target_value: number;
+  stretch_target?: number;
+  currency: string;
+  unit_type?: string; // For non-revenue targets
+  assigned_to?: string; // User ID for individual targets
+  assigned_to_name?: string;
+  team_target: boolean;
+  team_name?: string;
+  status: 'Active' | 'Completed' | 'Cancelled' | 'Draft';
+  current_value: number;
+  achievement_percentage: number;
+  stretch_achievement_percentage?: number;
+  is_on_track: boolean;
+  forecasted_value: number;
+  forecasted_achievement: number;
+  risk_level: 'Low' | 'Medium' | 'High';
+  notes?: string;
+  justification?: string;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+  updated_at: string;
+
+  // Calculated fields
+  days_remaining: number;
+  days_total: number;
+  expected_daily_progress: number;
+  actual_daily_progress: number;
+  variance_from_plan: number;
+
+  // Progress tracking
+  daily_progress?: DailyProgress[];
+  weekly_progress?: WeeklyProgress[];
+  monthly_progress?: MonthlyProgress[];
+
+  // Historical comparison
+  previous_period_value?: number;
+  previous_period_achievement?: number;
+  year_over_year_growth?: number;
+}
+
+export interface DailyProgress {
+  date: string;
+  value: number;
+  cumulative_value: number;
+  achievement_percentage: number;
+  target_pace: number;
+  variance: number;
+}
+
+export interface WeeklyProgress {
+  week_start: string;
+  week_end: string;
+  value: number;
+  cumulative_value: number;
+  achievement_percentage: number;
+  target_pace: number;
+  variance: number;
+}
+
+export interface MonthlyProgress {
+  month: string;
+  value: number;
+  cumulative_value: number;
+  achievement_percentage: number;
+  target_pace: number;
+  variance: number;
+}
+
+export interface TargetPerformanceMetrics {
+  target_id: string;
+  total_targets: number;
+  achieved_targets: number;
+  achievement_rate: number;
+  average_achievement_percentage: number;
+  best_performing_period: string;
+  worst_performing_period: string;
+  consistency_score: number;
+  trend: 'Improving' | 'Declining' | 'Stable';
+}
+
+export interface TeamPerformance {
+  team_name: string;
+  team_id?: string;
+  members: TeamMemberPerformance[];
+  total_target: number;
+  current_value: number;
+  achievement_percentage: number;
+  rank: number;
+  trend: 'Up' | 'Down' | 'Stable';
+}
+
+export interface TeamMemberPerformance {
+  user_id: string;
+  user_name: string;
+  individual_target: number;
+  current_value: number;
+  achievement_percentage: number;
+  rank: number;
+  contribution_to_team: number;
+  trend: 'Up' | 'Down' | 'Stable';
+}
+
+export interface TargetAnalytics {
+  total_targets: number;
+  active_targets: number;
+  achieved_targets: number;
+  at_risk_targets: number;
+  overall_achievement_rate: number;
+  revenue_targets: TargetSummary;
+  unit_targets: TargetSummary;
+  customer_targets: TargetSummary;
+  contract_targets: TargetSummary;
+  team_performance: TeamPerformance[];
+  individual_performance: IndividualPerformance[];
+  monthly_trends: MonthlyTrend[];
+  predictions: TargetPrediction[];
+}
+
+export interface TargetSummary {
+  total_target: number;
+  current_value: number;
+  achievement_percentage: number;
+  targets_count: number;
+  at_risk_count: number;
+}
+
+export interface IndividualPerformance {
+  user_id: string;
+  user_name: string;
+  total_targets: number;
+  achieved_targets: number;
+  achievement_rate: number;
+  average_achievement_percentage: number;
+  current_rank: number;
+  trend: 'Up' | 'Down' | 'Stable';
+  strongest_target_type: string;
+  improvement_area: string;
+}
+
+export interface MonthlyTrend {
+  month: string;
+  total_targets: number;
+  achieved_targets: number;
+  achievement_rate: number;
+  revenue_achieved: number;
+  units_achieved: number;
+  customers_achieved: number;
+  contracts_achieved: number;
+}
+
+export interface TargetPrediction {
+  target_id: string;
+  target_name: string;
+  predicted_achievement: number;
+  confidence_level: number;
+  risk_factors: string[];
+  recommended_actions: string[];
+  probability_of_success: number;
+}

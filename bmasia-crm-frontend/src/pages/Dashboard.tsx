@@ -23,6 +23,7 @@ import LoadingSkeleton from '../components/LoadingSkeleton';
 import SalesDashboard from '../components/SalesDashboard';
 import ContractWidgets from '../components/ContractWidgets';
 import InvoiceWidgets from '../components/InvoiceWidgets';
+import QuoteWidgets from '../components/QuoteWidgets';
 import TaskWidgets from '../components/TaskWidgets';
 
 interface StatCardProps {
@@ -251,6 +252,16 @@ const Dashboard: React.FC = () => {
               </Box>
             </Box>
           </Paper>
+        </Box>
+      )}
+
+      {/* Quote Management Section - show for Admin, Sales */}
+      {(['Admin', 'Sales'] as const).includes(user?.role as any) && (
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h5" gutterBottom>
+            Quote Management
+          </Typography>
+          <QuoteWidgets />
         </Box>
       )}
 

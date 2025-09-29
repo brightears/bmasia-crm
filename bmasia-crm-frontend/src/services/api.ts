@@ -1,7 +1,7 @@
 import axios from 'axios';
 import {
   User, Company, Contact, Note, Task, Opportunity, OpportunityActivity,
-  Contract, Invoice, DashboardStats, AuditLog, ApiResponse
+  Contract, Invoice, Quote, DashboardStats, AuditLog, ApiResponse
 } from '../types';
 import AuthService from './authService';
 import { MockApiService } from './mockData';
@@ -407,6 +407,88 @@ class ApiService {
   async getInvoiceStats(): Promise<any> {
     const response = await this.api.get('/invoices/stats/');
     return response.data;
+  }
+
+  // Quotes
+  async getQuotes(params?: any): Promise<ApiResponse<Quote>> {
+    const response = await this.api.get<ApiResponse<Quote>>('/quotes/', { params });
+    return response.data;
+  }
+
+  async getQuote(id: string): Promise<Quote> {
+    const response = await this.api.get<Quote>(`/quotes/${id}/`);
+    return response.data;
+  }
+
+  async createQuote(data: Partial<Quote>): Promise<Quote> {
+    const response = await this.api.post<Quote>('/quotes/', data);
+    return response.data;
+  }
+
+  async updateQuote(id: string, data: Partial<Quote>): Promise<Quote> {
+    const response = await this.api.put<Quote>(`/quotes/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteQuote(id: string): Promise<void> {
+    await this.api.delete(`/quotes/${id}/`);
+  }
+
+  async duplicateQuote(id: string): Promise<Quote> {
+    const response = await this.api.post<Quote>(`/quotes/${id}/duplicate/`);
+    return response.data;
+  }
+
+  async sendQuote(id: string, email?: string): Promise<any> {
+    const response = await this.api.post(`/quotes/${id}/send/`, { email });
+    return response.data;
+  }
+
+  async acceptQuote(id: string): Promise<any> {
+    const response = await this.api.post(`/quotes/${id}/accept/`);
+    return response.data;
+  }
+
+  async rejectQuote(id: string, reason?: string): Promise<any> {
+    const response = await this.api.post(`/quotes/${id}/reject/`, { reason });
+    return response.data;
+  }
+
+  async convertQuoteToContract(id: string, contractData?: Partial<Contract>): Promise<Contract> {
+    const response = await this.api.post<Contract>(`/quotes/${id}/convert_to_contract/`, contractData);
+    return response.data;
+  }
+
+  async downloadQuotePDF(id: string): Promise<Blob> {
+    const response = await this.api.get(`/quotes/${id}/pdf/`, {
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+
+  async getExpiringQuotes(): Promise<Quote[]> {
+    const response = await this.api.get<Quote[]>('/quotes/expiring_soon/');
+    return response.data;
+  }
+
+  async getQuoteStats(): Promise<any> {
+    const response = await this.api.get('/quotes/stats/');
+    return response.data;
+  }
+
+  async addQuoteAttachment(quoteId: string, file: File): Promise<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await this.api.post(`/quotes/${quoteId}/attachments/`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  }
+
+  async deleteQuoteAttachment(quoteId: string, attachmentId: string): Promise<void> {
+    await this.api.delete(`/quotes/${quoteId}/attachments/${attachmentId}/`);
   }
 
   // Users

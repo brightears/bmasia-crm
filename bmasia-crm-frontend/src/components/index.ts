@@ -31,3 +31,15 @@ export { default as MarketingDashboard } from './MarketingDashboard';
 export { default as TechSupportDashboard } from './TechSupportDashboard';
 export { default as MobileBottomNav } from './MobileBottomNav';
 export { default as SessionTimeout } from './SessionTimeout';
+
+// Quote Management Components
+export { default as QuoteForm } from './QuoteForm';
+export { default as QuoteDetail } from './QuoteDetail';
+export { default as QuotePDFGenerator } from './QuotePDFGenerator';
+export { default as QuoteWidgets } from './QuoteWidgets';
+
+// Invoice Management Components
+export { default as InvoiceForm } from './InvoiceForm';
+export { default as InvoiceDetail } from './InvoiceDetail';
+export { default as InvoicePDFGenerator } from './InvoicePDFGenerator';
+export { default as InvoiceWidgets } from './InvoiceWidgets';
