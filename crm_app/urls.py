@@ -21,11 +21,16 @@ router.register(r'contracts', views.ContractViewSet, basename='contract')
 router.register(r'invoices', views.InvoiceViewSet, basename='invoice')
 router.register(r'audit-logs', views.AuditLogViewSet, basename='auditlog')
 router.register(r'dashboard', views.DashboardViewSet, basename='dashboard')
-router.register(r'auth', views.AuthViewSet, basename='auth')
 
 # The API URLs are now determined automatically by the router.
 urlpatterns = [
     path('v1/', include(router.urls)),
+
+    # Authentication endpoints
+    path('v1/auth/login/', views.AuthViewSet.as_view({'post': 'login'}), name='auth_login'),
+    path('v1/auth/refresh/', views.AuthViewSet.as_view({'post': 'refresh'}), name='auth_refresh'),
+    path('v1/auth/logout/', views.AuthViewSet.as_view({'post': 'logout'}), name='auth_logout'),
+    path('v1/auth/me/', views.AuthViewSet.as_view({'get': 'me'}), name='auth_me'),
 
     # JWT token endpoints (fallback)
     path('v1/jwt/token/', TokenObtainPairView.as_view(), name='jwt_token_obtain_pair'),

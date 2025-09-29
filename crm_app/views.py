@@ -521,8 +521,9 @@ class DashboardViewSet(viewsets.ViewSet):
 
 class AuthViewSet(viewsets.ViewSet):
     """ViewSet for authentication"""
-    
-    @action(detail=False, methods=['post'])
+    permission_classes = [AllowAny]
+
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def login(self, request):
         """User login"""
         serializer = LoginSerializer(data=request.data, context={'request': request})
@@ -551,7 +552,7 @@ class AuthViewSet(viewsets.ViewSet):
             'user': UserSerializer(user).data
         })
     
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def refresh(self, request):
         """Refresh JWT token"""
         try:
@@ -579,7 +580,7 @@ class AuthViewSet(viewsets.ViewSet):
         """Get current user info"""
         return Response(UserSerializer(request.user).data)
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def logout(self, request):
         """User logout"""
         try:
