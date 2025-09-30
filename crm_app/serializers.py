@@ -4,7 +4,8 @@ from django.utils import timezone
 from django.db.models import Sum
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
-    Opportunity, OpportunityActivity, Contract, Invoice, Zone
+    Opportunity, OpportunityActivity, Contract, Invoice, Zone,
+    Quote, QuoteLineItem, QuoteAttachment, QuoteActivity
 )
 
 
@@ -443,16 +444,147 @@ class BulkOperationSerializer(serializers.Serializer):
         min_length=1
     )
     data = serializers.JSONField(required=False, help_text="Additional data for the operation")
-    
+
     def validate(self, attrs):
         action = attrs.get('action')
         data = attrs.get('data', {})
-        
+
         # Validate required data for specific actions
         if action == 'update_status' and 'status' not in data:
             raise serializers.ValidationError('Status is required for update_status action')
-        
+
         if action == 'assign' and 'assigned_to' not in data:
             raise serializers.ValidationError('assigned_to is required for assign action')
-        
+
         return attrs
+
+
+class QuoteLineItemSerializer(serializers.ModelSerializer):
+    """Serializer for QuoteLineItem model"""
+
+    class Meta:
+        model = QuoteLineItem
+        fields = [
+            'id', 'quote', 'product_service', 'description', 'quantity',
+            'unit_price', 'discount_percentage', 'tax_rate', 'line_total',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'line_total', 'created_at', 'updated_at']
+
+
+class QuoteAttachmentSerializer(serializers.ModelSerializer):
+    """Serializer for QuoteAttachment model"""
+    uploaded_by_name = serializers.CharField(source='uploaded_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = QuoteAttachment
+        fields = [
+            'id', 'quote', 'name', 'file', 'size', 'uploaded_by',
+            'uploaded_by_name', 'created_at'
+        ]
+        read_only_fields = ['id', 'size', 'created_at']
+
+
+class QuoteActivitySerializer(serializers.ModelSerializer):
+    """Serializer for QuoteActivity model"""
+    user_name = serializers.CharField(source='user.get_full_name', read_only=True)
+
+    class Meta:
+        model = QuoteActivity
+        fields = [
+            'id', 'quote', 'user', 'user_name', 'activity_type',
+            'description', 'created_at'
+        ]
+        read_only_fields = ['id', 'user', 'created_at']
+
+
+class QuoteSerializer(serializers.ModelSerializer):
+    """Serializer for Quote model with nested line items and activities"""
+    company_name = serializers.CharField(source='company.name', read_only=True)
+    contact_name = serializers.CharField(source='contact.name', read_only=True)
+    opportunity_name = serializers.CharField(source='opportunity.name', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    is_expired = serializers.ReadOnlyField()
+    days_until_expiry = serializers.ReadOnlyField()
+    line_items = QuoteLineItemSerializer(many=True, required=False)
+    attachments = QuoteAttachmentSerializer(many=True, read_only=True)
+    activities = QuoteActivitySerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Quote
+        fields = [
+            'id', 'quote_number', 'company', 'company_name', 'contact', 'contact_name',
+            'opportunity', 'opportunity_name', 'status', 'valid_from', 'valid_until',
+            'subtotal', 'tax_amount', 'discount_amount', 'total_value', 'currency',
+            'terms_conditions', 'notes', 'is_expired', 'days_until_expiry',
+            'sent_date', 'accepted_date', 'rejected_date', 'expired_date',
+            'created_by', 'created_by_name', 'line_items', 'attachments', 'activities',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'is_expired', 'days_until_expiry', 'created_by', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        """Create quote with nested line items"""
+        line_items_data = validated_data.pop('line_items', [])
+
+        # Set created_by from request user
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            validated_data['created_by'] = request.user
+
+        quote = Quote.objects.create(**validated_data)
+
+        # Create line items
+        for item_data in line_items_data:
+            QuoteLineItem.objects.create(quote=quote, **item_data)
+
+        # Create activity log
+        QuoteActivity.objects.create(
+            quote=quote,
+            user=request.user if request and request.user.is_authenticated else None,
+            activity_type='Created',
+            description=f'Quote {quote.quote_number} was created'
+        )
+
+        return quote
+
+    def update(self, instance, validated_data):
+        """Update quote and handle nested line items"""
+        line_items_data = validated_data.pop('line_items', None)
+
+        # Track status changes for activity log
+        old_status = instance.status
+        new_status = validated_data.get('status', old_status)
+
+        # Update quote fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Update line items if provided
+        if line_items_data is not None:
+            # Delete existing line items
+            instance.line_items.all().delete()
+
+            # Create new line items
+            for item_data in line_items_data:
+                QuoteLineItem.objects.create(quote=instance, **item_data)
+
+        # Create activity log for status changes
+        request = self.context.get('request')
+        if old_status != new_status:
+            QuoteActivity.objects.create(
+                quote=instance,
+                user=request.user if request and request.user.is_authenticated else None,
+                activity_type=new_status,
+                description=f'Quote status changed from {old_status} to {new_status}'
+            )
+        else:
+            QuoteActivity.objects.create(
+                quote=instance,
+                user=request.user if request and request.user.is_authenticated else None,
+                activity_type='Updated',
+                description=f'Quote {instance.quote_number} was updated'
+            )
+
+        return instance

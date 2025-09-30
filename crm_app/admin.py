@@ -16,7 +16,8 @@ from openpyxl.utils import get_column_letter
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice, Zone,
-    EmailTemplate, EmailLog, EmailCampaign, DocumentAttachment
+    EmailTemplate, EmailLog, EmailCampaign, DocumentAttachment,
+    Quote, QuoteLineItem, QuoteAttachment, QuoteActivity
 )
 
 
@@ -1501,7 +1502,7 @@ class DocumentAttachmentAdmin(admin.ModelAdmin):
     list_select_related = ['company', 'contract', 'invoice']
     search_fields = ['name', 'description', 'company__name']
     readonly_fields = ['created_at', 'updated_at']
-    
+
     fieldsets = (
         ('Document Info', {
             'fields': ('company', 'name', 'document_type', 'file', 'is_active')
@@ -1518,3 +1519,213 @@ class DocumentAttachmentAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+
+# Quote Management Admin
+class QuoteLineItemInline(admin.TabularInline):
+    model = QuoteLineItem
+    extra = 1
+    fields = ['product_service', 'description', 'quantity', 'unit_price', 'discount_percentage', 'tax_rate', 'line_total']
+    readonly_fields = ['line_total']
+
+
+class QuoteActivityInline(admin.TabularInline):
+    model = QuoteActivity
+    extra = 0
+    fields = ['activity_type', 'user', 'description', 'created_at']
+    readonly_fields = ['created_at']
+
+
+class QuoteAttachmentInline(admin.TabularInline):
+    model = QuoteAttachment
+    extra = 0
+    fields = ['name', 'file', 'size', 'uploaded_by', 'created_at']
+    readonly_fields = ['size', 'created_at']
+
+
+@admin.register(Quote)
+class QuoteAdmin(admin.ModelAdmin):
+    list_display = ['quote_number', 'company', 'contact', 'status', 'total_value', 'currency', 'valid_until', 'is_expired', 'created_at']
+    list_filter = ['status', 'currency', 'created_at', 'valid_until']
+    list_select_related = ['company', 'contact', 'opportunity', 'created_by']
+    search_fields = ['quote_number', 'company__name', 'contact__name', 'notes']
+    readonly_fields = ['quote_number', 'created_by', 'is_expired', 'days_until_expiry', 'created_at', 'updated_at']
+    date_hierarchy = 'created_at'
+    inlines = [QuoteLineItemInline, QuoteAttachmentInline, QuoteActivityInline]
+
+    fieldsets = (
+        ('Quote Information', {
+            'fields': ('quote_number', 'company', 'contact', 'opportunity', 'status')
+        }),
+        ('Validity Period', {
+            'fields': ('valid_from', 'valid_until', 'is_expired', 'days_until_expiry')
+        }),
+        ('Financial Details', {
+            'fields': ('subtotal', 'tax_amount', 'discount_amount', 'total_value', 'currency')
+        }),
+        ('Additional Information', {
+            'fields': ('terms_conditions', 'notes'),
+            'classes': ('collapse',)
+        }),
+        ('Status Tracking', {
+            'fields': ('sent_date', 'accepted_date', 'rejected_date', 'expired_date'),
+            'classes': ('collapse',)
+        }),
+        ('Metadata', {
+            'fields': ('created_by', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    actions = ['mark_as_sent', 'mark_as_accepted', 'mark_as_rejected', 'export_to_excel']
+
+    def save_model(self, request, obj, form, change):
+        """Set created_by on new quotes"""
+        if not change:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+    def mark_as_sent(self, request, queryset):
+        """Mark selected quotes as sent"""
+        count = 0
+        for quote in queryset:
+            if quote.status == 'Draft':
+                quote.status = 'Sent'
+                quote.sent_date = timezone.now().date()
+                quote.save()
+
+                # Create activity
+                QuoteActivity.objects.create(
+                    quote=quote,
+                    user=request.user,
+                    activity_type='Sent',
+                    description=f'Quote marked as sent by {request.user.get_full_name()}'
+                )
+                count += 1
+
+        self.message_user(request, f'{count} quote(s) marked as sent')
+    mark_as_sent.short_description = 'Mark selected quotes as sent'
+
+    def mark_as_accepted(self, request, queryset):
+        """Mark selected quotes as accepted"""
+        count = 0
+        for quote in queryset:
+            if quote.status in ['Draft', 'Sent']:
+                quote.status = 'Accepted'
+                quote.accepted_date = timezone.now().date()
+                quote.save()
+
+                # Create activity
+                QuoteActivity.objects.create(
+                    quote=quote,
+                    user=request.user,
+                    activity_type='Accepted',
+                    description=f'Quote marked as accepted by {request.user.get_full_name()}'
+                )
+                count += 1
+
+        self.message_user(request, f'{count} quote(s) marked as accepted')
+    mark_as_accepted.short_description = 'Mark selected quotes as accepted'
+
+    def mark_as_rejected(self, request, queryset):
+        """Mark selected quotes as rejected"""
+        count = 0
+        for quote in queryset:
+            if quote.status in ['Draft', 'Sent']:
+                quote.status = 'Rejected'
+                quote.rejected_date = timezone.now().date()
+                quote.save()
+
+                # Create activity
+                QuoteActivity.objects.create(
+                    quote=quote,
+                    user=request.user,
+                    activity_type='Rejected',
+                    description=f'Quote marked as rejected by {request.user.get_full_name()}'
+                )
+                count += 1
+
+        self.message_user(request, f'{count} quote(s) marked as rejected')
+    mark_as_rejected.short_description = 'Mark selected quotes as rejected'
+
+    def export_to_excel(self, request, queryset):
+        """Export selected quotes to Excel"""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Quotes'
+
+        # Define headers
+        headers = [
+            'Quote Number', 'Company', 'Contact', 'Status', 'Valid From', 'Valid Until',
+            'Subtotal', 'Tax', 'Discount', 'Total', 'Currency', 'Created Date'
+        ]
+
+        # Style headers
+        header_fill = PatternFill(start_color='1976D2', end_color='1976D2', fill_type='solid')
+        header_font = Font(color='FFFFFF', bold=True)
+
+        for col_num, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_num, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+
+        # Write data
+        for row_num, quote in enumerate(queryset.select_related('company', 'contact'), 2):
+            ws.cell(row=row_num, column=1, value=quote.quote_number)
+            ws.cell(row=row_num, column=2, value=quote.company.name)
+            ws.cell(row=row_num, column=3, value=quote.contact.name if quote.contact else '')
+            ws.cell(row=row_num, column=4, value=quote.status)
+            ws.cell(row=row_num, column=5, value=quote.valid_from.strftime('%Y-%m-%d'))
+            ws.cell(row=row_num, column=6, value=quote.valid_until.strftime('%Y-%m-%d'))
+            ws.cell(row=row_num, column=7, value=float(quote.subtotal))
+            ws.cell(row=row_num, column=8, value=float(quote.tax_amount))
+            ws.cell(row=row_num, column=9, value=float(quote.discount_amount))
+            ws.cell(row=row_num, column=10, value=float(quote.total_value))
+            ws.cell(row=row_num, column=11, value=quote.currency)
+            ws.cell(row=row_num, column=12, value=quote.created_at.strftime('%Y-%m-%d %H:%M'))
+
+        # Auto-adjust column widths
+        for col in ws.columns:
+            max_length = 0
+            column = col[0].column_letter
+            for cell in col:
+                if cell.value:
+                    max_length = max(max_length, len(str(cell.value)))
+            ws.column_dimensions[column].width = min(max_length + 2, 50)
+
+        # Prepare response
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = f'attachment; filename=quotes_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
+        wb.save(response)
+        return response
+    export_to_excel.short_description = 'Export selected quotes to Excel'
+
+
+@admin.register(QuoteLineItem)
+class QuoteLineItemAdmin(admin.ModelAdmin):
+    list_display = ['quote', 'product_service', 'quantity', 'unit_price', 'discount_percentage', 'line_total']
+    list_filter = ['created_at']
+    list_select_related = ['quote']
+    search_fields = ['product_service', 'description', 'quote__quote_number']
+    readonly_fields = ['line_total', 'created_at', 'updated_at']
+
+
+@admin.register(QuoteAttachment)
+class QuoteAttachmentAdmin(admin.ModelAdmin):
+    list_display = ['name', 'quote', 'file', 'size', 'uploaded_by', 'created_at']
+    list_filter = ['created_at']
+    list_select_related = ['quote', 'uploaded_by']
+    search_fields = ['name', 'quote__quote_number']
+    readonly_fields = ['size', 'created_at', 'updated_at']
+
+
+@admin.register(QuoteActivity)
+class QuoteActivityAdmin(admin.ModelAdmin):
+    list_display = ['quote', 'activity_type', 'user', 'description', 'created_at']
+    list_filter = ['activity_type', 'created_at']
+    list_select_related = ['quote', 'user']
+    search_fields = ['quote__quote_number', 'description']
+    readonly_fields = ['created_at', 'updated_at']

@@ -1022,7 +1022,7 @@ class DocumentAttachment(TimestampedModel):
         ('brochure', 'Brochure'),
         ('other', 'Other'),
     ]
-    
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='documents')
     name = models.CharField(max_length=200)
@@ -1030,16 +1030,170 @@ class DocumentAttachment(TimestampedModel):
     file = models.FileField(upload_to='documents/%Y/%m/')
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
-    
+
     # Related objects
     contract = models.ForeignKey(Contract, on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')
     invoice = models.ForeignKey(Invoice, on_delete=models.SET_NULL, null=True, blank=True, related_name='documents')
-    
+
     class Meta:
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['company', 'document_type']),
         ]
-    
+
     def __str__(self):
         return f"{self.name} - {self.company.name}"
+
+
+# Quote Management Models
+class Quote(TimestampedModel):
+    """Quote model for managing sales quotes and proposals"""
+    STATUS_CHOICES = [
+        ('Draft', 'Draft'),
+        ('Sent', 'Sent'),
+        ('Accepted', 'Accepted'),
+        ('Rejected', 'Rejected'),
+        ('Expired', 'Expired'),
+    ]
+
+    CURRENCY_CHOICES = [
+        ('USD', 'USD - US Dollar'),
+        ('THB', 'THB - Thai Baht'),
+        ('EUR', 'EUR - Euro'),
+        ('GBP', 'GBP - British Pound'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    quote_number = models.CharField(max_length=50, unique=True)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='quotes')
+    contact = models.ForeignKey(Contact, on_delete=models.SET_NULL, null=True, blank=True, related_name='quotes')
+    opportunity = models.ForeignKey(Opportunity, on_delete=models.SET_NULL, null=True, blank=True, related_name='quotes')
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Draft')
+    valid_from = models.DateField()
+    valid_until = models.DateField()
+
+    # Financial fields
+    subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    tax_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
+
+    # Additional information
+    terms_conditions = models.TextField(blank=True, help_text="Terms and conditions for this quote")
+    notes = models.TextField(blank=True, help_text="Internal notes about this quote")
+
+    # Status tracking
+    sent_date = models.DateField(null=True, blank=True)
+    accepted_date = models.DateField(null=True, blank=True)
+    rejected_date = models.DateField(null=True, blank=True)
+    expired_date = models.DateField(null=True, blank=True)
+
+    # Creator tracking
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='quotes_created')
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['company', 'status']),
+            models.Index(fields=['quote_number']),
+            models.Index(fields=['valid_until', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.quote_number} - {self.company.name}"
+
+    @property
+    def is_expired(self):
+        """Check if quote has expired"""
+        return self.valid_until < timezone.now().date() and self.status not in ['Accepted', 'Rejected', 'Expired']
+
+    @property
+    def days_until_expiry(self):
+        """Calculate days until quote expires"""
+        if self.valid_until:
+            return (self.valid_until - timezone.now().date()).days
+        return 0
+
+    def save(self, *args, **kwargs):
+        """Auto-update status dates"""
+        if self.status == 'Sent' and not self.sent_date:
+            self.sent_date = timezone.now().date()
+        elif self.status == 'Accepted' and not self.accepted_date:
+            self.accepted_date = timezone.now().date()
+        elif self.status == 'Rejected' and not self.rejected_date:
+            self.rejected_date = timezone.now().date()
+        elif self.status == 'Expired' and not self.expired_date:
+            self.expired_date = timezone.now().date()
+
+        super().save(*args, **kwargs)
+
+
+class QuoteLineItem(TimestampedModel):
+    """Line items for quotes"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    quote = models.ForeignKey(Quote, on_delete=models.CASCADE, related_name='line_items')
+    product_service = models.CharField(max_length=200)
+    description = models.TextField()
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=1)
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2)
+    discount_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    line_total = models.DecimalField(max_digits=12, decimal_places=2)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.product_service} - {self.quote.quote_number}"
+
+    def save(self, *args, **kwargs):
+        """Auto-calculate line total"""
+        subtotal = self.quantity * self.unit_price
+        discount_amount = subtotal * (self.discount_percentage / 100)
+        self.line_total = subtotal - discount_amount
+        super().save(*args, **kwargs)
+
+
+class QuoteAttachment(TimestampedModel):
+    """Attachments for quotes"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    quote = models.ForeignKey(Quote, on_delete=models.CASCADE, related_name='attachments')
+    name = models.CharField(max_length=200)
+    file = models.FileField(upload_to='quotes/attachments/%Y/%m/')
+    size = models.IntegerField(help_text="File size in bytes")
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.name} - {self.quote.quote_number}"
+
+
+class QuoteActivity(TimestampedModel):
+    """Track activities related to quotes"""
+    ACTIVITY_TYPE_CHOICES = [
+        ('Created', 'Created'),
+        ('Sent', 'Sent'),
+        ('Viewed', 'Viewed'),
+        ('Accepted', 'Accepted'),
+        ('Rejected', 'Rejected'),
+        ('Expired', 'Expired'),
+        ('Updated', 'Updated'),
+        ('Converted', 'Converted to Contract'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    quote = models.ForeignKey(Quote, on_delete=models.CASCADE, related_name='activities')
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    activity_type = models.CharField(max_length=20, choices=ACTIVITY_TYPE_CHOICES)
+    description = models.TextField()
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name_plural = 'Quote Activities'
+
+    def __str__(self):
+        return f"{self.activity_type} - {self.quote.quote_number}"

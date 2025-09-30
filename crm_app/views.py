@@ -21,13 +21,15 @@ import os
 
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
-    Opportunity, OpportunityActivity, Contract, Invoice
+    Opportunity, OpportunityActivity, Contract, Invoice,
+    Quote, QuoteLineItem, QuoteAttachment, QuoteActivity
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
     TaskSerializer, OpportunitySerializer, OpportunityActivitySerializer,
     ContractSerializer, InvoiceSerializer, AuditLogSerializer,
-    LoginSerializer, DashboardStatsSerializer, BulkOperationSerializer
+    LoginSerializer, DashboardStatsSerializer, BulkOperationSerializer,
+    QuoteSerializer, QuoteLineItemSerializer, QuoteAttachmentSerializer, QuoteActivitySerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -539,6 +541,130 @@ class InvoiceViewSet(BaseModelViewSet):
         })
         
         return Response({'message': 'Invoice marked as paid'})
+
+
+class QuoteViewSet(BaseModelViewSet):
+    """ViewSet for Quote management"""
+    queryset = Quote.objects.all().prefetch_related(
+        'line_items',
+        'attachments',
+        'activities'
+    ).select_related('company', 'contact', 'opportunity', 'created_by')
+    serializer_class = QuoteSerializer
+    search_fields = ['quote_number', 'company__name', 'notes']
+    ordering_fields = ['created_at', 'quote_number', 'total_value', 'valid_until', 'status']
+    ordering = ['-created_at']
+    filterset_fields = ['company', 'status', 'contact', 'opportunity', 'currency']
+
+    def get_queryset(self):
+        """Optimize queryset based on action"""
+        queryset = super().get_queryset()
+
+        if self.action == 'list':
+            queryset = queryset.prefetch_related('line_items')
+        elif self.action == 'retrieve':
+            queryset = queryset.prefetch_related(
+                'line_items',
+                'attachments',
+                'attachments__uploaded_by',
+                'activities',
+                'activities__user'
+            )
+
+        return queryset
+
+    @action(detail=False, methods=['get'])
+    def expiring_soon(self, request):
+        """Get quotes expiring within 7 days"""
+        today = timezone.now().date()
+        expiring = self.get_queryset().filter(
+            valid_until__lte=today + timedelta(days=7),
+            valid_until__gte=today,
+            status__in=['Draft', 'Sent']
+        )
+        serializer = self.get_serializer(expiring, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def send(self, request, pk=None):
+        """Mark quote as sent"""
+        quote = self.get_object()
+        quote.status = 'Sent'
+        quote.sent_date = timezone.now().date()
+        quote.save()
+
+        # Create activity
+        QuoteActivity.objects.create(
+            quote=quote,
+            user=request.user if request.user.is_authenticated else None,
+            activity_type='Sent',
+            description=f'Quote {quote.quote_number} was sent to {quote.company.name}'
+        )
+
+        self.log_action('UPDATE', quote, {
+            'status': {'old': 'Draft', 'new': 'Sent'}
+        })
+
+        return Response({'message': 'Quote marked as sent'})
+
+    @action(detail=True, methods=['post'])
+    def accept(self, request, pk=None):
+        """Mark quote as accepted"""
+        quote = self.get_object()
+        quote.status = 'Accepted'
+        quote.accepted_date = timezone.now().date()
+        quote.save()
+
+        # Create activity
+        QuoteActivity.objects.create(
+            quote=quote,
+            user=request.user if request.user.is_authenticated else None,
+            activity_type='Accepted',
+            description=f'Quote {quote.quote_number} was accepted by {quote.company.name}'
+        )
+
+        return Response({'message': 'Quote marked as accepted'})
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        """Mark quote as rejected"""
+        quote = self.get_object()
+        quote.status = 'Rejected'
+        quote.rejected_date = timezone.now().date()
+        quote.save()
+
+        # Create activity
+        QuoteActivity.objects.create(
+            quote=quote,
+            user=request.user if request.user.is_authenticated else None,
+            activity_type='Rejected',
+            description=f'Quote {quote.quote_number} was rejected by {quote.company.name}'
+        )
+
+        return Response({'message': 'Quote marked as rejected'})
+
+    @action(detail=True, methods=['post'])
+    def add_attachment(self, request, pk=None):
+        """Add attachment to quote"""
+        quote = self.get_object()
+        file = request.FILES.get('file')
+
+        if not file:
+            return Response(
+                {'error': 'No file provided'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        attachment = QuoteAttachment.objects.create(
+            quote=quote,
+            name=file.name,
+            file=file,
+            size=file.size,
+            uploaded_by=request.user if request.user.is_authenticated else None
+        )
+
+        serializer = QuoteAttachmentSerializer(attachment)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):

@@ -19,6 +19,7 @@ router.register(r'opportunities', views.OpportunityViewSet, basename='opportunit
 router.register(r'opportunity-activities', views.OpportunityActivityViewSet, basename='opportunityactivity')
 router.register(r'contracts', views.ContractViewSet, basename='contract')
 router.register(r'invoices', views.InvoiceViewSet, basename='invoice')
+router.register(r'quotes', views.QuoteViewSet, basename='quote')
 router.register(r'audit-logs', views.AuditLogViewSet, basename='auditlog')
 router.register(r'dashboard', views.DashboardViewSet, basename='dashboard')
 
