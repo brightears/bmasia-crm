@@ -86,24 +86,24 @@ class CompanySerializer(serializers.ModelSerializer):
     contacts = serializers.SerializerMethodField()
     zones = serializers.SerializerMethodField()
     zones_summary = serializers.SerializerMethodField()
-    # subscription_plans removed - use contracts with service_type instead
+    subscription_summary = serializers.SerializerMethodField()
     primary_contact = serializers.SerializerMethodField()
     total_contract_value = serializers.ReadOnlyField()
     full_address = serializers.ReadOnlyField()
     avg_zones_per_location = serializers.ReadOnlyField()
     opportunities_count = serializers.SerializerMethodField()
     active_contracts_count = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = Company
         fields = [
             'id', 'name', 'country', 'website', 'industry',
-            'location_count', 'music_zone_count', 'avg_zones_per_location', 
+            'location_count', 'music_zone_count', 'avg_zones_per_location',
             'soundtrack_account_id', 'is_active', 'notes',
             'address_line1', 'address_line2', 'city', 'state', 'postal_code',
             'full_address', 'total_contract_value', 'contacts', 'zones', 'zones_summary',
-            'primary_contact', 'opportunities_count', 'active_contracts_count', 
-            'created_at', 'updated_at'
+            'subscription_summary', 'primary_contact', 'opportunities_count',
+            'active_contracts_count', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
@@ -179,8 +179,29 @@ class CompanySerializer(serializers.ModelSerializer):
         except Exception:
             return 0
     
-    # Subscription methods removed - use contracts with service_type instead
-    
+    def get_subscription_summary(self, obj):
+        """Get a summary of active contracts/subscriptions"""
+        try:
+            active_contracts = obj.contracts.filter(is_active=True)
+            if not active_contracts:
+                return "No active subscriptions"
+
+            contract_types = {}
+            for contract in active_contracts:
+                contract_type = contract.contract_type
+                contract_types[contract_type] = contract_types.get(contract_type, 0) + 1
+
+            summary_parts = []
+            for contract_type, count in contract_types.items():
+                if count > 1:
+                    summary_parts.append(f"{count} {contract_type}")
+                else:
+                    summary_parts.append(contract_type)
+
+            return ", ".join(summary_parts)
+        except Exception:
+            return "Error loading subscriptions"
+
     def get_zones_summary(self, obj):
         """Get a summary of zone statuses"""
         try:
