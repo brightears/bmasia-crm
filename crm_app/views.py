@@ -185,7 +185,7 @@ class CompanyViewSet(BaseModelViewSet):
     search_fields = ['name', 'website', 'notes', 'zone']
     ordering_fields = ['name', 'created_at', 'zone', 'industry']
     ordering = ['name']
-    permission_classes = [IsAuthenticated, CompanyAccessPermission]
+    # Inherits permission_classes = [AllowAny] from BaseModelViewSet for development
     filterset_fields = ['zone', 'industry', 'company_size', 'is_active']
     
     @action(detail=True, methods=['get'])
