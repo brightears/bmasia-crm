@@ -47,23 +47,23 @@ interface CompanyFormData {
   soundtrack_account_id: string;
 }
 
-// Common industries for BMAsia's target market
+// BMAsia's target industries - must match backend Company.INDUSTRY_CHOICES exactly
 const INDUSTRIES = [
-  'Hospitality & Tourism',
-  'Retail',
-  'Restaurant & Food Service',
-  'Healthcare',
-  'Fitness & Wellness',
-  'Corporate Offices',
-  'Education',
-  'Real Estate',
-  'Entertainment',
-  'Transportation',
-  'Manufacturing',
-  'Technology',
-  'Financial Services',
-  'Government',
-  'Non-profit',
+  'Hotels & Resorts',
+  'Restaurants',
+  'Bars & Nightlife',
+  'Quick Service Restaurants',
+  'Retail Fashion',
+  'Retail Food',
+  'Shopping Malls',
+  'Offices & Corporate',
+  'Hospitals & Medical',
+  'Spas & Wellness',
+  'Fun Parks & Entertainment',
+  'Cafes & Coffee Shops',
+  'Gyms & Fitness Centers',
+  'Salons & Beauty',
+  'Banks & Financial',
   'Other',
 ];
 
