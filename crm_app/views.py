@@ -301,8 +301,53 @@ class CompanyViewSet(BaseModelViewSet):
             status__in=['Pending', 'In Progress'],
             due_date__gte=timezone.now().date()
         ).order_by('due_date')[:5]
-        
+
         return TaskSerializer(upcoming, many=True).data
+
+    @action(detail=False, methods=['get'])
+    def debug(self, request):
+        """Debug endpoint to find problematic companies"""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        results = {
+            'total_companies': 0,
+            'serialization_errors': [],
+            'successful': [],
+            'error_summary': {}
+        }
+
+        companies = Company.objects.all()
+        results['total_companies'] = companies.count()
+
+        for company in companies:
+            try:
+                # Try to serialize this specific company
+                serializer = CompanySerializer(company)
+                data = serializer.data
+                results['successful'].append({
+                    'id': str(company.id),
+                    'name': company.name
+                })
+            except Exception as e:
+                error_info = {
+                    'id': str(company.id),
+                    'name': company.name,
+                    'error_type': type(e).__name__,
+                    'error_message': str(e),
+                    'industry': company.industry,
+                    'country': company.country,
+                }
+                results['serialization_errors'].append(error_info)
+                logger.error(f"Company {company.id} ({company.name}) serialization failed: {str(e)}")
+
+                # Track error types
+                error_type = type(e).__name__
+                if error_type not in results['error_summary']:
+                    results['error_summary'][error_type] = 0
+                results['error_summary'][error_type] += 1
+
+        return Response(results)
 
 
 class ContactViewSet(BaseModelViewSet):
