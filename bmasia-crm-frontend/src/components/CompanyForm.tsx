@@ -48,23 +48,24 @@ interface CompanyFormData {
 }
 
 // BMAsia's target industries - must match backend Company.INDUSTRY_CHOICES exactly
+// Format: { value: database_value, label: display_name }
 const INDUSTRIES = [
-  'Hotels & Resorts',
-  'Restaurants',
-  'Bars & Nightlife',
-  'Quick Service Restaurants',
-  'Retail Fashion',
-  'Retail Food',
-  'Shopping Malls',
-  'Offices & Corporate',
-  'Hospitals & Medical',
-  'Spas & Wellness',
-  'Fun Parks & Entertainment',
-  'Cafes & Coffee Shops',
-  'Gyms & Fitness Centers',
-  'Salons & Beauty',
-  'Banks & Financial',
-  'Other',
+  { value: 'Hotels', label: 'Hotels & Resorts' },
+  { value: 'Restaurants', label: 'Restaurants' },
+  { value: 'Bars', label: 'Bars & Nightlife' },
+  { value: 'Quick Service Restaurants', label: 'Quick Service Restaurants' },
+  { value: 'Retail Fashion', label: 'Retail Fashion' },
+  { value: 'Retail Food', label: 'Retail Food' },
+  { value: 'Malls', label: 'Shopping Malls' },
+  { value: 'Offices', label: 'Offices & Corporate' },
+  { value: 'Hospitals', label: 'Hospitals & Medical' },
+  { value: 'Spas', label: 'Spas & Wellness' },
+  { value: 'Fun Parks', label: 'Fun Parks & Entertainment' },
+  { value: 'Cafes', label: 'Cafes & Coffee Shops' },
+  { value: 'Gyms', label: 'Gyms & Fitness Centers' },
+  { value: 'Salons', label: 'Salons & Beauty' },
+  { value: 'Banks', label: 'Banks & Financial' },
+  { value: 'Other', label: 'Other' },
 ];
 
 // Common countries for BMAsia's operations
@@ -323,8 +324,8 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
                 required
               >
                 {INDUSTRIES.map((industry) => (
-                  <MenuItem key={industry} value={industry}>
-                    {industry}
+                  <MenuItem key={industry.value} value={industry.value}>
+                    {industry.label}
                   </MenuItem>
                 ))}
               </Select>
