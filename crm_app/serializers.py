@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.utils import timezone
+from django.db.models import Sum
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice, Zone
@@ -82,8 +83,8 @@ class ZoneSerializer(serializers.ModelSerializer):
 
 class CompanySerializer(serializers.ModelSerializer):
     """Serializer for Company model with related data"""
-    contacts = ContactSerializer(many=True, read_only=True)
-    zones = ZoneSerializer(many=True, read_only=True)
+    contacts = serializers.SerializerMethodField()
+    zones = serializers.SerializerMethodField()
     zones_summary = serializers.SerializerMethodField()
     # subscription_plans removed - use contracts with service_type instead
     primary_contact = serializers.SerializerMethodField()
@@ -105,37 +106,100 @@ class CompanySerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
-    
+
+    def to_representation(self, instance):
+        """Override to handle errors in nested serializers gracefully"""
+        try:
+            data = super().to_representation(instance)
+            return data
+        except Exception as e:
+            # If complete serialization fails, return a minimal safe representation
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error serializing company {instance.id}: {str(e)}")
+
+            # Return minimal safe data
+            return {
+                'id': instance.id,
+                'name': instance.name,
+                'country': instance.country,
+                'is_active': instance.is_active,
+                'contacts': [],
+                'zones': [],
+                'zones_summary': 'Error loading data',
+                'primary_contact': None,
+                'opportunities_count': 0,
+                'active_contracts_count': 0,
+            }
+
+    def get_contacts(self, obj):
+        """Get all contacts with error handling"""
+        try:
+            contacts = obj.contacts.all()
+            return ContactSerializer(contacts, many=True).data
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error serializing contacts for company {obj.id}: {str(e)}")
+            return []
+
+    def get_zones(self, obj):
+        """Get all zones with error handling"""
+        try:
+            zones = obj.zones.all()
+            return ZoneSerializer(zones, many=True).data
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error serializing zones for company {obj.id}: {str(e)}")
+            return []
+
     def get_primary_contact(self, obj):
-        primary = obj.contacts.filter(is_primary=True, is_active=True).first()
-        if primary:
-            return ContactSerializer(primary).data
-        return None
-    
+        try:
+            primary = obj.contacts.filter(is_primary=True, is_active=True).first()
+            if primary:
+                return ContactSerializer(primary).data
+            return None
+        except Exception as e:
+            # Log the error but don't crash the entire serialization
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error serializing primary contact for company {obj.id}: {str(e)}")
+            return None
+
     def get_opportunities_count(self, obj):
-        return obj.opportunities.filter(is_active=True).count()
-    
+        try:
+            return obj.opportunities.filter(is_active=True).count()
+        except Exception:
+            return 0
+
     def get_active_contracts_count(self, obj):
-        return obj.contracts.filter(is_active=True).count()
+        try:
+            return obj.contracts.filter(is_active=True).count()
+        except Exception:
+            return 0
     
     # Subscription methods removed - use contracts with service_type instead
     
     def get_zones_summary(self, obj):
         """Get a summary of zone statuses"""
-        zones = obj.zones.all()
-        if not zones:
-            return "No zones configured"
-        
-        status_counts = {}
-        for zone in zones:
-            status = zone.get_status_display()
-            status_counts[status] = status_counts.get(status, 0) + 1
-        
-        summary_parts = []
-        for status, count in status_counts.items():
-            summary_parts.append(f"{count} {status}")
-        
-        return ", ".join(summary_parts)
+        try:
+            zones = obj.zones.all()
+            if not zones:
+                return "No zones configured"
+
+            status_counts = {}
+            for zone in zones:
+                status = zone.get_status_display()
+                status_counts[status] = status_counts.get(status, 0) + 1
+
+            summary_parts = []
+            for status, count in status_counts.items():
+                summary_parts.append(f"{count} {status}")
+
+            return ", ".join(summary_parts)
+        except Exception:
+            return "Error loading zones"
 
 
 class NoteSerializer(serializers.ModelSerializer):
@@ -275,7 +339,7 @@ class ContractSerializer(serializers.ModelSerializer):
     
     def get_outstanding_amount(self, obj):
         outstanding = obj.invoices.exclude(status='Paid').aggregate(
-            total=serializers.models.Sum('total_amount')
+            total=Sum('total_amount')
         )['total']
         return outstanding or 0
 

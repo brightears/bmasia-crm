@@ -180,13 +180,65 @@ class UserViewSet(BaseModelViewSet):
 
 class CompanyViewSet(BaseModelViewSet):
     """ViewSet for Company management with enhanced features"""
-    queryset = Company.objects.all()
+    queryset = Company.objects.all().prefetch_related(
+        'contacts',
+        'zones',
+        'opportunities',
+        'contracts'
+    )
     serializer_class = CompanySerializer
     search_fields = ['name', 'website', 'notes', 'zone']
     ordering_fields = ['name', 'created_at', 'zone', 'industry']
     ordering = ['name']
     # Inherits permission_classes = [AllowAny] from BaseModelViewSet for development
     filterset_fields = ['zone', 'industry', 'company_size', 'is_active']
+
+    def get_queryset(self):
+        """Override to dynamically optimize queryset based on action"""
+        queryset = super().get_queryset()
+
+        # For list action, optimize for serialization
+        if self.action == 'list':
+            # Prefetch related objects that are used in the serializer
+            queryset = queryset.prefetch_related(
+                'contacts',
+                'zones',
+                'opportunities',
+                'contracts'
+            )
+        elif self.action == 'retrieve':
+            # For detail view, include even more related data
+            queryset = queryset.prefetch_related(
+                'contacts',
+                'zones',
+                'opportunities',
+                'opportunities__activities',
+                'contracts',
+                'contracts__invoices',
+                'tasks'
+            )
+
+        return queryset
+
+    def list(self, request, *args, **kwargs):
+        """Override list method to add error handling"""
+        try:
+            return super().list(request, *args, **kwargs)
+        except Exception as e:
+            # Log the actual Python exception for debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error in CompanyViewSet.list(): {type(e).__name__}: {str(e)}", exc_info=True)
+
+            # Return meaningful error response instead of 500
+            return Response(
+                {
+                    'error': 'Failed to retrieve companies',
+                    'detail': str(e),
+                    'type': type(e).__name__
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     @action(detail=True, methods=['get'])
     def dashboard(self, request, pk=None):
