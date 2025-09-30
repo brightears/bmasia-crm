@@ -1,82 +1,24 @@
-import axios from 'axios';
 import {
   User, Company, Contact, Note, Task, Opportunity, OpportunityActivity,
   Contract, Invoice, Quote, DashboardStats, AuditLog, ApiResponse
 } from '../types';
-import AuthService from './authService';
+import { authApi } from './authService';
 import { MockApiService } from './mockData';
-
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://bmasia-crm.onrender.com';
 
 class ApiService {
   private useMockData = process.env.REACT_APP_BYPASS_AUTH === 'true' && process.env.NODE_ENV === 'development';
-  private api = axios.create({
-    baseURL: `${API_BASE_URL}/api/v1`,
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
 
   constructor() {
-    // Add token to requests
-    this.api.interceptors.request.use((config) => {
-      const token = AuthService.getAccessToken();
-      const bypassAuth = process.env.REACT_APP_BYPASS_AUTH === 'true';
-
-      if (bypassAuth && process.env.NODE_ENV === 'development') {
-        // Use development bypass - no authorization header needed
-        console.log('API: Development mode - bypassing authorization');
-      } else if (token && !AuthService.isTokenExpired(token)) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-      return config;
-    });
-
-    // Handle unauthorized responses with token refresh
-    this.api.interceptors.response.use(
-      (response) => response,
-      async (error) => {
-        const bypassAuth = process.env.REACT_APP_BYPASS_AUTH === 'true';
-        const originalRequest = error.config;
-
-        if (bypassAuth && process.env.NODE_ENV === 'development' && error.response?.status === 401) {
-          console.warn('API: Ignoring 401 error in development mode');
-          return Promise.reject(error);
-        }
-
-        if (error.response?.status === 401 && !originalRequest._retry) {
-          originalRequest._retry = true;
-
-          try {
-            await AuthService.refreshToken();
-            const newToken = AuthService.getAccessToken();
-            if (newToken) {
-              originalRequest.headers.Authorization = `Bearer ${newToken}`;
-              return this.api(originalRequest);
-            }
-          } catch (refreshError) {
-            AuthService.clearAuthData();
-            window.location.href = '/login';
-            return Promise.reject(refreshError);
-          }
-        }
-
-        if (error.response?.status === 403) {
-          // Handle forbidden responses (insufficient permissions)
-          console.error('Access forbidden:', error.response.data);
-        }
-
-        return Promise.reject(error);
-      }
-    );
+    console.log('ApiService: Initialized using shared authApi axios instance');
+    console.log('ApiService: Mock data mode:', this.useMockData);
   }
 
-  // Note: Authentication methods moved to AuthService
-  // This service now focuses on business data operations
+  // Note: Authentication methods are in AuthService
+  // This service focuses on business data operations using the shared axios instance
 
   // Dashboard
   async getDashboardStats(): Promise<DashboardStats> {
-    const response = await this.api.get<DashboardStats>('/dashboard/stats/');
+    const response = await authApi.get<DashboardStats>('/dashboard/stats/');
     return response.data;
   }
 
@@ -87,7 +29,13 @@ class ApiService {
       return MockApiService.getCompanies(params);
     }
 
-    const response = await this.api.get<ApiResponse<Company>>('/companies/', { params });
+    console.log('ApiService.getCompanies: Making request to /companies/ with params:', params);
+    const response = await authApi.get<ApiResponse<Company>>('/companies/', { params });
+    console.log('ApiService.getCompanies: Response received:', {
+      status: response.status,
+      count: response.data.count,
+      resultsLength: response.data.results?.length || 0
+    });
     return response.data;
   }
 
@@ -97,7 +45,7 @@ class ApiService {
       return MockApiService.getCompany(id);
     }
 
-    const response = await this.api.get<Company>(`/companies/${id}/`);
+    const response = await authApi.get<Company>(`/companies/${id}/`);
     return response.data;
   }
 
@@ -107,7 +55,7 @@ class ApiService {
       return MockApiService.createCompany(data);
     }
 
-    const response = await this.api.post<Company>('/companies/', data);
+    const response = await authApi.post<Company>('/companies/', data);
     return response.data;
   }
 
@@ -117,16 +65,16 @@ class ApiService {
       return MockApiService.updateCompany(id, data);
     }
 
-    const response = await this.api.put<Company>(`/companies/${id}/`, data);
+    const response = await authApi.put<Company>(`/companies/${id}/`, data);
     return response.data;
   }
 
   async deleteCompany(id: string): Promise<void> {
-    await this.api.delete(`/companies/${id}/`);
+    await authApi.delete(`/companies/${id}/`);
   }
 
   async getCompanyDashboard(id: string): Promise<any> {
-    const response = await this.api.get(`/companies/${id}/dashboard/`);
+    const response = await authApi.get(`/companies/${id}/dashboard/`);
     return response.data;
   }
 
@@ -137,108 +85,108 @@ class ApiService {
       return MockApiService.getContacts(params);
     }
 
-    const response = await this.api.get<ApiResponse<Contact>>('/contacts/', { params });
+    const response = await authApi.get<ApiResponse<Contact>>('/contacts/', { params });
     return response.data;
   }
 
   async getContact(id: string): Promise<Contact> {
-    const response = await this.api.get<Contact>(`/contacts/${id}/`);
+    const response = await authApi.get<Contact>(`/contacts/${id}/`);
     return response.data;
   }
 
   async createContact(data: Partial<Contact>): Promise<Contact> {
-    const response = await this.api.post<Contact>('/contacts/', data);
+    const response = await authApi.post<Contact>('/contacts/', data);
     return response.data;
   }
 
   async updateContact(id: string, data: Partial<Contact>): Promise<Contact> {
-    const response = await this.api.put<Contact>(`/contacts/${id}/`, data);
+    const response = await authApi.put<Contact>(`/contacts/${id}/`, data);
     return response.data;
   }
 
   async deleteContact(id: string): Promise<void> {
-    await this.api.delete(`/contacts/${id}/`);
+    await authApi.delete(`/contacts/${id}/`);
   }
 
   // Notes
   async getNotes(params?: any): Promise<ApiResponse<Note>> {
-    const response = await this.api.get<ApiResponse<Note>>('/notes/', { params });
+    const response = await authApi.get<ApiResponse<Note>>('/notes/', { params });
     return response.data;
   }
 
   async createNote(data: Partial<Note>): Promise<Note> {
-    const response = await this.api.post<Note>('/notes/', data);
+    const response = await authApi.post<Note>('/notes/', data);
     return response.data;
   }
 
   async updateNote(id: string, data: Partial<Note>): Promise<Note> {
-    const response = await this.api.put<Note>(`/notes/${id}/`, data);
+    const response = await authApi.put<Note>(`/notes/${id}/`, data);
     return response.data;
   }
 
   async deleteNote(id: string): Promise<void> {
-    await this.api.delete(`/notes/${id}/`);
+    await authApi.delete(`/notes/${id}/`);
   }
 
   // Tasks
   async getTasks(params?: any): Promise<ApiResponse<Task>> {
-    const response = await this.api.get<ApiResponse<Task>>('/tasks/', { params });
+    const response = await authApi.get<ApiResponse<Task>>('/tasks/', { params });
     return response.data;
   }
 
   async getMyTasks(): Promise<Task[]> {
-    const response = await this.api.get<Task[]>('/tasks/my_tasks/');
+    const response = await authApi.get<Task[]>('/tasks/my_tasks/');
     return response.data;
   }
 
   async getOverdueTasks(): Promise<Task[]> {
-    const response = await this.api.get<Task[]>('/tasks/overdue/');
+    const response = await authApi.get<Task[]>('/tasks/overdue/');
     return response.data;
   }
 
   async getTask(id: string): Promise<Task> {
-    const response = await this.api.get<Task>(`/tasks/${id}/`);
+    const response = await authApi.get<Task>(`/tasks/${id}/`);
     return response.data;
   }
 
   async createTask(data: Partial<Task>): Promise<Task> {
-    const response = await this.api.post<Task>('/tasks/', data);
+    const response = await authApi.post<Task>('/tasks/', data);
     return response.data;
   }
 
   async updateTask(id: string, data: Partial<Task>): Promise<Task> {
-    const response = await this.api.put<Task>(`/tasks/${id}/`, data);
+    const response = await authApi.put<Task>(`/tasks/${id}/`, data);
     return response.data;
   }
 
   async deleteTask(id: string): Promise<void> {
-    await this.api.delete(`/tasks/${id}/`);
+    await authApi.delete(`/tasks/${id}/`);
   }
 
   // Task Comments
   async addTaskComment(taskId: string, comment: string): Promise<any> {
-    const response = await this.api.post(`/tasks/${taskId}/comments/`, { comment });
+    const response = await authApi.post(`/tasks/${taskId}/comments/`, { comment });
     return response.data;
   }
 
   async getTaskComments(taskId: string): Promise<any[]> {
-    const response = await this.api.get(`/tasks/${taskId}/comments/`);
+    const response = await authApi.get(`/tasks/${taskId}/comments/`);
     return response.data;
   }
 
   // Task Subtasks
   async addTaskSubtask(taskId: string, title: string): Promise<any> {
-    const response = await this.api.post(`/tasks/${taskId}/subtasks/`, { title });
+    const response = await authApi.post(`/tasks/${taskId}/subtasks/`, { title });
     return response.data;
   }
 
   async updateTaskSubtask(taskId: string, subtaskId: string, data: any): Promise<any> {
-    const response = await this.api.put(`/tasks/${taskId}/subtasks/${subtaskId}/`, data);
+    const response = await authApi.put(`/tasks/${taskId}/subtasks/${subtaskId}/`, data);
     return response.data;
   }
 
   async deleteTaskSubtask(taskId: string, subtaskId: string): Promise<void> {
-    await this.api.delete(`/tasks/${taskId}/subtasks/${subtaskId}/`);
+    await authApi.delete(`/tasks/${taskId}/subtasks/${subtaskId}/`);
   }
 
   // Opportunities
@@ -248,71 +196,71 @@ class ApiService {
       return MockApiService.getOpportunities(params);
     }
 
-    const response = await this.api.get<ApiResponse<Opportunity>>('/opportunities/', { params });
+    const response = await authApi.get<ApiResponse<Opportunity>>('/opportunities/', { params });
     return response.data;
   }
 
   async getOpportunity(id: string): Promise<Opportunity> {
-    const response = await this.api.get<Opportunity>(`/opportunities/${id}/`);
+    const response = await authApi.get<Opportunity>(`/opportunities/${id}/`);
     return response.data;
   }
 
   async createOpportunity(data: Partial<Opportunity>): Promise<Opportunity> {
-    const response = await this.api.post<Opportunity>('/opportunities/', data);
+    const response = await authApi.post<Opportunity>('/opportunities/', data);
     return response.data;
   }
 
   async updateOpportunity(id: string, data: Partial<Opportunity>): Promise<Opportunity> {
-    const response = await this.api.put<Opportunity>(`/opportunities/${id}/`, data);
+    const response = await authApi.put<Opportunity>(`/opportunities/${id}/`, data);
     return response.data;
   }
 
   async deleteOpportunity(id: string): Promise<void> {
-    await this.api.delete(`/opportunities/${id}/`);
+    await authApi.delete(`/opportunities/${id}/`);
   }
 
   async getSalesPipeline(): Promise<any> {
-    const response = await this.api.get('/opportunities/pipeline/');
+    const response = await authApi.get('/opportunities/pipeline/');
     return response.data;
   }
 
   async advanceOpportunityStage(id: string): Promise<any> {
-    const response = await this.api.post(`/opportunities/${id}/advance_stage/`);
+    const response = await authApi.post(`/opportunities/${id}/advance_stage/`);
     return response.data;
   }
 
   // Opportunity Activities
   async getOpportunityActivities(params?: any): Promise<ApiResponse<OpportunityActivity>> {
-    const response = await this.api.get<ApiResponse<OpportunityActivity>>('/opportunity-activities/', { params });
+    const response = await authApi.get<ApiResponse<OpportunityActivity>>('/opportunity-activities/', { params });
     return response.data;
   }
 
   async getOpportunityActivity(id: string): Promise<OpportunityActivity> {
-    const response = await this.api.get<OpportunityActivity>(`/opportunity-activities/${id}/`);
+    const response = await authApi.get<OpportunityActivity>(`/opportunity-activities/${id}/`);
     return response.data;
   }
 
   async createOpportunityActivity(data: Partial<OpportunityActivity>): Promise<OpportunityActivity> {
-    const response = await this.api.post<OpportunityActivity>('/opportunity-activities/', data);
+    const response = await authApi.post<OpportunityActivity>('/opportunity-activities/', data);
     return response.data;
   }
 
   async updateOpportunityActivity(id: string, data: Partial<OpportunityActivity>): Promise<OpportunityActivity> {
-    const response = await this.api.put<OpportunityActivity>(`/opportunity-activities/${id}/`, data);
+    const response = await authApi.put<OpportunityActivity>(`/opportunity-activities/${id}/`, data);
     return response.data;
   }
 
   async deleteOpportunityActivity(id: string): Promise<void> {
-    await this.api.delete(`/opportunity-activities/${id}/`);
+    await authApi.delete(`/opportunity-activities/${id}/`);
   }
 
   async getActivitiesByOpportunity(opportunityId: string): Promise<OpportunityActivity[]> {
-    const response = await this.api.get<OpportunityActivity[]>(`/opportunities/${opportunityId}/activities/`);
+    const response = await authApi.get<OpportunityActivity[]>(`/opportunities/${opportunityId}/activities/`);
     return response.data;
   }
 
   async getActivitiesByContact(contactId: string): Promise<OpportunityActivity[]> {
-    const response = await this.api.get<OpportunityActivity[]>(`/contacts/${contactId}/activities/`);
+    const response = await authApi.get<OpportunityActivity[]>(`/contacts/${contactId}/activities/`);
     return response.data;
   }
 
@@ -323,163 +271,163 @@ class ApiService {
       return MockApiService.getContracts(params);
     }
 
-    const response = await this.api.get<ApiResponse<Contract>>('/contracts/', { params });
+    const response = await authApi.get<ApiResponse<Contract>>('/contracts/', { params });
     return response.data;
   }
 
   async getContract(id: string): Promise<Contract> {
-    const response = await this.api.get<Contract>(`/contracts/${id}/`);
+    const response = await authApi.get<Contract>(`/contracts/${id}/`);
     return response.data;
   }
 
   async getExpiringContracts(): Promise<Contract[]> {
-    const response = await this.api.get<Contract[]>('/contracts/expiring_soon/');
+    const response = await authApi.get<Contract[]>('/contracts/expiring_soon/');
     return response.data;
   }
 
   async createContract(data: Partial<Contract>): Promise<Contract> {
-    const response = await this.api.post<Contract>('/contracts/', data);
+    const response = await authApi.post<Contract>('/contracts/', data);
     return response.data;
   }
 
   async updateContract(id: string, data: Partial<Contract>): Promise<Contract> {
-    const response = await this.api.put<Contract>(`/contracts/${id}/`, data);
+    const response = await authApi.put<Contract>(`/contracts/${id}/`, data);
     return response.data;
   }
 
   async sendRenewalNotice(id: string): Promise<any> {
-    const response = await this.api.post(`/contracts/${id}/send_renewal_notice/`);
+    const response = await authApi.post(`/contracts/${id}/send_renewal_notice/`);
     return response.data;
   }
 
   // Invoices
   async getInvoices(params?: any): Promise<ApiResponse<Invoice>> {
-    const response = await this.api.get<ApiResponse<Invoice>>('/invoices/', { params });
+    const response = await authApi.get<ApiResponse<Invoice>>('/invoices/', { params });
     return response.data;
   }
 
   async getInvoice(id: string): Promise<Invoice> {
-    const response = await this.api.get<Invoice>(`/invoices/${id}/`);
+    const response = await authApi.get<Invoice>(`/invoices/${id}/`);
     return response.data;
   }
 
   async createInvoice(data: Partial<Invoice>): Promise<Invoice> {
-    const response = await this.api.post<Invoice>('/invoices/', data);
+    const response = await authApi.post<Invoice>('/invoices/', data);
     return response.data;
   }
 
   async updateInvoice(id: string, data: Partial<Invoice>): Promise<Invoice> {
-    const response = await this.api.put<Invoice>(`/invoices/${id}/`, data);
+    const response = await authApi.put<Invoice>(`/invoices/${id}/`, data);
     return response.data;
   }
 
   async deleteInvoice(id: string): Promise<void> {
-    await this.api.delete(`/invoices/${id}/`);
+    await authApi.delete(`/invoices/${id}/`);
   }
 
   async getOverdueInvoices(): Promise<Invoice[]> {
-    const response = await this.api.get<Invoice[]>('/invoices/overdue/');
+    const response = await authApi.get<Invoice[]>('/invoices/overdue/');
     return response.data;
   }
 
   async markInvoicePaid(id: string, data?: { payment_method?: string; transaction_id?: string; notes?: string }): Promise<any> {
-    const response = await this.api.post(`/invoices/${id}/mark_paid/`, data);
+    const response = await authApi.post(`/invoices/${id}/mark_paid/`, data);
     return response.data;
   }
 
   async sendInvoice(id: string, email?: string): Promise<any> {
-    const response = await this.api.post(`/invoices/${id}/send/`, { email });
+    const response = await authApi.post(`/invoices/${id}/send/`, { email });
     return response.data;
   }
 
   async downloadInvoicePDF(id: string): Promise<Blob> {
-    const response = await this.api.get(`/invoices/${id}/pdf/`, {
+    const response = await authApi.get(`/invoices/${id}/pdf/`, {
       responseType: 'blob'
     });
     return response.data;
   }
 
   async addInvoicePayment(invoiceId: string, data: Partial<any>): Promise<any> {
-    const response = await this.api.post(`/invoices/${invoiceId}/payments/`, data);
+    const response = await authApi.post(`/invoices/${invoiceId}/payments/`, data);
     return response.data;
   }
 
   async getInvoiceStats(): Promise<any> {
-    const response = await this.api.get('/invoices/stats/');
+    const response = await authApi.get('/invoices/stats/');
     return response.data;
   }
 
   // Quotes
   async getQuotes(params?: any): Promise<ApiResponse<Quote>> {
-    const response = await this.api.get<ApiResponse<Quote>>('/quotes/', { params });
+    const response = await authApi.get<ApiResponse<Quote>>('/quotes/', { params });
     return response.data;
   }
 
   async getQuote(id: string): Promise<Quote> {
-    const response = await this.api.get<Quote>(`/quotes/${id}/`);
+    const response = await authApi.get<Quote>(`/quotes/${id}/`);
     return response.data;
   }
 
   async createQuote(data: Partial<Quote>): Promise<Quote> {
-    const response = await this.api.post<Quote>('/quotes/', data);
+    const response = await authApi.post<Quote>('/quotes/', data);
     return response.data;
   }
 
   async updateQuote(id: string, data: Partial<Quote>): Promise<Quote> {
-    const response = await this.api.put<Quote>(`/quotes/${id}/`, data);
+    const response = await authApi.put<Quote>(`/quotes/${id}/`, data);
     return response.data;
   }
 
   async deleteQuote(id: string): Promise<void> {
-    await this.api.delete(`/quotes/${id}/`);
+    await authApi.delete(`/quotes/${id}/`);
   }
 
   async duplicateQuote(id: string): Promise<Quote> {
-    const response = await this.api.post<Quote>(`/quotes/${id}/duplicate/`);
+    const response = await authApi.post<Quote>(`/quotes/${id}/duplicate/`);
     return response.data;
   }
 
   async sendQuote(id: string, email?: string): Promise<any> {
-    const response = await this.api.post(`/quotes/${id}/send/`, { email });
+    const response = await authApi.post(`/quotes/${id}/send/`, { email });
     return response.data;
   }
 
   async acceptQuote(id: string): Promise<any> {
-    const response = await this.api.post(`/quotes/${id}/accept/`);
+    const response = await authApi.post(`/quotes/${id}/accept/`);
     return response.data;
   }
 
   async rejectQuote(id: string, reason?: string): Promise<any> {
-    const response = await this.api.post(`/quotes/${id}/reject/`, { reason });
+    const response = await authApi.post(`/quotes/${id}/reject/`, { reason });
     return response.data;
   }
 
   async convertQuoteToContract(id: string, contractData?: Partial<Contract>): Promise<Contract> {
-    const response = await this.api.post<Contract>(`/quotes/${id}/convert_to_contract/`, contractData);
+    const response = await authApi.post<Contract>(`/quotes/${id}/convert_to_contract/`, contractData);
     return response.data;
   }
 
   async downloadQuotePDF(id: string): Promise<Blob> {
-    const response = await this.api.get(`/quotes/${id}/pdf/`, {
+    const response = await authApi.get(`/quotes/${id}/pdf/`, {
       responseType: 'blob'
     });
     return response.data;
   }
 
   async getExpiringQuotes(): Promise<Quote[]> {
-    const response = await this.api.get<Quote[]>('/quotes/expiring_soon/');
+    const response = await authApi.get<Quote[]>('/quotes/expiring_soon/');
     return response.data;
   }
 
   async getQuoteStats(): Promise<any> {
-    const response = await this.api.get('/quotes/stats/');
+    const response = await authApi.get('/quotes/stats/');
     return response.data;
   }
 
   async addQuoteAttachment(quoteId: string, file: File): Promise<any> {
     const formData = new FormData();
     formData.append('file', file);
-    const response = await this.api.post(`/quotes/${quoteId}/attachments/`, formData, {
+    const response = await authApi.post(`/quotes/${quoteId}/attachments/`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -488,24 +436,24 @@ class ApiService {
   }
 
   async deleteQuoteAttachment(quoteId: string, attachmentId: string): Promise<void> {
-    await this.api.delete(`/quotes/${quoteId}/attachments/${attachmentId}/`);
+    await authApi.delete(`/quotes/${quoteId}/attachments/${attachmentId}/`);
   }
 
   // Users
   async getUsers(params?: any): Promise<ApiResponse<User>> {
-    const response = await this.api.get<ApiResponse<User>>('/users/', { params });
+    const response = await authApi.get<ApiResponse<User>>('/users/', { params });
     return response.data;
   }
 
   // Audit Logs
   async getAuditLogs(params?: any): Promise<ApiResponse<AuditLog>> {
-    const response = await this.api.get<ApiResponse<AuditLog>>('/audit-logs/', { params });
+    const response = await authApi.get<ApiResponse<AuditLog>>('/audit-logs/', { params });
     return response.data;
   }
 
   // Bulk Operations
   async bulkOperation(endpoint: string, action: string, ids: string[], data?: any): Promise<any> {
-    const response = await this.api.post(`/${endpoint}/bulk_operations/`, {
+    const response = await authApi.post(`/${endpoint}/bulk_operations/`, {
       action,
       ids,
       data
@@ -519,7 +467,7 @@ class ApiService {
     if (ids) {
       params.ids = ids;
     }
-    const response = await this.api.post(`/${endpoint}/bulk_operations/`, params, {
+    const response = await authApi.post(`/${endpoint}/bulk_operations/`, params, {
       responseType: 'blob'
     });
     return response.data;

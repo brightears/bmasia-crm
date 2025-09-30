@@ -301,7 +301,20 @@ class AuthService {
       }, timeUntilRefresh);
     }
   }
+
+  /**
+   * Get the shared axios instance with configured interceptors
+   * This allows other services to use the same instance and benefit from automatic token handling
+   */
+  public getAxiosInstance() {
+    console.log('AuthService: Providing shared axios instance');
+    return this.api;
+  }
 }
 
 const authService = new AuthService();
 export default authService;
+
+// Export the shared axios instance for use by other services
+// This ensures all API calls use the same instance with token management
+export const authApi = authService.getAxiosInstance();

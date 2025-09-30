@@ -45,18 +45,27 @@ const Companies: React.FC = () => {
   const loadCompanies = useCallback(async () => {
     try {
       setLoading(true);
+      setError(''); // Clear previous errors
       const params = {
         page: page + 1,
         page_size: rowsPerPage,
         search: search || undefined,
       };
 
+      console.log('Loading companies with params:', params);
       const response: ApiResponse<Company> = await ApiService.getCompanies(params);
-      setCompanies(response.results);
-      setTotalCount(response.count);
+      console.log('Companies API response:', response);
+      console.log('Companies count:', response.count, 'Results:', response.results.length);
+
+      setCompanies(response.results || []);
+      setTotalCount(response.count || 0);
     } catch (err: any) {
-      setError('Failed to load companies');
-      console.error('Companies error:', err);
+      console.error('Companies error - Full error object:', err);
+      console.error('Error response:', err.response);
+      console.error('Error message:', err.message);
+      setError(`Failed to load companies: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
+      setCompanies([]);
+      setTotalCount(0);
     } finally {
       setLoading(false);
     }

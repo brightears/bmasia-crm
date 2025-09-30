@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Box,
   Paper,
@@ -17,6 +18,8 @@ import { useAuth } from '../contexts/AuthContext';
 
 const Login: React.FC = () => {
   const { login, loading } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [credentials, setCredentials] = useState({
     username: '',
     password: '',
@@ -38,7 +41,13 @@ const Login: React.FC = () => {
 
     try {
       await login(credentials);
-      // Login successful - AuthContext will handle state update and App.tsx will redirect
+
+      // Get the intended destination from location state, or default to /dashboard
+      const from = (location.state as any)?.from?.pathname || '/dashboard';
+      console.log('Login successful, navigating to:', from);
+
+      // Navigate to the intended destination
+      navigate(from, { replace: true });
     } catch (err: any) {
       console.error('Login component error:', err);
       // Get error message from the thrown Error object

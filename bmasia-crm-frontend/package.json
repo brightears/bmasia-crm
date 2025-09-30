@@ -2,7 +2,6 @@
   "name": "bmasia-crm-frontend",
   "version": "0.1.0",
   "private": true,
-  "proxy": "https://bmasia-crm.onrender.com",
   "dependencies": {
     "@date-io/date-fns": "^2.17.0",
     "@emotion/react": "^11.14.0",
