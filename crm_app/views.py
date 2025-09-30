@@ -187,11 +187,11 @@ class CompanyViewSet(BaseModelViewSet):
         'contracts'
     )
     serializer_class = CompanySerializer
-    search_fields = ['name', 'website', 'notes', 'zone']
-    ordering_fields = ['name', 'created_at', 'zone', 'industry']
+    search_fields = ['name', 'website', 'notes', 'country']
+    ordering_fields = ['name', 'created_at', 'industry', 'country']
     ordering = ['name']
     # Inherits permission_classes = [AllowAny] from BaseModelViewSet for development
-    filterset_fields = ['zone', 'industry', 'company_size', 'is_active']
+    filterset_fields = ['industry', 'is_active', 'country']
 
     def get_queryset(self):
         """Override to dynamically optimize queryset based on action"""
