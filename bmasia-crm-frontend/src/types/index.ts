@@ -71,22 +71,27 @@ export interface Contact {
   id: string;
   company: string;
   company_name: string;
-  first_name: string;
-  last_name: string;
-  name: string; // computed full name
+  name: string; // Full name stored in backend
   email: string;
   phone?: string;
-  mobile?: string;
   title?: string;
   department?: string;
-  status: 'Active' | 'Inactive';
-  is_decision_maker: boolean;
+  contact_type: 'Primary' | 'Technical' | 'Billing' | 'Decision Maker' | 'Other';
+  is_primary: boolean;
+  is_active: boolean;
   linkedin_url?: string;
   notes?: string;
-  preferred_contact_method?: 'Email' | 'Phone' | 'Mobile' | 'LinkedIn';
   last_contacted?: string;
   created_at: string;
   updated_at: string;
+
+  // These fields are not in the backend yet but used in frontend for convenience
+  first_name?: string; // Computed from name
+  last_name?: string; // Computed from name
+  mobile?: string; // Not in backend yet
+  status?: 'Active' | 'Inactive'; // Mapped from is_active
+  is_decision_maker?: boolean; // Derived from contact_type
+  preferred_contact_method?: 'Email' | 'Phone' | 'Mobile' | 'LinkedIn'; // Not in backend yet
 }
 
 export interface Note {

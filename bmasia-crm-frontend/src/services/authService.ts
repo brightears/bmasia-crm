@@ -1,7 +1,15 @@
 import axios, { AxiosResponse } from 'axios';
 import { LoginCredentials, AuthResponse, RefreshTokenResponse, User, JWTPayload } from '../types';
 
+// Log environment variables for debugging
+console.log('=== Environment Variables ===');
+console.log('process.env.REACT_APP_API_URL:', process.env.REACT_APP_API_URL);
+console.log('process.env.REACT_APP_BYPASS_AUTH:', process.env.REACT_APP_BYPASS_AUTH);
+console.log('process.env.NODE_ENV:', process.env.NODE_ENV);
+console.log('============================\n');
+
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://bmasia-crm.onrender.com';
+console.log('Using API_BASE_URL:', API_BASE_URL);
 
 /**
  * JWT Token Management Service
@@ -23,6 +31,13 @@ class AuthService {
   });
 
   constructor() {
+    console.log('=== AuthService Constructor ===');
+    console.log('API_BASE_URL:', API_BASE_URL);
+    console.log('Configured baseURL:', `${API_BASE_URL}/api/v1`);
+    console.log('Axios defaults transformResponse:', this.api.defaults.transformResponse);
+    console.log('Number of request interceptors:', this.api.interceptors.request['handlers']?.length || 0);
+    console.log('Number of response interceptors:', this.api.interceptors.response['handlers']?.length || 0);
+    console.log('===============================\n');
     this.setupInterceptors();
   }
 
@@ -34,31 +49,102 @@ class AuthService {
     this.api.interceptors.request.use(
       (config) => {
         const token = this.getAccessToken();
+
+        // Construct full URL for logging
+        const fullUrl = `${config.baseURL}${config.url}`;
+
+        console.log('=== REQUEST INTERCEPTOR ===');
+        console.log('Full URL:', fullUrl);
+        console.log('Method:', config.method?.toUpperCase());
+        console.log('Base URL:', config.baseURL);
+        console.log('Endpoint:', config.url);
+        console.log('Params:', config.params);
+        console.log('Has Token:', !!token);
+
         if (token && !this.isTokenExpired(token)) {
           config.headers.Authorization = `Bearer ${token}`;
+          console.log('Authorization Header (first 30 chars):', `${token.substring(0, 30)}...`);
+        } else if (token) {
+          console.log('Token exists but is EXPIRED');
+        } else {
+          console.log('No token available');
         }
+
+        console.log('Request Headers:', JSON.stringify(config.headers, null, 2));
+        console.log('========================\n');
+
         return config;
       },
-      (error) => Promise.reject(error)
+      (error) => {
+        console.error('=== REQUEST INTERCEPTOR ERROR ===');
+        console.error('Error:', error);
+        console.error('==================================\n');
+        return Promise.reject(error);
+      }
     );
 
     // Response interceptor for token refresh
     this.api.interceptors.response.use(
-      (response) => response,
+      (response) => {
+        console.log('=== RESPONSE INTERCEPTOR (SUCCESS) ===');
+        console.log('Status:', response.status);
+        console.log('Status Text:', response.statusText);
+        console.log('URL:', response.config.url);
+        console.log('Response Headers:', JSON.stringify(response.headers, null, 2));
+        console.log('Response Data Type:', typeof response.data);
+        console.log('Response Data:', JSON.stringify(response.data, null, 2));
+
+        // Check if data was transformed
+        if (response.data && typeof response.data === 'object') {
+          console.log('Response Data Keys:', Object.keys(response.data));
+          if ('count' in response.data) {
+            console.log('Has count property:', response.data.count);
+          }
+          if ('results' in response.data) {
+            console.log('Has results property, length:', response.data.results?.length);
+          }
+        }
+        console.log('======================================\n');
+
+        return response;
+      },
       async (error) => {
+        console.error('=== RESPONSE INTERCEPTOR (ERROR) ===');
+
+        if (error.response) {
+          // Server responded with error status
+          console.error('Error Status:', error.response.status);
+          console.error('Error Status Text:', error.response.statusText);
+          console.error('Error URL:', error.config?.url);
+          console.error('Error Data:', JSON.stringify(error.response.data, null, 2));
+          console.error('Error Headers:', JSON.stringify(error.response.headers, null, 2));
+        } else if (error.request) {
+          // Request was made but no response received
+          console.error('No response received');
+          console.error('Request:', error.request);
+        } else {
+          // Something else happened
+          console.error('Error Message:', error.message);
+        }
+        console.error('Error Config:', JSON.stringify(error.config, null, 2));
+        console.error('=====================================\n');
+
         const originalRequest = error.config;
 
         if (error.response?.status === 401 && !originalRequest._retry) {
+          console.log('Attempting token refresh due to 401 error');
           originalRequest._retry = true;
 
           try {
             await this.refreshToken();
             const newToken = this.getAccessToken();
             if (newToken) {
+              console.log('Token refreshed successfully, retrying request');
               originalRequest.headers.Authorization = `Bearer ${newToken}`;
               return this.api(originalRequest);
             }
           } catch (refreshError) {
+            console.error('Token refresh failed, redirecting to login');
             this.clearAuthData();
             window.location.href = '/login';
             return Promise.reject(refreshError);

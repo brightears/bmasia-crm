@@ -164,6 +164,16 @@ const ContactDetail: React.FC<ContactDetailProps> = ({
     return null;
   }
 
+  // Get initials from name
+  const nameParts = contact.name.split(' ');
+  const initials = nameParts.length >= 2
+    ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`
+    : contact.name.substring(0, 2);
+
+  // Derive status and decision maker from backend fields
+  const status = contact.is_active ? 'Active' : 'Inactive';
+  const isDecisionMaker = contact.contact_type === 'Decision Maker';
+
   return (
     <Dialog
       open={open}
@@ -178,7 +188,7 @@ const ContactDetail: React.FC<ContactDetailProps> = ({
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <Avatar sx={{ mr: 2, bgcolor: 'primary.main', width: 56, height: 56 }}>
-              {contact.first_name[0]}{contact.last_name[0]}
+              {initials.toUpperCase()}
             </Avatar>
             <Box>
               <Typography variant="h5" component="div">
@@ -256,26 +266,6 @@ const ContactDetail: React.FC<ContactDetailProps> = ({
                         />
                       </ListItem>
                     )}
-                    {contact.mobile && (
-                      <ListItem>
-                        <ListItemIcon>
-                          <Phone />
-                        </ListItemIcon>
-                        <ListItemText
-                          primary="Mobile"
-                          secondary={
-                            <Link
-                              component="button"
-                              variant="body2"
-                              onClick={() => handlePhoneCall(contact.mobile!)}
-                              sx={{ textAlign: 'left' }}
-                            >
-                              {contact.mobile}
-                            </Link>
-                          }
-                        />
-                      </ListItem>
-                    )}
                     {contact.linkedin_url && (
                       <ListItem>
                         <ListItemIcon>
@@ -333,12 +323,12 @@ const ContactDetail: React.FC<ContactDetailProps> = ({
                       Status
                     </Typography>
                     <Chip
-                      label={contact.status}
-                      color={contact.status === 'Active' ? 'success' : 'default'}
+                      label={status}
+                      color={status === 'Active' ? 'success' : 'default'}
                       size="small"
                     />
                   </Box>
-                  {contact.is_decision_maker && (
+                  {isDecisionMaker && (
                     <Box sx={{ mb: 2 }}>
                       <Chip
                         label="Decision Maker"

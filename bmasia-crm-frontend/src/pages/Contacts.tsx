@@ -346,98 +346,102 @@ const Contacts: React.FC = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              contacts.map((contact) => (
-                <TableRow key={contact.id} hover>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Avatar sx={{ mr: 2, bgcolor: 'primary.main', width: 40, height: 40 }}>
-                        {contact.first_name[0]}{contact.last_name[0]}
-                      </Avatar>
-                      <Box>
-                        <Typography variant="body2" fontWeight="medium">
-                          {contact.name}
-                          {contact.is_decision_maker && (
-                            <Chip
-                              label="Decision Maker"
-                              size="small"
-                              color="primary"
-                              sx={{ ml: 1, fontSize: '0.7rem' }}
-                            />
-                          )}
-                        </Typography>
-                        {contact.department && (
-                          <Typography variant="caption" color="text.secondary">
-                            {contact.department}
+              contacts.map((contact) => {
+                // Get initials from name
+                const nameParts = contact.name.split(' ');
+                const initials = nameParts.length >= 2
+                  ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`
+                  : contact.name.substring(0, 2);
+                const status = contact.is_active ? 'Active' : 'Inactive';
+                const isDecisionMaker = contact.contact_type === 'Decision Maker';
+
+                return (
+                  <TableRow key={contact.id} hover>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        <Avatar sx={{ mr: 2, bgcolor: 'primary.main', width: 40, height: 40 }}>
+                          {initials.toUpperCase()}
+                        </Avatar>
+                        <Box>
+                          <Typography variant="body2" fontWeight="medium">
+                            {contact.name}
+                            {isDecisionMaker && (
+                              <Chip
+                                label="Decision Maker"
+                                size="small"
+                                color="primary"
+                                sx={{ ml: 1, fontSize: '0.7rem' }}
+                              />
+                            )}
                           </Typography>
-                        )}
+                          {contact.department && (
+                            <Typography variant="caption" color="text.secondary">
+                              {contact.department}
+                            </Typography>
+                          )}
+                        </Box>
                       </Box>
-                    </Box>
-                  </TableCell>
-                  <TableCell>{contact.title || '-'}</TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Business sx={{ mr: 1, fontSize: 16, color: 'text.secondary' }} />
-                      {contact.company_name}
-                    </Box>
-                  </TableCell>
-                  <TableCell>{contact.email}</TableCell>
-                  <TableCell>
-                    {contact.phone && (
-                      <Typography variant="body2">{contact.phone}</Typography>
-                    )}
-                    {contact.mobile && (
-                      <Typography variant="caption" color="text.secondary" display="block">
-                        Mobile: {contact.mobile}
+                    </TableCell>
+                    <TableCell>{contact.title || '-'}</TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        <Business sx={{ mr: 1, fontSize: 16, color: 'text.secondary' }} />
+                        {contact.company_name}
+                      </Box>
+                    </TableCell>
+                    <TableCell>{contact.email}</TableCell>
+                    <TableCell>
+                      {contact.phone ? (
+                        <Typography variant="body2">{contact.phone}</Typography>
+                      ) : '-'}
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {formatLastContacted(contact.last_contacted)}
                       </Typography>
-                    )}
-                    {!contact.phone && !contact.mobile && '-'}
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
-                      {formatLastContacted(contact.last_contacted)}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={contact.status}
-                      size="small"
-                      color={getStatusColor(contact.status)}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      {contact.email && (
-                        <Tooltip title="Send Email">
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={status}
+                        size="small"
+                        color={getStatusColor(status)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        {contact.email && (
+                          <Tooltip title="Send Email">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleSendEmail(contact)}
+                            >
+                              <Email />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        {contact.linkedin_url && (
+                          <Tooltip title="LinkedIn Profile">
+                            <IconButton
+                              size="small"
+                              onClick={() => window.open(contact.linkedin_url, '_blank')}
+                            >
+                              <LinkedIn />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        <Tooltip title="More Actions">
                           <IconButton
                             size="small"
-                            onClick={() => handleSendEmail(contact)}
+                            onClick={(e) => handleMenuOpen(e, contact)}
                           >
-                            <Email />
+                            <MoreVert />
                           </IconButton>
                         </Tooltip>
-                      )}
-                      {contact.linkedin_url && (
-                        <Tooltip title="LinkedIn Profile">
-                          <IconButton
-                            size="small"
-                            onClick={() => window.open(contact.linkedin_url, '_blank')}
-                          >
-                            <LinkedIn />
-                          </IconButton>
-                        </Tooltip>
-                      )}
-                      <Tooltip title="More Actions">
-                        <IconButton
-                          size="small"
-                          onClick={(e) => handleMenuOpen(e, contact)}
-                        >
-                          <MoreVert />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  </TableCell>
-                </TableRow>
-              ))
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>

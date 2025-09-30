@@ -77,20 +77,25 @@ const ContactForm: React.FC<ContactFormProps> = ({
 
   useEffect(() => {
     if (contact) {
+      // Split name into first and last for editing
+      const nameParts = contact.name ? contact.name.split(' ') : ['', ''];
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.slice(1).join(' ') || '';
+
       setFormData({
-        first_name: contact.first_name || '',
-        last_name: contact.last_name || '',
+        first_name: firstName,
+        last_name: lastName,
         title: contact.title || '',
         company: contact.company || '',
         email: contact.email || '',
         phone: contact.phone || '',
-        mobile: contact.mobile || '',
+        mobile: '', // Mobile field not in backend yet
         department: contact.department || '',
-        status: contact.status || 'Active',
-        is_decision_maker: contact.is_decision_maker || false,
+        status: contact.is_active ? 'Active' : 'Inactive',
+        is_decision_maker: contact.contact_type === 'Decision Maker',
         linkedin_url: contact.linkedin_url || '',
         notes: contact.notes || '',
-        preferred_contact_method: contact.preferred_contact_method || '',
+        preferred_contact_method: '', // Not in backend yet
       });
     } else {
       // Reset form for new contact
@@ -170,10 +175,29 @@ const ContactForm: React.FC<ContactFormProps> = ({
     setError('');
 
     try {
-      const submitData = {
-        ...formData,
-        preferred_contact_method: formData.preferred_contact_method || undefined,
+      // Map frontend form data to backend API format
+      // Note: mobile and preferred_contact_method are not in the Django model yet
+      const contactType: 'Primary' | 'Technical' | 'Billing' | 'Decision Maker' | 'Other' =
+        formData.is_decision_maker ? 'Decision Maker' : 'Other';
+
+      const submitData: Partial<Contact> = {
+        name: `${formData.first_name} ${formData.last_name}`.trim(),
+        email: formData.email,
+        phone: formData.phone || '',
+        title: formData.title || '',
+        department: formData.department || '',
+        company: formData.company,
+        contact_type: contactType,
+        is_primary: false, // Default to non-primary
+        is_active: formData.status === 'Active',
+        linkedin_url: formData.linkedin_url || '',
+        notes: formData.notes || '',
       };
+
+      console.log('=== Contact Form Submit ===');
+      console.log('Form Data:', JSON.stringify(formData, null, 2));
+      console.log('Submit Data (mapped for API):', JSON.stringify(submitData, null, 2));
+      console.log('Contact ID:', contact?.id || 'NEW');
 
       if (contact) {
         await ApiService.updateContact(contact.id, submitData);
@@ -181,9 +205,20 @@ const ContactForm: React.FC<ContactFormProps> = ({
         await ApiService.createContact(submitData);
       }
 
+      console.log('Contact save successful!');
       onSave();
     } catch (err: any) {
-      console.error('Contact save error:', err);
+      console.error('=== Contact Save ERROR ===');
+      console.error('Full error object:', err);
+      console.error('Error message:', err.message);
+      console.error('Error response:', err.response);
+
+      if (err.response) {
+        console.error('Response status:', err.response.status);
+        console.error('Response data:', JSON.stringify(err.response.data, null, 2));
+        console.error('Response headers:', err.response.headers);
+      }
+
       if (err.response?.data) {
         if (typeof err.response.data === 'object') {
           const fieldErrors: Record<string, string> = {};
@@ -194,13 +229,17 @@ const ContactForm: React.FC<ContactFormProps> = ({
               fieldErrors[field] = err.response.data[field];
             }
           });
+          console.error('Parsed field errors:', fieldErrors);
           setErrors(fieldErrors);
+          setError(`Validation error: ${JSON.stringify(fieldErrors)}`);
         } else {
-          setError(err.response.data.message || 'Failed to save contact');
+          const errorMsg = err.response.data.message || err.response.data || 'Failed to save contact';
+          setError(errorMsg);
         }
       } else {
-        setError('Failed to save contact. Please try again.');
+        setError('Failed to save contact. Please check the console for details.');
       }
+      console.error('============================');
     } finally {
       setLoading(false);
     }

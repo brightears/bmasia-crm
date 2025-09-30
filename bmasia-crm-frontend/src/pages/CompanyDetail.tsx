@@ -433,47 +433,57 @@ const CompanyDetail: React.FC = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {contacts.map((contact) => (
-                    <TableRow key={contact.id} hover>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <Avatar sx={{ mr: 1, width: 32, height: 32 }}>
-                            {contact.first_name?.charAt(0)}{contact.last_name?.charAt(0)}
-                          </Avatar>
-                          {contact.name}
-                        </Box>
-                      </TableCell>
-                      <TableCell>{contact.title || '-'}</TableCell>
-                      <TableCell>
-                        {contact.email && (
-                          <a href={`mailto:${contact.email}`}>{contact.email}</a>
-                        )}
-                      </TableCell>
-                      <TableCell>{contact.phone || contact.mobile || '-'}</TableCell>
-                      <TableCell>
-                        <Chip
-                          label={contact.status}
-                          size="small"
-                          color={getStatusColor(contact.status) as any}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {contact.is_decision_maker && (
-                          <Chip label="Decision Maker" size="small" color="primary" />
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Tooltip title="View Contact">
-                          <IconButton
+                  {contacts.map((contact) => {
+                    // Get initials from name
+                    const nameParts = contact.name.split(' ');
+                    const initials = nameParts.length >= 2
+                      ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`
+                      : contact.name.substring(0, 2);
+                    const status = contact.is_active ? 'Active' : 'Inactive';
+                    const isDecisionMaker = contact.contact_type === 'Decision Maker';
+
+                    return (
+                      <TableRow key={contact.id} hover>
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <Avatar sx={{ mr: 1, width: 32, height: 32 }}>
+                              {initials.toUpperCase()}
+                            </Avatar>
+                            {contact.name}
+                          </Box>
+                        </TableCell>
+                        <TableCell>{contact.title || '-'}</TableCell>
+                        <TableCell>
+                          {contact.email && (
+                            <a href={`mailto:${contact.email}`}>{contact.email}</a>
+                          )}
+                        </TableCell>
+                        <TableCell>{contact.phone || '-'}</TableCell>
+                        <TableCell>
+                          <Chip
+                            label={status}
                             size="small"
-                            onClick={() => navigate(`/contacts/${contact.id}`)}
-                          >
-                            <Person />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                            color={getStatusColor(status) as any}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          {isDecisionMaker && (
+                            <Chip label="Decision Maker" size="small" color="primary" />
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Tooltip title="View Contact">
+                            <IconButton
+                              size="small"
+                              onClick={() => navigate(`/contacts/${contact.id}`)}
+                            >
+                              <Person />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </TableContainer>
