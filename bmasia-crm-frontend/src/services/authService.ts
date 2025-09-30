@@ -35,8 +35,6 @@ class AuthService {
     console.log('API_BASE_URL:', API_BASE_URL);
     console.log('Configured baseURL:', `${API_BASE_URL}/api/v1`);
     console.log('Axios defaults transformResponse:', this.api.defaults.transformResponse);
-    console.log('Number of request interceptors:', this.api.interceptors.request['handlers']?.length || 0);
-    console.log('Number of response interceptors:', this.api.interceptors.response['handlers']?.length || 0);
     console.log('===============================\n');
     this.setupInterceptors();
   }
