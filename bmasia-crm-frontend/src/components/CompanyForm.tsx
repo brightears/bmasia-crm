@@ -225,7 +225,10 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
         await ApiService.createCompany(submitData);
       }
 
+      // Call onSave callback after successful save
       onSave();
+      // Close the form after calling onSave
+      onClose();
     } catch (err: any) {
       console.error('Company save error:', err);
       if (err.response?.data) {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -42,11 +42,7 @@ const Companies: React.FC = () => {
   const [formOpen, setFormOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
 
-  useEffect(() => {
-    loadCompanies();
-  }, [page, rowsPerPage, search]);
-
-  const loadCompanies = async () => {
+  const loadCompanies = useCallback(async () => {
     try {
       setLoading(true);
       const params = {
@@ -54,7 +50,7 @@ const Companies: React.FC = () => {
         page_size: rowsPerPage,
         search: search || undefined,
       };
-      
+
       const response: ApiResponse<Company> = await ApiService.getCompanies(params);
       setCompanies(response.results);
       setTotalCount(response.count);
@@ -64,7 +60,11 @@ const Companies: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, rowsPerPage, search]);
+
+  useEffect(() => {
+    loadCompanies();
+  }, [loadCompanies]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(event.target.value);
@@ -100,9 +100,11 @@ const Companies: React.FC = () => {
   };
 
   const handleFormSave = () => {
+    // Refresh the list after save
+    loadCompanies();
+    // Reset form state
     setFormOpen(false);
     setEditingCompany(null);
-    loadCompanies(); // Refresh the list
   };
 
   return (
