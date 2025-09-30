@@ -54,12 +54,14 @@ class BaseModelViewSet(viewsets.ModelViewSet):
             return queryset
         
         # Apply role-based filtering
-        if user.role == 'Sales':
-            # Sales sees companies they have opportunities for
-            if self.basename == 'company':
-                company_ids = Opportunity.objects.filter(owner=user).values_list('company_id', flat=True)
-                return queryset.filter(Q(id__in=company_ids) | Q(opportunities__owner=user)).distinct()
-        
+        # TEMPORARILY DISABLED for development - all authenticated users see all data
+        # TODO: Re-enable role-based filtering in production
+        # if user.role == 'Sales':
+        #     # Sales sees companies they have opportunities for
+        #     if self.basename == 'company':
+        #         company_ids = Opportunity.objects.filter(owner=user).values_list('company_id', flat=True)
+        #         return queryset.filter(Q(id__in=company_ids) | Q(opportunities__owner=user)).distinct()
+
         return queryset
     
     def perform_create(self, serializer):
