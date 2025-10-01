@@ -354,7 +354,10 @@ class ContractSerializer(serializers.ModelSerializer):
             'is_expiring_soon', 'monthly_value', 'invoices', 'paid_invoices_count',
             'outstanding_amount', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'contract_number', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'contract_number': {'required': False}
+        }
     
     def get_paid_invoices_count(self, obj):
         return obj.invoices.filter(status='Paid').count()
@@ -364,6 +367,20 @@ class ContractSerializer(serializers.ModelSerializer):
             total=Sum('total_amount')
         )['total']
         return outstanding or 0
+
+    def create(self, validated_data):
+        """Create contract with auto-generated contract number"""
+        # Auto-generate contract number if not provided
+        if not validated_data.get('contract_number'):
+            today = timezone.now().date()
+            date_str = today.strftime('%Y-%m%d')
+            # Count existing contracts for today
+            count = Contract.objects.filter(
+                contract_number__startswith=f'C-{date_str}'
+            ).count() + 1
+            validated_data['contract_number'] = f'C-{date_str}-{count:03d}'
+
+        return super().create(validated_data)
 
 
 class AuditLogSerializer(serializers.ModelSerializer):
