@@ -504,12 +504,323 @@ class ContractViewSet(BaseModelViewSet):
         contract.renewal_notice_sent = True
         contract.renewal_notice_date = timezone.now().date()
         contract.save()
-        
+
         self.log_action('UPDATE', contract, {
             'renewal_notice_sent': {'old': False, 'new': True}
         })
-        
+
         return Response({'message': 'Renewal notice marked as sent'})
+
+    @action(detail=True, methods=['get'])
+    def pdf(self, request, pk=None):
+        """Generate and download PDF for contract"""
+        from reportlab.lib.pagesizes import letter, A4
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
+        from io import BytesIO
+
+        contract = self.get_object()
+        company = contract.company
+
+        # Create PDF buffer
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+
+        # Container for PDF elements
+        elements = []
+        styles = getSampleStyleSheet()
+
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#1976d2'),
+            spaceAfter=30,
+            alignment=TA_CENTER
+        )
+
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor=colors.HexColor('#424242'),
+            spaceAfter=12,
+            spaceBefore=12
+        )
+
+        body_style = ParagraphStyle(
+            'CustomBody',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#212121')
+        )
+
+        small_style = ParagraphStyle(
+            'SmallText',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#757575')
+        )
+
+        contract_title_style = ParagraphStyle(
+            'ContractTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            textColor=colors.HexColor('#1976d2'),
+            spaceAfter=20,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+
+        # Header - BM ASIA branding (text placeholder for logo)
+        elements.append(Paragraph("BM ASIA", title_style))
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Contract title
+        elements.append(Paragraph("CONTRACT AGREEMENT", contract_title_style))
+        elements.append(Spacer(1, 0.1*inch))
+
+        # Contract details header
+        contract_info_data = [
+            ['Contract Number:', contract.contract_number, 'Start Date:', contract.start_date.strftime('%B %d, %Y')],
+            ['Status:', contract.status, 'End Date:', contract.end_date.strftime('%B %d, %Y')]
+        ]
+
+        contract_info_table = Table(contract_info_data, colWidths=[1.2*inch, 2*inch, 1.2*inch, 2*inch])
+        contract_info_table.setStyle(TableStyle([
+            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 9),
+            ('FONT', (2, 0), (2, -1), 'Helvetica-Bold', 9),
+            ('FONT', (1, 0), (1, -1), 'Helvetica', 9),
+            ('FONT', (3, 0), (3, -1), 'Helvetica', 9),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(contract_info_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Parties Section
+        elements.append(Paragraph("PARTIES TO THIS AGREEMENT", heading_style))
+        elements.append(Spacer(1, 0.1*inch))
+
+        # Provider (BM Asia)
+        provider_text = """
+        <b>SERVICE PROVIDER:</b><br/>
+        <b>BM Asia Co., Ltd.</b><br/>
+        Bangkok, Thailand<br/>
+        Email: info@bmasia.com<br/>
+        Phone: +66 (0) 2XXX XXXX
+        """
+        elements.append(Paragraph(provider_text, body_style))
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Client
+        client_text = f"<b>CLIENT:</b><br/><b>{company.name}</b><br/>"
+        if company.full_address:
+            client_text += company.full_address.replace(', ', '<br/>')
+        else:
+            if company.country:
+                client_text += f"{company.country}<br/>"
+
+        # Add company contact info if available
+        if hasattr(company, 'contacts') and company.contacts.exists():
+            primary_contact = company.contacts.filter(is_primary=True).first()
+            if primary_contact:
+                if primary_contact.email:
+                    client_text += f"<br/>Email: {primary_contact.email}"
+                if primary_contact.phone:
+                    client_text += f"<br/>Phone: {primary_contact.phone}"
+
+        elements.append(Paragraph(client_text, body_style))
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Service Details Section
+        elements.append(Paragraph("SERVICE DETAILS", heading_style))
+
+        service_details_text = f"<b>Service Type:</b> {contract.get_service_type_display() if contract.service_type else 'Professional Services'}<br/>"
+        service_details_text += f"<b>Contract Type:</b> {contract.get_contract_type_display()}<br/>"
+        if contract.billing_frequency:
+            service_details_text += f"<b>Billing Frequency:</b> {contract.billing_frequency}"
+
+        elements.append(Paragraph(service_details_text, body_style))
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Contract Value Section
+        elements.append(Paragraph("CONTRACT VALUE", heading_style))
+
+        # Currency symbol
+        currency_symbol = {'USD': '$', 'THB': '฿', 'EUR': '€', 'GBP': '£'}.get(contract.currency, contract.currency)
+
+        value_text = f"<b>Total Contract Value:</b> {currency_symbol}{contract.value:,.2f} {contract.currency}<br/>"
+
+        if contract.discount_percentage > 0:
+            value_text += f"<b>Discount Applied:</b> {contract.discount_percentage}%<br/>"
+
+        if contract.monthly_value > 0:
+            value_text += f"<b>Monthly Value:</b> {currency_symbol}{contract.monthly_value:,.2f}"
+
+        elements.append(Paragraph(value_text, body_style))
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Terms Section
+        elements.append(Paragraph("CONTRACT TERMS", heading_style))
+
+        # Create terms table for better layout
+        terms_data = [
+            ['Contract Period:', f"{contract.start_date.strftime('%B %d, %Y')} to {contract.end_date.strftime('%B %d, %Y')}"],
+            ['Duration:', f"{contract.days_until_expiry + (contract.end_date - contract.start_date).days} days total"],
+        ]
+
+        if contract.payment_terms:
+            terms_data.append(['Payment Terms:', contract.payment_terms])
+
+        terms_data.append(['Auto-Renewal:', 'Yes' if contract.auto_renew else 'No'])
+
+        if contract.auto_renew:
+            terms_data.append(['Renewal Period:', f"{contract.renewal_period_months} months"])
+
+        # Add notice period if it exists (assuming a notice_period field might exist)
+        # Note: The field notice_period was mentioned in requirements but not in model
+        # Adding it conditionally in case it exists
+        if hasattr(contract, 'notice_period') and contract.notice_period:
+            terms_data.append(['Notice Period:', contract.notice_period])
+
+        terms_table = Table(terms_data, colWidths=[2*inch, 4.9*inch])
+        terms_table.setStyle(TableStyle([
+            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 10),
+            ('FONT', (1, 0), (1, -1), 'Helvetica', 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e0e0e0')),
+        ]))
+        elements.append(terms_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Payment Schedule (if applicable)
+        if contract.billing_frequency and contract.billing_frequency != 'One-time':
+            elements.append(Paragraph("PAYMENT SCHEDULE", heading_style))
+
+            payment_schedule_text = f"<b>Billing Frequency:</b> {contract.billing_frequency}<br/>"
+
+            if contract.billing_frequency == 'Monthly' and contract.monthly_value > 0:
+                payment_schedule_text += f"<b>Monthly Payment:</b> {currency_symbol}{contract.monthly_value:,.2f}<br/>"
+            elif contract.billing_frequency == 'Annual':
+                payment_schedule_text += f"<b>Annual Payment:</b> {currency_symbol}{contract.value:,.2f}<br/>"
+
+            if contract.payment_terms:
+                payment_schedule_text += f"<b>Terms:</b> {contract.payment_terms}"
+
+            elements.append(Paragraph(payment_schedule_text, body_style))
+            elements.append(Spacer(1, 0.3*inch))
+
+        # Additional Terms and Conditions
+        if contract.notes:
+            elements.append(Paragraph("ADDITIONAL TERMS AND CONDITIONS", heading_style))
+
+            # Handle multi-line notes
+            notes_text = contract.notes.replace('\n', '<br/>')
+            elements.append(Paragraph(notes_text, body_style))
+            elements.append(Spacer(1, 0.3*inch))
+
+        # Contract Status Indicator
+        if contract.status == 'Active':
+            status_style = ParagraphStyle(
+                'ActiveStatus',
+                parent=styles['Normal'],
+                fontSize=12,
+                textColor=colors.HexColor('#2e7d32'),
+                alignment=TA_CENTER,
+                spaceBefore=12,
+                spaceAfter=12
+            )
+            elements.append(Paragraph("<b>✓ ACTIVE CONTRACT</b>", status_style))
+        elif contract.status == 'Expired':
+            expired_style = ParagraphStyle(
+                'ExpiredStatus',
+                parent=styles['Normal'],
+                fontSize=12,
+                textColor=colors.HexColor('#c62828'),
+                alignment=TA_CENTER,
+                spaceBefore=12,
+                spaceAfter=12
+            )
+            elements.append(Paragraph("<b>⚠ EXPIRED</b>", expired_style))
+        elif contract.status == 'Signed':
+            signed_style = ParagraphStyle(
+                'SignedStatus',
+                parent=styles['Normal'],
+                fontSize=12,
+                textColor=colors.HexColor('#1976d2'),
+                alignment=TA_CENTER,
+                spaceBefore=12,
+                spaceAfter=12
+            )
+            elements.append(Paragraph("<b>✓ SIGNED</b>", signed_style))
+
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Signatures Section
+        elements.append(Paragraph("SIGNATURES", heading_style))
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Create signature table
+        signature_data = [
+            ['', ''],
+            ['_' * 40, '_' * 40],
+            ['BM Asia Co., Ltd.', company.name],
+            ['Authorized Representative', 'Authorized Representative'],
+            ['', ''],
+            ['Date: _________________', 'Date: _________________'],
+        ]
+
+        signature_table = Table(signature_data, colWidths=[3.45*inch, 3.45*inch])
+        signature_table.setStyle(TableStyle([
+            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
+            ('FONT', (0, 2), (-1, 3), 'Helvetica-Bold', 10),
+            ('FONT', (0, 5), (-1, 5), 'Helvetica', 9),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(signature_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Footer
+        elements.append(Spacer(1, 0.3*inch))
+        footer_text = """
+        <b>BM Asia Co., Ltd.</b><br/>
+        Email: info@bmasia.com | Phone: +66 (0) 2XXX XXXX<br/>
+        Website: www.bmasia.com
+        """
+        elements.append(Paragraph(footer_text, small_style))
+
+        # Build PDF
+        doc.build(elements)
+
+        # Get PDF data
+        pdf_data = buffer.getvalue()
+        buffer.close()
+
+        # Create response
+        response = HttpResponse(pdf_data, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Contract_{contract.contract_number}.pdf"'
+
+        # Log activity
+        self.log_action('VIEW', contract, {
+            'action': 'PDF generated and downloaded',
+            'contract_number': contract.contract_number,
+            'status': contract.status
+        })
+
+        return response
 
 
 class InvoiceViewSet(BaseModelViewSet):
@@ -520,14 +831,14 @@ class InvoiceViewSet(BaseModelViewSet):
     ordering_fields = ['created_at', 'issue_date', 'due_date', 'total_amount']
     ordering = ['-issue_date']
     filterset_fields = ['contract', 'status', 'issue_date', 'due_date']
-    
+
     @action(detail=False, methods=['get'])
     def overdue(self, request):
         """Get overdue invoices"""
         overdue = [invoice for invoice in self.get_queryset() if invoice.is_overdue]
         serializer = self.get_serializer(overdue, many=True)
         return Response(serializer.data)
-    
+
     @action(detail=True, methods=['post'])
     def mark_paid(self, request, pk=None):
         """Mark invoice as paid"""
@@ -535,12 +846,289 @@ class InvoiceViewSet(BaseModelViewSet):
         invoice.status = 'Paid'
         invoice.paid_date = timezone.now().date()
         invoice.save()
-        
+
         self.log_action('UPDATE', invoice, {
             'status': {'old': invoice.status, 'new': 'Paid'}
         })
-        
+
         return Response({'message': 'Invoice marked as paid'})
+
+    @action(detail=True, methods=['get'])
+    def pdf(self, request, pk=None):
+        """Generate and download PDF for invoice"""
+        from reportlab.lib.pagesizes import letter, A4
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
+        from io import BytesIO
+
+        invoice = self.get_object()
+        company = invoice.contract.company
+
+        # Create PDF buffer
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+
+        # Container for PDF elements
+        elements = []
+        styles = getSampleStyleSheet()
+
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#1976d2'),
+            spaceAfter=30,
+            alignment=TA_CENTER
+        )
+
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor=colors.HexColor('#424242'),
+            spaceAfter=12,
+            spaceBefore=12
+        )
+
+        body_style = ParagraphStyle(
+            'CustomBody',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#212121')
+        )
+
+        small_style = ParagraphStyle(
+            'SmallText',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#757575')
+        )
+
+        # Header - BM ASIA branding (text placeholder for logo)
+        elements.append(Paragraph("BM ASIA", title_style))
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Invoice title
+        elements.append(Paragraph("INVOICE", heading_style))
+        elements.append(Spacer(1, 0.1*inch))
+
+        # Invoice details header
+        invoice_info_data = [
+            ['Invoice Number:', invoice.invoice_number, 'Issue Date:', invoice.issue_date.strftime('%B %d, %Y')],
+            ['Status:', invoice.status, 'Due Date:', invoice.due_date.strftime('%B %d, %Y')]
+        ]
+
+        # Add paid date if invoice is paid
+        if invoice.status == 'Paid' and invoice.paid_date:
+            invoice_info_data.append(['Payment Method:', invoice.payment_method or 'N/A', 'Paid Date:', invoice.paid_date.strftime('%B %d, %Y')])
+
+        invoice_info_table = Table(invoice_info_data, colWidths=[1.2*inch, 2*inch, 1.2*inch, 2*inch])
+        invoice_info_table.setStyle(TableStyle([
+            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 9),
+            ('FONT', (2, 0), (2, -1), 'Helvetica-Bold', 9),
+            ('FONT', (1, 0), (1, -1), 'Helvetica', 9),
+            ('FONT', (3, 0), (3, -1), 'Helvetica', 9),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(invoice_info_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Bill To section
+        elements.append(Paragraph("Bill To:", heading_style))
+
+        bill_to_text = f"<b>{company.name}</b><br/>"
+        if company.full_address:
+            bill_to_text += company.full_address.replace(', ', '<br/>')
+
+        elements.append(Paragraph(bill_to_text, body_style))
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Contract reference
+        contract_text = f"<b>Contract:</b> {invoice.contract.contract_number}<br/>"
+        contract_text += f"<b>Service:</b> {invoice.contract.get_service_type_display() if invoice.contract.service_type else 'N/A'}"
+        elements.append(Paragraph(contract_text, body_style))
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Service description section
+        elements.append(Paragraph("Services:", heading_style))
+
+        # Currency symbol
+        currency_symbol = {'USD': '$', 'THB': '฿', 'EUR': '€', 'GBP': '£'}.get(invoice.currency, invoice.currency)
+
+        # Create services table
+        services_data = [
+            ['Description', 'Amount']
+        ]
+
+        # Add main service line
+        service_description = f"{invoice.contract.get_service_type_display() if invoice.contract.service_type else 'Professional Services'}"
+        if invoice.contract.service_type:
+            service_description += f"<br/><font size=8>Contract: {invoice.contract.contract_number}</font>"
+            service_description += f"<br/><font size=8>Period: {invoice.contract.start_date.strftime('%b %d, %Y')} - {invoice.contract.end_date.strftime('%b %d, %Y')}</font>"
+
+        services_data.append([
+            Paragraph(service_description, body_style),
+            f"{currency_symbol}{invoice.amount:,.2f}"
+        ])
+
+        # Create services table
+        services_table = Table(services_data, colWidths=[5*inch, 1.9*inch])
+        services_table.setStyle(TableStyle([
+            # Header row
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1976d2')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+
+            # Data rows
+            ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#212121')),
+            ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
+            ('ALIGN', (0, 1), (0, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+
+            # Grid
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+
+            # Alternating row colors
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')]),
+        ]))
+
+        elements.append(services_table)
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Totals section
+        totals_data = []
+
+        if invoice.amount > 0:
+            totals_data.append(['Subtotal:', f"{currency_symbol}{invoice.amount:,.2f}"])
+
+        if invoice.discount_amount > 0:
+            totals_data.append(['Discount:', f"-{currency_symbol}{invoice.discount_amount:,.2f}"])
+
+        if invoice.tax_amount > 0:
+            totals_data.append(['Tax:', f"{currency_symbol}{invoice.tax_amount:,.2f}"])
+
+        totals_data.append(['<b>Total Amount:</b>', f"<b>{currency_symbol}{invoice.total_amount:,.2f}</b>"])
+
+        # Convert to Paragraphs for HTML rendering
+        totals_data_parsed = []
+        for label, value in totals_data:
+            totals_data_parsed.append([
+                Paragraph(label, body_style),
+                Paragraph(value, body_style)
+            ])
+
+        totals_table = Table(totals_data_parsed, colWidths=[5*inch, 1.9*inch])
+        totals_table.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+            ('FONT', (0, 0), (-1, -1), 'Helvetica', 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            # Bold the last row (Total)
+            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 12),
+            ('LINEABOVE', (0, -1), (-1, -1), 1, colors.HexColor('#1976d2')),
+        ]))
+
+        elements.append(totals_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Payment status indicator
+        if invoice.status == 'Paid':
+            paid_style = ParagraphStyle(
+                'PaidStamp',
+                parent=styles['Normal'],
+                fontSize=16,
+                textColor=colors.HexColor('#2e7d32'),
+                alignment=TA_CENTER,
+                spaceBefore=12,
+                spaceAfter=12
+            )
+            elements.append(Paragraph("<b>✓ PAID</b>", paid_style))
+            if invoice.paid_date:
+                elements.append(Paragraph(f"Payment received on {invoice.paid_date.strftime('%B %d, %Y')}", body_style))
+        elif invoice.is_overdue:
+            overdue_style = ParagraphStyle(
+                'OverdueStamp',
+                parent=styles['Normal'],
+                fontSize=14,
+                textColor=colors.HexColor('#c62828'),
+                alignment=TA_CENTER,
+                spaceBefore=12,
+                spaceAfter=12
+            )
+            elements.append(Paragraph(f"<b>⚠ OVERDUE - {invoice.days_overdue} days past due</b>", overdue_style))
+        else:
+            pending_style = ParagraphStyle(
+                'PendingStamp',
+                parent=styles['Normal'],
+                fontSize=12,
+                textColor=colors.HexColor('#f57c00'),
+                alignment=TA_CENTER,
+                spaceBefore=12,
+                spaceAfter=12
+            )
+            days_until_due = (invoice.due_date - timezone.now().date()).days
+            if days_until_due > 0:
+                elements.append(Paragraph(f"Payment due in {days_until_due} days", pending_style))
+            else:
+                elements.append(Paragraph("Payment due today", pending_style))
+
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Payment terms
+        if invoice.contract.payment_terms:
+            elements.append(Paragraph("Payment Terms:", heading_style))
+            payment_terms_text = invoice.contract.payment_terms.replace('\n', '<br/>')
+            elements.append(Paragraph(payment_terms_text, body_style))
+            elements.append(Spacer(1, 0.2*inch))
+
+        # Notes (if any)
+        if invoice.notes:
+            elements.append(Paragraph("Notes:", heading_style))
+            notes_text = invoice.notes.replace('\n', '<br/>')
+            elements.append(Paragraph(notes_text, body_style))
+            elements.append(Spacer(1, 0.2*inch))
+
+        # Footer
+        elements.append(Spacer(1, 0.3*inch))
+        footer_text = """
+        <b>BM Asia Co., Ltd.</b><br/>
+        Email: info@bmasia.com | Phone: +66 (0) 2XXX XXXX<br/>
+        Website: www.bmasia.com
+        """
+        elements.append(Paragraph(footer_text, small_style))
+
+        # Build PDF
+        doc.build(elements)
+
+        # Get PDF data
+        pdf_data = buffer.getvalue()
+        buffer.close()
+
+        # Create response
+        response = HttpResponse(pdf_data, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Invoice_{invoice.invoice_number}.pdf"'
+
+        # Log activity
+        self.log_action('VIEW', invoice, {
+            'action': 'PDF generated and downloaded',
+            'invoice_number': invoice.invoice_number,
+            'status': invoice.status
+        })
+
+        return response
 
 
 class QuoteViewSet(BaseModelViewSet):
@@ -665,6 +1253,245 @@ class QuoteViewSet(BaseModelViewSet):
 
         serializer = QuoteAttachmentSerializer(attachment)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'])
+    def pdf(self, request, pk=None):
+        """Generate and download PDF for quote"""
+        from reportlab.lib.pagesizes import letter, A4
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
+        from io import BytesIO
+
+        quote = self.get_object()
+
+        # Create PDF buffer
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+
+        # Container for PDF elements
+        elements = []
+        styles = getSampleStyleSheet()
+
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#1976d2'),
+            spaceAfter=30,
+            alignment=TA_CENTER
+        )
+
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor=colors.HexColor('#424242'),
+            spaceAfter=12,
+            spaceBefore=12
+        )
+
+        body_style = ParagraphStyle(
+            'CustomBody',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#212121')
+        )
+
+        small_style = ParagraphStyle(
+            'SmallText',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#757575')
+        )
+
+        # Header - BM ASIA branding (text placeholder for logo)
+        elements.append(Paragraph("BM ASIA", title_style))
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Quote title
+        elements.append(Paragraph(f"QUOTATION", heading_style))
+        elements.append(Spacer(1, 0.1*inch))
+
+        # Quote details header
+        quote_info_data = [
+            ['Quote Number:', quote.quote_number, 'Date:', quote.valid_from.strftime('%B %d, %Y')],
+            ['Status:', quote.status, 'Valid Until:', quote.valid_until.strftime('%B %d, %Y')]
+        ]
+
+        quote_info_table = Table(quote_info_data, colWidths=[1.2*inch, 2*inch, 1.2*inch, 2*inch])
+        quote_info_table.setStyle(TableStyle([
+            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 9),
+            ('FONT', (2, 0), (2, -1), 'Helvetica-Bold', 9),
+            ('FONT', (1, 0), (1, -1), 'Helvetica', 9),
+            ('FONT', (3, 0), (3, -1), 'Helvetica', 9),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(quote_info_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Bill To section
+        elements.append(Paragraph("Bill To:", heading_style))
+
+        bill_to_text = f"<b>{quote.company.name}</b><br/>"
+        if quote.company.full_address:
+            bill_to_text += quote.company.full_address.replace(', ', '<br/>')
+
+        elements.append(Paragraph(bill_to_text, body_style))
+        elements.append(Spacer(1, 0.1*inch))
+
+        # Contact information
+        if quote.contact:
+            contact_text = f"<b>Contact:</b> {quote.contact.name}<br/>"
+            if quote.contact.email:
+                contact_text += f"<b>Email:</b> {quote.contact.email}<br/>"
+            if quote.contact.phone:
+                contact_text += f"<b>Phone:</b> {quote.contact.phone}"
+            elements.append(Paragraph(contact_text, body_style))
+
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Line items table
+        elements.append(Paragraph("Items:", heading_style))
+
+        # Prepare line items data
+        line_items = quote.line_items.all()
+
+        if line_items.exists():
+            # Currency symbol
+            currency_symbol = {'USD': '$', 'THB': '฿', 'EUR': '€', 'GBP': '£'}.get(quote.currency, quote.currency)
+
+            table_data = [
+                ['Description', 'Quantity', 'Unit Price', 'Total']
+            ]
+
+            for item in line_items:
+                table_data.append([
+                    Paragraph(item.description, body_style),
+                    str(item.quantity),
+                    f"{currency_symbol}{item.unit_price:,.2f}",
+                    f"{currency_symbol}{item.line_total:,.2f}"
+                ])
+
+            # Create line items table
+            line_items_table = Table(table_data, colWidths=[3.5*inch, 1*inch, 1.2*inch, 1.2*inch])
+            line_items_table.setStyle(TableStyle([
+                # Header row
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1976d2')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+
+                # Data rows
+                ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+                ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#212121')),
+                ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
+                ('ALIGN', (0, 1), (0, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('TOPPADDING', (0, 1), (-1, -1), 8),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+
+                # Grid
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+
+                # Alternating row colors
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')]),
+            ]))
+
+            elements.append(line_items_table)
+        else:
+            elements.append(Paragraph("No line items", body_style))
+
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Totals section
+        totals_data = []
+
+        if quote.subtotal > 0:
+            totals_data.append(['Subtotal:', f"{currency_symbol}{quote.subtotal:,.2f}"])
+
+        if quote.discount_amount > 0:
+            totals_data.append(['Discount:', f"-{currency_symbol}{quote.discount_amount:,.2f}"])
+
+        if quote.tax_amount > 0:
+            totals_data.append(['Tax:', f"{currency_symbol}{quote.tax_amount:,.2f}"])
+
+        totals_data.append(['<b>Total:</b>', f"<b>{currency_symbol}{quote.total_value:,.2f}</b>"])
+
+        # Convert to Paragraphs for HTML rendering
+        totals_data_parsed = []
+        for label, value in totals_data:
+            totals_data_parsed.append([
+                Paragraph(label, body_style),
+                Paragraph(value, body_style)
+            ])
+
+        totals_table = Table(totals_data_parsed, colWidths=[5*inch, 1.9*inch])
+        totals_table.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
+            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+            ('FONT', (0, 0), (-1, -1), 'Helvetica', 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            # Bold the last row (Total)
+            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 12),
+            ('LINEABOVE', (0, -1), (-1, -1), 1, colors.HexColor('#1976d2')),
+        ]))
+
+        elements.append(totals_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Terms and conditions
+        if quote.terms_conditions:
+            elements.append(Paragraph("Terms and Conditions:", heading_style))
+            # Handle multi-line terms and conditions
+            terms_text = quote.terms_conditions.replace('\n', '<br/>')
+            elements.append(Paragraph(terms_text, body_style))
+            elements.append(Spacer(1, 0.2*inch))
+
+        # Notes (internal - optional to show on PDF)
+        if quote.notes:
+            elements.append(Paragraph("Notes:", heading_style))
+            notes_text = quote.notes.replace('\n', '<br/>')
+            elements.append(Paragraph(notes_text, body_style))
+            elements.append(Spacer(1, 0.2*inch))
+
+        # Footer
+        elements.append(Spacer(1, 0.3*inch))
+        footer_text = """
+        <b>BM Asia Co., Ltd.</b><br/>
+        Email: info@bmasia.com | Phone: +66 (0) 2XXX XXXX<br/>
+        Website: www.bmasia.com
+        """
+        elements.append(Paragraph(footer_text, small_style))
+
+        # Build PDF
+        doc.build(elements)
+
+        # Get PDF data
+        pdf_data = buffer.getvalue()
+        buffer.close()
+
+        # Create response
+        response = HttpResponse(pdf_data, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Quote_{quote.quote_number}.pdf"'
+
+        # Log activity
+        QuoteActivity.objects.create(
+            quote=quote,
+            user=request.user if request.user.is_authenticated else None,
+            activity_type='Viewed',
+            description=f'Quote {quote.quote_number} PDF generated and downloaded'
+        )
+
+        return response
 
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
