@@ -168,8 +168,7 @@ const Contracts: React.FC = () => {
   const handleDeleteContract = async (contract: Contract) => {
     if (window.confirm(`Are you sure you want to delete contract "${contract.contract_number}"?`)) {
       try {
-        // Note: Delete endpoint not implemented in API service yet
-        // await ApiService.deleteContract(contract.id);
+        await ApiService.deleteContract(contract.id);
         loadContracts();
       } catch (err) {
         setError('Failed to delete contract');

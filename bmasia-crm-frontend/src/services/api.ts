@@ -319,6 +319,10 @@ class ApiService {
     return response.data;
   }
 
+  async deleteContract(id: string): Promise<void> {
+    await authApi.delete(`/contracts/${id}/`);
+  }
+
   async sendRenewalNotice(id: string): Promise<any> {
     const response = await authApi.post(`/contracts/${id}/send_renewal_notice/`);
     return response.data;
