@@ -469,7 +469,10 @@ class QuoteLineItemSerializer(serializers.ModelSerializer):
             'unit_price', 'discount_percentage', 'tax_rate', 'line_total',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'line_total', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'quote', 'line_total', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'quote': {'required': False}  # Not required during nested creation
+        }
 
 
 class QuoteAttachmentSerializer(serializers.ModelSerializer):
