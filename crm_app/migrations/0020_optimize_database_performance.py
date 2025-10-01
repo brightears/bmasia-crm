@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('crm_app', '0019_update_service_types'),
+        ('crm_app', '0020a_enable_pg_trgm_extension'),
     ]
 
     operations = [
