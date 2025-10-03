@@ -93,25 +93,72 @@ Use this agent when:
 - Building comparison and trend analysis views
 - Working with files: Dashboard components, chart components in `bmasia-crm-frontend/`
 
+## Key Features Implemented
+
+### Company Management
+- **Legal Entity Names**: Separate field for registered company names (e.g., "Hilton Pattaya" displays as "CPN Pattaya Hotel Co., Ltd." on PDFs)
+- **Billing Entities**: Two entities supported:
+  - BMAsia Limited (Hong Kong) - for international clients
+  - BMAsia (Thailand) Co., Ltd. - for Thailand/Hong Kong clients
+- **Smart Defaults**: Auto-selects billing entity based on country:
+  - Thailand/Hong Kong → BMAsia (Thailand) Co., Ltd.
+  - All other countries → BMAsia Limited
+- **Forms**: Three interfaces all with same fields:
+  - `CompanyNew.tsx` - Standalone new company page
+  - `CompanyEdit.tsx` - Standalone edit page
+  - `CompanyForm.tsx` - Modal dialog (used from Companies list)
+
+### PDF Generation (Quotes, Invoices, Contracts)
+- **Professional Design**: Modern 2025 layouts with BMAsia orange branding (#FFA500)
+- **Entity-Specific**: Shows correct BMAsia entity address, bank details, tax info
+- **Tax Labeling**:
+  - Thailand entities → "VAT (7.0%): ฿900.00"
+  - Hong Kong entities → "Tax (0.0%): $0.00"
+- **Discount Display**: Shows percentage + amount: "Discount (10.0%): -฿500.00"
+- **Legal Entity Names**: Uses legal_entity_name when available, falls back to name
+- **Optimizations**: Single-page quotes for simple items, optimized logo (880x377px)
+- **File**: `crm_app/views.py` (lines ~515-1750)
+
+### Quote Line Items
+- **Discount %**: Per-item discount percentage (0-100%)
+- **Tax Rate**: Per-item tax rate (0-100%, typically 7% for Thailand)
+- **Calculations**: Automatic line total, subtotal, discount, tax, and total calculations
+- **UI**: Clear percentage display in form with centered text and proper styling
+- **File**: `bmasia-crm-frontend/src/components/QuoteForm.tsx`
+
 ## Key Project Files and Locations
 
 ### Backend (Django)
-- **Models**: `crm_app/models.py` (16+ entities including Company, Contact, Contract, Zone)
+- **Models**: `crm_app/models.py` (16+ entities including Company, Contact, Contract, Zone, Quote)
+  - Company model (lines 87-170): billing_entity, legal_entity_name fields
+  - Quote model (lines 1069-1150): subtotal, tax_amount, discount_amount
+  - QuoteLineItem model (lines 1153-1177): discount_percentage, tax_rate
 - **Admin**: `crm_app/admin.py` (comprehensive admin interface)
+- **Views/PDFs**: `crm_app/views.py` - PDF generation for Quotes, Invoices, Contracts
 - **Services**: `crm_app/services/` (business logic, API integrations)
 - **Email System**: `crm_app/services/email_service.py`
 - **API Integration**: `crm_app/services/soundtrack_api.py`
 - **Settings**: `bmasia_crm/settings.py`
+- **Serializers**: `crm_app/serializers.py` - includes legal_entity_name, billing_entity
 
-### Frontend (React)
+### Frontend (React + TypeScript + Material-UI)
 - **Main App**: `bmasia-crm-frontend/src/App.tsx`
-- **Components**: `bmasia-crm-frontend/src/components/`
-- **Services**: `bmasia-crm-frontend/src/services/`
+- **Components**:
+  - `CompanyForm.tsx` - Modal dialog for create/edit (with legal_entity_name, billing_entity)
+  - `QuoteForm.tsx` - Quote creation with line items (discount %, tax %)
+  - Company pages: `CompanyNew.tsx`, `CompanyEdit.tsx`, `Companies.tsx`
+- **Services**:
+  - `api.ts` - API service layer with Axios
+  - `authService.ts` - JWT authentication
+- **Types**: `types/index.ts` - TypeScript interfaces for all entities
+- **Context**: `AuthContext.tsx` - Authentication state management
 
 ### Database
 - **Development**: SQLite (`db.sqlite3`)
-- **Production**: PostgreSQL on Render
+- **Production**: PostgreSQL on Render (dpg-d3cbikd6ubrc73el0ke0-a)
 - **Migrations**: `crm_app/migrations/`
+  - Latest: `0024_add_legal_entity_name_to_company.py`
+  - Previous: `0023_company_billing_entity.py`
 
 ## Environment Variables (.env)
 
@@ -200,15 +247,48 @@ npm run build  # Production build
 6. **Test locally** before pushing to production
 7. **Use environment variables** for sensitive data, never hardcode
 
-## Current Status (September 2025)
+## Current Status (October 2025)
 
-- ✅ Core CRM functionality implemented
+### Backend (Django)
+- ✅ Core CRM functionality (Companies, Contacts, Contracts, Quotes, Invoices)
 - ✅ Soundtrack API integration working
 - ✅ Email automation system complete
-- ✅ PostgreSQL migration completed
-- 🚧 React frontend needs expansion (currently using Django admin)
+- ✅ PostgreSQL production database on Render
+- ✅ Professional PDF generation (Quotes, Invoices, Contracts) with BMAsia branding
+- ✅ Multi-entity support (BMAsia Limited HK + BMAsia Thailand Co., Ltd.)
+- ✅ Legal entity name field for registered company names
+- ✅ Smart billing entity defaults based on country
+
+### Frontend (React + TypeScript)
+- ✅ Authentication with JWT tokens (AuthContext)
+- ✅ Dashboard with company/opportunity metrics
+- ✅ Companies management (list, create, edit, delete with modal forms)
+- ✅ Contacts management
+- ✅ Opportunities pipeline
+- ✅ Quotes creation and management
+- ✅ Material-UI components throughout
+- ✅ Legal entity name + billing entity in all company forms
+
+### Recent Improvements (Oct 2025)
+- ✅ PDF design overhaul - modern 2025 professional layouts
+- ✅ Logo optimization (auto-cropped, proper sizing)
+- ✅ Single-page quotes for simple items
+- ✅ Discount/tax display shows percentages + amounts
+- ✅ VAT labeling for Thailand entities
+- ✅ Fixed billing entity race condition bug
+- ✅ Delete company functionality with confirmation dialog
+
+### Known Issues & Workarounds
+- ⚠️ **Migration Deployment**: Django migrations don't always run automatically on Render
+  - **Workaround**: After deploying, SSH into Render service and run `python manage.py migrate`
+  - Files: `start.sh` runs migrations, but may fail silently
+
+### Areas for Future Development
 - 🚧 Test coverage needs improvement
-- 📋 Authentication currently disabled for development
+- 🚧 Invoice management UI expansion
+- 🚧 Contract management UI expansion
+- 🚧 Email campaign dashboard
+- 🚧 Soundtrack API sync automation
 
 ## Support and Documentation
 
