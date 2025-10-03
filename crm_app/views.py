@@ -666,7 +666,7 @@ class ContractViewSet(BaseModelViewSet):
                 {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
                 """, body_style),
                 Paragraph(f"""
-                <b>{company.name}</b><br/>
+                <b>{company.legal_entity_name or company.name}</b><br/>
                 {company.full_address.replace(', ', '<br/>') if company.full_address else (company.country or '')}
                 """, body_style)
             ]
@@ -1078,7 +1078,7 @@ class InvoiceViewSet(BaseModelViewSet):
                 {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
                 """, body_style),
                 Paragraph(f"""
-                <b>{company.name}</b><br/>
+                <b>{company.legal_entity_name or company.name}</b><br/>
                 {company.full_address.replace(', ', '<br/>') if company.full_address else (company.country or '')}
                 """, body_style)
             ]
@@ -1589,7 +1589,7 @@ class QuoteViewSet(BaseModelViewSet):
                 {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
                 """, body_style),
                 Paragraph(f"""
-                <b>{quote.company.name}</b><br/>
+                <b>{quote.company.legal_entity_name or quote.company.name}</b><br/>
                 {quote.company.full_address.replace(', ', '<br/>') if quote.company.full_address else (quote.company.country or '')}
                 {f"<br/><br/><b>Contact:</b> {quote.contact.name}" if quote.contact else ""}
                 {f"<br/>Email: {quote.contact.email}" if quote.contact and quote.contact.email else ""}
