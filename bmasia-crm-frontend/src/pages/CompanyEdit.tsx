@@ -248,27 +248,21 @@ const CompanyEdit: React.FC = () => {
   };
 
   const handleFieldChange = (field: keyof CompanyFormData, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value,
-    }));
+    // Single atomic state update with smart defaults
+    setFormData(prev => {
+      const updates: Partial<CompanyFormData> = { [field]: value };
 
-    // Smart default: auto-select billing entity based on country
-    if (field === 'country') {
-      if (value === 'Thailand' || value === 'Hong Kong') {
-        setFormData(prev => ({
-          ...prev,
-          country: value,
-          billing_entity: 'BMAsia (Thailand) Co., Ltd.',
-        }));
-      } else if (value) {
-        setFormData(prev => ({
-          ...prev,
-          country: value,
-          billing_entity: 'BMAsia Limited',
-        }));
+      // Smart default: auto-select billing entity based on country
+      if (field === 'country') {
+        if (value === 'Thailand' || value === 'Hong Kong') {
+          updates.billing_entity = 'BMAsia (Thailand) Co., Ltd.';
+        } else if (value) {
+          updates.billing_entity = 'BMAsia Limited';
+        }
       }
-    }
+
+      return { ...prev, ...updates };
+    });
 
     // Clear field error when user starts typing
     if (errors[field]) {
