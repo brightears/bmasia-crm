@@ -550,7 +550,7 @@ class ContractViewSet(BaseModelViewSet):
 
         # Create PDF buffer
         buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.4*inch)
 
         # Container for PDF elements
         elements = []
@@ -569,10 +569,10 @@ class ContractViewSet(BaseModelViewSet):
         heading_style = ParagraphStyle(
             'CustomHeading',
             parent=styles['Heading2'],
-            fontSize=14,
+            fontSize=12,
             textColor=colors.HexColor('#424242'),
-            spaceAfter=12,
-            spaceBefore=12,
+            spaceAfter=8,
+            spaceBefore=8,
             fontName='Helvetica-Bold'
         )
 
@@ -596,7 +596,7 @@ class ContractViewSet(BaseModelViewSet):
         logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
         try:
             if os.path.exists(logo_path):
-                logo = Image(logo_path, width=120, height=48, kind='proportional')
+                logo = Image(logo_path, width=160, height=64, kind='proportional')
                 logo.hAlign = 'LEFT'
                 elements.append(logo)
             else:
@@ -607,9 +607,9 @@ class ContractViewSet(BaseModelViewSet):
             elements.append(Paragraph("BM ASIA", title_style))
 
         # Orange accent line
-        elements.append(Spacer(1, 0.15*inch))
+        elements.append(Spacer(1, 0.1*inch))
         elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#FFA500'), spaceBefore=0, spaceAfter=0))
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.2*inch))
 
         # Contract title with orange color
         contract_title_style = ParagraphStyle(
@@ -653,7 +653,7 @@ class ContractViewSet(BaseModelViewSet):
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
         ]))
         elements.append(metadata_table)
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.2*inch))
 
         # Two-column From/Bill To section
         from_bill_data = [
@@ -680,7 +680,7 @@ class ContractViewSet(BaseModelViewSet):
             ('TOPPADDING', (0, 1), (-1, 1), 6),
         ]))
         elements.append(from_bill_table)
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.2*inch))
 
         # Service Details Section
         elements.append(Paragraph("SERVICE DETAILS", heading_style))
@@ -770,14 +770,14 @@ class ContractViewSet(BaseModelViewSet):
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-            ('TOPPADDING', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             ('LEFTPADDING', (0, 0), (-1, -1), 12),
             ('RIGHTPADDING', (0, 0), (-1, -1), 12),
             ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e0e0e0')),
         ]))
         elements.append(bank_table)
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.15*inch))
 
         # Payment Terms
         elements.append(Paragraph("PAYMENT TERMS", heading_style))
@@ -864,8 +864,8 @@ class ContractViewSet(BaseModelViewSet):
         elements.append(Spacer(1, 0.3*inch))
 
         # Footer - entity-specific with separator
-        elements.append(Spacer(1, 0.3*inch))
-        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=12))
+        elements.append(Spacer(1, 0.15*inch))
+        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
 
         footer_text = f"""
         <b>{entity_name}</b> | {entity_address.replace(', ', ' | ')} | Phone: {entity_phone}
@@ -962,7 +962,7 @@ class InvoiceViewSet(BaseModelViewSet):
 
         # Create PDF buffer
         buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.4*inch)
 
         # Container for PDF elements
         elements = []
@@ -981,10 +981,10 @@ class InvoiceViewSet(BaseModelViewSet):
         heading_style = ParagraphStyle(
             'CustomHeading',
             parent=styles['Heading2'],
-            fontSize=14,
+            fontSize=12,
             textColor=colors.HexColor('#424242'),
-            spaceAfter=12,
-            spaceBefore=12,
+            spaceAfter=8,
+            spaceBefore=8,
             fontName='Helvetica-Bold'
         )
 
@@ -1008,7 +1008,7 @@ class InvoiceViewSet(BaseModelViewSet):
         logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
         try:
             if os.path.exists(logo_path):
-                logo = Image(logo_path, width=120, height=48, kind='proportional')
+                logo = Image(logo_path, width=160, height=64, kind='proportional')
                 logo.hAlign = 'LEFT'
                 elements.append(logo)
             else:
@@ -1019,9 +1019,9 @@ class InvoiceViewSet(BaseModelViewSet):
             elements.append(Paragraph("BM ASIA", title_style))
 
         # Orange accent line
-        elements.append(Spacer(1, 0.15*inch))
+        elements.append(Spacer(1, 0.1*inch))
         elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#FFA500'), spaceBefore=0, spaceAfter=0))
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.2*inch))
 
         # Invoice title with orange color
         invoice_title_style = ParagraphStyle(
@@ -1065,7 +1065,7 @@ class InvoiceViewSet(BaseModelViewSet):
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
         ]))
         elements.append(metadata_table)
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.2*inch))
 
         # Two-column From/Bill To section
         from_bill_data = [
@@ -1092,7 +1092,7 @@ class InvoiceViewSet(BaseModelViewSet):
             ('TOPPADDING', (0, 1), (-1, 1), 6),
         ]))
         elements.append(from_bill_table)
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.2*inch))
 
         # Contract reference
         contract_text = f"<b>Contract:</b> {invoice.contract.contract_number}<br/>"
@@ -1187,7 +1187,7 @@ class InvoiceViewSet(BaseModelViewSet):
         ]))
 
         elements.append(totals_table)
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.2*inch))
 
         # Bank Details Section - Organized blocks with background
         elements.append(Paragraph("BANK DETAILS FOR PAYMENT", heading_style))
@@ -1207,14 +1207,14 @@ class InvoiceViewSet(BaseModelViewSet):
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-            ('TOPPADDING', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             ('LEFTPADDING', (0, 0), (-1, -1), 12),
             ('RIGHTPADDING', (0, 0), (-1, -1), 12),
             ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e0e0e0')),
         ]))
         elements.append(bank_table)
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.15*inch))
 
         # Payment status indicator
         if invoice.status == 'Paid':
@@ -1275,8 +1275,8 @@ class InvoiceViewSet(BaseModelViewSet):
             elements.append(Spacer(1, 0.2*inch))
 
         # Footer - entity-specific with separator
-        elements.append(Spacer(1, 0.3*inch))
-        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=12))
+        elements.append(Spacer(1, 0.15*inch))
+        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
 
         footer_text = f"""
         <b>{entity_name}</b> | {entity_address.replace(', ', ' | ')} | Phone: {entity_phone}
@@ -1465,7 +1465,7 @@ class QuoteViewSet(BaseModelViewSet):
 
         # Create PDF buffer
         buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.4*inch)
 
         # Container for PDF elements
         elements = []
@@ -1484,10 +1484,10 @@ class QuoteViewSet(BaseModelViewSet):
         heading_style = ParagraphStyle(
             'CustomHeading',
             parent=styles['Heading2'],
-            fontSize=14,
+            fontSize=12,
             textColor=colors.HexColor('#424242'),
-            spaceAfter=12,
-            spaceBefore=12,
+            spaceAfter=8,
+            spaceBefore=8,
             fontName='Helvetica-Bold'
         )
 
@@ -1507,11 +1507,19 @@ class QuoteViewSet(BaseModelViewSet):
             leading=11
         )
 
+        terms_style = ParagraphStyle(
+            'TermsText',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#424242'),
+            leading=10
+        )
+
         # Header - BMAsia Logo (properly sized with aspect ratio preserved)
         logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
         try:
             if os.path.exists(logo_path):
-                logo = Image(logo_path, width=120, height=48, kind='proportional')
+                logo = Image(logo_path, width=160, height=64, kind='proportional')
                 logo.hAlign = 'LEFT'
                 elements.append(logo)
             else:
@@ -1522,9 +1530,9 @@ class QuoteViewSet(BaseModelViewSet):
             elements.append(Paragraph("BM ASIA", title_style))
 
         # Orange accent line
-        elements.append(Spacer(1, 0.15*inch))
+        elements.append(Spacer(1, 0.1*inch))
         elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#FFA500'), spaceBefore=0, spaceAfter=0))
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.2*inch))
 
         # Quote title with orange color
         quote_title_style = ParagraphStyle(
@@ -1568,7 +1576,7 @@ class QuoteViewSet(BaseModelViewSet):
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
         ]))
         elements.append(metadata_table)
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.2*inch))
 
         # Two-column From/Bill To section
         from_bill_data = [
@@ -1598,7 +1606,7 @@ class QuoteViewSet(BaseModelViewSet):
             ('TOPPADDING', (0, 1), (-1, 1), 6),
         ]))
         elements.append(from_bill_table)
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.2*inch))
 
         # Line items table
         elements.append(Paragraph("Items:", heading_style))
@@ -1690,7 +1698,7 @@ class QuoteViewSet(BaseModelViewSet):
         ]))
 
         elements.append(totals_table)
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.2*inch))
 
         # Bank Details Section - Organized blocks with background
         elements.append(Paragraph("BANK DETAILS FOR PAYMENT", heading_style))
@@ -1710,39 +1718,39 @@ class QuoteViewSet(BaseModelViewSet):
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-            ('TOPPADDING', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             ('LEFTPADDING', (0, 0), (-1, -1), 12),
             ('RIGHTPADDING', (0, 0), (-1, -1), 12),
             ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e0e0e0')),
         ]))
         elements.append(bank_table)
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.15*inch))
 
         # Terms and conditions
         if quote.terms_conditions:
             elements.append(Paragraph("Terms and Conditions:", heading_style))
             # Handle multi-line terms and conditions
             terms_text = quote.terms_conditions.replace('\n', '<br/>')
-            elements.append(Paragraph(terms_text, body_style))
-            elements.append(Spacer(1, 0.2*inch))
+            elements.append(Paragraph(terms_text, terms_style))
+            elements.append(Spacer(1, 0.1*inch))
         else:
             # Use default payment terms if no custom terms
             elements.append(Paragraph("Payment Terms:", heading_style))
             payment_terms_formatted = payment_terms_default.replace('\n', '<br/>')
-            elements.append(Paragraph(payment_terms_formatted, body_style))
-            elements.append(Spacer(1, 0.2*inch))
+            elements.append(Paragraph(payment_terms_formatted, terms_style))
+            elements.append(Spacer(1, 0.1*inch))
 
         # Notes (internal - optional to show on PDF)
         if quote.notes:
             elements.append(Paragraph("Notes:", heading_style))
             notes_text = quote.notes.replace('\n', '<br/>')
-            elements.append(Paragraph(notes_text, body_style))
-            elements.append(Spacer(1, 0.2*inch))
+            elements.append(Paragraph(notes_text, terms_style))
+            elements.append(Spacer(1, 0.1*inch))
 
         # Footer - entity-specific with separator
-        elements.append(Spacer(1, 0.3*inch))
-        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=12))
+        elements.append(Spacer(1, 0.15*inch))
+        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
 
         footer_text = f"""
         <b>{entity_name}</b> | {entity_address.replace(', ', ' | ')} | Phone: {entity_phone}
