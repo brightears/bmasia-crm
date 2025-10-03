@@ -5,16 +5,21 @@ This bypasses Django migrations and directly alters the PostgreSQL table
 """
 import os
 import sys
-import django
-
-# Set up Django environment
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'bmasia_crm.settings')
-django.setup()
-
-from django.db import connection
-from django.db.migrations.recorder import MigrationRecorder
 
 print("=== Force Add billing_entity Column Script ===\n")
+
+# Import Django after confirming environment
+try:
+    import django
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'bmasia_crm.settings')
+    django.setup()
+    from django.db import connection
+    from django.db.migrations.recorder import MigrationRecorder
+    print("✓ Django setup successful")
+except Exception as e:
+    print(f"✗ Error setting up Django: {e}")
+    print("This script needs to run after Django is properly configured.")
+    sys.exit(1)
 
 # First, check current state
 cursor = connection.cursor()

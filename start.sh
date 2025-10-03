@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -e
 
 echo "Starting BMAsia CRM..."
 
@@ -7,6 +8,13 @@ if [ "$RESET_DB" = "true" ]; then
     echo "RESET_DB is set, resetting database..."
     python reset_db.py <<< "yes"
 fi
+
+# Force add billing_entity column before running migrations
+echo "Ensuring billing_entity column exists..."
+python force_add_billing_entity.py || {
+    echo "⚠️  Force script failed - may need manual intervention"
+    echo "You can run add_billing_entity_simple.sql manually via Render Shell"
+}
 
 # Run database migrations
 echo "Running database migrations..."

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Exit on error - migrations are critical
+# Exit on error for critical steps
 set -e
 
 # Install dependencies
@@ -8,16 +8,7 @@ pip install -r requirements.txt
 # Collect static files
 python manage.py collectstatic --no-input
 
-# Force add billing_entity column if it doesn't exist
-echo "Ensuring billing_entity column exists..."
-python force_add_billing_entity.py || {
-    echo "ERROR: Failed to add billing_entity column"
-    exit 1
-}
-
-# Run any remaining migrations
-echo "Running migrations..."
-python manage.py migrate --noinput
+# Note: Migrations are now handled in start.sh where DATABASE_URL is available
 
 # Create superuser if it doesn't exist (may fail if tables don't exist)
 python manage.py shell << EOF 2>/dev/null || echo "Skipping superuser creation (tables may not exist yet)"
