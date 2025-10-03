@@ -517,7 +517,7 @@ class ContractViewSet(BaseModelViewSet):
         from reportlab.lib.pagesizes import letter, A4
         from reportlab.lib import colors
         from reportlab.lib.units import inch
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
         from io import BytesIO
@@ -556,14 +556,14 @@ class ContractViewSet(BaseModelViewSet):
         elements = []
         styles = getSampleStyleSheet()
 
-        # Custom styles
+        # Custom styles - Modern 2025 design
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
             fontSize=24,
-            textColor=colors.HexColor('#FFA500'),
-            spaceAfter=30,
-            alignment=TA_CENTER
+            textColor=colors.HexColor('#424242'),
+            spaceAfter=12,
+            fontName='Helvetica-Bold'
         )
 
         heading_style = ParagraphStyle(
@@ -572,38 +572,32 @@ class ContractViewSet(BaseModelViewSet):
             fontSize=14,
             textColor=colors.HexColor('#424242'),
             spaceAfter=12,
-            spaceBefore=12
+            spaceBefore=12,
+            fontName='Helvetica-Bold'
         )
 
         body_style = ParagraphStyle(
             'CustomBody',
             parent=styles['Normal'],
             fontSize=10,
-            textColor=colors.HexColor('#212121')
+            textColor=colors.HexColor('#424242'),
+            leading=14
         )
 
         small_style = ParagraphStyle(
             'SmallText',
             parent=styles['Normal'],
             fontSize=8,
-            textColor=colors.HexColor('#757575')
+            textColor=colors.HexColor('#757575'),
+            leading=11
         )
 
-        contract_title_style = ParagraphStyle(
-            'ContractTitle',
-            parent=styles['Heading1'],
-            fontSize=18,
-            textColor=colors.HexColor('#FFA500'),
-            spaceAfter=20,
-            alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
-        )
-
-        # Header - BMAsia Logo
+        # Header - BMAsia Logo (properly sized with aspect ratio preserved)
         logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
         try:
             if os.path.exists(logo_path):
-                logo = Image(logo_path, width=150, height=60)
+                logo = Image(logo_path, width=120, height=48, kind='proportional')
+                logo.hAlign = 'LEFT'
                 elements.append(logo)
             else:
                 # Fallback to text if logo not found
@@ -612,65 +606,80 @@ class ContractViewSet(BaseModelViewSet):
             # Fallback to text if image loading fails
             elements.append(Paragraph("BM ASIA", title_style))
 
-        elements.append(Spacer(1, 0.2*inch))
-
-        # Contract title
-        elements.append(Paragraph("CONTRACT AGREEMENT", contract_title_style))
-        elements.append(Spacer(1, 0.1*inch))
-
-        # Contract details header
-        contract_info_data = [
-            ['Contract Number:', contract.contract_number, 'Start Date:', contract.start_date.strftime('%B %d, %Y')],
-            ['Status:', contract.status, 'End Date:', contract.end_date.strftime('%B %d, %Y')]
-        ]
-
-        contract_info_table = Table(contract_info_data, colWidths=[1.2*inch, 2*inch, 1.2*inch, 2*inch])
-        contract_info_table.setStyle(TableStyle([
-            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 9),
-            ('FONT', (2, 0), (2, -1), 'Helvetica-Bold', 9),
-            ('FONT', (1, 0), (1, -1), 'Helvetica', 9),
-            ('FONT', (3, 0), (3, -1), 'Helvetica', 9),
-            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-        ]))
-        elements.append(contract_info_table)
+        # Orange accent line
+        elements.append(Spacer(1, 0.15*inch))
+        elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#FFA500'), spaceBefore=0, spaceAfter=0))
         elements.append(Spacer(1, 0.3*inch))
 
-        # Parties Section
-        elements.append(Paragraph("PARTIES TO THIS AGREEMENT", heading_style))
-        elements.append(Spacer(1, 0.1*inch))
+        # Contract title with orange color
+        contract_title_style = ParagraphStyle(
+            'ContractTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#FFA500'),
+            spaceAfter=20,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        elements.append(Paragraph("CONTRACT AGREEMENT", contract_title_style))
 
-        # Provider (BM Asia) - entity-specific
-        provider_text = f"""
-        <b>SERVICE PROVIDER:</b><br/>
-        <b>{entity_name}</b><br/>
-        {entity_address.replace(', ', '<br/>')}<br/>
-        Phone: {entity_phone}
-        """
-        if entity_tax:
-            provider_text += f"<br/>Tax No.: {entity_tax}"
-        elements.append(Paragraph(provider_text, body_style))
-        elements.append(Spacer(1, 0.2*inch))
+        # Document metadata table (modern grid layout)
+        metadata_data = [
+            ['Contract Number', 'Date', 'Status', 'Validity'],
+            [contract.contract_number,
+             contract.start_date.strftime('%b %d, %Y'),
+             contract.status,
+             f"{contract.start_date.strftime('%b %d, %Y')} - {contract.end_date.strftime('%b %d, %Y')}"]
+        ]
 
-        # Client
-        client_text = f"<b>CLIENT:</b><br/><b>{company.name}</b><br/>"
-        if company.full_address:
-            client_text += company.full_address.replace(', ', '<br/>')
-        else:
-            if company.country:
-                client_text += f"{company.country}<br/>"
+        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.7*inch, 1.7*inch, 1.8*inch])
+        metadata_table.setStyle(TableStyle([
+            # Header row - orange background
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('TOPPADDING', (0, 0), (-1, 0), 10),
 
-        # Add company contact info if available
-        if hasattr(company, 'contacts') and company.contacts.exists():
-            primary_contact = company.contacts.filter(is_primary=True).first()
-            if primary_contact:
-                if primary_contact.email:
-                    client_text += f"<br/>Email: {primary_contact.email}"
-                if primary_contact.phone:
-                    client_text += f"<br/>Phone: {primary_contact.phone}"
+            # Data row
+            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
+            ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#424242')),
+            ('ALIGN', (0, 1), (-1, 1), 'CENTER'),
+            ('TOPPADDING', (0, 1), (-1, 1), 10),
+            ('BOTTOMPADDING', (0, 1), (-1, 1), 10),
 
-        elements.append(Paragraph(client_text, body_style))
+            # Grid
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+        ]))
+        elements.append(metadata_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Two-column From/Bill To section
+        from_bill_data = [
+            [Paragraph('<b>FROM:</b>', heading_style), Paragraph('<b>BILL TO:</b>', heading_style)],
+            [
+                Paragraph(f"""
+                <b>{entity_name}</b><br/>
+                {entity_address.replace(', ', '<br/>')}<br/>
+                Phone: {entity_phone}
+                {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
+                """, body_style),
+                Paragraph(f"""
+                <b>{company.name}</b><br/>
+                {company.full_address.replace(', ', '<br/>') if company.full_address else (company.country or '')}
+                """, body_style)
+            ]
+        ]
+
+        from_bill_table = Table(from_bill_data, colWidths=[3.45*inch, 3.45*inch])
+        from_bill_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, 0), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+            ('TOPPADDING', (0, 1), (-1, 1), 6),
+        ]))
+        elements.append(from_bill_table)
         elements.append(Spacer(1, 0.3*inch))
 
         # Service Details Section
@@ -684,82 +693,90 @@ class ContractViewSet(BaseModelViewSet):
         elements.append(Paragraph(service_details_text, body_style))
         elements.append(Spacer(1, 0.3*inch))
 
-        # Contract Value Section
+        # Contract Value Section - Modern card-style layout
         elements.append(Paragraph("CONTRACT VALUE", heading_style))
 
         # Currency symbol
         currency_symbol = {'USD': '$', 'THB': '฿', 'EUR': '€', 'GBP': '£'}.get(contract.currency, contract.currency)
 
-        value_text = f"<b>Total Contract Value:</b> {currency_symbol}{contract.value:,.2f} {contract.currency}<br/>"
-
-        if contract.discount_percentage > 0:
-            value_text += f"<b>Discount Applied:</b> {contract.discount_percentage}%<br/>"
-
-        if contract.monthly_value > 0:
-            value_text += f"<b>Monthly Value:</b> {currency_symbol}{contract.monthly_value:,.2f}"
-
-        elements.append(Paragraph(value_text, body_style))
-        elements.append(Spacer(1, 0.3*inch))
-
-        # Terms Section
-        elements.append(Paragraph("CONTRACT TERMS", heading_style))
-
-        # Create terms table for better layout
-        terms_data = [
-            ['Contract Period:', f"{contract.start_date.strftime('%B %d, %Y')} to {contract.end_date.strftime('%B %d, %Y')}"],
-            ['Duration:', f"{contract.days_until_expiry + (contract.end_date - contract.start_date).days} days total"],
+        value_data = [
+            ['Total Contract Value', f"{currency_symbol}{contract.value:,.2f} {contract.currency}"]
         ]
 
-        if contract.payment_terms:
-            terms_data.append(['Payment Terms:', contract.payment_terms])
+        if contract.discount_percentage > 0:
+            value_data.append(['Discount Applied', f"{contract.discount_percentage}%"])
 
-        terms_data.append(['Auto-Renewal:', 'Yes' if contract.auto_renew else 'No'])
+        if contract.monthly_value > 0:
+            value_data.append(['Monthly Value', f"{currency_symbol}{contract.monthly_value:,.2f}"])
+
+        value_table = Table(value_data, colWidths=[3.45*inch, 3.45*inch])
+        value_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f5f5f5')),
+            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 10),
+            ('FONT', (1, 0), (1, -1), 'Helvetica', 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e0e0e0')),
+        ]))
+        elements.append(value_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Terms Section - Modern table layout
+        elements.append(Paragraph("CONTRACT TERMS", heading_style))
+
+        terms_data = [
+            ['Contract Period', f"{contract.start_date.strftime('%B %d, %Y')} to {contract.end_date.strftime('%B %d, %Y')}"],
+            ['Billing Frequency', contract.billing_frequency or 'One-time'],
+            ['Auto-Renewal', 'Yes' if contract.auto_renew else 'No'],
+        ]
 
         if contract.auto_renew:
-            terms_data.append(['Renewal Period:', f"{contract.renewal_period_months} months"])
+            terms_data.append(['Renewal Period', f"{contract.renewal_period_months} months"])
 
-        # Add notice period if it exists (assuming a notice_period field might exist)
-        # Note: The field notice_period was mentioned in requirements but not in model
-        # Adding it conditionally in case it exists
-        if hasattr(contract, 'notice_period') and contract.notice_period:
-            terms_data.append(['Notice Period:', contract.notice_period])
-
-        terms_table = Table(terms_data, colWidths=[2*inch, 4.9*inch])
+        terms_table = Table(terms_data, colWidths=[3.45*inch, 3.45*inch])
         terms_table.setStyle(TableStyle([
             ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 10),
             ('FONT', (1, 0), (1, -1), 'Helvetica', 10),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
             ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e0e0e0')),
         ]))
         elements.append(terms_table)
         elements.append(Spacer(1, 0.3*inch))
 
-        # Payment Schedule (if applicable)
-        if contract.billing_frequency and contract.billing_frequency != 'One-time':
-            elements.append(Paragraph("PAYMENT SCHEDULE", heading_style))
-
-            payment_schedule_text = f"<b>Billing Frequency:</b> {contract.billing_frequency}<br/>"
-
-            if contract.billing_frequency == 'Monthly' and contract.monthly_value > 0:
-                payment_schedule_text += f"<b>Monthly Payment:</b> {currency_symbol}{contract.monthly_value:,.2f}<br/>"
-            elif contract.billing_frequency == 'Annual':
-                payment_schedule_text += f"<b>Annual Payment:</b> {currency_symbol}{contract.value:,.2f}<br/>"
-
-            elements.append(Paragraph(payment_schedule_text, body_style))
-            elements.append(Spacer(1, 0.3*inch))
-
-        # Bank Details Section
+        # Bank Details Section - Organized blocks with background
         elements.append(Paragraph("BANK DETAILS FOR PAYMENT", heading_style))
 
-        bank_details_text = f"<b>Beneficiary:</b> {entity_name}<br/>"
-        bank_details_text += f"<b>Bank:</b> {entity_bank}<br/>"
-        bank_details_text += f"<b>SWIFT Code:</b> {entity_swift}<br/>"
-        bank_details_text += f"<b>Account Number:</b> {entity_account}"
+        bank_data = [
+            ['Beneficiary', entity_name],
+            ['Bank', entity_bank],
+            ['SWIFT Code', entity_swift],
+            ['Account Number', entity_account],
+        ]
 
-        elements.append(Paragraph(bank_details_text, body_style))
+        bank_table = Table(bank_data, colWidths=[2*inch, 4.9*inch])
+        bank_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f5f5f5')),
+            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 10),
+            ('FONT', (1, 0), (1, -1), 'Helvetica', 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e0e0e0')),
+        ]))
+        elements.append(bank_table)
         elements.append(Spacer(1, 0.3*inch))
 
         # Payment Terms
@@ -846,12 +863,12 @@ class ContractViewSet(BaseModelViewSet):
         elements.append(signature_table)
         elements.append(Spacer(1, 0.3*inch))
 
-        # Footer - entity-specific
+        # Footer - entity-specific with separator
         elements.append(Spacer(1, 0.3*inch))
+        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=12))
+
         footer_text = f"""
-        <b>{entity_name}</b><br/>
-        {entity_address.replace(', ', ' | ')}<br/>
-        Phone: {entity_phone}
+        <b>{entity_name}</b> | {entity_address.replace(', ', ' | ')} | Phone: {entity_phone}
         """
         elements.append(Paragraph(footer_text, small_style))
 
@@ -912,7 +929,7 @@ class InvoiceViewSet(BaseModelViewSet):
         from reportlab.lib.pagesizes import letter, A4
         from reportlab.lib import colors
         from reportlab.lib.units import inch
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
         from io import BytesIO
@@ -951,14 +968,14 @@ class InvoiceViewSet(BaseModelViewSet):
         elements = []
         styles = getSampleStyleSheet()
 
-        # Custom styles
+        # Custom styles - Modern 2025 design
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
             fontSize=24,
-            textColor=colors.HexColor('#FFA500'),
-            spaceAfter=30,
-            alignment=TA_CENTER
+            textColor=colors.HexColor('#424242'),
+            spaceAfter=12,
+            fontName='Helvetica-Bold'
         )
 
         heading_style = ParagraphStyle(
@@ -967,28 +984,32 @@ class InvoiceViewSet(BaseModelViewSet):
             fontSize=14,
             textColor=colors.HexColor('#424242'),
             spaceAfter=12,
-            spaceBefore=12
+            spaceBefore=12,
+            fontName='Helvetica-Bold'
         )
 
         body_style = ParagraphStyle(
             'CustomBody',
             parent=styles['Normal'],
             fontSize=10,
-            textColor=colors.HexColor('#212121')
+            textColor=colors.HexColor('#424242'),
+            leading=14
         )
 
         small_style = ParagraphStyle(
             'SmallText',
             parent=styles['Normal'],
             fontSize=8,
-            textColor=colors.HexColor('#757575')
+            textColor=colors.HexColor('#757575'),
+            leading=11
         )
 
-        # Header - BMAsia Logo
+        # Header - BMAsia Logo (properly sized with aspect ratio preserved)
         logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
         try:
             if os.path.exists(logo_path):
-                logo = Image(logo_path, width=150, height=60)
+                logo = Image(logo_path, width=120, height=48, kind='proportional')
+                logo.hAlign = 'LEFT'
                 elements.append(logo)
             else:
                 # Fallback to text if logo not found
@@ -997,43 +1018,80 @@ class InvoiceViewSet(BaseModelViewSet):
             # Fallback to text if image loading fails
             elements.append(Paragraph("BM ASIA", title_style))
 
-        elements.append(Spacer(1, 0.2*inch))
-
-        # Invoice title
-        elements.append(Paragraph("INVOICE", heading_style))
-        elements.append(Spacer(1, 0.1*inch))
-
-        # Invoice details header
-        invoice_info_data = [
-            ['Invoice Number:', invoice.invoice_number, 'Issue Date:', invoice.issue_date.strftime('%B %d, %Y')],
-            ['Status:', invoice.status, 'Due Date:', invoice.due_date.strftime('%B %d, %Y')]
-        ]
-
-        # Add paid date if invoice is paid
-        if invoice.status == 'Paid' and invoice.paid_date:
-            invoice_info_data.append(['Payment Method:', invoice.payment_method or 'N/A', 'Paid Date:', invoice.paid_date.strftime('%B %d, %Y')])
-
-        invoice_info_table = Table(invoice_info_data, colWidths=[1.2*inch, 2*inch, 1.2*inch, 2*inch])
-        invoice_info_table.setStyle(TableStyle([
-            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 9),
-            ('FONT', (2, 0), (2, -1), 'Helvetica-Bold', 9),
-            ('FONT', (1, 0), (1, -1), 'Helvetica', 9),
-            ('FONT', (3, 0), (3, -1), 'Helvetica', 9),
-            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-        ]))
-        elements.append(invoice_info_table)
+        # Orange accent line
+        elements.append(Spacer(1, 0.15*inch))
+        elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#FFA500'), spaceBefore=0, spaceAfter=0))
         elements.append(Spacer(1, 0.3*inch))
 
-        # Bill To section
-        elements.append(Paragraph("Bill To:", heading_style))
+        # Invoice title with orange color
+        invoice_title_style = ParagraphStyle(
+            'InvoiceTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#FFA500'),
+            spaceAfter=20,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        elements.append(Paragraph("INVOICE", invoice_title_style))
 
-        bill_to_text = f"<b>{company.name}</b><br/>"
-        if company.full_address:
-            bill_to_text += company.full_address.replace(', ', '<br/>')
+        # Document metadata table (modern grid layout)
+        metadata_data = [
+            ['Invoice Number', 'Issue Date', 'Due Date', 'Status'],
+            [invoice.invoice_number,
+             invoice.issue_date.strftime('%b %d, %Y'),
+             invoice.due_date.strftime('%b %d, %Y'),
+             invoice.status]
+        ]
 
-        elements.append(Paragraph(bill_to_text, body_style))
+        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.7*inch, 1.7*inch, 1.8*inch])
+        metadata_table.setStyle(TableStyle([
+            # Header row - orange background
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('TOPPADDING', (0, 0), (-1, 0), 10),
+
+            # Data row
+            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
+            ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#424242')),
+            ('ALIGN', (0, 1), (-1, 1), 'CENTER'),
+            ('TOPPADDING', (0, 1), (-1, 1), 10),
+            ('BOTTOMPADDING', (0, 1), (-1, 1), 10),
+
+            # Grid
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+        ]))
+        elements.append(metadata_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Two-column From/Bill To section
+        from_bill_data = [
+            [Paragraph('<b>FROM:</b>', heading_style), Paragraph('<b>BILL TO:</b>', heading_style)],
+            [
+                Paragraph(f"""
+                <b>{entity_name}</b><br/>
+                {entity_address.replace(', ', '<br/>')}<br/>
+                Phone: {entity_phone}
+                {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
+                """, body_style),
+                Paragraph(f"""
+                <b>{company.name}</b><br/>
+                {company.full_address.replace(', ', '<br/>') if company.full_address else (company.country or '')}
+                """, body_style)
+            ]
+        ]
+
+        from_bill_table = Table(from_bill_data, colWidths=[3.45*inch, 3.45*inch])
+        from_bill_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, 0), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+            ('TOPPADDING', (0, 1), (-1, 1), 6),
+        ]))
+        elements.append(from_bill_table)
         elements.append(Spacer(1, 0.3*inch))
 
         # Contract reference
@@ -1131,17 +1189,31 @@ class InvoiceViewSet(BaseModelViewSet):
         elements.append(totals_table)
         elements.append(Spacer(1, 0.3*inch))
 
-        # Bank Details Section
+        # Bank Details Section - Organized blocks with background
         elements.append(Paragraph("BANK DETAILS FOR PAYMENT", heading_style))
 
-        bank_details_text = f"<b>Beneficiary:</b> {entity_name}<br/>"
-        bank_details_text += f"<b>Bank:</b> {entity_bank}<br/>"
-        bank_details_text += f"<b>SWIFT Code:</b> {entity_swift}<br/>"
-        bank_details_text += f"<b>Account Number:</b> {entity_account}"
-        if entity_tax:
-            bank_details_text += f"<br/><b>Tax No.:</b> {entity_tax}"
+        bank_data = [
+            ['Beneficiary', entity_name],
+            ['Bank', entity_bank],
+            ['SWIFT Code', entity_swift],
+            ['Account Number', entity_account],
+        ]
 
-        elements.append(Paragraph(bank_details_text, body_style))
+        bank_table = Table(bank_data, colWidths=[2*inch, 4.9*inch])
+        bank_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f5f5f5')),
+            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 10),
+            ('FONT', (1, 0), (1, -1), 'Helvetica', 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e0e0e0')),
+        ]))
+        elements.append(bank_table)
         elements.append(Spacer(1, 0.3*inch))
 
         # Payment status indicator
@@ -1202,12 +1274,12 @@ class InvoiceViewSet(BaseModelViewSet):
             elements.append(Paragraph(notes_text, body_style))
             elements.append(Spacer(1, 0.2*inch))
 
-        # Footer - entity-specific
+        # Footer - entity-specific with separator
         elements.append(Spacer(1, 0.3*inch))
+        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=12))
+
         footer_text = f"""
-        <b>{entity_name}</b><br/>
-        {entity_address.replace(', ', ' | ')}<br/>
-        Phone: {entity_phone}
+        <b>{entity_name}</b> | {entity_address.replace(', ', ' | ')} | Phone: {entity_phone}
         """
         elements.append(Paragraph(footer_text, small_style))
 
@@ -1361,7 +1433,7 @@ class QuoteViewSet(BaseModelViewSet):
         from reportlab.lib.pagesizes import letter, A4
         from reportlab.lib import colors
         from reportlab.lib.units import inch
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
         from io import BytesIO
@@ -1399,14 +1471,14 @@ class QuoteViewSet(BaseModelViewSet):
         elements = []
         styles = getSampleStyleSheet()
 
-        # Custom styles
+        # Custom styles - Modern 2025 design
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
             fontSize=24,
-            textColor=colors.HexColor('#FFA500'),
-            spaceAfter=30,
-            alignment=TA_CENTER
+            textColor=colors.HexColor('#424242'),
+            spaceAfter=12,
+            fontName='Helvetica-Bold'
         )
 
         heading_style = ParagraphStyle(
@@ -1415,28 +1487,32 @@ class QuoteViewSet(BaseModelViewSet):
             fontSize=14,
             textColor=colors.HexColor('#424242'),
             spaceAfter=12,
-            spaceBefore=12
+            spaceBefore=12,
+            fontName='Helvetica-Bold'
         )
 
         body_style = ParagraphStyle(
             'CustomBody',
             parent=styles['Normal'],
             fontSize=10,
-            textColor=colors.HexColor('#212121')
+            textColor=colors.HexColor('#424242'),
+            leading=14
         )
 
         small_style = ParagraphStyle(
             'SmallText',
             parent=styles['Normal'],
             fontSize=8,
-            textColor=colors.HexColor('#757575')
+            textColor=colors.HexColor('#757575'),
+            leading=11
         )
 
-        # Header - BMAsia Logo
+        # Header - BMAsia Logo (properly sized with aspect ratio preserved)
         logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
         try:
             if os.path.exists(logo_path):
-                logo = Image(logo_path, width=150, height=60)
+                logo = Image(logo_path, width=120, height=48, kind='proportional')
+                logo.hAlign = 'LEFT'
                 elements.append(logo)
             else:
                 # Fallback to text if logo not found
@@ -1445,62 +1521,83 @@ class QuoteViewSet(BaseModelViewSet):
             # Fallback to text if image loading fails
             elements.append(Paragraph("BM ASIA", title_style))
 
-        elements.append(Spacer(1, 0.2*inch))
-
-        # Quote title
-        elements.append(Paragraph(f"QUOTATION", heading_style))
-        elements.append(Spacer(1, 0.1*inch))
-
-        # Quote details header
-        quote_info_data = [
-            ['Quote Number:', quote.quote_number, 'Date:', quote.valid_from.strftime('%B %d, %Y')],
-            ['Status:', quote.status, 'Valid Until:', quote.valid_until.strftime('%B %d, %Y')]
-        ]
-
-        quote_info_table = Table(quote_info_data, colWidths=[1.2*inch, 2*inch, 1.2*inch, 2*inch])
-        quote_info_table.setStyle(TableStyle([
-            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 9),
-            ('FONT', (2, 0), (2, -1), 'Helvetica-Bold', 9),
-            ('FONT', (1, 0), (1, -1), 'Helvetica', 9),
-            ('FONT', (3, 0), (3, -1), 'Helvetica', 9),
-            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-        ]))
-        elements.append(quote_info_table)
+        # Orange accent line
+        elements.append(Spacer(1, 0.15*inch))
+        elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#FFA500'), spaceBefore=0, spaceAfter=0))
         elements.append(Spacer(1, 0.3*inch))
 
-        # From section - entity-specific
-        elements.append(Paragraph("From:", heading_style))
+        # Quote title with orange color
+        quote_title_style = ParagraphStyle(
+            'QuoteTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#FFA500'),
+            spaceAfter=20,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        elements.append(Paragraph("QUOTATION", quote_title_style))
 
-        from_text = f"<b>{entity_name}</b><br/>"
-        from_text += entity_address.replace(', ', '<br/>') + '<br/>'
-        from_text += f"Phone: {entity_phone}"
-        if entity_tax:
-            from_text += f"<br/>Tax No.: {entity_tax}"
+        # Document metadata table (modern grid layout)
+        metadata_data = [
+            ['Quote Number', 'Date', 'Valid Until', 'Status'],
+            [quote.quote_number,
+             quote.valid_from.strftime('%b %d, %Y'),
+             quote.valid_until.strftime('%b %d, %Y'),
+             quote.status]
+        ]
 
-        elements.append(Paragraph(from_text, body_style))
-        elements.append(Spacer(1, 0.2*inch))
+        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.7*inch, 1.7*inch, 1.8*inch])
+        metadata_table.setStyle(TableStyle([
+            # Header row - orange background
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('TOPPADDING', (0, 0), (-1, 0), 10),
 
-        # Bill To section
-        elements.append(Paragraph("Bill To:", heading_style))
+            # Data row
+            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
+            ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#424242')),
+            ('ALIGN', (0, 1), (-1, 1), 'CENTER'),
+            ('TOPPADDING', (0, 1), (-1, 1), 10),
+            ('BOTTOMPADDING', (0, 1), (-1, 1), 10),
 
-        bill_to_text = f"<b>{quote.company.name}</b><br/>"
-        if quote.company.full_address:
-            bill_to_text += quote.company.full_address.replace(', ', '<br/>')
+            # Grid
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+        ]))
+        elements.append(metadata_table)
+        elements.append(Spacer(1, 0.3*inch))
 
-        elements.append(Paragraph(bill_to_text, body_style))
-        elements.append(Spacer(1, 0.1*inch))
+        # Two-column From/Bill To section
+        from_bill_data = [
+            [Paragraph('<b>FROM:</b>', heading_style), Paragraph('<b>BILL TO:</b>', heading_style)],
+            [
+                Paragraph(f"""
+                <b>{entity_name}</b><br/>
+                {entity_address.replace(', ', '<br/>')}<br/>
+                Phone: {entity_phone}
+                {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
+                """, body_style),
+                Paragraph(f"""
+                <b>{quote.company.name}</b><br/>
+                {quote.company.full_address.replace(', ', '<br/>') if quote.company.full_address else (quote.company.country or '')}
+                {f"<br/><br/><b>Contact:</b> {quote.contact.name}" if quote.contact else ""}
+                {f"<br/>Email: {quote.contact.email}" if quote.contact and quote.contact.email else ""}
+                {f"<br/>Phone: {quote.contact.phone}" if quote.contact and quote.contact.phone else ""}
+                """, body_style)
+            ]
+        ]
 
-        # Contact information
-        if quote.contact:
-            contact_text = f"<b>Contact:</b> {quote.contact.name}<br/>"
-            if quote.contact.email:
-                contact_text += f"<b>Email:</b> {quote.contact.email}<br/>"
-            if quote.contact.phone:
-                contact_text += f"<b>Phone:</b> {quote.contact.phone}"
-            elements.append(Paragraph(contact_text, body_style))
-
+        from_bill_table = Table(from_bill_data, colWidths=[3.45*inch, 3.45*inch])
+        from_bill_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, 0), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+            ('TOPPADDING', (0, 1), (-1, 1), 6),
+        ]))
+        elements.append(from_bill_table)
         elements.append(Spacer(1, 0.3*inch))
 
         # Line items table
@@ -1595,17 +1692,31 @@ class QuoteViewSet(BaseModelViewSet):
         elements.append(totals_table)
         elements.append(Spacer(1, 0.3*inch))
 
-        # Bank Details Section
+        # Bank Details Section - Organized blocks with background
         elements.append(Paragraph("BANK DETAILS FOR PAYMENT", heading_style))
 
-        bank_details_text = f"<b>Beneficiary:</b> {entity_name}<br/>"
-        bank_details_text += f"<b>Bank:</b> {entity_bank}<br/>"
-        bank_details_text += f"<b>SWIFT Code:</b> {entity_swift}<br/>"
-        bank_details_text += f"<b>Account Number:</b> {entity_account}"
-        if entity_tax:
-            bank_details_text += f"<br/><b>Tax No.:</b> {entity_tax}"
+        bank_data = [
+            ['Beneficiary', entity_name],
+            ['Bank', entity_bank],
+            ['SWIFT Code', entity_swift],
+            ['Account Number', entity_account],
+        ]
 
-        elements.append(Paragraph(bank_details_text, body_style))
+        bank_table = Table(bank_data, colWidths=[2*inch, 4.9*inch])
+        bank_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f5f5f5')),
+            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 10),
+            ('FONT', (1, 0), (1, -1), 'Helvetica', 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e0e0e0')),
+        ]))
+        elements.append(bank_table)
         elements.append(Spacer(1, 0.3*inch))
 
         # Terms and conditions
@@ -1629,12 +1740,12 @@ class QuoteViewSet(BaseModelViewSet):
             elements.append(Paragraph(notes_text, body_style))
             elements.append(Spacer(1, 0.2*inch))
 
-        # Footer - entity-specific
+        # Footer - entity-specific with separator
         elements.append(Spacer(1, 0.3*inch))
+        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=12))
+
         footer_text = f"""
-        <b>{entity_name}</b><br/>
-        {entity_address.replace(', ', ' | ')}<br/>
-        Phone: {entity_phone}
+        <b>{entity_name}</b> | {entity_address.replace(', ', ' | ')} | Phone: {entity_phone}
         """
         elements.append(Paragraph(footer_text, small_style))
 
@@ -1858,7 +1969,7 @@ def reset_admin(request):
     )
     
     return HttpResponse(f"""
-        <h2>✅ Admin Reset Successful\!</h2>
+        <h2>✅ Admin Reset Successful!</h2>
         <p>Deleted {deleted_count} existing admin users</p>
         <p>Created fresh admin user:</p>
         <strong>Username:</strong> admin<br>
