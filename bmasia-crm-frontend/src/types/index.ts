@@ -37,6 +37,7 @@ export interface SubscriptionPlan {
 export interface Company {
   id: string;
   name: string;
+  legal_entity_name?: string;
   country?: string;
   billing_entity?: string;
   website?: string;

@@ -121,6 +121,13 @@ class Company(TimestampedModel):
         default='BMAsia Limited',
         help_text="Legal entity for billing and invoicing"
     )
+
+    # Legal entity name (for official registered company name)
+    legal_entity_name = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Legal registered company name (if different from display name)"
+    )
     
     class Meta:
         verbose_name_plural = 'Companies'

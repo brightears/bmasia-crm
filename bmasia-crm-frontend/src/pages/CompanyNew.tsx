@@ -25,6 +25,7 @@ import ApiService from '../services/api';
 
 interface CompanyFormData {
   name: string;
+  legal_entity_name: string;
   industry: string;
   country: string;
   billing_entity: string;
@@ -95,6 +96,7 @@ const CompanyNew: React.FC = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState<CompanyFormData>({
     name: '',
+    legal_entity_name: '',
     industry: '',
     country: '',
     billing_entity: 'BMAsia Limited',
@@ -165,6 +167,7 @@ const CompanyNew: React.FC = () => {
       const submitData = {
         ...formData,
         billing_entity: formData.billing_entity,
+        legal_entity_name: formData.legal_entity_name || undefined,
         website: formData.website || undefined,
         phone: formData.phone || undefined,
         email: formData.email || undefined,
@@ -293,6 +296,19 @@ const CompanyNew: React.FC = () => {
               error={!!errors.name}
               helperText={errors.name}
               required
+              size="medium"
+            />
+          </Grid>
+
+          <Grid item xs={12}>
+            <TextField
+              fullWidth
+              label="Legal Entity Name"
+              name="legal_entity_name"
+              value={formData.legal_entity_name}
+              onChange={(e) => handleFieldChange('legal_entity_name', e.target.value)}
+              helperText="Registered company name if different from display name (optional)"
+              error={!!errors.legal_entity_name}
               size="medium"
             />
           </Grid>

@@ -126,10 +126,10 @@ class BeatBreezeZoneInline(admin.TabularInline):
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
-    list_display = ['name', 'country', 'industry', 'location_count', 'music_zone_count', 'soundtrack_status']
-    list_filter = ['country', 'industry', 'is_active', 'created_at']
+    list_display = ['name', 'country', 'industry', 'location_count', 'music_zone_count', 'soundtrack_status', 'billing_entity']
+    list_filter = ['country', 'industry', 'is_active', 'billing_entity', 'created_at']
     list_select_related = []  # Company has no ForeignKey fields to select_related on
-    search_fields = ['name', 'website', 'notes', 'soundtrack_account_id']
+    search_fields = ['name', 'legal_entity_name', 'website', 'notes', 'soundtrack_account_id']
     readonly_fields = ['created_at', 'updated_at', 'current_subscription_summary', 'zones_status_summary']
     actions = ['sync_soundtrack_zones', 'preview_email_to_contacts', 'send_email_to_contacts', 'bulk_send_email_to_contacts', 'bulk_sync_soundtrack_zones', 'export_companies_csv', 'export_companies_excel']
     
@@ -342,8 +342,8 @@ class CompanyAdmin(admin.ModelAdmin):
         writer = csv.writer(response)
         # Write headers
         writer.writerow([
-            'Company Name', 'Country', 'Industry', 'Website', 'Location Count',
-            'Music Zone Count', 'Soundtrack Account ID', 'Contact Count',
+            'Company Name', 'Legal Entity Name', 'Country', 'Industry', 'Website', 'Location Count',
+            'Music Zone Count', 'Billing Entity', 'Soundtrack Account ID', 'Contact Count',
             'Active Contract Count', 'Total Contract Value', 'Is Active',
             'Address', 'Created Date', 'Last Updated'
         ])
@@ -360,11 +360,13 @@ class CompanyAdmin(admin.ModelAdmin):
         for company in companies:
             writer.writerow([
                 company.name,
+                company.legal_entity_name,
                 company.country,
                 company.get_industry_display() if company.industry else '',
                 company.website,
                 company.location_count,
                 company.music_zone_count,
+                company.get_billing_entity_display(),
                 company.soundtrack_account_id,
                 company.contact_count or 0,
                 company.active_contract_count or 0,
@@ -393,8 +395,8 @@ class CompanyAdmin(admin.ModelAdmin):
 
         # Write headers
         headers = [
-            'Company Name', 'Country', 'Industry', 'Website', 'Location Count',
-            'Music Zone Count', 'Soundtrack Account ID', 'Contact Count',
+            'Company Name', 'Legal Entity Name', 'Country', 'Industry', 'Website', 'Location Count',
+            'Music Zone Count', 'Billing Entity', 'Soundtrack Account ID', 'Contact Count',
             'Active Contract Count', 'Total Contract Value (USD)', 'Is Active',
             'Full Address', 'Created Date', 'Last Updated'
         ]
@@ -416,19 +418,21 @@ class CompanyAdmin(admin.ModelAdmin):
 
         for row, company in enumerate(companies, 2):
             ws.cell(row=row, column=1, value=company.name)
-            ws.cell(row=row, column=2, value=company.country)
-            ws.cell(row=row, column=3, value=company.get_industry_display() if company.industry else '')
-            ws.cell(row=row, column=4, value=company.website)
-            ws.cell(row=row, column=5, value=company.location_count)
-            ws.cell(row=row, column=6, value=company.music_zone_count)
-            ws.cell(row=row, column=7, value=company.soundtrack_account_id)
-            ws.cell(row=row, column=8, value=company.contact_count or 0)
-            ws.cell(row=row, column=9, value=company.active_contract_count or 0)
-            ws.cell(row=row, column=10, value=float(company.total_contract_value or 0))
-            ws.cell(row=row, column=11, value='Yes' if company.is_active else 'No')
-            ws.cell(row=row, column=12, value=company.full_address)
-            ws.cell(row=row, column=13, value=company.created_at)
-            ws.cell(row=row, column=14, value=company.updated_at)
+            ws.cell(row=row, column=2, value=company.legal_entity_name)
+            ws.cell(row=row, column=3, value=company.country)
+            ws.cell(row=row, column=4, value=company.get_industry_display() if company.industry else '')
+            ws.cell(row=row, column=5, value=company.website)
+            ws.cell(row=row, column=6, value=company.location_count)
+            ws.cell(row=row, column=7, value=company.music_zone_count)
+            ws.cell(row=row, column=8, value=company.get_billing_entity_display())
+            ws.cell(row=row, column=9, value=company.soundtrack_account_id)
+            ws.cell(row=row, column=10, value=company.contact_count or 0)
+            ws.cell(row=row, column=11, value=company.active_contract_count or 0)
+            ws.cell(row=row, column=12, value=float(company.total_contract_value or 0))
+            ws.cell(row=row, column=13, value='Yes' if company.is_active else 'No')
+            ws.cell(row=row, column=14, value=company.full_address)
+            ws.cell(row=row, column=15, value=company.created_at)
+            ws.cell(row=row, column=16, value=company.updated_at)
 
         # Auto-adjust column widths
         for col in range(1, len(headers) + 1):
@@ -476,7 +480,11 @@ class CompanyAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('name', 'country', 'industry', 'website', 'location_count', 'music_zone_count'),
+            'fields': ('name', 'legal_entity_name', 'country', 'industry', 'website', 'location_count', 'music_zone_count'),
+        }),
+        ('Billing', {
+            'fields': ('billing_entity',),
+            'description': 'Select which BMAsia legal entity will be used for billing and invoicing'
         }),
         ('Soundtrack Integration', {
             'fields': ('soundtrack_account_id', 'zones_status_summary'),
