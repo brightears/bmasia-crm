@@ -27,6 +27,7 @@ interface CompanyFormData {
   name: string;
   industry: string;
   country: string;
+  billing_entity: string;
   city: string;
   website: string;
   phone: string;
@@ -84,12 +85,19 @@ const COUNTRIES = [
   'Other',
 ];
 
+// Billing entities for BMAsia
+const BILLING_ENTITIES = [
+  { value: 'BMAsia Limited', label: 'BMAsia Limited (Hong Kong)' },
+  { value: 'BMAsia (Thailand) Co., Ltd.', label: 'BMAsia (Thailand) Co., Ltd.' },
+];
+
 const CompanyNew: React.FC = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState<CompanyFormData>({
     name: '',
     industry: '',
     country: '',
+    billing_entity: 'BMAsia Limited',
     city: '',
     website: '',
     phone: '',
@@ -156,6 +164,7 @@ const CompanyNew: React.FC = () => {
     try {
       const submitData = {
         ...formData,
+        billing_entity: formData.billing_entity,
         website: formData.website || undefined,
         phone: formData.phone || undefined,
         email: formData.email || undefined,
@@ -197,6 +206,23 @@ const CompanyNew: React.FC = () => {
       ...prev,
       [field]: value,
     }));
+
+    // Smart default: auto-select billing entity based on country
+    if (field === 'country') {
+      if (value === 'Thailand' || value === 'Hong Kong') {
+        setFormData(prev => ({
+          ...prev,
+          country: value,
+          billing_entity: 'BMAsia (Thailand) Co., Ltd.',
+        }));
+      } else if (value) {
+        setFormData(prev => ({
+          ...prev,
+          country: value,
+          billing_entity: 'BMAsia Limited',
+        }));
+      }
+    }
 
     // Clear field error when user starts typing
     if (errors[field]) {
@@ -315,6 +341,26 @@ const CompanyNew: React.FC = () => {
                 {errors.country}
               </Typography>
             )}
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <FormControl fullWidth size="medium">
+              <InputLabel>Billing Entity</InputLabel>
+              <Select
+                value={formData.billing_entity}
+                onChange={(e) => handleFieldChange('billing_entity', e.target.value)}
+                label="Billing Entity"
+              >
+                {BILLING_ENTITIES.map((entity) => (
+                  <MenuItem key={entity.value} value={entity.value}>
+                    {entity.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+              Legal entity for billing and invoicing
+            </Typography>
           </Grid>
 
           <Grid item xs={12} sm={6}>

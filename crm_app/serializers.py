@@ -102,7 +102,7 @@ class CompanySerializer(serializers.ModelSerializer):
             'location_count', 'music_zone_count', 'avg_zones_per_location',
             'soundtrack_account_id', 'is_active', 'notes',
             'address_line1', 'address_line2', 'city', 'state', 'postal_code',
-            'full_address', 'total_contract_value', 'contacts', 'zones', 'zones_summary',
+            'billing_entity', 'full_address', 'total_contract_value', 'contacts', 'zones', 'zones_summary',
             'subscription_summary', 'primary_contact', 'opportunities_count',
             'active_contracts_count', 'created_at', 'updated_at'
         ]

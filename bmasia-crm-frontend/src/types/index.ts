@@ -38,6 +38,7 @@ export interface Company {
   id: string;
   name: string;
   country?: string;
+  billing_entity?: string;
   website?: string;
   industry?: string;
   location_count: number;

@@ -83,6 +83,11 @@ class Company(TimestampedModel):
         ('Banks', 'Banks & Financial'),
         ('Other', 'Other'),
     ]
+
+    BILLING_ENTITY_CHOICES = [
+        ('BMAsia Limited', 'BMAsia Limited (Hong Kong)'),
+        ('BMAsia (Thailand) Co., Ltd.', 'BMAsia (Thailand) Co., Ltd.'),
+    ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255, unique=True, db_index=True)
@@ -108,6 +113,14 @@ class Company(TimestampedModel):
     city = models.CharField(max_length=100, blank=True)
     state = models.CharField(max_length=100, blank=True)
     postal_code = models.CharField(max_length=20, blank=True)
+
+    # Billing entity
+    billing_entity = models.CharField(
+        max_length=50,
+        choices=BILLING_ENTITY_CHOICES,
+        default='BMAsia Limited',
+        help_text="Legal entity for billing and invoicing"
+    )
     
     class Meta:
         verbose_name_plural = 'Companies'

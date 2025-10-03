@@ -521,9 +521,32 @@ class ContractViewSet(BaseModelViewSet):
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
         from io import BytesIO
+        from django.conf import settings
+        import os
 
         contract = self.get_object()
         company = contract.company
+
+        # Get entity-specific details based on billing_entity
+        billing_entity = company.billing_entity
+        if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+            entity_name = 'BMAsia (Thailand) Co., Ltd.'
+            entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
+            entity_phone = '+66 2153 3520'
+            entity_tax = '0105548025073'
+            entity_bank = 'TMBThanachart Bank, Thonglor Soi 17 Branch'
+            entity_swift = 'TMBKTHBK'
+            entity_account = '916-1-00579-9'
+            payment_terms_default = 'by bank transfer on a net received, paid in full basis, with no offset to BMA\'s TMB-Thanachart Bank, Bangkok, Thailand due immediately on invoicing to activate the music subscription. All outbound and inbound bank transfer fees are borne by the Client in remitting payments as invoiced less Withholding Tax required by Thai Law.'
+        else:  # BMAsia Limited (Hong Kong)
+            entity_name = 'BMAsia Limited'
+            entity_address = '22nd Floor, Tai Yau Building, 181 Johnston Road, Wanchai, Hong Kong'
+            entity_phone = '+66 2153 3520'
+            entity_tax = None
+            entity_bank = 'HSBC, HK'
+            entity_swift = 'HSBCHKHHHKH'
+            entity_account = '808-021570-838'
+            payment_terms_default = 'by bank transfer on a net received, paid in full basis, with no offset to BMA\'s HSBC Bank, Hong Kong due immediately as invoiced to activate the music subscription. All Bank transfer fees, and all taxes are borne by the Client in remitting payments as invoiced.'
 
         # Create PDF buffer
         buffer = BytesIO()
@@ -538,7 +561,7 @@ class ContractViewSet(BaseModelViewSet):
             'CustomTitle',
             parent=styles['Heading1'],
             fontSize=24,
-            textColor=colors.HexColor('#1976d2'),
+            textColor=colors.HexColor('#FFA500'),
             spaceAfter=30,
             alignment=TA_CENTER
         )
@@ -570,14 +593,25 @@ class ContractViewSet(BaseModelViewSet):
             'ContractTitle',
             parent=styles['Heading1'],
             fontSize=18,
-            textColor=colors.HexColor('#1976d2'),
+            textColor=colors.HexColor('#FFA500'),
             spaceAfter=20,
             alignment=TA_CENTER,
             fontName='Helvetica-Bold'
         )
 
-        # Header - BM ASIA branding (text placeholder for logo)
-        elements.append(Paragraph("BM ASIA", title_style))
+        # Header - BMAsia Logo
+        logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
+        try:
+            if os.path.exists(logo_path):
+                logo = Image(logo_path, width=150, height=60)
+                elements.append(logo)
+            else:
+                # Fallback to text if logo not found
+                elements.append(Paragraph("BM ASIA", title_style))
+        except Exception:
+            # Fallback to text if image loading fails
+            elements.append(Paragraph("BM ASIA", title_style))
+
         elements.append(Spacer(1, 0.2*inch))
 
         # Contract title
@@ -607,14 +641,15 @@ class ContractViewSet(BaseModelViewSet):
         elements.append(Paragraph("PARTIES TO THIS AGREEMENT", heading_style))
         elements.append(Spacer(1, 0.1*inch))
 
-        # Provider (BM Asia)
-        provider_text = """
+        # Provider (BM Asia) - entity-specific
+        provider_text = f"""
         <b>SERVICE PROVIDER:</b><br/>
-        <b>BM Asia Co., Ltd.</b><br/>
-        Bangkok, Thailand<br/>
-        Email: info@bmasia.com<br/>
-        Phone: +66 (0) 2XXX XXXX
+        <b>{entity_name}</b><br/>
+        {entity_address.replace(', ', '<br/>')}<br/>
+        Phone: {entity_phone}
         """
+        if entity_tax:
+            provider_text += f"<br/>Tax No.: {entity_tax}"
         elements.append(Paragraph(provider_text, body_style))
         elements.append(Spacer(1, 0.2*inch))
 
@@ -713,11 +748,29 @@ class ContractViewSet(BaseModelViewSet):
             elif contract.billing_frequency == 'Annual':
                 payment_schedule_text += f"<b>Annual Payment:</b> {currency_symbol}{contract.value:,.2f}<br/>"
 
-            if contract.payment_terms:
-                payment_schedule_text += f"<b>Terms:</b> {contract.payment_terms}"
-
             elements.append(Paragraph(payment_schedule_text, body_style))
             elements.append(Spacer(1, 0.3*inch))
+
+        # Bank Details Section
+        elements.append(Paragraph("BANK DETAILS FOR PAYMENT", heading_style))
+
+        bank_details_text = f"<b>Beneficiary:</b> {entity_name}<br/>"
+        bank_details_text += f"<b>Bank:</b> {entity_bank}<br/>"
+        bank_details_text += f"<b>SWIFT Code:</b> {entity_swift}<br/>"
+        bank_details_text += f"<b>Account Number:</b> {entity_account}"
+
+        elements.append(Paragraph(bank_details_text, body_style))
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Payment Terms
+        elements.append(Paragraph("PAYMENT TERMS", heading_style))
+
+        # Use contract payment terms if specified, otherwise use entity default
+        payment_terms_text = contract.payment_terms if contract.payment_terms else payment_terms_default
+        payment_terms_formatted = payment_terms_text.replace('\n', '<br/>')
+
+        elements.append(Paragraph(payment_terms_formatted, body_style))
+        elements.append(Spacer(1, 0.3*inch))
 
         # Additional Terms and Conditions
         if contract.notes:
@@ -773,7 +826,7 @@ class ContractViewSet(BaseModelViewSet):
         signature_data = [
             ['', ''],
             ['_' * 40, '_' * 40],
-            ['BM Asia Co., Ltd.', company.name],
+            [entity_name, company.name],
             ['Authorized Representative', 'Authorized Representative'],
             ['', ''],
             ['Date: _________________', 'Date: _________________'],
@@ -793,12 +846,12 @@ class ContractViewSet(BaseModelViewSet):
         elements.append(signature_table)
         elements.append(Spacer(1, 0.3*inch))
 
-        # Footer
+        # Footer - entity-specific
         elements.append(Spacer(1, 0.3*inch))
-        footer_text = """
-        <b>BM Asia Co., Ltd.</b><br/>
-        Email: info@bmasia.com | Phone: +66 (0) 2XXX XXXX<br/>
-        Website: www.bmasia.com
+        footer_text = f"""
+        <b>{entity_name}</b><br/>
+        {entity_address.replace(', ', ' | ')}<br/>
+        Phone: {entity_phone}
         """
         elements.append(Paragraph(footer_text, small_style))
 
@@ -863,9 +916,32 @@ class InvoiceViewSet(BaseModelViewSet):
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
         from io import BytesIO
+        from django.conf import settings
+        import os
 
         invoice = self.get_object()
         company = invoice.contract.company
+
+        # Get entity-specific details based on billing_entity
+        billing_entity = company.billing_entity
+        if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+            entity_name = 'BMAsia (Thailand) Co., Ltd.'
+            entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
+            entity_phone = '+66 2153 3520'
+            entity_tax = '0105548025073'
+            entity_bank = 'TMBThanachart Bank, Thonglor Soi 17 Branch'
+            entity_swift = 'TMBKTHBK'
+            entity_account = '916-1-00579-9'
+            payment_terms_default = 'by bank transfer on a net received, paid in full basis, with no offset to BMA\'s TMB-Thanachart Bank, Bangkok, Thailand due immediately on invoicing to activate the music subscription. All outbound and inbound bank transfer fees are borne by the Client in remitting payments as invoiced less Withholding Tax required by Thai Law.'
+        else:  # BMAsia Limited (Hong Kong)
+            entity_name = 'BMAsia Limited'
+            entity_address = '22nd Floor, Tai Yau Building, 181 Johnston Road, Wanchai, Hong Kong'
+            entity_phone = '+66 2153 3520'
+            entity_tax = None
+            entity_bank = 'HSBC, HK'
+            entity_swift = 'HSBCHKHHHKH'
+            entity_account = '808-021570-838'
+            payment_terms_default = 'by bank transfer on a net received, paid in full basis, with no offset to BMA\'s HSBC Bank, Hong Kong due immediately as invoiced to activate the music subscription. All Bank transfer fees, and all taxes are borne by the Client in remitting payments as invoiced.'
 
         # Create PDF buffer
         buffer = BytesIO()
@@ -880,7 +956,7 @@ class InvoiceViewSet(BaseModelViewSet):
             'CustomTitle',
             parent=styles['Heading1'],
             fontSize=24,
-            textColor=colors.HexColor('#1976d2'),
+            textColor=colors.HexColor('#FFA500'),
             spaceAfter=30,
             alignment=TA_CENTER
         )
@@ -908,8 +984,19 @@ class InvoiceViewSet(BaseModelViewSet):
             textColor=colors.HexColor('#757575')
         )
 
-        # Header - BM ASIA branding (text placeholder for logo)
-        elements.append(Paragraph("BM ASIA", title_style))
+        # Header - BMAsia Logo
+        logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
+        try:
+            if os.path.exists(logo_path):
+                logo = Image(logo_path, width=150, height=60)
+                elements.append(logo)
+            else:
+                # Fallback to text if logo not found
+                elements.append(Paragraph("BM ASIA", title_style))
+        except Exception:
+            # Fallback to text if image loading fails
+            elements.append(Paragraph("BM ASIA", title_style))
+
         elements.append(Spacer(1, 0.2*inch))
 
         # Invoice title
@@ -981,7 +1068,7 @@ class InvoiceViewSet(BaseModelViewSet):
         services_table = Table(services_data, colWidths=[5*inch, 1.9*inch])
         services_table.setStyle(TableStyle([
             # Header row
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1976d2')),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
@@ -1038,10 +1125,23 @@ class InvoiceViewSet(BaseModelViewSet):
             ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             # Bold the last row (Total)
             ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 12),
-            ('LINEABOVE', (0, -1), (-1, -1), 1, colors.HexColor('#1976d2')),
+            ('LINEABOVE', (0, -1), (-1, -1), 1, colors.HexColor('#FFA500')),
         ]))
 
         elements.append(totals_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Bank Details Section
+        elements.append(Paragraph("BANK DETAILS FOR PAYMENT", heading_style))
+
+        bank_details_text = f"<b>Beneficiary:</b> {entity_name}<br/>"
+        bank_details_text += f"<b>Bank:</b> {entity_bank}<br/>"
+        bank_details_text += f"<b>SWIFT Code:</b> {entity_swift}<br/>"
+        bank_details_text += f"<b>Account Number:</b> {entity_account}"
+        if entity_tax:
+            bank_details_text += f"<br/><b>Tax No.:</b> {entity_tax}"
+
+        elements.append(Paragraph(bank_details_text, body_style))
         elements.append(Spacer(1, 0.3*inch))
 
         # Payment status indicator
@@ -1088,11 +1188,12 @@ class InvoiceViewSet(BaseModelViewSet):
         elements.append(Spacer(1, 0.2*inch))
 
         # Payment terms
-        if invoice.contract.payment_terms:
-            elements.append(Paragraph("Payment Terms:", heading_style))
-            payment_terms_text = invoice.contract.payment_terms.replace('\n', '<br/>')
-            elements.append(Paragraph(payment_terms_text, body_style))
-            elements.append(Spacer(1, 0.2*inch))
+        elements.append(Paragraph("Payment Terms:", heading_style))
+        # Use contract payment terms if specified, otherwise use entity default
+        payment_terms_text = invoice.contract.payment_terms if invoice.contract.payment_terms else payment_terms_default
+        payment_terms_formatted = payment_terms_text.replace('\n', '<br/>')
+        elements.append(Paragraph(payment_terms_formatted, body_style))
+        elements.append(Spacer(1, 0.2*inch))
 
         # Notes (if any)
         if invoice.notes:
@@ -1101,12 +1202,12 @@ class InvoiceViewSet(BaseModelViewSet):
             elements.append(Paragraph(notes_text, body_style))
             elements.append(Spacer(1, 0.2*inch))
 
-        # Footer
+        # Footer - entity-specific
         elements.append(Spacer(1, 0.3*inch))
-        footer_text = """
-        <b>BM Asia Co., Ltd.</b><br/>
-        Email: info@bmasia.com | Phone: +66 (0) 2XXX XXXX<br/>
-        Website: www.bmasia.com
+        footer_text = f"""
+        <b>{entity_name}</b><br/>
+        {entity_address.replace(', ', ' | ')}<br/>
+        Phone: {entity_phone}
         """
         elements.append(Paragraph(footer_text, small_style))
 
@@ -1264,8 +1365,31 @@ class QuoteViewSet(BaseModelViewSet):
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
         from io import BytesIO
+        from django.conf import settings
+        import os
 
         quote = self.get_object()
+
+        # Get entity-specific details based on billing_entity
+        billing_entity = quote.company.billing_entity
+        if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+            entity_name = 'BMAsia (Thailand) Co., Ltd.'
+            entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
+            entity_phone = '+66 2153 3520'
+            entity_tax = '0105548025073'
+            entity_bank = 'TMBThanachart Bank, Thonglor Soi 17 Branch'
+            entity_swift = 'TMBKTHBK'
+            entity_account = '916-1-00579-9'
+            payment_terms_default = 'by bank transfer on a net received, paid in full basis, with no offset to BMA\'s TMB-Thanachart Bank, Bangkok, Thailand due immediately on invoicing to activate the music subscription. All outbound and inbound bank transfer fees are borne by the Client in remitting payments as invoiced less Withholding Tax required by Thai Law.'
+        else:  # BMAsia Limited (Hong Kong)
+            entity_name = 'BMAsia Limited'
+            entity_address = '22nd Floor, Tai Yau Building, 181 Johnston Road, Wanchai, Hong Kong'
+            entity_phone = '+66 2153 3520'
+            entity_tax = None
+            entity_bank = 'HSBC, HK'
+            entity_swift = 'HSBCHKHHHKH'
+            entity_account = '808-021570-838'
+            payment_terms_default = 'by bank transfer on a net received, paid in full basis, with no offset to BMA\'s HSBC Bank, Hong Kong due immediately as invoiced to activate the music subscription. All Bank transfer fees, and all taxes are borne by the Client in remitting payments as invoiced.'
 
         # Create PDF buffer
         buffer = BytesIO()
@@ -1280,7 +1404,7 @@ class QuoteViewSet(BaseModelViewSet):
             'CustomTitle',
             parent=styles['Heading1'],
             fontSize=24,
-            textColor=colors.HexColor('#1976d2'),
+            textColor=colors.HexColor('#FFA500'),
             spaceAfter=30,
             alignment=TA_CENTER
         )
@@ -1308,8 +1432,19 @@ class QuoteViewSet(BaseModelViewSet):
             textColor=colors.HexColor('#757575')
         )
 
-        # Header - BM ASIA branding (text placeholder for logo)
-        elements.append(Paragraph("BM ASIA", title_style))
+        # Header - BMAsia Logo
+        logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
+        try:
+            if os.path.exists(logo_path):
+                logo = Image(logo_path, width=150, height=60)
+                elements.append(logo)
+            else:
+                # Fallback to text if logo not found
+                elements.append(Paragraph("BM ASIA", title_style))
+        except Exception:
+            # Fallback to text if image loading fails
+            elements.append(Paragraph("BM ASIA", title_style))
+
         elements.append(Spacer(1, 0.2*inch))
 
         # Quote title
@@ -1334,6 +1469,18 @@ class QuoteViewSet(BaseModelViewSet):
         ]))
         elements.append(quote_info_table)
         elements.append(Spacer(1, 0.3*inch))
+
+        # From section - entity-specific
+        elements.append(Paragraph("From:", heading_style))
+
+        from_text = f"<b>{entity_name}</b><br/>"
+        from_text += entity_address.replace(', ', '<br/>') + '<br/>'
+        from_text += f"Phone: {entity_phone}"
+        if entity_tax:
+            from_text += f"<br/>Tax No.: {entity_tax}"
+
+        elements.append(Paragraph(from_text, body_style))
+        elements.append(Spacer(1, 0.2*inch))
 
         # Bill To section
         elements.append(Paragraph("Bill To:", heading_style))
@@ -1382,7 +1529,7 @@ class QuoteViewSet(BaseModelViewSet):
             line_items_table = Table(table_data, colWidths=[3.5*inch, 1*inch, 1.2*inch, 1.2*inch])
             line_items_table.setStyle(TableStyle([
                 # Header row
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1976d2')),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                 ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
@@ -1442,10 +1589,23 @@ class QuoteViewSet(BaseModelViewSet):
             ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             # Bold the last row (Total)
             ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 12),
-            ('LINEABOVE', (0, -1), (-1, -1), 1, colors.HexColor('#1976d2')),
+            ('LINEABOVE', (0, -1), (-1, -1), 1, colors.HexColor('#FFA500')),
         ]))
 
         elements.append(totals_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Bank Details Section
+        elements.append(Paragraph("BANK DETAILS FOR PAYMENT", heading_style))
+
+        bank_details_text = f"<b>Beneficiary:</b> {entity_name}<br/>"
+        bank_details_text += f"<b>Bank:</b> {entity_bank}<br/>"
+        bank_details_text += f"<b>SWIFT Code:</b> {entity_swift}<br/>"
+        bank_details_text += f"<b>Account Number:</b> {entity_account}"
+        if entity_tax:
+            bank_details_text += f"<br/><b>Tax No.:</b> {entity_tax}"
+
+        elements.append(Paragraph(bank_details_text, body_style))
         elements.append(Spacer(1, 0.3*inch))
 
         # Terms and conditions
@@ -1455,6 +1615,12 @@ class QuoteViewSet(BaseModelViewSet):
             terms_text = quote.terms_conditions.replace('\n', '<br/>')
             elements.append(Paragraph(terms_text, body_style))
             elements.append(Spacer(1, 0.2*inch))
+        else:
+            # Use default payment terms if no custom terms
+            elements.append(Paragraph("Payment Terms:", heading_style))
+            payment_terms_formatted = payment_terms_default.replace('\n', '<br/>')
+            elements.append(Paragraph(payment_terms_formatted, body_style))
+            elements.append(Spacer(1, 0.2*inch))
 
         # Notes (internal - optional to show on PDF)
         if quote.notes:
@@ -1463,12 +1629,12 @@ class QuoteViewSet(BaseModelViewSet):
             elements.append(Paragraph(notes_text, body_style))
             elements.append(Spacer(1, 0.2*inch))
 
-        # Footer
+        # Footer - entity-specific
         elements.append(Spacer(1, 0.3*inch))
-        footer_text = """
-        <b>BM Asia Co., Ltd.</b><br/>
-        Email: info@bmasia.com | Phone: +66 (0) 2XXX XXXX<br/>
-        Website: www.bmasia.com
+        footer_text = f"""
+        <b>{entity_name}</b><br/>
+        {entity_address.replace(', ', ' | ')}<br/>
+        Phone: {entity_phone}
         """
         elements.append(Paragraph(footer_text, small_style))
 
