@@ -8,6 +8,14 @@ if [ "$RESET_DB" = "true" ]; then
     python reset_db.py <<< "yes"
 fi
 
-# Start the web server regardless of migration status
+# Run database migrations
+echo "Running database migrations..."
+python manage.py migrate --noinput
+
+# Collect static files
+echo "Collecting static files..."
+python manage.py collectstatic --noinput
+
+# Start the web server
 echo "Starting Gunicorn..."
 exec gunicorn bmasia_crm.wsgi:application --bind 0.0.0.0:$PORT
