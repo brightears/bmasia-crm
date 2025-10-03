@@ -32,8 +32,10 @@ interface CompanyFormProps {
 
 interface CompanyFormData {
   name: string;
+  legal_entity_name: string;
   industry: string;
   country: string;
+  billing_entity: string;
   city: string;
   website: string;
   phone: string;
@@ -92,6 +94,12 @@ const COUNTRIES = [
   'Other',
 ];
 
+// Billing entities for BMAsia
+const BILLING_ENTITIES = [
+  { value: 'BMAsia Limited', label: 'BMAsia Limited (Hong Kong)' },
+  { value: 'BMAsia (Thailand) Co., Ltd.', label: 'BMAsia (Thailand) Co., Ltd.' },
+];
+
 const CompanyForm: React.FC<CompanyFormProps> = ({
   open,
   onClose,
@@ -100,8 +108,10 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
 }) => {
   const [formData, setFormData] = useState<CompanyFormData>({
     name: '',
+    legal_entity_name: '',
     industry: '',
     country: '',
+    billing_entity: 'BMAsia Limited',
     city: '',
     website: '',
     phone: '',
@@ -123,8 +133,10 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
     if (company) {
       setFormData({
         name: company.name || '',
+        legal_entity_name: company.legal_entity_name || '',
         industry: company.industry || '',
         country: company.country || '',
+        billing_entity: company.billing_entity || 'BMAsia Limited',
         city: company.city || '',
         website: company.website || '',
         phone: '', // Phone not in Company type, will need to be added
@@ -141,8 +153,10 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
       // Reset form for new company
       setFormData({
         name: '',
+        legal_entity_name: '',
         industry: '',
         country: '',
+        billing_entity: 'BMAsia Limited',
         city: '',
         website: '',
         phone: '',
@@ -209,6 +223,8 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
     try {
       const submitData = {
         ...formData,
+        billing_entity: formData.billing_entity,
+        legal_entity_name: formData.legal_entity_name || undefined,
         website: formData.website || undefined,
         phone: formData.phone || undefined,
         email: formData.email || undefined,
@@ -258,10 +274,21 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
   };
 
   const handleFieldChange = (field: keyof CompanyFormData, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value,
-    }));
+    // Single atomic state update with smart defaults
+    setFormData(prev => {
+      const updates: Partial<CompanyFormData> = { [field]: value };
+
+      // Smart default: auto-select billing entity based on country
+      if (field === 'country') {
+        if (value === 'Thailand' || value === 'Hong Kong') {
+          updates.billing_entity = 'BMAsia (Thailand) Co., Ltd.';
+        } else if (value) {
+          updates.billing_entity = 'BMAsia Limited';
+        }
+      }
+
+      return { ...prev, ...updates };
+    });
 
     // Clear field error when user starts typing
     if (errors[field]) {
@@ -312,11 +339,24 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
               error={!!errors.name}
               helperText={errors.name}
               required
+              size="medium"
+            />
+          </Grid>
+
+          <Grid item xs={12}>
+            <TextField
+              fullWidth
+              label="Legal Entity Name"
+              value={formData.legal_entity_name}
+              onChange={(e) => handleFieldChange('legal_entity_name', e.target.value)}
+              helperText="Registered company name if different from display name (optional)"
+              error={!!errors.legal_entity_name}
+              size="medium"
             />
           </Grid>
 
           <Grid item xs={12} sm={6}>
-            <FormControl fullWidth error={!!errors.industry}>
+            <FormControl fullWidth error={!!errors.industry} size="medium">
               <InputLabel>Industry *</InputLabel>
               <Select
                 value={formData.industry}
@@ -339,7 +379,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
           </Grid>
 
           <Grid item xs={12} sm={6}>
-            <FormControl fullWidth error={!!errors.country}>
+            <FormControl fullWidth error={!!errors.country} size="medium">
               <InputLabel>Country *</InputLabel>
               <Select
                 value={formData.country}
@@ -359,6 +399,26 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
                 {errors.country}
               </Typography>
             )}
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <FormControl fullWidth size="medium">
+              <InputLabel>Billing Entity</InputLabel>
+              <Select
+                value={formData.billing_entity}
+                onChange={(e) => handleFieldChange('billing_entity', e.target.value)}
+                label="Billing Entity"
+              >
+                {BILLING_ENTITIES.map((entity) => (
+                  <MenuItem key={entity.value} value={entity.value}>
+                    {entity.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+              Legal entity for billing and invoicing
+            </Typography>
           </Grid>
 
           <Grid item xs={12} sm={6}>
