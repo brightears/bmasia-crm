@@ -1158,10 +1158,15 @@ class InvoiceViewSet(BaseModelViewSet):
             totals_data.append(['Subtotal:', f"{currency_symbol}{invoice.amount:,.2f}"])
 
         if invoice.discount_amount > 0:
-            totals_data.append(['Discount:', f"-{currency_symbol}{invoice.discount_amount:,.2f}"])
+            discount_pct = (invoice.discount_amount / invoice.amount * 100) if invoice.amount > 0 else 0
+            totals_data.append([f'Discount ({discount_pct:.1f}%):', f"-{currency_symbol}{invoice.discount_amount:,.2f}"])
 
         if invoice.tax_amount > 0:
-            totals_data.append(['Tax:', f"{currency_symbol}{invoice.tax_amount:,.2f}"])
+            # Determine tax label based on billing entity
+            tax_label = "VAT" if billing_entity == 'BMAsia (Thailand) Co., Ltd.' else "Tax"
+            taxable_amount = invoice.amount - invoice.discount_amount
+            tax_pct = (invoice.tax_amount / taxable_amount * 100) if taxable_amount > 0 else 0
+            totals_data.append([f'{tax_label} ({tax_pct:.1f}%):', f"{currency_symbol}{invoice.tax_amount:,.2f}"])
 
         totals_data.append(['<b>Total Amount:</b>', f"<b>{currency_symbol}{invoice.total_amount:,.2f}</b>"])
 
@@ -1668,11 +1673,19 @@ class QuoteViewSet(BaseModelViewSet):
         if quote.subtotal > 0:
             totals_data.append(['Subtotal:', f"{currency_symbol}{quote.subtotal:,.2f}"])
 
+        # Calculate weighted average discount percentage from line items
         if quote.discount_amount > 0:
-            totals_data.append(['Discount:', f"-{currency_symbol}{quote.discount_amount:,.2f}"])
+            total_before_discount = sum(item.quantity * item.unit_price for item in line_items)
+            discount_pct = (quote.discount_amount / total_before_discount * 100) if total_before_discount > 0 else 0
+            totals_data.append([f'Discount ({discount_pct:.1f}%):', f"-{currency_symbol}{quote.discount_amount:,.2f}"])
 
+        # Calculate weighted average tax rate from line items
         if quote.tax_amount > 0:
-            totals_data.append(['Tax:', f"{currency_symbol}{quote.tax_amount:,.2f}"])
+            # Determine tax label based on billing entity
+            tax_label = "VAT" if billing_entity == 'BMAsia (Thailand) Co., Ltd.' else "Tax"
+            after_discount = quote.subtotal
+            tax_pct = (quote.tax_amount / after_discount * 100) if after_discount > 0 else 0
+            totals_data.append([f'{tax_label} ({tax_pct:.1f}%):', f"{currency_symbol}{quote.tax_amount:,.2f}"])
 
         totals_data.append(['<b>Total:</b>', f"<b>{currency_symbol}{quote.total_value:,.2f}</b>"])
 

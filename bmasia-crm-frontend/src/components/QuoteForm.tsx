@@ -554,6 +554,15 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
                               InputProps={{
                                 endAdornment: <InputAdornment position="end"><Percent sx={{ fontSize: 14 }} /></InputAdornment>,
                               }}
+                              sx={{
+                                minWidth: '90px',
+                                '& input': {
+                                  textAlign: 'center',
+                                  paddingRight: '8px',
+                                  color: 'text.primary',
+                                  fontWeight: 500,
+                                },
+                              }}
                             />
                           </TableCell>
                           <TableCell>
@@ -565,6 +574,15 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
                               inputProps={{ min: 0, max: 100, step: 0.1 }}
                               InputProps={{
                                 endAdornment: <InputAdornment position="end"><Percent sx={{ fontSize: 14 }} /></InputAdornment>,
+                              }}
+                              sx={{
+                                minWidth: '90px',
+                                '& input': {
+                                  textAlign: 'center',
+                                  paddingRight: '8px',
+                                  color: 'text.primary',
+                                  fontWeight: 500,
+                                },
                               }}
                             />
                           </TableCell>
