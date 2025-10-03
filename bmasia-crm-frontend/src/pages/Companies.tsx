@@ -17,6 +17,11 @@ import {
   InputAdornment,
   Alert,
   CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
 } from '@mui/material';
 import {
   Add,
@@ -24,6 +29,7 @@ import {
   Edit,
   Visibility,
   Business,
+  Delete,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { Company, ApiResponse } from '../types';
@@ -41,6 +47,9 @@ const Companies: React.FC = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [formOpen, setFormOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [companyToDelete, setCompanyToDelete] = useState<Company | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const loadCompanies = useCallback(async () => {
     try {
@@ -114,6 +123,38 @@ const Companies: React.FC = () => {
     // Reset form state
     setFormOpen(false);
     setEditingCompany(null);
+  };
+
+  const handleDeleteClick = (company: Company) => {
+    setCompanyToDelete(company);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteCancel = () => {
+    setDeleteDialogOpen(false);
+    setCompanyToDelete(null);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!companyToDelete) return;
+
+    try {
+      setDeleteLoading(true);
+      setError('');
+      await ApiService.deleteCompany(companyToDelete.id);
+
+      // Refresh the list after successful deletion
+      loadCompanies();
+
+      // Close dialog and reset state
+      setDeleteDialogOpen(false);
+      setCompanyToDelete(null);
+    } catch (err: any) {
+      console.error('Delete company error:', err);
+      setError(`Failed to delete company: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
+    } finally {
+      setDeleteLoading(false);
+    }
   };
 
   return (
@@ -251,6 +292,14 @@ const Companies: React.FC = () => {
                     >
                       <Edit />
                     </IconButton>
+                    <IconButton
+                      size="small"
+                      onClick={() => handleDeleteClick(company)}
+                      title="Delete Company"
+                      color="error"
+                    >
+                      <Delete />
+                    </IconButton>
                   </TableCell>
                 </TableRow>
               ))
@@ -275,6 +324,41 @@ const Companies: React.FC = () => {
         onSave={handleFormSave}
         company={editingCompany}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={handleDeleteCancel}
+        aria-labelledby="delete-dialog-title"
+        aria-describedby="delete-dialog-description"
+      >
+        <DialogTitle id="delete-dialog-title">
+          Delete Company?
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText id="delete-dialog-description">
+            Are you sure you want to delete <strong>{companyToDelete?.name}</strong>?
+            This action cannot be undone and will remove all associated data.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={handleDeleteCancel}
+            disabled={deleteLoading}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleDeleteConfirm}
+            color="error"
+            variant="contained"
+            disabled={deleteLoading}
+            startIcon={deleteLoading ? <CircularProgress size={16} /> : <Delete />}
+          >
+            {deleteLoading ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };
