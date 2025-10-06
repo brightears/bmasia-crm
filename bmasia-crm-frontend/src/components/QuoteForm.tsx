@@ -30,7 +30,6 @@ import {
 import {
   Add,
   Delete,
-  AttachMoney,
   Percent,
   Calculate,
   Business,
@@ -332,6 +331,16 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
     onClose();
   };
 
+  const getCurrencySymbol = (currency: string): string => {
+    const symbols: { [key: string]: string } = {
+      'USD': '$',
+      'THB': '฿',
+      'EUR': '€',
+      'GBP': '£'
+    };
+    return symbols[currency] || currency;
+  };
+
   const formatCurrency = (value: number): string => {
     // Currency locale mapping for proper symbol display
     const currencyLocaleMap: { [key: string]: string } = {
@@ -589,7 +598,13 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
                               onChange={(e) => updateLineItem(index, 'unit_price', parseFloat(e.target.value) || 0)}
                               inputProps={{ min: 0, step: 0.01 }}
                               InputProps={{
-                                startAdornment: <InputAdornment position="start"><AttachMoney sx={{ fontSize: 14 }} /></InputAdornment>,
+                                startAdornment: (
+                                  <InputAdornment position="start">
+                                    <Typography variant="body2" sx={{ fontSize: 14, fontWeight: 500 }}>
+                                      {getCurrencySymbol(formData.currency)}
+                                    </Typography>
+                                  </InputAdornment>
+                                ),
                               }}
                             />
                           </TableCell>

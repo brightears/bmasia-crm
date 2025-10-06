@@ -697,7 +697,7 @@ class ContractViewSet(BaseModelViewSet):
         elements.append(Paragraph("CONTRACT VALUE", heading_style))
 
         # Currency symbol
-        currency_symbol = {'USD': '$', 'THB': '฿', 'EUR': '€', 'GBP': '£'}.get(contract.currency, contract.currency)
+        currency_symbol = {'USD': '$', 'THB': 'THB ', 'EUR': 'EUR ', 'GBP': 'GBP '}.get(contract.currency, contract.currency + ' ')
 
         value_data = [
             ['Total Contract Value', f"{currency_symbol}{contract.value:,.2f} {contract.currency}"]
@@ -1104,7 +1104,7 @@ class InvoiceViewSet(BaseModelViewSet):
         elements.append(Paragraph("Services:", heading_style))
 
         # Currency symbol
-        currency_symbol = {'USD': '$', 'THB': '฿', 'EUR': '€', 'GBP': '£'}.get(invoice.currency, invoice.currency)
+        currency_symbol = {'USD': '$', 'THB': 'THB ', 'EUR': 'EUR ', 'GBP': 'GBP '}.get(invoice.currency, invoice.currency + ' ')
 
         # Create services table
         services_data = [
@@ -1621,7 +1621,7 @@ class QuoteViewSet(BaseModelViewSet):
 
         if line_items.exists():
             # Currency symbol
-            currency_symbol = {'USD': '$', 'THB': '฿', 'EUR': '€', 'GBP': '£'}.get(quote.currency, quote.currency)
+            currency_symbol = {'USD': '$', 'THB': 'THB ', 'EUR': 'EUR ', 'GBP': 'GBP '}.get(quote.currency, quote.currency + ' ')
 
             table_data = [
                 ['Description', 'Quantity', 'Unit Price', 'Total']
