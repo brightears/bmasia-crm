@@ -44,7 +44,6 @@ import {
   GetApp,
   MoreVert,
   RequestQuote,
-  AttachMoney,
   Business,
   Schedule,
   FileCopy,
@@ -296,10 +295,18 @@ const Quotes: React.FC = () => {
     setActionMenuQuote(null);
   };
 
-  const formatCurrency = (value: number): string => {
-    return new Intl.NumberFormat('en-US', {
+  const formatCurrency = (value: number, currency: string = 'USD'): string => {
+    // Currency locale mapping for proper symbol display
+    const currencyLocaleMap: { [key: string]: string } = {
+      'USD': 'en-US',
+      'THB': 'th-TH',
+      'EUR': 'de-DE',
+      'GBP': 'en-GB'
+    };
+
+    return new Intl.NumberFormat(currencyLocaleMap[currency] || 'en-US', {
       style: 'currency',
-      currency: 'USD',
+      currency: currency,
       minimumFractionDigits: 2,
     }).format(value);
   };
@@ -513,12 +520,9 @@ const Quotes: React.FC = () => {
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <AttachMoney sx={{ fontSize: 16, color: 'text.secondary' }} />
-                        <Typography variant="body2">
-                          {formatCurrency(quote.total_value)}
-                        </Typography>
-                      </Box>
+                      <Typography variant="body2">
+                        {formatCurrency(quote.total_value, quote.currency)}
+                      </Typography>
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2" sx={{
