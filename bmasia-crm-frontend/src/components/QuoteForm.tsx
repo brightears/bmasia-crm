@@ -86,7 +86,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
       quantity: 1,
       unit_price: 50.00,
       discount_percentage: 0,
-      tax_rate: 7.5,
+      tax_rate: 7,
       line_total: 50.00,
     }
   ]);
@@ -323,7 +323,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
       quantity: 1,
       unit_price: 50.00,
       discount_percentage: 0,
-      tax_rate: 7.5,
+      tax_rate: 7,
       line_total: 50.00,
     }]);
     setAttachments([]);
@@ -634,8 +634,8 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
                               size="small"
                               type="number"
                               value={item.tax_rate}
-                              onChange={(e) => updateLineItem(index, 'tax_rate', parseFloat(e.target.value) || 0)}
-                              inputProps={{ min: 0, max: 100, step: 0.1 }}
+                              onChange={(e) => updateLineItem(index, 'tax_rate', parseInt(e.target.value) || 0)}
+                              inputProps={{ min: 0, max: 100, step: 1 }}
                               InputProps={{
                                 endAdornment: <InputAdornment position="end"><Percent sx={{ fontSize: 14 }} /></InputAdornment>,
                               }}
@@ -646,6 +646,17 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
                                   paddingRight: '8px',
                                   color: 'text.primary',
                                   fontWeight: 500,
+                                },
+                                '& input[type=number]': {
+                                  MozAppearance: 'textfield',
+                                },
+                                '& input[type=number]::-webkit-outer-spin-button': {
+                                  WebkitAppearance: 'none',
+                                  margin: 0,
+                                },
+                                '& input[type=number]::-webkit-inner-spin-button': {
+                                  WebkitAppearance: 'none',
+                                  margin: 0,
                                 },
                               }}
                             />
