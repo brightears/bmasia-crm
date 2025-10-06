@@ -94,6 +94,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
 
   const [filteredContacts, setFilteredContacts] = useState<Contact[]>([]);
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [selectedCompanyCountry, setSelectedCompanyCountry] = useState<string>('');
 
   useEffect(() => {
     if (open) {
@@ -144,17 +145,39 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
   }, [formData.company, contacts]);
 
   const handleInputChange = (field: string, value: any) => {
+    // Handle company selection with smart defaults
+    if (field === 'company') {
+      const selectedCompany = companies.find(c => c.id === value);
+      if (selectedCompany) {
+        const country = selectedCompany.country || '';
+        setSelectedCompanyCountry(country);
+
+        // Smart currency default based on country
+        const smartCurrency = country === 'Thailand' ? 'THB' : 'USD';
+
+        setFormData(prev => ({
+          ...prev,
+          company: value,
+          currency: smartCurrency
+        }));
+        return;
+      }
+    }
+
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
   const addLineItem = () => {
+    // Smart tax rate default based on company country
+    const smartTaxRate = selectedCompanyCountry === 'Thailand' ? 7 : 0;
+
     setLineItems(prev => [...prev, {
       product_service: '',
       description: '',
       quantity: 1,
       unit_price: 0,
       discount_percentage: 0,
-      tax_rate: 7.5,
+      tax_rate: smartTaxRate,
       line_total: 0,
     }]);
   };
@@ -184,6 +207,11 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
   };
 
   const calculateTotals = () => {
+    // Helper function to round to 2 decimal places to avoid floating-point precision errors
+    const roundTo2Decimals = (value: number): number => {
+      return Math.round(value * 100) / 100;
+    };
+
     const subtotal = lineItems.reduce((sum, item) => {
       const itemSubtotal = item.quantity * item.unit_price;
       const discountAmount = itemSubtotal * (item.discount_percentage / 100);
@@ -207,10 +235,10 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
     const total = subtotal + totalTaxAmount;
 
     return {
-      subtotal,
-      taxAmount: totalTaxAmount,
-      discountAmount: totalDiscountAmount,
-      total
+      subtotal: roundTo2Decimals(subtotal),
+      taxAmount: roundTo2Decimals(totalTaxAmount),
+      discountAmount: roundTo2Decimals(totalDiscountAmount),
+      total: roundTo2Decimals(total)
     };
   };
 
@@ -305,7 +333,15 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
   };
 
   const formatCurrency = (value: number): string => {
-    return new Intl.NumberFormat('en-US', {
+    // Currency locale mapping for proper symbol display
+    const currencyLocaleMap: { [key: string]: string } = {
+      'USD': 'en-US',
+      'THB': 'th-TH',
+      'EUR': 'de-DE',
+      'GBP': 'en-GB'
+    };
+
+    return new Intl.NumberFormat(currencyLocaleMap[formData.currency] || 'en-US', {
       style: 'currency',
       currency: formData.currency,
       minimumFractionDigits: 2,
@@ -313,6 +349,19 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
   };
 
   const totals = calculateTotals();
+
+  // Determine tax label based on company country or billing entity
+  const getTaxLabel = (): string => {
+    const selectedCompany = companies.find(c => c.id === formData.company);
+    if (selectedCompany) {
+      // Check if Thailand or if billing entity is Thailand
+      if (selectedCompanyCountry === 'Thailand' ||
+          selectedCompany.billing_entity?.includes('Thailand')) {
+        return 'VAT:';
+      }
+    }
+    return 'Tax:';
+  };
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
@@ -628,7 +677,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
                         </Typography>
                       </Grid>
                       <Grid item xs={6}>
-                        <Typography variant="body2">Tax:</Typography>
+                        <Typography variant="body2">{getTaxLabel()}</Typography>
                       </Grid>
                       <Grid item xs={6}>
                         <Typography variant="body2" align="right">
