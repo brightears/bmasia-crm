@@ -9,16 +9,31 @@ if [ "$RESET_DB" = "true" ]; then
     python reset_db.py <<< "yes"
 fi
 
-# Force add billing_entity column before running migrations
-echo "Ensuring billing_entity column exists..."
-python force_add_billing_entity.py || {
-    echo "⚠️  Force script failed - may need manual intervention"
-    echo "You can run add_billing_entity_simple.sql manually via Render Shell"
-}
-
-# Run database migrations
+# Run database migrations first
 echo "Running database migrations..."
 python manage.py migrate --noinput
+
+# Only run force_add_billing_entity if tables already exist (migration 0024 specific fix)
+# This script is only needed for existing databases, not fresh ones
+echo "Checking if billing_entity column fix is needed..."
+python -c "
+import os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'bmasia_crm.settings')
+import django
+django.setup()
+from crm_app.models import Company
+try:
+    # Try to check if billing_entity exists
+    Company.objects.filter(billing_entity__isnull=True).exists()
+    print('billing_entity column exists, skipping fix')
+except Exception as e:
+    if 'billing_entity' in str(e):
+        print('billing_entity column missing, running fix...')
+        import subprocess
+        subprocess.run(['python', 'force_add_billing_entity.py'])
+    else:
+        print(f'Unexpected error: {e}')
+" || echo "Column check skipped (likely fresh database)"
 
 # Collect static files
 echo "Collecting static files..."
