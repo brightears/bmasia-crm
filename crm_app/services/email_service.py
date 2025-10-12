@@ -380,10 +380,10 @@ class EmailService:
             'failed': 0,
             'skipped': 0
         }
-        
+
         # Find companies due for quarterly check-in
         three_months_ago = timezone.now().date() - timedelta(days=90)
-        
+
         companies = Company.objects.filter(
             is_active=True,
             contracts__is_active=True,
@@ -392,7 +392,7 @@ class EmailService:
             email_logs__email_type='quarterly',
             email_logs__created_at__gte=three_months_ago
         ).distinct()
-        
+
         for company in companies:
             # Get contacts for quarterly updates
             contacts = company.contacts.filter(
@@ -403,27 +403,751 @@ class EmailService:
                 Q(contact_type='Primary') |
                 Q(notification_types__contains='quarterly')
             )
-            
+
             for contact in contacts:
                 context = {
                     'company': company,
                     'zone_count': company.zones.count(),
                     'active_zones': company.zones.filter(status='online').count(),
                 }
-                
+
                 success, message = self.send_template_email(
                     template_type='quarterly_checkin',
                     contact=contact,
                     context=context,
                     email_type='quarterly'
                 )
-                
+
                 if success:
                     results['sent'] += 1
                 else:
                     results['failed'] += 1
-        
+
         return results
+
+    def send_quote_email(
+        self,
+        quote_id,
+        recipients=None,
+        subject=None,
+        body=None,
+        sender='admin'
+    ) -> Tuple[bool, str]:
+        """
+        Send quote email with PDF attachment
+
+        Args:
+            quote_id: ID of the quote to send
+            recipients: List of email addresses (optional, defaults to company contacts)
+            subject: Custom subject line (optional, uses template if not provided)
+            body: Custom body text (optional, uses template if not provided)
+            sender: Sender key from EMAIL_SENDERS config
+
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        from crm_app.models import Quote
+        from django.conf import settings
+        import io
+
+        # Get quote
+        try:
+            quote = Quote.objects.select_related('company', 'contact').get(id=quote_id)
+        except Quote.DoesNotExist:
+            return False, f"Quote with ID {quote_id} not found"
+
+        # Get recipients
+        if not recipients:
+            recipients = list(quote.company.contacts.filter(
+                email__isnull=False,
+                is_active=True
+            ).values_list('email', flat=True))
+
+        if not recipients:
+            return False, "No recipients found for this quote"
+
+        # Get sender configuration
+        sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+        from_email = f"{sender_config['display']} <{sender_config['email']}>"
+
+        # Prepare context for template
+        context = {
+            'company_name': quote.company.legal_entity_name or quote.company.name,
+            'contact_name': quote.contact.name if quote.contact else 'Valued Customer',
+            'document_number': quote.quote_number,
+            'amount': f"{quote.currency} {quote.total_value:,.2f}",
+            'valid_until': quote.valid_until.strftime('%B %d, %Y'),
+            'sender_name': sender_config['name'],
+            'current_year': datetime.now().year,
+        }
+
+        # Use template if subject/body not provided
+        if not subject or not body:
+            try:
+                template = EmailTemplate.objects.get(
+                    template_type='quote_send',
+                    is_active=True
+                )
+                rendered = template.render(context)
+                if not subject:
+                    subject = rendered['subject']
+                if not body:
+                    body = rendered['body_text']
+                    body_html = rendered['body_html']
+            except EmailTemplate.DoesNotExist:
+                # Fallback to default
+                if not subject:
+                    subject = f"Quote {quote.quote_number} from BMAsia Music"
+                if not body:
+                    body = f"Dear {context['contact_name']},\n\nPlease find attached quote {quote.quote_number} for {context['company_name']}.\n\nTotal Amount: {context['amount']}\nValid Until: {context['valid_until']}\n\nBest regards,\n{context['sender_name']}\nBMAsia Music"
+                    body_html = body.replace('\n', '<br/>')
+        else:
+            body_html = body.replace('\n', '<br/>')
+
+        # Generate PDF
+        try:
+            from django.test import RequestFactory
+            from rest_framework.request import Request as DRFRequest
+            from crm_app.views import QuoteViewSet
+            from django.contrib.auth.models import AnonymousUser
+
+            factory = RequestFactory()
+            django_request = factory.get(f'/api/quotes/{quote.id}/pdf/')
+            django_request.user = AnonymousUser()
+
+            # Wrap in DRF Request to get query_params
+            request = DRFRequest(django_request)
+
+            viewset = QuoteViewSet()
+            viewset.request = request
+            viewset.kwargs = {'pk': quote.id}
+
+            pdf_response = viewset.pdf(request, pk=quote.id)
+            pdf_data = pdf_response.content
+            pdf_filename = f"Quote_{quote.quote_number}.pdf"
+        except Exception as e:
+            logger.error(f"Failed to generate PDF for quote {quote.quote_number}: {e}")
+            return False, f"Failed to generate PDF: {str(e)}"
+
+        # Send to each recipient
+        success_count = 0
+        for recipient in recipients:
+            try:
+                # Find contact for this email
+                contact = quote.company.contacts.filter(email=recipient).first()
+
+                # Create email message
+                msg = EmailMultiAlternatives(
+                    subject=subject,
+                    body=body,
+                    from_email=from_email,
+                    to=[recipient]
+                )
+
+                # Add HTML version
+                msg.attach_alternative(body_html, "text/html")
+
+                # Attach PDF
+                msg.attach(pdf_filename, pdf_data, 'application/pdf')
+
+                # Add tracking headers
+                msg.extra_headers['X-BMAsia-Email-ID'] = f'quote_{quote.id}'
+                if contact:
+                    msg.extra_headers['List-Unsubscribe'] = self._get_unsubscribe_url(contact)
+
+                # Send email
+                msg.send(fail_silently=False)
+
+                # Log email
+                email_log = EmailLog.objects.create(
+                    company=quote.company,
+                    contact=contact,
+                    email_type='manual',
+                    from_email=sender_config['email'],
+                    to_email=recipient,
+                    subject=subject,
+                    body_html=body_html,
+                    body_text=body,
+                    status='sent',
+                    sent_at=timezone.now()
+                )
+
+                success_count += 1
+                logger.info(f"Quote email sent successfully to {recipient}")
+
+            except Exception as e:
+                logger.error(f"Failed to send quote email to {recipient}: {e}")
+
+        # Update quote status
+        if success_count > 0:
+            quote.status = 'Sent'
+            quote.sent_date = timezone.now().date()
+            quote.save()
+
+            return True, f"Quote sent successfully to {success_count} recipient(s)"
+        else:
+            return False, "Failed to send quote to any recipients"
+
+    def send_contract_email(
+        self,
+        contract_id,
+        recipients=None,
+        subject=None,
+        body=None,
+        sender='admin'
+    ) -> Tuple[bool, str]:
+        """
+        Send contract email with PDF attachment
+
+        Args:
+            contract_id: ID of the contract to send
+            recipients: List of email addresses (optional, defaults to company contacts)
+            subject: Custom subject line (optional, uses template if not provided)
+            body: Custom body text (optional, uses template if not provided)
+            sender: Sender key from EMAIL_SENDERS config
+
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        from django.conf import settings
+
+        # Get contract
+        try:
+            contract = Contract.objects.select_related('company').get(id=contract_id)
+        except Contract.DoesNotExist:
+            return False, f"Contract with ID {contract_id} not found"
+
+        # Get recipients
+        if not recipients:
+            recipients = list(contract.company.contacts.filter(
+                email__isnull=False,
+                is_active=True
+            ).values_list('email', flat=True))
+
+        if not recipients:
+            return False, "No recipients found for this contract"
+
+        # Get sender configuration
+        sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+        from_email = f"{sender_config['display']} <{sender_config['email']}>"
+
+        # Prepare context for template
+        context = {
+            'company_name': contract.company.legal_entity_name or contract.company.name,
+            'contact_name': 'Valued Customer',
+            'document_number': contract.contract_number,
+            'amount': f"{contract.currency} {contract.value:,.2f}",
+            'valid_until': contract.end_date.strftime('%B %d, %Y'),
+            'sender_name': sender_config['name'],
+            'current_year': datetime.now().year,
+        }
+
+        # Use template if subject/body not provided
+        if not subject or not body:
+            try:
+                template = EmailTemplate.objects.get(
+                    template_type='contract_send',
+                    is_active=True
+                )
+                rendered = template.render(context)
+                if not subject:
+                    subject = rendered['subject']
+                if not body:
+                    body = rendered['body_text']
+                    body_html = rendered['body_html']
+            except EmailTemplate.DoesNotExist:
+                # Fallback to default
+                if not subject:
+                    subject = f"Contract {contract.contract_number} from BMAsia Music"
+                if not body:
+                    body = f"Dear {context['contact_name']},\n\nPlease find attached contract {contract.contract_number} for {context['company_name']}.\n\nContract Value: {context['amount']}\nValid Until: {context['valid_until']}\n\nBest regards,\n{context['sender_name']}\nBMAsia Music"
+                    body_html = body.replace('\n', '<br/>')
+        else:
+            body_html = body.replace('\n', '<br/>')
+
+        # Generate PDF by directly calling the PDF generation logic (avoids viewset complications)
+        try:
+            from crm_app.services.pdf_generator import generate_contract_pdf
+
+            # Try using PDF generator service if it exists
+            pdf_data = generate_contract_pdf(contract)
+            pdf_filename = f"Contract_{contract.contract_number}.pdf"
+        except ImportError:
+            # Fallback: Generate inline using the same logic as the view
+            try:
+                from reportlab.lib.pagesizes import letter
+                from reportlab.lib import colors
+                from reportlab.lib.units import inch
+                from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable
+                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                from reportlab.lib.enums import TA_CENTER
+                from io import BytesIO
+                import os
+
+                company = contract.company
+
+                # Get entity-specific details based on billing_entity
+                billing_entity = company.billing_entity
+                if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+                    entity_name = 'BMAsia (Thailand) Co., Ltd.'
+                    entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
+                    entity_phone = '+66 2153 3520'
+                    entity_tax = '0105548025073'
+                    entity_bank = 'TMBThanachart Bank, Thonglor Soi 17 Branch'
+                    entity_swift = 'TMBKTHBK'
+                    entity_account = '916-1-00579-9'
+                else:  # BMAsia Limited (Hong Kong)
+                    entity_name = 'BMAsia Limited'
+                    entity_address = '22nd Floor, Tai Yau Building, 181 Johnston Road, Wanchai, Hong Kong'
+                    entity_phone = '+66 2153 3520'
+                    entity_tax = None
+                    entity_bank = 'HSBC, HK'
+                    entity_swift = 'HSBCHKHHHKH'
+                    entity_account = '808-021570-838'
+
+                # Create PDF buffer
+                buffer = BytesIO()
+                doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.4*inch)
+                elements = []
+                styles = getSampleStyleSheet()
+
+                # Add logo
+                logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
+                try:
+                    if os.path.exists(logo_path):
+                        logo = Image(logo_path, width=160, height=64, kind='proportional')
+                        logo.hAlign = 'LEFT'
+                        elements.append(logo)
+                except Exception:
+                    pass
+
+                elements.append(Spacer(1, 0.1*inch))
+                elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#FFA500'), spaceBefore=0, spaceAfter=0))
+                elements.append(Spacer(1, 0.2*inch))
+
+                # Contract title
+                contract_title_style = ParagraphStyle(
+                    'ContractTitle',
+                    parent=styles['Heading1'],
+                    fontSize=24,
+                    textColor=colors.HexColor('#FFA500'),
+                    spaceAfter=20,
+                    alignment=TA_CENTER,
+                    fontName='Helvetica-Bold'
+                )
+                elements.append(Paragraph("CONTRACT AGREEMENT", contract_title_style))
+
+                # Basic contract info (simplified version)
+                body_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=10)
+                elements.append(Paragraph(f"<b>Contract Number:</b> {contract.contract_number}", body_style))
+                elements.append(Paragraph(f"<b>Company:</b> {company.legal_entity_name or company.name}", body_style))
+                elements.append(Paragraph(f"<b>Period:</b> {contract.start_date.strftime('%b %d, %Y')} - {contract.end_date.strftime('%b %d, %Y')}", body_style))
+                elements.append(Paragraph(f"<b>Value:</b> {contract.currency} {contract.value:,.2f}", body_style))
+                elements.append(Paragraph(f"<b>Status:</b> {contract.status}", body_style))
+
+                # Build PDF
+                doc.build(elements)
+                pdf_data = buffer.getvalue()
+                buffer.close()
+                pdf_filename = f"Contract_{contract.contract_number}.pdf"
+
+            except Exception as e:
+                logger.error(f"Failed to generate PDF for contract {contract.contract_number}: {e}")
+                return False, f"Failed to generate PDF: {str(e)}"
+
+        # Send to each recipient
+        success_count = 0
+        for recipient in recipients:
+            try:
+                # Find contact for this email
+                contact = contract.company.contacts.filter(email=recipient).first()
+
+                # Create email message
+                msg = EmailMultiAlternatives(
+                    subject=subject,
+                    body=body,
+                    from_email=from_email,
+                    to=[recipient]
+                )
+
+                # Add HTML version
+                msg.attach_alternative(body_html, "text/html")
+
+                # Attach PDF
+                msg.attach(pdf_filename, pdf_data, 'application/pdf')
+
+                # Add tracking headers
+                msg.extra_headers['X-BMAsia-Email-ID'] = f'contract_{contract.id}'
+                if contact:
+                    msg.extra_headers['List-Unsubscribe'] = self._get_unsubscribe_url(contact)
+
+                # Send email
+                msg.send(fail_silently=False)
+
+                # Log email
+                email_log = EmailLog.objects.create(
+                    company=contract.company,
+                    contact=contact,
+                    email_type='manual',
+                    from_email=sender_config['email'],
+                    to_email=recipient,
+                    subject=subject,
+                    body_html=body_html,
+                    body_text=body,
+                    status='sent',
+                    sent_at=timezone.now(),
+                    contract=contract
+                )
+
+                success_count += 1
+                logger.info(f"Contract email sent successfully to {recipient}")
+
+            except Exception as e:
+                logger.error(f"Failed to send contract email to {recipient}: {e}")
+
+        # Update contract status
+        if success_count > 0:
+            contract.status = 'Sent'
+            contract.save()
+
+            return True, f"Contract sent successfully to {success_count} recipient(s)"
+        else:
+            return False, "Failed to send contract to any recipients"
+
+    def send_invoice_email(
+        self,
+        invoice_id,
+        recipients=None,
+        subject=None,
+        body=None,
+        sender='admin'
+    ) -> Tuple[bool, str]:
+        """
+        Send invoice email with PDF attachment
+
+        Args:
+            invoice_id: ID of the invoice to send
+            recipients: List of email addresses (optional, defaults to company contacts)
+            subject: Custom subject line (optional, uses template if not provided)
+            body: Custom body text (optional, uses template if not provided)
+            sender: Sender key from EMAIL_SENDERS config
+
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        from django.conf import settings
+
+        # Get invoice
+        try:
+            invoice = Invoice.objects.select_related('contract__company').get(id=invoice_id)
+        except Invoice.DoesNotExist:
+            return False, f"Invoice with ID {invoice_id} not found"
+
+        company = invoice.contract.company
+
+        # Get recipients - prioritize billing contacts
+        if not recipients:
+            recipients = list(company.contacts.filter(
+                email__isnull=False,
+                is_active=True
+            ).filter(
+                Q(contact_type='Billing') |
+                Q(notification_types__contains='invoice')
+            ).values_list('email', flat=True))
+
+            # Fallback to all contacts if no billing contacts
+            if not recipients:
+                recipients = list(company.contacts.filter(
+                    email__isnull=False,
+                    is_active=True
+                ).values_list('email', flat=True))
+
+        if not recipients:
+            return False, "No recipients found for this invoice"
+
+        # Get sender configuration
+        sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+        from_email = f"{sender_config['display']} <{sender_config['email']}>"
+
+        # Prepare context for template
+        context = {
+            'company_name': company.legal_entity_name or company.name,
+            'contact_name': 'Valued Customer',
+            'document_number': invoice.invoice_number,
+            'amount': f"{invoice.currency} {invoice.total_amount:,.2f}",
+            'valid_until': invoice.due_date.strftime('%B %d, %Y'),
+            'sender_name': sender_config['name'],
+            'current_year': datetime.now().year,
+        }
+
+        # Use template if subject/body not provided
+        if not subject or not body:
+            try:
+                template = EmailTemplate.objects.get(
+                    template_type='invoice_send',
+                    is_active=True
+                )
+                rendered = template.render(context)
+                if not subject:
+                    subject = rendered['subject']
+                if not body:
+                    body = rendered['body_text']
+                    body_html = rendered['body_html']
+            except EmailTemplate.DoesNotExist:
+                # Fallback to default
+                if not subject:
+                    subject = f"Invoice {invoice.invoice_number} from BMAsia Music"
+                if not body:
+                    body = f"Dear {context['contact_name']},\n\nPlease find attached invoice {invoice.invoice_number} for {context['company_name']}.\n\nAmount Due: {context['amount']}\nDue Date: {context['valid_until']}\n\nBest regards,\n{context['sender_name']}\nBMAsia Music"
+                    body_html = body.replace('\n', '<br/>')
+        else:
+            body_html = body.replace('\n', '<br/>')
+
+        # Generate PDF
+        try:
+            from django.test import RequestFactory
+            from rest_framework.request import Request as DRFRequest
+            from crm_app.views import InvoiceViewSet
+            from django.contrib.auth.models import AnonymousUser
+
+            factory = RequestFactory()
+            django_request = factory.get(f'/api/invoices/{invoice.id}/pdf/')
+            django_request.user = AnonymousUser()
+
+            # Wrap in DRF Request to get query_params
+            request = DRFRequest(django_request)
+
+            viewset = InvoiceViewSet()
+            viewset.request = request
+            viewset.kwargs = {'pk': invoice.id}
+
+            pdf_response = viewset.pdf(request, pk=invoice.id)
+            pdf_data = pdf_response.content
+            pdf_filename = f"Invoice_{invoice.invoice_number}.pdf"
+        except Exception as e:
+            logger.error(f"Failed to generate PDF for invoice {invoice.invoice_number}: {e}")
+            return False, f"Failed to generate PDF: {str(e)}"
+
+        # Send to each recipient
+        success_count = 0
+        for recipient in recipients:
+            try:
+                # Find contact for this email
+                contact = company.contacts.filter(email=recipient).first()
+
+                # Create email message
+                msg = EmailMultiAlternatives(
+                    subject=subject,
+                    body=body,
+                    from_email=from_email,
+                    to=[recipient]
+                )
+
+                # Add HTML version
+                msg.attach_alternative(body_html, "text/html")
+
+                # Attach PDF
+                msg.attach(pdf_filename, pdf_data, 'application/pdf')
+
+                # Add tracking headers
+                msg.extra_headers['X-BMAsia-Email-ID'] = f'invoice_{invoice.id}'
+                if contact:
+                    msg.extra_headers['List-Unsubscribe'] = self._get_unsubscribe_url(contact)
+
+                # Send email
+                msg.send(fail_silently=False)
+
+                # Log email
+                email_log = EmailLog.objects.create(
+                    company=company,
+                    contact=contact,
+                    email_type='manual',
+                    from_email=sender_config['email'],
+                    to_email=recipient,
+                    subject=subject,
+                    body_html=body_html,
+                    body_text=body,
+                    status='sent',
+                    sent_at=timezone.now(),
+                    invoice=invoice
+                )
+
+                success_count += 1
+                logger.info(f"Invoice email sent successfully to {recipient}")
+
+            except Exception as e:
+                logger.error(f"Failed to send invoice email to {recipient}: {e}")
+
+        # Update invoice status
+        if success_count > 0:
+            invoice.status = 'Sent'
+            invoice.save()
+
+            return True, f"Invoice sent successfully to {success_count} recipient(s)"
+        else:
+            return False, "Failed to send invoice to any recipients"
+
+    def send_manual_renewal_reminder(
+        self,
+        contract_id,
+        recipients=None,
+        subject=None,
+        body=None,
+        sender='admin'
+    ) -> Tuple[bool, str]:
+        """
+        Send manual renewal reminder
+        Blocks if automated reminder was sent within last 24 hours
+
+        Args:
+            contract_id: ID of the contract
+            recipients: List of email addresses (optional, defaults to company contacts)
+            subject: Custom subject line (optional, uses template if not provided)
+            body: Custom body text (optional, uses template if not provided)
+            sender: Sender key from EMAIL_SENDERS config
+
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        from django.conf import settings
+
+        # Get contract
+        try:
+            contract = Contract.objects.select_related('company').get(id=contract_id)
+        except Contract.DoesNotExist:
+            return False, f"Contract with ID {contract_id} not found"
+
+        # Check if automated reminder was sent in last 24 hours
+        twenty_four_hours_ago = timezone.now() - timedelta(hours=24)
+        recent_auto_reminder = EmailLog.objects.filter(
+            contract=contract,
+            email_type='renewal',
+            created_at__gte=twenty_four_hours_ago
+        ).exists()
+
+        if recent_auto_reminder:
+            raise ValueError("An automated renewal reminder was sent within the last 24 hours. Please wait before sending a manual reminder.")
+
+        # Get recipients - prioritize decision makers
+        if not recipients:
+            recipients = list(contract.company.contacts.filter(
+                email__isnull=False,
+                is_active=True
+            ).filter(
+                Q(contact_type__in=['Primary', 'Decision Maker']) |
+                Q(notification_types__contains='renewal')
+            ).values_list('email', flat=True))
+
+            # Fallback to all contacts if no decision makers
+            if not recipients:
+                recipients = list(contract.company.contacts.filter(
+                    email__isnull=False,
+                    is_active=True
+                ).values_list('email', flat=True))
+
+        if not recipients:
+            return False, "No recipients found for this contract"
+
+        # Get sender configuration
+        sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+        from_email = f"{sender_config['display']} <{sender_config['email']}>"
+
+        # Calculate days until expiry
+        days_until_expiry = contract.days_until_expiry
+
+        # Prepare context for template
+        context = {
+            'company_name': contract.company.legal_entity_name or contract.company.name,
+            'contact_name': 'Valued Customer',
+            'contract': contract,
+            'days_until_expiry': days_until_expiry,
+            'contract_value': f"{contract.currency} {contract.value:,.2f}",
+            'monthly_value': f"{contract.currency} {contract.monthly_value:,.2f}",
+            'start_date': contract.start_date.strftime('%B %d, %Y'),
+            'end_date': contract.end_date.strftime('%B %d, %Y'),
+            'sender_name': sender_config['name'],
+            'current_year': datetime.now().year,
+        }
+
+        # Use template if subject/body not provided
+        if not subject or not body:
+            try:
+                template = EmailTemplate.objects.get(
+                    template_type='renewal_manual',
+                    is_active=True
+                )
+                rendered = template.render(context)
+                if not subject:
+                    subject = rendered['subject']
+                if not body:
+                    body = rendered['body_text']
+                    body_html = rendered['body_html']
+            except EmailTemplate.DoesNotExist:
+                # Fallback to default
+                if not subject:
+                    subject = f"Contract Renewal Reminder - {contract.contract_number}"
+                if not body:
+                    body = f"Dear {context['contact_name']},\n\nThis is a reminder that your contract {contract.contract_number} will expire on {context['end_date']} ({days_until_expiry} days from now).\n\nContract Value: {context['contract_value']}\n\nPlease contact us to discuss renewal options.\n\nBest regards,\n{context['sender_name']}\nBMAsia Music"
+                    body_html = body.replace('\n', '<br/>')
+        else:
+            body_html = body.replace('\n', '<br/>')
+
+        # Send to each recipient
+        success_count = 0
+        for recipient in recipients:
+            try:
+                # Find contact for this email
+                contact = contract.company.contacts.filter(email=recipient).first()
+
+                # Create email message
+                msg = EmailMultiAlternatives(
+                    subject=subject,
+                    body=body,
+                    from_email=from_email,
+                    to=[recipient]
+                )
+
+                # Add HTML version
+                msg.attach_alternative(body_html, "text/html")
+
+                # Add tracking headers
+                msg.extra_headers['X-BMAsia-Email-ID'] = f'renewal_manual_{contract.id}'
+                if contact:
+                    msg.extra_headers['List-Unsubscribe'] = self._get_unsubscribe_url(contact)
+
+                # Send email
+                msg.send(fail_silently=False)
+
+                # Log email
+                email_log = EmailLog.objects.create(
+                    company=contract.company,
+                    contact=contact,
+                    email_type='renewal',
+                    from_email=sender_config['email'],
+                    to_email=recipient,
+                    subject=subject,
+                    body_html=body_html,
+                    body_text=body,
+                    status='sent',
+                    sent_at=timezone.now(),
+                    contract=contract
+                )
+
+                success_count += 1
+                logger.info(f"Manual renewal reminder sent successfully to {recipient}")
+
+            except Exception as e:
+                logger.error(f"Failed to send renewal reminder to {recipient}: {e}")
+
+        # Update contract reminder tracking
+        if success_count > 0:
+            contract.renewal_notice_sent = True
+            contract.renewal_notice_date = timezone.now().date()
+            contract.save()
+
+            return True, f"Renewal reminder sent successfully to {success_count} recipient(s)"
+        else:
+            return False, "Failed to send renewal reminder to any recipients"
 
 
 # Create singleton instance

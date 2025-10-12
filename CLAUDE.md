@@ -157,8 +157,8 @@ Use this agent when:
 - **Development**: SQLite (`db.sqlite3`)
 - **Production**: PostgreSQL on Render (dpg-d3cbikd6ubrc73el0ke0-a)
 - **Migrations**: `crm_app/migrations/`
-  - Latest: `0024_add_legal_entity_name_to_company.py`
-  - Previous: `0023_company_billing_entity.py`
+  - Latest: `0025_alter_emailtemplate_body_html_and_more.py` (Added quote_send, contract_send, invoice_send, renewal_manual template types)
+  - Previous: `0024_add_legal_entity_name_to_company.py`
 
 ## Environment Variables (.env)
 
@@ -166,7 +166,10 @@ Key environment variables:
 - `DATABASE_URL`: Database connection string
 - `SECRET_KEY`: Django secret key
 - `DEBUG`: Debug mode (True for development)
-- `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`: Email configuration
+- `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`: Gmail SMTP configuration (requires App Password)
+- `DEFAULT_FROM_EMAIL`: Default sender email (e.g., "BMAsia Music <norbert@bmasiamusic.com>")
+- `ADMIN_EMAIL`, `FINANCE_SENDER_EMAIL`, `SALES_SENDER_EMAIL`, `SUPPORT_SENDER_EMAIL`, `PRODUCTION_EMAIL`: Multi-user sender emails
+- `SITE_URL`: Site URL for email links (default: https://bmasia-crm.onrender.com)
 - `SOUNDTRACK_API_TOKEN`, `SOUNDTRACK_CLIENT_ID`, `SOUNDTRACK_CLIENT_SECRET`: Soundtrack API
 - `RENDER_API_KEY`: Render platform API key
 
@@ -269,7 +272,7 @@ npm run build  # Production build
 - ✅ Material-UI components throughout
 - ✅ Legal entity name + billing entity in all company forms
 
-### Recent Improvements (Oct 2025)
+### Recent Improvements (October 2025)
 - ✅ PDF design overhaul - modern 2025 professional layouts
 - ✅ Logo optimization (auto-cropped, proper sizing)
 - ✅ Single-page quotes for simple items
@@ -277,18 +280,47 @@ npm run build  # Production build
 - ✅ VAT labeling for Thailand entities
 - ✅ Fixed billing entity race condition bug
 - ✅ Delete company functionality with confirmation dialog
+- ✅ **Contract currency display fixes** (Oct 11, 2025)
+- ✅ **Contract PDF download functionality** (Oct 11, 2025)
+- ✅ **Email sending infrastructure complete** (Oct 11, 2025)
 
 ### Known Issues & Workarounds
 - ⚠️ **Migration Deployment**: Django migrations don't always run automatically on Render
   - **Workaround**: After deploying, SSH into Render service and run `python manage.py migrate`
   - Files: `start.sh` runs migrations, but may fail silently
 
+### Email System (October 2025) ✅ FULLY TESTED & OPERATIONAL
+- ✅ EmailTemplate model with 4 new template types (quote_send, contract_send, invoice_send, renewal_manual)
+- ✅ Enhanced admin interface with variable guide and rich text editing
+- ✅ Multi-user sender configuration (norbert, pom, niki.h, keith, production)
+- ✅ Email sending methods in email_service.py with PDF attachments
+- ✅ ViewSet actions: POST /api/quotes/{id}/send/, /api/contracts/{id}/send/, /api/invoices/{id}/send/
+- ✅ 24-hour block for manual renewal reminders
+- ✅ Smart recipient selection (billing contacts for invoices, decision makers for renewals)
+- ✅ **Gmail App Password configured** (Oct 11, 2025)
+- ✅ **Email sending tested with real SMTP** (Oct 12, 2025)
+- ✅ **Contract TEST-001 email sent successfully** (norbert@bmasiamusic.com)
+- ✅ **PDF generation fixed for all document types** (Oct 12, 2025)
+- ✅ **Environment variables added to Render production**
+- ✅ **Default email templates created** (4 professional templates - editable in admin)
+- 🚧 **IN PROGRESS**: Frontend EmailSendDialog component (Phase 3 - Oct 12, 2025)
+- ⏳ **PENDING**: AI email drafting with OpenAI (Phase 4 - Optional)
+
+### Contract Management (October 2025)
+- ✅ Currency display with locale mapping (THB → th-TH, USD → en-US, EUR → de-DE, GBP → en-GB)
+- ✅ Fixed double currency symbol issue (removed AttachMoney icon)
+- ✅ Dynamic currency symbol in ContractForm ($ / ฿ / € / £)
+- ✅ PDF download functionality (downloadContractPDF in api.ts)
+- ✅ "Download PDF" menu option (renamed from "Export")
+
 ### Areas for Future Development
 - 🚧 Test coverage needs improvement
 - 🚧 Invoice management UI expansion
-- 🚧 Contract management UI expansion
 - 🚧 Email campaign dashboard
 - 🚧 Soundtrack API sync automation
+- 🚧 Frontend email send dialogs (Phase 3)
+- 🚧 Smart renewal notice UI with status indicators (Phase 3)
+- 🚧 AI email drafting integration (Phase 4 - Optional)
 
 ## Support and Documentation
 
