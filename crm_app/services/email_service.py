@@ -558,6 +558,7 @@ class EmailService:
             viewset = QuoteViewSet()
             viewset.request = request
             viewset.kwargs = {'pk': quote.id}
+            viewset.action = 'pdf'
 
             pdf_response = viewset.pdf(request, pk=quote.id)
             pdf_data = pdf_response.content
@@ -1033,6 +1034,7 @@ class EmailService:
             viewset = InvoiceViewSet()
             viewset.request = request
             viewset.kwargs = {'pk': invoice.id}
+            viewset.action = 'pdf'
 
             pdf_response = viewset.pdf(request, pk=invoice.id)
             pdf_data = pdf_response.content
