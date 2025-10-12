@@ -569,6 +569,7 @@ class EmailService:
 
         # Send to each recipient
         success_count = 0
+        error_messages = []
         for recipient in recipients:
             try:
                 # Find contact for this email
@@ -620,7 +621,9 @@ class EmailService:
                 logger.info(f"Quote email sent successfully to {recipient}")
 
             except Exception as e:
-                logger.error(f"Failed to send quote email to {recipient}: {e}")
+                error_msg = str(e)
+                logger.error(f"Failed to send quote email to {recipient}: {error_msg}")
+                error_messages.append(f"{recipient}: {error_msg}")
 
         # Update quote status
         if success_count > 0:
@@ -630,7 +633,8 @@ class EmailService:
 
             return True, f"Quote sent successfully to {success_count} recipient(s)"
         else:
-            return False, "Failed to send quote to any recipients"
+            detailed_errors = '; '.join(error_messages) if error_messages else 'Unknown error'
+            return False, f"Failed to send quote to any recipients. Errors: {detailed_errors}"
 
     def send_contract_email(
         self,
@@ -833,6 +837,7 @@ class EmailService:
 
         # Send to each recipient
         success_count = 0
+        error_messages = []
         for recipient in recipients:
             try:
                 # Find contact for this email
@@ -885,7 +890,9 @@ class EmailService:
                 logger.info(f"Contract email sent successfully to {recipient}")
 
             except Exception as e:
-                logger.error(f"Failed to send contract email to {recipient}: {e}")
+                error_msg = str(e)
+                logger.error(f"Failed to send contract email to {recipient}: {error_msg}")
+                error_messages.append(f"{recipient}: {error_msg}")
 
         # Update contract status
         if success_count > 0:
@@ -894,7 +901,8 @@ class EmailService:
 
             return True, f"Contract sent successfully to {success_count} recipient(s)"
         else:
-            return False, "Failed to send contract to any recipients"
+            detailed_errors = '; '.join(error_messages) if error_messages else 'Unknown error'
+            return False, f"Failed to send contract to any recipients. Errors: {detailed_errors}"
 
     def send_invoice_email(
         self,
@@ -1045,6 +1053,7 @@ class EmailService:
 
         # Send to each recipient
         success_count = 0
+        error_messages = []
         for recipient in recipients:
             try:
                 # Find contact for this email
@@ -1097,7 +1106,9 @@ class EmailService:
                 logger.info(f"Invoice email sent successfully to {recipient}")
 
             except Exception as e:
-                logger.error(f"Failed to send invoice email to {recipient}: {e}")
+                error_msg = str(e)
+                logger.error(f"Failed to send invoice email to {recipient}: {error_msg}")
+                error_messages.append(f"{recipient}: {error_msg}")
 
         # Update invoice status
         if success_count > 0:
@@ -1106,7 +1117,8 @@ class EmailService:
 
             return True, f"Invoice sent successfully to {success_count} recipient(s)"
         else:
-            return False, "Failed to send invoice to any recipients"
+            detailed_errors = '; '.join(error_messages) if error_messages else 'Unknown error'
+            return False, f"Failed to send invoice to any recipients. Errors: {detailed_errors}"
 
     def send_manual_renewal_reminder(
         self,
