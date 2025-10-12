@@ -105,12 +105,13 @@ if os.environ.get('DATABASE_URL'):
             default=os.environ.get('DATABASE_URL'),
             conn_max_age=600,
             conn_health_checks=True,
-            ssl_require=True,
         )
     }
     # Add SSL options for PostgreSQL on Render
+    # Render uses self-signed certificates, so we need to disable SSL verification
     DATABASES['default']['OPTIONS'] = {
         'sslmode': 'require',
+        'sslrootcert': '/dev/null',  # Disable SSL certificate verification for Render
     }
 else:
     DATABASES = {
