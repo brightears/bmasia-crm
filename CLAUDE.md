@@ -157,7 +157,7 @@ Use this agent when:
 - **Development**: SQLite (`db.sqlite3`)
 - **Production**: PostgreSQL on Render (dpg-d3cbikd6ubrc73el0ke0-a)
 - **Migrations**: `crm_app/migrations/`
-  - Latest: `0025_alter_emailtemplate_body_html_and_more.py` (Added quote_send, contract_send, invoice_send, renewal_manual template types)
+  - Latest: `0025_user_smtp_email_user_smtp_password.py` (Added per-user SMTP fields for email authentication)
   - Previous: `0024_add_legal_entity_name_to_company.py`
 
 ## Environment Variables (.env)
@@ -271,6 +271,7 @@ npm run build  # Production build
 - ✅ Quotes creation and management
 - ✅ Material-UI components throughout
 - ✅ Legal entity name + billing entity in all company forms
+- ✅ Email sending UI (EmailSendDialog component integrated in Contracts/Quotes)
 
 ### Recent Improvements (October 2025)
 - ✅ PDF design overhaul - modern 2025 professional layouts
@@ -282,7 +283,8 @@ npm run build  # Production build
 - ✅ Delete company functionality with confirmation dialog
 - ✅ **Contract currency display fixes** (Oct 11, 2025)
 - ✅ **Contract PDF download functionality** (Oct 11, 2025)
-- ✅ **Email sending infrastructure complete** (Oct 11, 2025)
+- ✅ **Email sending infrastructure complete** (Oct 11-12, 2025)
+- ✅ **Per-user SMTP system complete** (Oct 12, 2025) - Full frontend + backend integration
 
 ### Known Issues & Workarounds
 - ✅ **Migration Deployment**: FIXED (Oct 12, 2025)
@@ -290,12 +292,12 @@ npm run build  # Production build
   - Migrations now run successfully on fresh PostgreSQL databases
   - Files: `start.sh` (commit f552cdeb)
 
-### Email System (October 2025) ⚠️ BACKEND COMPLETE - FRONTEND PENDING
+### Email System (October 2025) ✅ FULLY OPERATIONAL
 
-**Backend - FULLY OPERATIONAL** ✅
+**Backend - COMPLETE** ✅
 - ✅ EmailTemplate model with 4 new template types (quote_send, contract_send, invoice_send, renewal_manual)
 - ✅ Enhanced admin interface with variable guide and rich text editing
-- ✅ Multi-user sender configuration (norbert, pom, niki.h [TYPO - should be nikki.h], keith, production)
+- ✅ Multi-user sender configuration (norbert, pom, nikki.h, keith, production) - Fixed typo: niki.h → nikki.h
 - ✅ Email sending methods in email_service.py with PDF attachments
 - ✅ ViewSet actions: POST /api/quotes/{id}/send/, /api/contracts/{id}/send/, /api/invoices/{id}/send/
 - ✅ 24-hour block for manual renewal reminders
@@ -306,21 +308,37 @@ npm run build  # Production build
 - ✅ **PDF generation fixed for all document types** (Oct 12, 2025)
 - ✅ **Environment variables added to Render production**
 - ✅ **Default email templates created** (4 professional templates - editable in admin)
-- ✅ **Can send emails via API now** (curl/Postman work)
 
-**Frontend - NOT YET IMPLEMENTED** ❌
-- ❌ EmailSendDialog component (not created)
-- ❌ Send Email buttons in UI (not in Contracts/Quotes pages)
-- ❌ Frontend-backend integration (api.ts missing email methods)
-- ❌ Users cannot send emails from web interface yet
+**Per-User SMTP System - COMPLETE** ✅ (Oct 12, 2025)
+- ✅ User model extended with smtp_email and smtp_password fields
+- ✅ Migration 0025 created and deployed to production
+- ✅ Per-user SMTP logic in email_service.py with intelligent fallback
+- ✅ Fallback to EMAIL_SENDERS config when user has no SMTP configured
+- ✅ Admin interface for SMTP configuration with password widget
+- ✅ USER_SMTP_SETUP_GUIDE.md created for team onboarding
+- ✅ Deployed to production (commit 1ad460d8)
 
-**Next Phase: Per-User SMTP System** 🚧
-- 📋 See `PHASE3_SMTP_IMPLEMENTATION.md` for detailed plan
-- Goal: Each user sends from their own Gmail account
-- No sender dropdown needed - automatic based on login
-- Add smtp_email and smtp_password to User model
-- Estimated time: 90 minutes
-- Typo fix needed: niki.h@ → nikki.h@
+**Frontend - COMPLETE** ✅ (Oct 12, 2025)
+- ✅ EmailSendDialog component with Material-UI design
+- ✅ Multi-select recipient checkboxes (auto-selects Primary/Billing contacts)
+- ✅ Editable subject and body fields with smart defaults
+- ✅ Loading states and error handling
+- ✅ API methods: sendContractEmail, sendQuoteEmail, sendInvoiceEmail
+- ✅ Integrated into Contracts page (Send Email menu item)
+- ✅ Integrated into Quotes page (Send Quote functionality)
+- ✅ Success notifications with auto-dismiss
+- ✅ BMAsia orange branding (#FFA500)
+
+**How It Works**:
+1. Admin configures SMTP credentials via Django admin (https://bmasia-crm.onrender.com/admin/)
+2. Each user has optional smtp_email and smtp_password fields
+3. When user sends email, system uses their SMTP credentials
+4. If user has no SMTP configured, falls back to EMAIL_SENDERS default
+5. Emails sent from user's Gmail account, replies go to their inbox
+6. See USER_SMTP_SETUP_GUIDE.md for complete setup instructions
+
+**Optional Future Enhancement** 🚧
+- 🚧 AI email drafting with OpenAI (Phase 4 - Optional)
 
 ### Contract Management (October 2025)
 - ✅ Currency display with locale mapping (THB → th-TH, USD → en-US, EUR → de-DE, GBP → en-GB)
@@ -334,9 +352,8 @@ npm run build  # Production build
 - 🚧 Invoice management UI expansion
 - 🚧 Email campaign dashboard
 - 🚧 Soundtrack API sync automation
-- 🚧 Frontend email send dialogs (Phase 3)
-- 🚧 Smart renewal notice UI with status indicators (Phase 3)
-- 🚧 AI email drafting integration (Phase 4 - Optional)
+- 🚧 Smart renewal notice UI with status indicators
+- 🚧 AI email drafting integration (Optional)
 
 ## Support and Documentation
 

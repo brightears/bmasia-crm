@@ -2097,3 +2097,86 @@ def initialize_database(request):
         """, content_type='text/html')
     except Exception as e:
         return HttpResponse(f'Initialization failed: {str(e)}', status=500)
+
+
+@csrf_exempt
+def apply_migration_0025_view(request):
+    """
+    Emergency endpoint to apply migration 0025 manually
+    Access: /api/apply-migration-0025/?key=bmasia2024migrate
+    """
+    # Simple security check
+    migrate_key = request.GET.get('key', '')
+    if migrate_key != 'bmasia2024migrate':
+        return HttpResponse('Unauthorized', status=401)
+
+    try:
+        from django.db import connection
+        results = []
+
+        with connection.cursor() as cursor:
+            # Check if columns exist
+            cursor.execute("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = 'auth_user'
+                AND column_name IN ('smtp_email', 'smtp_password')
+            """)
+            existing = [row[0] for row in cursor.fetchall()]
+            results.append(f"Existing columns: {existing}")
+
+            if len(existing) == 2:
+                results.append("✓ Both columns already exist!")
+            else:
+                # Add smtp_email
+                if 'smtp_email' not in existing:
+                    cursor.execute("""
+                        ALTER TABLE auth_user
+                        ADD COLUMN smtp_email VARCHAR(254) NULL
+                    """)
+                    results.append("✓ Added smtp_email column")
+
+                # Add smtp_password
+                if 'smtp_password' not in existing:
+                    cursor.execute("""
+                        ALTER TABLE auth_user
+                        ADD COLUMN smtp_password VARCHAR(255) NULL
+                    """)
+                    results.append("✓ Added smtp_password column")
+
+            # Record migration
+            cursor.execute("""
+                SELECT COUNT(*) FROM django_migrations
+                WHERE app = 'crm_app'
+                AND name = '0025_user_smtp_email_user_smtp_password'
+            """)
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("""
+                    INSERT INTO django_migrations (app, name, applied)
+                    VALUES ('crm_app', '0025_user_smtp_email_user_smtp_password', NOW())
+                """)
+                results.append("✓ Migration recorded in django_migrations")
+            else:
+                results.append("✓ Migration already recorded")
+
+            # Verify
+            cursor.execute("""
+                SELECT column_name, data_type, character_maximum_length, is_nullable
+                FROM information_schema.columns
+                WHERE table_name = 'auth_user'
+                AND column_name IN ('smtp_email', 'smtp_password')
+                ORDER BY column_name
+            """)
+            verify_results = cursor.fetchall()
+            results.append("<br><b>Verification:</b>")
+            for col_name, data_type, max_len, nullable in verify_results:
+                results.append(f"  {col_name}: {data_type}({max_len}), nullable={nullable}")
+
+        return HttpResponse(f"""
+            <h1>✓ Migration 0025 Applied Successfully!</h1>
+            <pre>{'<br>'.join(results)}</pre>
+            <p><a href="/api/v1/auth/login/">Test Login</a></p>
+        """, content_type='text/html')
+    except Exception as e:
+        import traceback
+        return HttpResponse(f'Migration failed: {str(e)}<br><pre>{traceback.format_exc()}</pre>', status=500)
