@@ -13,6 +13,10 @@ fi
 echo "Running database migrations..."
 python manage.py migrate --noinput
 
+# Apply migration 0025 manually if needed (fixes production issue)
+echo "Applying migration 0025 if needed..."
+python manage.py apply_migration_0025 || echo "Migration 0025 command not found or already applied"
+
 # Only run force_add_billing_entity if tables already exist (migration 0024 specific fix)
 # This script is only needed for existing databases, not fresh ones
 echo "Checking if billing_entity column fix is needed..."
