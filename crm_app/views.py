@@ -498,6 +498,49 @@ class ContractViewSet(BaseModelViewSet):
         return Response(serializer.data)
     
     @action(detail=True, methods=['post'])
+    def send(self, request, pk=None):
+        """Send contract via email with PDF attachment"""
+        from crm_app.services.email_service import EmailService
+
+        contract = self.get_object()
+        email_service = EmailService()
+
+        # Extract email parameters from request
+        recipients = request.data.get('recipients', [])
+        subject = request.data.get('subject')
+        body = request.data.get('body')
+
+        # Send email via EmailService (passes request for per-user SMTP)
+        success, message = email_service.send_contract_email(
+            contract_id=contract.id,
+            recipients=recipients if recipients else None,
+            subject=subject if subject else None,
+            body=body if body else None,
+            sender='admin',  # Legacy parameter, will use request.user
+            request=request   # Critical for per-user SMTP authentication
+        )
+
+        if not success:
+            return Response(
+                {'error': message},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # Email service updates the status, refresh from DB
+        contract.refresh_from_db()
+
+        self.log_action('UPDATE', contract, {
+            'status': {'old': contract.status, 'new': 'Sent'},
+            'action': 'Email sent',
+            'recipients': recipients
+        })
+
+        return Response({
+            'message': message,
+            'status': contract.status
+        })
+
+    @action(detail=True, methods=['post'])
     def send_renewal_notice(self, request, pk=None):
         """Mark renewal notice as sent"""
         contract = self.get_object()
@@ -908,6 +951,49 @@ class InvoiceViewSet(BaseModelViewSet):
         overdue = [invoice for invoice in self.get_queryset() if invoice.is_overdue]
         serializer = self.get_serializer(overdue, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def send(self, request, pk=None):
+        """Send invoice via email with PDF attachment"""
+        from crm_app.services.email_service import EmailService
+
+        invoice = self.get_object()
+        email_service = EmailService()
+
+        # Extract email parameters from request
+        recipients = request.data.get('recipients', [])
+        subject = request.data.get('subject')
+        body = request.data.get('body')
+
+        # Send email via EmailService (passes request for per-user SMTP)
+        success, message = email_service.send_invoice_email(
+            invoice_id=invoice.id,
+            recipients=recipients if recipients else None,
+            subject=subject if subject else None,
+            body=body if body else None,
+            sender='admin',  # Legacy parameter, will use request.user
+            request=request   # Critical for per-user SMTP authentication
+        )
+
+        if not success:
+            return Response(
+                {'error': message},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # Email service updates the status, refresh from DB
+        invoice.refresh_from_db()
+
+        self.log_action('UPDATE', invoice, {
+            'status': {'old': invoice.status, 'new': 'Sent'},
+            'action': 'Email sent',
+            'recipients': recipients
+        })
+
+        return Response({
+            'message': message,
+            'status': invoice.status
+        })
 
     @action(detail=True, methods=['post'])
     def mark_paid(self, request, pk=None):
@@ -1353,11 +1439,35 @@ class QuoteViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=['post'])
     def send(self, request, pk=None):
-        """Mark quote as sent"""
+        """Send quote via email with PDF attachment"""
+        from crm_app.services.email_service import EmailService
+
         quote = self.get_object()
-        quote.status = 'Sent'
-        quote.sent_date = timezone.now().date()
-        quote.save()
+        email_service = EmailService()
+
+        # Extract email parameters from request
+        recipients = request.data.get('recipients', [])
+        subject = request.data.get('subject')
+        body = request.data.get('body')
+
+        # Send email via EmailService (passes request for per-user SMTP)
+        success, message = email_service.send_quote_email(
+            quote_id=quote.id,
+            recipients=recipients if recipients else None,
+            subject=subject if subject else None,
+            body=body if body else None,
+            sender='admin',  # Legacy parameter, will use request.user
+            request=request   # Critical for per-user SMTP authentication
+        )
+
+        if not success:
+            return Response(
+                {'error': message},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        # Email service updates the status, refresh from DB
+        quote.refresh_from_db()
 
         # Create activity
         QuoteActivity.objects.create(
@@ -1368,10 +1478,16 @@ class QuoteViewSet(BaseModelViewSet):
         )
 
         self.log_action('UPDATE', quote, {
-            'status': {'old': 'Draft', 'new': 'Sent'}
+            'status': {'old': 'Draft', 'new': 'Sent'},
+            'action': 'Email sent',
+            'recipients': recipients
         })
 
-        return Response({'message': 'Quote marked as sent'})
+        return Response({
+            'message': message,
+            'status': quote.status,
+            'sent_date': str(quote.sent_date) if quote.sent_date else None
+        })
 
     @action(detail=True, methods=['post'])
     def accept(self, request, pk=None):
