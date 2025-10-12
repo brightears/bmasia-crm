@@ -105,7 +105,12 @@ if os.environ.get('DATABASE_URL'):
             default=os.environ.get('DATABASE_URL'),
             conn_max_age=600,
             conn_health_checks=True,
+            ssl_require=True,
         )
+    }
+    # Add SSL options for PostgreSQL on Render
+    DATABASES['default']['OPTIONS'] = {
+        'sslmode': 'require',
     }
 else:
     DATABASES = {
