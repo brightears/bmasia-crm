@@ -25,10 +25,25 @@ from .models import (
 class UserAdmin(BaseUserAdmin):
     fieldsets = BaseUserAdmin.fieldsets + (
         ('CRM Info', {'fields': ('role', 'phone', 'department', 'last_login_ip')}),
+        ('Email SMTP Configuration', {
+            'fields': ('smtp_email', 'smtp_password'),
+            'description': 'Configure Gmail credentials for sending emails as this user. Get app password from: https://myaccount.google.com/apppasswords'
+        }),
     )
     list_display = ['username', 'email', 'role', 'is_active', 'date_joined']
     list_filter = ['role', 'is_active', 'date_joined']
     search_fields = ['username', 'email', 'first_name', 'last_name']
+
+    def get_form(self, request, obj=None, **kwargs):
+        """Customize form to use password widget for smtp_password field"""
+        form = super().get_form(request, obj, **kwargs)
+        if 'smtp_password' in form.base_fields:
+            # Use PasswordInput with render_value=True to show asterisks but allow viewing
+            form.base_fields['smtp_password'].widget = forms.PasswordInput(
+                attrs={'autocomplete': 'new-password'},
+                render_value=True
+            )
+        return form
 
 
 class ContactInline(admin.TabularInline):

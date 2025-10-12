@@ -285,14 +285,17 @@ npm run build  # Production build
 - ✅ **Email sending infrastructure complete** (Oct 11, 2025)
 
 ### Known Issues & Workarounds
-- ⚠️ **Migration Deployment**: Django migrations don't always run automatically on Render
-  - **Workaround**: After deploying, SSH into Render service and run `python manage.py migrate`
-  - Files: `start.sh` runs migrations, but may fail silently
+- ✅ **Migration Deployment**: FIXED (Oct 12, 2025)
+  - Fixed `start.sh` to run migrations FIRST before billing_entity fix
+  - Migrations now run successfully on fresh PostgreSQL databases
+  - Files: `start.sh` (commit f552cdeb)
 
-### Email System (October 2025) ✅ FULLY OPERATIONAL - ALL PHASES COMPLETE
+### Email System (October 2025) ⚠️ BACKEND COMPLETE - FRONTEND PENDING
+
+**Backend - FULLY OPERATIONAL** ✅
 - ✅ EmailTemplate model with 4 new template types (quote_send, contract_send, invoice_send, renewal_manual)
 - ✅ Enhanced admin interface with variable guide and rich text editing
-- ✅ Multi-user sender configuration (norbert, pom, niki.h, keith, production)
+- ✅ Multi-user sender configuration (norbert, pom, niki.h [TYPO - should be nikki.h], keith, production)
 - ✅ Email sending methods in email_service.py with PDF attachments
 - ✅ ViewSet actions: POST /api/quotes/{id}/send/, /api/contracts/{id}/send/, /api/invoices/{id}/send/
 - ✅ 24-hour block for manual renewal reminders
@@ -303,13 +306,21 @@ npm run build  # Production build
 - ✅ **PDF generation fixed for all document types** (Oct 12, 2025)
 - ✅ **Environment variables added to Render production**
 - ✅ **Default email templates created** (4 professional templates - editable in admin)
-- ✅ **Phase 3 Complete**: Frontend EmailSendDialog component (Oct 12, 2025)
-  - Professional Material-UI dialog with multi-recipient selection
-  - Sender dropdown (admin, finance, sales, support, production)
-  - Editable subject/body with pre-filled templates
-  - Success/error notifications and loading states
-  - Integrated into Quotes and Contracts pages
-- ⏳ **OPTIONAL**: AI email drafting with OpenAI (Phase 4 - Not yet implemented)
+- ✅ **Can send emails via API now** (curl/Postman work)
+
+**Frontend - NOT YET IMPLEMENTED** ❌
+- ❌ EmailSendDialog component (not created)
+- ❌ Send Email buttons in UI (not in Contracts/Quotes pages)
+- ❌ Frontend-backend integration (api.ts missing email methods)
+- ❌ Users cannot send emails from web interface yet
+
+**Next Phase: Per-User SMTP System** 🚧
+- 📋 See `PHASE3_SMTP_IMPLEMENTATION.md` for detailed plan
+- Goal: Each user sends from their own Gmail account
+- No sender dropdown needed - automatic based on login
+- Add smtp_email and smtp_password to User model
+- Estimated time: 90 minutes
+- Typo fix needed: niki.h@ → nikki.h@
 
 ### Contract Management (October 2025)
 - ✅ Currency display with locale mapping (THB → th-TH, USD → en-US, EUR → de-DE, GBP → en-GB)

@@ -57,9 +57,10 @@ import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFnsV2';
 import { Quote, ApiResponse, Company, Contact, Opportunity } from '../types';
-import ApiService from '../services/api';
+import ApiService, { EmailSendData } from '../services/api';
 import QuoteForm from '../components/QuoteForm';
 import QuoteDetail from '../components/QuoteDetail';
+import EmailSendDialog from '../components/EmailSendDialog';
 
 const statusOptions = [
   { value: '', label: 'All Status' },
@@ -105,6 +106,11 @@ const Quotes: React.FC = () => {
   // Convert to contract dialog
   const [convertDialogOpen, setConvertDialogOpen] = useState(false);
   const [convertingQuote, setConvertingQuote] = useState<Quote | null>(null);
+
+  // Email dialog state
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
+  const [emailQuote, setEmailQuote] = useState<Quote | null>(null);
+  const [emailContacts, setEmailContacts] = useState<Contact[]>([]);
 
   useEffect(() => {
     loadQuotes();
@@ -213,13 +219,31 @@ const Quotes: React.FC = () => {
 
   const handleSendQuote = async (quote: Quote) => {
     try {
-      await ApiService.sendQuote(quote.id);
-      setSuccess('Quote sent successfully');
-      loadQuotes();
+      // Fetch full quote details with company contacts
+      const fullQuote = await ApiService.getQuote(quote.id);
+      const company = await ApiService.getCompany(fullQuote.company);
+
+      setEmailQuote(fullQuote);
+      setEmailContacts(company.contacts || []);
+      setEmailDialogOpen(true);
+      setActionMenuAnchor(null);
     } catch (err) {
-      setError('Failed to send quote');
+      setError('Failed to load quote details');
+      console.error('Error loading quote details:', err);
     }
-    setActionMenuAnchor(null);
+  };
+
+  const handleEmailSend = async (data: EmailSendData) => {
+    if (!emailQuote) return;
+
+    await ApiService.sendQuoteEmail(emailQuote.id, data);
+  };
+
+  const handleEmailSuccess = () => {
+    setSuccess('Quote email sent successfully');
+    loadQuotes();
+    // Auto-dismiss success message after 4 seconds
+    setTimeout(() => setSuccess(''), 4000);
   };
 
   const handleDownloadPDF = async (quote: Quote) => {
@@ -654,6 +678,26 @@ const Quotes: React.FC = () => {
           quote={selectedQuote}
           onQuoteUpdate={loadQuotes}
         />
+
+        {/* Email Send Dialog */}
+        {emailQuote && (
+          <EmailSendDialog
+            open={emailDialogOpen}
+            onClose={() => setEmailDialogOpen(false)}
+            documentType="quote"
+            documentId={emailQuote.id}
+            documentNumber={emailQuote.quote_number}
+            companyName={emailQuote.company_name}
+            contacts={emailContacts}
+            onSendSuccess={handleEmailSuccess}
+            onSendEmail={handleEmailSend}
+            documentDetails={{
+              currency: emailQuote.currency,
+              totalValue: emailQuote.total_value,
+              validUntil: emailQuote.valid_until,
+            }}
+          />
+        )}
 
         {/* Convert to Contract Dialog */}
         <Dialog open={convertDialogOpen} onClose={() => setConvertDialogOpen(false)} maxWidth="sm" fullWidth>

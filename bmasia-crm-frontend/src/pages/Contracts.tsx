@@ -44,14 +44,16 @@ import {
   Warning,
   Refresh,
   GetApp,
+  Email,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFnsV2';
-import { Contract, ApiResponse } from '../types';
-import ApiService from '../services/api';
+import { Contract, ApiResponse, Contact } from '../types';
+import ApiService, { EmailSendData } from '../services/api';
 import ContractForm from '../components/ContractForm';
 import ContractDetail from '../components/ContractDetail';
+import EmailSendDialog from '../components/EmailSendDialog';
 
 const statusOptions = [
   { value: '', label: 'All Statuses' },
@@ -79,6 +81,7 @@ const Contracts: React.FC = () => {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
@@ -102,6 +105,11 @@ const Contracts: React.FC = () => {
   // Action menu
   const [actionMenuAnchor, setActionMenuAnchor] = useState<null | HTMLElement>(null);
   const [actionMenuContract, setActionMenuContract] = useState<Contract | null>(null);
+
+  // Email dialog state
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false);
+  const [emailContract, setEmailContract] = useState<Contract | null>(null);
+  const [emailContacts, setEmailContacts] = useState<Contact[]>([]);
 
   useEffect(() => {
     loadContracts();
@@ -238,6 +246,52 @@ const Contracts: React.FC = () => {
     setEndDate(null);
     setSearch('');
     setPage(0);
+  };
+
+  const handleSendEmail = async (contract: Contract) => {
+    try {
+      // Fetch full contract details with company contacts
+      const fullContract = await ApiService.getContract(contract.id);
+      const company = await ApiService.getCompany(fullContract.company);
+
+      setEmailContract(fullContract);
+      setEmailContacts(company.contacts || []);
+      setEmailDialogOpen(true);
+      setActionMenuAnchor(null);
+    } catch (err) {
+      setError('Failed to load contract details');
+      console.error('Error loading contract details:', err);
+    }
+  };
+
+  const handleEmailSend = async (data: EmailSendData) => {
+    if (!emailContract) return;
+
+    await ApiService.sendContractEmail(emailContract.id, data);
+  };
+
+  const handleEmailSuccess = () => {
+    setSuccess('Contract email sent successfully');
+    loadContracts();
+    // Auto-dismiss success message after 4 seconds
+    setTimeout(() => setSuccess(''), 4000);
+  };
+
+  const handleDownloadPDF = async (contract: Contract) => {
+    try {
+      const blob = await ApiService.downloadContractPDF(contract.id);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Contract_${contract.contract_number}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError('Failed to download PDF');
+    }
+    setActionMenuAnchor(null);
   };
 
   const renderFilters = () => (
@@ -526,6 +580,27 @@ const Contracts: React.FC = () => {
           contractId={detailContractId}
         />
 
+        {/* Email Send Dialog */}
+        {emailContract && (
+          <EmailSendDialog
+            open={emailDialogOpen}
+            onClose={() => setEmailDialogOpen(false)}
+            documentType="contract"
+            documentId={emailContract.id}
+            documentNumber={emailContract.contract_number}
+            companyName={emailContract.company_name}
+            contacts={emailContacts}
+            onSendSuccess={handleEmailSuccess}
+            onSendEmail={handleEmailSend}
+            documentDetails={{
+              currency: emailContract.currency,
+              totalValue: emailContract.value,
+              startDate: emailContract.start_date,
+              endDate: emailContract.end_date,
+            }}
+          />
+        )}
+
         {/* Action Menu */}
         <Menu
           anchorEl={actionMenuAnchor}
@@ -544,6 +619,18 @@ const Contracts: React.FC = () => {
             </ListItemIcon>
             <ListItemText>Edit</ListItemText>
           </MenuItem>
+          <MenuItem onClick={() => handleSendEmail(actionMenuContract!)}>
+            <ListItemIcon>
+              <Email fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Send Email</ListItemText>
+          </MenuItem>
+          <MenuItem onClick={() => handleDownloadPDF(actionMenuContract!)}>
+            <ListItemIcon>
+              <GetApp fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Download PDF</ListItemText>
+          </MenuItem>
           <MenuItem onClick={() => {
             // Handle renewal
             console.log('Send renewal notice for:', actionMenuContract?.id);
@@ -553,16 +640,6 @@ const Contracts: React.FC = () => {
               <Refresh fontSize="small" />
             </ListItemIcon>
             <ListItemText>Send Renewal Notice</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={() => {
-            // Handle export
-            console.log('Export contract:', actionMenuContract?.id);
-            handleActionMenuClose();
-          }}>
-            <ListItemIcon>
-              <GetApp fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Export</ListItemText>
           </MenuItem>
           <Divider />
           <MenuItem
@@ -575,6 +652,13 @@ const Contracts: React.FC = () => {
             <ListItemText>Delete</ListItemText>
           </MenuItem>
         </Menu>
+
+        {/* Success Snackbar */}
+        {success && (
+          <Alert severity="success" sx={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999 }}>
+            {success}
+          </Alert>
+        )}
       </Box>
     </LocalizationProvider>
   );

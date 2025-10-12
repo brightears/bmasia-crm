@@ -69,15 +69,19 @@ class EmailService:
         contract: Contract = None,
         invoice: Invoice = None,
         reply_to: str = None,
-        attachments: List[DocumentAttachment] = None
+        attachments: List[DocumentAttachment] = None,
+        smtp_connection = None
     ) -> Tuple[bool, str]:
         """
         Send an email and log it
         Returns: (success: bool, message: str)
+
+        Args:
+            smtp_connection: Optional custom SMTP connection (for per-user SMTP)
         """
         if not from_email:
             from_email = settings.DEFAULT_FROM_EMAIL
-        
+
         # Create email log entry
         email_log = EmailLog.objects.create(
             company=company,
@@ -94,7 +98,7 @@ class EmailService:
             invoice=invoice,
             status='pending'
         )
-        
+
         try:
             # Create email message
             msg = EmailMultiAlternatives(
@@ -103,7 +107,8 @@ class EmailService:
                 from_email=from_email,
                 to=[to_email],
                 cc=cc_emails or [],
-                reply_to=[reply_to] if reply_to else None
+                reply_to=[reply_to] if reply_to else None,
+                connection=smtp_connection
             )
             
             # Add HTML version
@@ -431,7 +436,8 @@ class EmailService:
         recipients=None,
         subject=None,
         body=None,
-        sender='admin'
+        sender='admin',
+        request=None
     ) -> Tuple[bool, str]:
         """
         Send quote email with PDF attachment
@@ -441,13 +447,15 @@ class EmailService:
             recipients: List of email addresses (optional, defaults to company contacts)
             subject: Custom subject line (optional, uses template if not provided)
             body: Custom body text (optional, uses template if not provided)
-            sender: Sender key from EMAIL_SENDERS config
+            sender: Sender key from EMAIL_SENDERS config (legacy, will be replaced by request.user)
+            request: HTTP request object (for per-user SMTP authentication)
 
         Returns:
             Tuple of (success: bool, message: str)
         """
         from crm_app.models import Quote
         from django.conf import settings
+        from django.core.mail import get_connection
         import io
 
         # Get quote
@@ -466,9 +474,38 @@ class EmailService:
         if not recipients:
             return False, "No recipients found for this quote"
 
-        # Get sender configuration
-        sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
-        from_email = f"{sender_config['display']} <{sender_config['email']}>"
+        # Get user's SMTP configuration (per-user SMTP)
+        smtp_connection = None
+        if request and request.user.is_authenticated:
+            user_smtp = request.user.get_smtp_config()
+            if user_smtp:
+                # Use user's own SMTP credentials
+                try:
+                    smtp_connection = get_connection(
+                        host=user_smtp['host'],
+                        port=user_smtp['port'],
+                        username=user_smtp['email'],
+                        password=user_smtp['password'],
+                        use_tls=user_smtp['use_tls'],
+                    )
+                    from_email = user_smtp['email']
+                    sender_name = request.user.get_full_name() or request.user.username
+                except Exception as e:
+                    logger.error(f"Failed to create user SMTP connection: {e}")
+                    # Fall back to default
+                    sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+                    from_email = f"{sender_config['display']} <{sender_config['email']}>"
+                    sender_name = sender_config['name']
+            else:
+                # User has no SMTP configured, use default
+                sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+                from_email = f"{sender_config['display']} <{sender_config['email']}>"
+                sender_name = sender_config['name']
+        else:
+            # No authenticated user, use legacy sender config
+            sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+            from_email = f"{sender_config['display']} <{sender_config['email']}>"
+            sender_name = sender_config['name']
 
         # Prepare context for template
         context = {
@@ -477,7 +514,7 @@ class EmailService:
             'document_number': quote.quote_number,
             'amount': f"{quote.currency} {quote.total_value:,.2f}",
             'valid_until': quote.valid_until.strftime('%B %d, %Y'),
-            'sender_name': sender_config['name'],
+            'sender_name': sender_name,
             'current_year': datetime.now().year,
         }
 
@@ -541,7 +578,8 @@ class EmailService:
                     subject=subject,
                     body=body,
                     from_email=from_email,
-                    to=[recipient]
+                    to=[recipient],
+                    connection=smtp_connection
                 )
 
                 # Add HTML version
@@ -558,12 +596,17 @@ class EmailService:
                 # Send email
                 msg.send(fail_silently=False)
 
+                # Determine actual from_email for logging (extract from display format if needed)
+                log_from_email = from_email
+                if '<' in from_email and '>' in from_email:
+                    log_from_email = from_email.split('<')[1].split('>')[0]
+
                 # Log email
                 email_log = EmailLog.objects.create(
                     company=quote.company,
                     contact=contact,
                     email_type='manual',
-                    from_email=sender_config['email'],
+                    from_email=log_from_email,
                     to_email=recipient,
                     subject=subject,
                     body_html=body_html,
@@ -594,7 +637,8 @@ class EmailService:
         recipients=None,
         subject=None,
         body=None,
-        sender='admin'
+        sender='admin',
+        request=None
     ) -> Tuple[bool, str]:
         """
         Send contract email with PDF attachment
@@ -604,12 +648,14 @@ class EmailService:
             recipients: List of email addresses (optional, defaults to company contacts)
             subject: Custom subject line (optional, uses template if not provided)
             body: Custom body text (optional, uses template if not provided)
-            sender: Sender key from EMAIL_SENDERS config
+            sender: Sender key from EMAIL_SENDERS config (legacy, will be replaced by request.user)
+            request: HTTP request object (for per-user SMTP authentication)
 
         Returns:
             Tuple of (success: bool, message: str)
         """
         from django.conf import settings
+        from django.core.mail import get_connection
 
         # Get contract
         try:
@@ -627,9 +673,38 @@ class EmailService:
         if not recipients:
             return False, "No recipients found for this contract"
 
-        # Get sender configuration
-        sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
-        from_email = f"{sender_config['display']} <{sender_config['email']}>"
+        # Get user's SMTP configuration (per-user SMTP)
+        smtp_connection = None
+        if request and request.user.is_authenticated:
+            user_smtp = request.user.get_smtp_config()
+            if user_smtp:
+                # Use user's own SMTP credentials
+                try:
+                    smtp_connection = get_connection(
+                        host=user_smtp['host'],
+                        port=user_smtp['port'],
+                        username=user_smtp['email'],
+                        password=user_smtp['password'],
+                        use_tls=user_smtp['use_tls'],
+                    )
+                    from_email = user_smtp['email']
+                    sender_name = request.user.get_full_name() or request.user.username
+                except Exception as e:
+                    logger.error(f"Failed to create user SMTP connection: {e}")
+                    # Fall back to default
+                    sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+                    from_email = f"{sender_config['display']} <{sender_config['email']}>"
+                    sender_name = sender_config['name']
+            else:
+                # User has no SMTP configured, use default
+                sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+                from_email = f"{sender_config['display']} <{sender_config['email']}>"
+                sender_name = sender_config['name']
+        else:
+            # No authenticated user, use legacy sender config
+            sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+            from_email = f"{sender_config['display']} <{sender_config['email']}>"
+            sender_name = sender_config['name']
 
         # Prepare context for template
         context = {
@@ -638,7 +713,7 @@ class EmailService:
             'document_number': contract.contract_number,
             'amount': f"{contract.currency} {contract.value:,.2f}",
             'valid_until': contract.end_date.strftime('%B %d, %Y'),
-            'sender_name': sender_config['name'],
+            'sender_name': sender_name,
             'current_year': datetime.now().year,
         }
 
@@ -767,7 +842,8 @@ class EmailService:
                     subject=subject,
                     body=body,
                     from_email=from_email,
-                    to=[recipient]
+                    to=[recipient],
+                    connection=smtp_connection
                 )
 
                 # Add HTML version
@@ -784,12 +860,17 @@ class EmailService:
                 # Send email
                 msg.send(fail_silently=False)
 
+                # Determine actual from_email for logging (extract from display format if needed)
+                log_from_email = from_email
+                if '<' in from_email and '>' in from_email:
+                    log_from_email = from_email.split('<')[1].split('>')[0]
+
                 # Log email
                 email_log = EmailLog.objects.create(
                     company=contract.company,
                     contact=contact,
                     email_type='manual',
-                    from_email=sender_config['email'],
+                    from_email=log_from_email,
                     to_email=recipient,
                     subject=subject,
                     body_html=body_html,
@@ -820,7 +901,8 @@ class EmailService:
         recipients=None,
         subject=None,
         body=None,
-        sender='admin'
+        sender='admin',
+        request=None
     ) -> Tuple[bool, str]:
         """
         Send invoice email with PDF attachment
@@ -830,12 +912,14 @@ class EmailService:
             recipients: List of email addresses (optional, defaults to company contacts)
             subject: Custom subject line (optional, uses template if not provided)
             body: Custom body text (optional, uses template if not provided)
-            sender: Sender key from EMAIL_SENDERS config
+            sender: Sender key from EMAIL_SENDERS config (legacy, will be replaced by request.user)
+            request: HTTP request object (for per-user SMTP authentication)
 
         Returns:
             Tuple of (success: bool, message: str)
         """
         from django.conf import settings
+        from django.core.mail import get_connection
 
         # Get invoice
         try:
@@ -865,9 +949,38 @@ class EmailService:
         if not recipients:
             return False, "No recipients found for this invoice"
 
-        # Get sender configuration
-        sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
-        from_email = f"{sender_config['display']} <{sender_config['email']}>"
+        # Get user's SMTP configuration (per-user SMTP)
+        smtp_connection = None
+        if request and request.user.is_authenticated:
+            user_smtp = request.user.get_smtp_config()
+            if user_smtp:
+                # Use user's own SMTP credentials
+                try:
+                    smtp_connection = get_connection(
+                        host=user_smtp['host'],
+                        port=user_smtp['port'],
+                        username=user_smtp['email'],
+                        password=user_smtp['password'],
+                        use_tls=user_smtp['use_tls'],
+                    )
+                    from_email = user_smtp['email']
+                    sender_name = request.user.get_full_name() or request.user.username
+                except Exception as e:
+                    logger.error(f"Failed to create user SMTP connection: {e}")
+                    # Fall back to default
+                    sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+                    from_email = f"{sender_config['display']} <{sender_config['email']}>"
+                    sender_name = sender_config['name']
+            else:
+                # User has no SMTP configured, use default
+                sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+                from_email = f"{sender_config['display']} <{sender_config['email']}>"
+                sender_name = sender_config['name']
+        else:
+            # No authenticated user, use legacy sender config
+            sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+            from_email = f"{sender_config['display']} <{sender_config['email']}>"
+            sender_name = sender_config['name']
 
         # Prepare context for template
         context = {
@@ -876,7 +989,7 @@ class EmailService:
             'document_number': invoice.invoice_number,
             'amount': f"{invoice.currency} {invoice.total_amount:,.2f}",
             'valid_until': invoice.due_date.strftime('%B %d, %Y'),
-            'sender_name': sender_config['name'],
+            'sender_name': sender_name,
             'current_year': datetime.now().year,
         }
 
@@ -940,7 +1053,8 @@ class EmailService:
                     subject=subject,
                     body=body,
                     from_email=from_email,
-                    to=[recipient]
+                    to=[recipient],
+                    connection=smtp_connection
                 )
 
                 # Add HTML version
@@ -957,12 +1071,17 @@ class EmailService:
                 # Send email
                 msg.send(fail_silently=False)
 
+                # Determine actual from_email for logging (extract from display format if needed)
+                log_from_email = from_email
+                if '<' in from_email and '>' in from_email:
+                    log_from_email = from_email.split('<')[1].split('>')[0]
+
                 # Log email
                 email_log = EmailLog.objects.create(
                     company=company,
                     contact=contact,
                     email_type='manual',
-                    from_email=sender_config['email'],
+                    from_email=log_from_email,
                     to_email=recipient,
                     subject=subject,
                     body_html=body_html,
@@ -993,7 +1112,8 @@ class EmailService:
         recipients=None,
         subject=None,
         body=None,
-        sender='admin'
+        sender='admin',
+        request=None
     ) -> Tuple[bool, str]:
         """
         Send manual renewal reminder
@@ -1004,12 +1124,14 @@ class EmailService:
             recipients: List of email addresses (optional, defaults to company contacts)
             subject: Custom subject line (optional, uses template if not provided)
             body: Custom body text (optional, uses template if not provided)
-            sender: Sender key from EMAIL_SENDERS config
+            sender: Sender key from EMAIL_SENDERS config (legacy, will be replaced by request.user)
+            request: HTTP request object (for per-user SMTP authentication)
 
         Returns:
             Tuple of (success: bool, message: str)
         """
         from django.conf import settings
+        from django.core.mail import get_connection
 
         # Get contract
         try:
@@ -1048,9 +1170,38 @@ class EmailService:
         if not recipients:
             return False, "No recipients found for this contract"
 
-        # Get sender configuration
-        sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
-        from_email = f"{sender_config['display']} <{sender_config['email']}>"
+        # Get user's SMTP configuration (per-user SMTP)
+        smtp_connection = None
+        if request and request.user.is_authenticated:
+            user_smtp = request.user.get_smtp_config()
+            if user_smtp:
+                # Use user's own SMTP credentials
+                try:
+                    smtp_connection = get_connection(
+                        host=user_smtp['host'],
+                        port=user_smtp['port'],
+                        username=user_smtp['email'],
+                        password=user_smtp['password'],
+                        use_tls=user_smtp['use_tls'],
+                    )
+                    from_email = user_smtp['email']
+                    sender_name = request.user.get_full_name() or request.user.username
+                except Exception as e:
+                    logger.error(f"Failed to create user SMTP connection: {e}")
+                    # Fall back to default
+                    sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+                    from_email = f"{sender_config['display']} <{sender_config['email']}>"
+                    sender_name = sender_config['name']
+            else:
+                # User has no SMTP configured, use default
+                sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+                from_email = f"{sender_config['display']} <{sender_config['email']}>"
+                sender_name = sender_config['name']
+        else:
+            # No authenticated user, use legacy sender config
+            sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+            from_email = f"{sender_config['display']} <{sender_config['email']}>"
+            sender_name = sender_config['name']
 
         # Calculate days until expiry
         days_until_expiry = contract.days_until_expiry
@@ -1065,7 +1216,7 @@ class EmailService:
             'monthly_value': f"{contract.currency} {contract.monthly_value:,.2f}",
             'start_date': contract.start_date.strftime('%B %d, %Y'),
             'end_date': contract.end_date.strftime('%B %d, %Y'),
-            'sender_name': sender_config['name'],
+            'sender_name': sender_name,
             'current_year': datetime.now().year,
         }
 
@@ -1104,7 +1255,8 @@ class EmailService:
                     subject=subject,
                     body=body,
                     from_email=from_email,
-                    to=[recipient]
+                    to=[recipient],
+                    connection=smtp_connection
                 )
 
                 # Add HTML version
@@ -1118,12 +1270,17 @@ class EmailService:
                 # Send email
                 msg.send(fail_silently=False)
 
+                # Determine actual from_email for logging (extract from display format if needed)
+                log_from_email = from_email
+                if '<' in from_email and '>' in from_email:
+                    log_from_email = from_email.split('<')[1].split('>')[0]
+
                 # Log email
                 email_log = EmailLog.objects.create(
                     company=contract.company,
                     contact=contact,
                     email_type='renewal',
-                    from_email=sender_config['email'],
+                    from_email=log_from_email,
                     to_email=recipient,
                     subject=subject,
                     body_html=body_html,

@@ -23,7 +23,7 @@ class User(AbstractUser):
         ('Music', 'Music Design'),
         ('Admin', 'Admin'),
     ]
-    
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='Sales')
     is_active = models.BooleanField(default=True)
@@ -32,19 +32,32 @@ class User(AbstractUser):
     ])
     department = models.CharField(max_length=50, blank=True)
     last_login_ip = models.GenericIPAddressField(null=True, blank=True)
-    
+
+    # Email SMTP configuration for per-user email sending
+    smtp_email = models.EmailField(
+        blank=True,
+        null=True,
+        help_text="Gmail address for sending emails (e.g., user@bmasiamusic.com)"
+    )
+    smtp_password = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="Gmail app password (will be encrypted)"
+    )
+
     class Meta:
         db_table = 'auth_user'
         verbose_name = 'User'
         verbose_name_plural = 'Users'
-    
+
     def __str__(self):
         return f"{self.username} ({self.role})"
-    
+
     def has_role(self, role):
         """Check if user has specific role"""
         return self.role == role
-    
+
     def can_edit_company(self, company):
         """Check if user can edit a specific company"""
         if self.role == 'Admin':
@@ -52,6 +65,18 @@ class User(AbstractUser):
         if self.role == 'Sales':
             return company.opportunities.filter(owner=self).exists()
         return False
+
+    def get_smtp_config(self):
+        """Return user's SMTP configuration or None if not configured"""
+        if self.smtp_email and self.smtp_password:
+            return {
+                'email': self.smtp_email,
+                'password': self.smtp_password,
+                'host': 'smtp.gmail.com',
+                'port': 587,
+                'use_tls': True,
+            }
+        return None
 
 
 class Company(TimestampedModel):

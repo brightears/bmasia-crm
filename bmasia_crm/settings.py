@@ -311,3 +311,36 @@ MUSIC_DESIGN_EMAIL = config('MUSIC_DESIGN_EMAIL', default='music@bmasiamusic.com
 BUSINESS_HOURS_START = 9  # 9 AM
 BUSINESS_HOURS_END = 17   # 5 PM
 BUSINESS_TIMEZONE = 'Asia/Bangkok'
+
+# Email sender configurations (legacy - will be replaced by per-user SMTP)
+# Each user will use their own SMTP credentials via User.get_smtp_config()
+EMAIL_SENDERS = {
+    'admin': {
+        'email': 'norbert@bmasiamusic.com',
+        'name': 'Norbert Platzer',
+        'display': 'BMAsia Music - Norbert Platzer'
+    },
+    'finance': {
+        'email': 'pom@bmasiamusic.com',
+        'name': 'Pom',
+        'display': 'BMAsia Finance - Pom'
+    },
+    'sales': {
+        'email': 'nikki.h@bmasiamusic.com',  # Fixed typo: was niki.h@
+        'name': 'Nikki',
+        'display': 'BMAsia Sales - Nikki'
+    },
+    'support': {
+        'email': 'keith@bmasiamusic.com',
+        'name': 'Keith',
+        'display': 'BMAsia Support - Keith'
+    },
+    'production': {
+        'email': 'production@bmasiamusic.com',
+        'name': 'Production Team',
+        'display': 'BMAsia Production'
+    },
+}
+
+# Site URL for email links and redirects
+SITE_URL = config('SITE_URL', default='https://bmasia-crm.onrender.com')

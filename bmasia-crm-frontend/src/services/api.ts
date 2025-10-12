@@ -500,6 +500,33 @@ class ApiService {
     });
     return response.data;
   }
+
+  // Email Sending
+  async sendContractEmail(contractId: string, data: EmailSendData): Promise<void> {
+    await authApi.post(`/contracts/${contractId}/send/`, data);
+  }
+
+  async sendQuoteEmail(quoteId: string, data: EmailSendData): Promise<void> {
+    await authApi.post(`/quotes/${quoteId}/send/`, data);
+  }
+
+  async sendInvoiceEmail(invoiceId: string, data: EmailSendData): Promise<void> {
+    await authApi.post(`/invoices/${invoiceId}/send/`, data);
+  }
+
+  // Download Contract PDF
+  async downloadContractPDF(id: string): Promise<Blob> {
+    const response = await authApi.get(`/contracts/${id}/pdf/`, {
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+}
+
+export interface EmailSendData {
+  recipients: string[];
+  subject: string;
+  body: string;
 }
 
 const apiService = new ApiService();
