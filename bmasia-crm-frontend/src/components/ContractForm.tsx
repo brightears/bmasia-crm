@@ -28,7 +28,6 @@ import {
   Close,
   Delete,
   CalendarToday,
-  AttachMoney,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -497,13 +496,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
                     type="number"
                     value={formData.value}
                     onChange={(e) => setFormData(prev => ({ ...prev, value: e.target.value }))}
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <AttachMoney />
-                        </InputAdornment>
-                      ),
-                    }}
                     fullWidth
                   />
 

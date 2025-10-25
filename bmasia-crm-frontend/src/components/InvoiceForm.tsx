@@ -91,9 +91,21 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([defaultLineItem]);
   const [discountAmount, setDiscountAmount] = useState(0);
   const [sendEmail, setSendEmail] = useState(false);
+  const [currency, setCurrency] = useState<string>('USD');
 
   // Filtered contracts based on selected company
   const [filteredContracts, setFilteredContracts] = useState<Contract[]>([]);
+
+  // Helper function to get currency symbol
+  const getCurrencySymbol = (currencyCode: string): string => {
+    const symbols: Record<string, string> = {
+      'USD': '$',
+      'THB': '฿',
+      'EUR': '€',
+      'GBP': '£',
+    };
+    return symbols[currencyCode] || '$';
+  };
 
   useEffect(() => {
     if (open) {
@@ -261,7 +273,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         tax_amount: totals.taxAmount,
         discount_amount: discountAmount,
         total_amount: totals.total,
-        currency: 'USD',
+        currency: currency,
         status: 'Draft' as const,
       };
 
@@ -291,10 +303,18 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     }
   };
 
-  const formatCurrency = (value: number): string => {
-    return new Intl.NumberFormat('en-US', {
+  const formatCurrency = (value: number, currencyCode: string = currency): string => {
+    // Map currency to locale
+    const localeMap: Record<string, string> = {
+      'USD': 'en-US',
+      'THB': 'th-TH',
+      'EUR': 'de-DE',
+      'GBP': 'en-GB',
+    };
+
+    return new Intl.NumberFormat(localeMap[currencyCode] || 'en-US', {
       style: 'currency',
-      currency: 'USD',
+      currency: currencyCode,
       minimumFractionDigits: 2,
     }).format(value);
   };
@@ -366,13 +386,22 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                     <InputLabel>Contract</InputLabel>
                     <Select
                       value={contractId}
-                      onChange={(e) => setContractId(e.target.value)}
+                      onChange={(e) => {
+                        const selectedContractId = e.target.value;
+                        setContractId(selectedContractId);
+
+                        // Get the selected contract's currency
+                        const selectedContract = filteredContracts.find(c => c.id === selectedContractId);
+                        if (selectedContract) {
+                          setCurrency(selectedContract.currency);
+                        }
+                      }}
                       label="Contract"
                       disabled={!companyId}
                     >
                       {filteredContracts.map((contract) => (
                         <MenuItem key={contract.id} value={contract.id}>
-                          {contract.contract_number} - {formatCurrency(contract.value)}
+                          {contract.contract_number} - {formatCurrency(contract.value, contract.currency)}
                         </MenuItem>
                       ))}
                     </Select>
@@ -480,7 +509,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                             onChange={(e) => handleLineItemChange(index, 'unit_price', parseFloat(e.target.value) || 0)}
                             inputProps={{ min: 0, step: 0.01 }}
                             InputProps={{
-                              startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                              startAdornment: <InputAdornment position="start">{getCurrencySymbol(currency)}</InputAdornment>,
                             }}
                           />
                         </TableCell>
@@ -495,7 +524,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2" fontWeight="medium">
-                            {formatCurrency(item.total)}
+                            {formatCurrency(item.total, currency)}
                           </Typography>
                         </TableCell>
                         <TableCell>
@@ -530,7 +559,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                     onChange={(e) => setDiscountAmount(parseFloat(e.target.value) || 0)}
                     inputProps={{ min: 0, step: 0.01 }}
                     InputProps={{
-                      startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                      startAdornment: <InputAdornment position="start">{getCurrencySymbol(currency)}</InputAdornment>,
                     }}
                   />
                 </Grid>
@@ -538,23 +567,23 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                   <Box sx={{ mt: 1 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                       <Typography variant="body2">Subtotal:</Typography>
-                      <Typography variant="body2">{formatCurrency(totals.subtotal)}</Typography>
+                      <Typography variant="body2">{formatCurrency(totals.subtotal, currency)}</Typography>
                     </Box>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                       <Typography variant="body2">Tax:</Typography>
-                      <Typography variant="body2">{formatCurrency(totals.taxAmount)}</Typography>
+                      <Typography variant="body2">{formatCurrency(totals.taxAmount, currency)}</Typography>
                     </Box>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                       <Typography variant="body2">Discount:</Typography>
                       <Typography variant="body2" color="error">
-                        -{formatCurrency(discountAmount)}
+                        -{formatCurrency(discountAmount, currency)}
                       </Typography>
                     </Box>
                     <Divider sx={{ my: 1 }} />
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                       <Typography variant="h6">Total:</Typography>
                       <Typography variant="h6" color="primary">
-                        {formatCurrency(totals.total)}
+                        {formatCurrency(totals.total, currency)}
                       </Typography>
                     </Box>
                   </Box>
