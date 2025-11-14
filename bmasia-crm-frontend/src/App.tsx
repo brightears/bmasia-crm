@@ -20,6 +20,7 @@ import Contacts from './pages/Contacts';
 import Quotes from './pages/Quotes';
 import QuoteDetail from './pages/QuoteDetail';
 import SalesTargets from './pages/SalesTargets';
+import Settings from './pages/Settings';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -232,7 +233,7 @@ function App() {
 
         {/* Admin routes */}
         <Route path="/users" element={<PlaceholderPage title="User Management" />} />
-        <Route path="/settings" element={<PlaceholderPage title="System Settings" />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="/audit-logs" element={<PlaceholderPage title="Audit Logs" />} />
         <Route path="/system-status" element={<PlaceholderPage title="System Status" />} />
 

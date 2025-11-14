@@ -2296,3 +2296,158 @@ def apply_migration_0025_view(request):
     except Exception as e:
         import traceback
         return HttpResponse(f'Migration failed: {str(e)}<br><pre>{traceback.format_exc()}</pre>', status=500)
+
+
+# ============================================================================
+# AUTOMATION API ENDPOINTS
+# ============================================================================
+
+class AutomationViewSet(viewsets.ViewSet):
+    """
+    ViewSet for email automation status and manual triggering
+    """
+    permission_classes = [AllowAny]  # TODO: Restrict to admin in production
+
+    @action(detail=False, methods=['get'], url_path='status')
+    def get_status(self, request):
+        """
+        GET /api/v1/automation/status/
+        Returns automation status, schedule, and recent statistics
+        """
+        from .models import EmailLog
+        from datetime import datetime, timedelta
+
+        # Calculate next run (cron: 0 2 * * * = daily at 2:00 AM UTC)
+        now = timezone.now()
+        next_run = now.replace(hour=2, minute=0, second=0, microsecond=0)
+        if now.hour >= 2:
+            next_run += timedelta(days=1)
+
+        # Get last run from most recent EmailLog
+        last_email = EmailLog.objects.filter(
+            email_type__in=['renewal', 'payment', 'quarterly']
+        ).order_by('-sent_at').first()
+        last_run = last_email.sent_at if last_email else None
+
+        # Calculate statistics for last 7 days
+        seven_days_ago = now - timedelta(days=7)
+        recent_stats = {
+            'renewal_sent': EmailLog.objects.filter(
+                email_type='renewal',
+                status='sent',
+                sent_at__gte=seven_days_ago
+            ).count(),
+            'payment_sent': EmailLog.objects.filter(
+                email_type='payment',
+                status='sent',
+                sent_at__gte=seven_days_ago
+            ).count(),
+            'quarterly_sent': EmailLog.objects.filter(
+                email_type='quarterly',
+                status='sent',
+                sent_at__gte=seven_days_ago
+            ).count(),
+        }
+        recent_stats['total_sent_last_7_days'] = sum(recent_stats.values())
+
+        return Response({
+            'enabled': True,  # Cron job is active on Render
+            'cron_schedule': '0 2 * * *',  # Daily at 2 AM UTC
+            'cron_description': 'Daily at 9:00 AM Bangkok time',
+            'last_run': last_run.isoformat() if last_run else None,
+            'next_run': next_run.isoformat(),
+            'recent_stats': recent_stats,
+        })
+
+    @action(detail=False, methods=['post'], url_path='test-run')
+    def test_run(self, request):
+        """
+        POST /api/v1/automation/test-run/
+        Body: { "type": "renewal|payment|quarterly|all", "dry_run": true }
+        Manually trigger email automation
+        """
+        import subprocess
+        import sys
+
+        email_type = request.data.get('type', 'all')
+        dry_run = request.data.get('dry_run', True)
+
+        # Validate type
+        valid_types = ['all', 'renewal', 'payment', 'quarterly']
+        if email_type not in valid_types:
+            return Response(
+                {'error': f'Invalid type. Must be one of: {", ".join(valid_types)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Build command
+        cmd = [
+            sys.executable,
+            'manage.py',
+            'send_emails',
+            '--type', email_type,
+            '--force'  # Force to run outside business hours
+        ]
+        if dry_run:
+            cmd.append('--dry-run')
+
+        try:
+            # Run command
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            )
+
+            return Response({
+                'success': result.returncode == 0,
+                'dry_run': dry_run,
+                'type': email_type,
+                'output': result.stdout,
+                'error': result.stderr if result.returncode != 0 else None,
+            })
+        except subprocess.TimeoutExpired:
+            return Response(
+                {'error': 'Command timed out after 60 seconds'},
+                status=status.HTTP_408_REQUEST_TIMEOUT
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to run command: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['get'], url_path='recent-emails')
+    def recent_emails(self, request):
+        """
+        GET /api/v1/automation/recent-emails/
+        Returns last 20 automated emails sent
+        """
+        from .models import EmailLog
+
+        # Get recent automated emails (exclude manual/test)
+        emails = EmailLog.objects.filter(
+            email_type__in=['renewal', 'payment', 'quarterly']
+        ).select_related(
+            'company', 'contact', 'contract', 'invoice'
+        ).order_by('-sent_at')[:20]
+
+        # Serialize
+        results = []
+        for email in emails:
+            results.append({
+                'id': str(email.id),
+                'date': email.sent_at.isoformat() if email.sent_at else email.created_at.isoformat(),
+                'type': email.get_email_type_display(),
+                'type_code': email.email_type,
+                'recipients': email.to_email,
+                'status': email.get_status_display(),
+                'status_code': email.status,
+                'subject': email.subject,
+                'company': email.company.name if email.company else None,
+                'contact': email.contact.name if email.contact else None,
+            })
+
+        return Response(results)

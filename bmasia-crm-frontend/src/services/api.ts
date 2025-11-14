@@ -521,12 +521,66 @@ class ApiService {
     });
     return response.data;
   }
+
+  // Automation endpoints
+  async getAutomationStatus(): Promise<AutomationStatus> {
+    const response = await authApi.get<AutomationStatus>('/automation/status/');
+    return response.data;
+  }
+
+  async testRunAutomation(type: string, dryRun: boolean): Promise<TestRunResult> {
+    const response = await authApi.post<TestRunResult>('/automation/test-run/', {
+      type,
+      dry_run: dryRun
+    });
+    return response.data;
+  }
+
+  async getRecentAutomatedEmails(): Promise<AutomatedEmail[]> {
+    const response = await authApi.get<AutomatedEmail[]>('/automation/recent-emails/');
+    return response.data;
+  }
 }
 
 export interface EmailSendData {
   recipients: string[];
   subject: string;
   body: string;
+}
+
+export interface AutomationStatus {
+  enabled: boolean;
+  cron_schedule: string;
+  cron_description: string;
+  last_run: string | null;
+  next_run: string;
+  recent_stats: {
+    renewal_sent: number;
+    payment_sent: number;
+    quarterly_sent: number;
+    total_sent_last_7_days: number;
+  };
+}
+
+export interface TestRunResult {
+  success: boolean;
+  dry_run: boolean;
+  type: string;
+  output: string;
+  error: string | null;
+}
+
+export interface AutomatedEmail {
+  id: string;
+  date: string;
+  type: string;
+  type_code: string;
+  recipients: string;
+  status: string;
+  status_code: string;
+  subject: string;
+  company: string | null;
+  contact: string | null;
 }
 
 const apiService = new ApiService();
