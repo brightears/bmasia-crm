@@ -33,6 +33,9 @@ export const ROLE_PERMISSIONS = {
     'view_own_notes',
     'create_notes',
     'edit_own_notes',
+    'view_campaigns',
+    'create_campaigns',
+    'edit_campaigns',
   ],
   Marketing: [
     'view_companies',
@@ -60,6 +63,10 @@ export const ROLE_PERMISSIONS = {
     'edit_own_notes',
     'view_analytics',
     'export_data',
+    'view_campaigns',
+    'create_campaigns',
+    'edit_campaigns',
+    'delete_campaigns',
   ],
   'Tech Support': [
     'view_companies',
@@ -78,6 +85,7 @@ export const ROLE_PERMISSIONS = {
     'create_notes',
     'edit_all_notes',
     'manage_technical_settings',
+    'view_campaigns',
   ],
   Admin: [
     // Admins have all permissions
@@ -123,6 +131,10 @@ export const ROLE_PERMISSIONS = {
     'manage_system_settings',
     'view_audit_logs',
     'manage_technical_settings',
+    'view_campaigns',
+    'create_campaigns',
+    'edit_campaigns',
+    'delete_campaigns',
   ],
 } as const;
 
@@ -196,10 +208,16 @@ export const canAccessModule = (user: User | null, module: string): boolean => {
     invoices: 'view_invoices',
     quotes: 'view_quotes',
     targets: 'view_targets',
+    campaigns: 'view_campaigns',
+    'email-templates': 'view_campaigns',
+    segments: 'view_campaigns',
     analytics: 'view_analytics',
+    tickets: 'manage_technical_settings',
+    'knowledge-base': 'manage_technical_settings',
+    equipment: 'manage_technical_settings',
     users: 'manage_users',
     settings: 'manage_system_settings',
-    audit: 'view_audit_logs',
+    'audit-logs': 'view_audit_logs',
   };
 
   const requiredPermission = modulePermissions[module as keyof typeof modulePermissions];

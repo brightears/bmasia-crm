@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import {
   AppBar,
   Box,
@@ -25,9 +25,6 @@ import {
   Chip,
   Button,
   Collapse,
-  Paper,
-  Switch,
-  FormControlLabel,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import {
@@ -36,10 +33,7 @@ import {
   Business as BusinessIcon,
   People as PeopleIcon,
   Assignment as AssignmentIcon,
-  Handshake as HandshakeIcon,
   Receipt as ReceiptIcon,
-  TaskAlt as TaskAltIcon,
-  AccountCircle,
   Logout,
   Search as SearchIcon,
   Notifications as NotificationsIcon,
@@ -50,20 +44,19 @@ import {
   ExpandMore,
   Campaign as CampaignIcon,
   Email as EmailIcon,
-  Analytics as AnalyticsIcon,
   Group as GroupIcon,
-  SupportAgent as SupportAgentIcon,
-  LiveHelp as LiveHelpIcon,
-  Computer as ComputerIcon,
-  Gavel as GavelIcon,
-  AdminPanelSettings as AdminPanelSettingsIcon,
   History as HistoryIcon,
   LightMode as LightModeIcon,
   DarkMode as DarkModeIcon,
   Person as PersonIcon,
-  RequestQuote as QuoteIcon,
-  TableChart,
-  Hub as HubIcon,
+  Bolt as BoltIcon,
+  TrendingUp as TrendingUpIcon,
+  Description as DescriptionIcon,
+  TrackChanges as TrackChangesIcon,
+  CheckCircle as CheckCircleIcon,
+  Support as SupportIcon,
+  MenuBook as MenuBookIcon,
+  Devices as DevicesIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -101,110 +94,58 @@ const departmentColors = {
   },
 };
 
-// Navigation structure by department
-const navigationConfig = {
-  Sales: {
-    label: 'Sales Hub',
-    sections: [
-      {
-        title: 'Overview',
-        items: [
-          { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
-          { text: 'Quick Actions', icon: <HubIcon />, path: '/quick-actions' },
-        ],
-      },
-      {
-        title: 'Customer Management',
-        items: [
-          { text: 'Companies', icon: <BusinessIcon />, path: '/companies' },
-          { text: 'Contacts', icon: <PeopleIcon />, path: '/contacts' },
-          { text: 'Opportunities', icon: <HandshakeIcon />, path: '/opportunities' },
-        ],
-      },
-      {
-        title: 'Sales Operations',
-        items: [
-          { text: 'Quotes', icon: <QuoteIcon />, path: '/quotes' },
-          { text: 'Contracts', icon: <AssignmentIcon />, path: '/contracts' },
-          { text: 'Invoices', icon: <ReceiptIcon />, path: '/invoices' },
-          { text: 'Targets', icon: <TableChart />, path: '/targets' },
-          { text: 'Tasks', icon: <TaskAltIcon />, path: '/tasks' },
-        ],
-      },
+// Unified navigation for all users
+const unifiedNavigation = [
+  {
+    title: 'Overview',
+    items: [
+      { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
+      { text: 'Quick Actions', icon: <BoltIcon />, path: '/quick-actions' },
     ],
   },
-  Marketing: {
-    label: 'Marketing Center',
-    sections: [
-      {
-        title: 'Overview',
-        items: [
-          { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
-          { text: 'Analytics', icon: <AnalyticsIcon />, path: '/analytics' },
-        ],
-      },
-      {
-        title: 'Campaign Management',
-        items: [
-          { text: 'Campaigns', icon: <CampaignIcon />, path: '/campaigns' },
-          { text: 'Email Templates', icon: <EmailIcon />, path: '/email-templates' },
-          { text: 'Segments', icon: <GroupIcon />, path: '/segments' },
-        ],
-      },
+  {
+    title: 'Customer Management',
+    items: [
+      { text: 'Companies', icon: <BusinessIcon />, path: '/companies' },
+      { text: 'Contacts', icon: <PeopleIcon />, path: '/contacts' },
+      { text: 'Opportunities', icon: <TrendingUpIcon />, path: '/opportunities' },
     ],
   },
-  'Tech Support': {
-    label: 'Support Center',
-    sections: [
-      {
-        title: 'Overview',
-        items: [
-          { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
-          { text: 'My Queue', icon: <TaskAltIcon />, path: '/my-queue' },
-        ],
-      },
-      {
-        title: 'Support Operations',
-        items: [
-          { text: 'Tickets', icon: <SupportAgentIcon />, path: '/tickets' },
-          { text: 'Knowledge Base', icon: <LiveHelpIcon />, path: '/knowledge-base' },
-          { text: 'Equipment', icon: <ComputerIcon />, path: '/equipment' },
-          { text: 'SLAs', icon: <GavelIcon />, path: '/slas' },
-        ],
-      },
+  {
+    title: 'Sales Operations',
+    items: [
+      { text: 'Quotes', icon: <DescriptionIcon />, path: '/quotes' },
+      { text: 'Contracts', icon: <AssignmentIcon />, path: '/contracts' },
+      { text: 'Invoices', icon: <ReceiptIcon />, path: '/invoices' },
+      { text: 'Targets', icon: <TrackChangesIcon />, path: '/targets' },
+      { text: 'Tasks', icon: <CheckCircleIcon />, path: '/tasks' },
     ],
   },
-  Admin: {
-    label: 'Admin Control',
-    sections: [
-      {
-        title: 'Overview',
-        items: [
-          { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
-          { text: 'System Status', icon: <AnalyticsIcon />, path: '/system-status' },
-        ],
-      },
-      {
-        title: 'Business Data',
-        items: [
-          { text: 'Companies', icon: <BusinessIcon />, path: '/companies' },
-          { text: 'Contacts', icon: <PeopleIcon />, path: '/contacts' },
-          { text: 'Opportunities', icon: <HandshakeIcon />, path: '/opportunities' },
-          { text: 'Contracts', icon: <AssignmentIcon />, path: '/contracts' },
-          { text: 'Invoices', icon: <ReceiptIcon />, path: '/invoices' },
-        ],
-      },
-      {
-        title: 'Administration',
-        items: [
-          { text: 'User Management', icon: <AdminPanelSettingsIcon />, path: '/users' },
-          { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
-          { text: 'Audit Logs', icon: <HistoryIcon />, path: '/audit-logs' },
-        ],
-      },
+  {
+    title: 'Marketing & Campaigns',
+    items: [
+      { text: 'Campaigns', icon: <CampaignIcon />, path: '/campaigns' },
+      { text: 'Email Templates', icon: <EmailIcon />, path: '/email-templates' },
+      { text: 'Segments', icon: <GroupIcon />, path: '/segments' },
     ],
   },
-};
+  {
+    title: 'Tech Support',
+    items: [
+      { text: 'Tickets', icon: <SupportIcon />, path: '/tickets' },
+      { text: 'Knowledge Base', icon: <MenuBookIcon />, path: '/knowledge-base' },
+      { text: 'Equipment', icon: <DevicesIcon />, path: '/equipment' },
+    ],
+  },
+  {
+    title: 'Administration',
+    items: [
+      { text: 'Users', icon: <PeopleIcon />, path: '/users' },
+      { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
+      { text: 'Audit Logs', icon: <HistoryIcon />, path: '/audit-logs' },
+    ],
+  },
+];
 
 const Search = styled('div')(({ theme }) => ({
   position: 'relative',
@@ -385,9 +326,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const { darkMode, toggleDarkMode } = useThemeContext();
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Get department-specific navigation and colors
+  // Get unified navigation and default color
   const userRole = user?.role || 'Admin';
-  const navigation = navigationConfig[userRole];
+  const navigation = unifiedNavigation;
   const departmentColor = departmentColors[userRole];
 
   const handleDrawerToggle = () => {
@@ -472,7 +413,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       {!drawerCollapsed && (
         <Box sx={{ p: 2, pb: 1 }}>
           <Chip
-            label={navigation.label}
+            label={user?.role || 'User'}
             size="small"
             sx={{
               backgroundColor: departmentColor.background,
@@ -487,7 +428,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Navigation */}
       <Box sx={{ flexGrow: 1, overflow: 'auto' }}>
         <List sx={{ pt: drawerCollapsed ? 1 : 0 }}>
-          {navigation.sections.map((section) => (
+          {navigation.map((section) => (
             <NavigationSection
               key={section.title}
               title={section.title}

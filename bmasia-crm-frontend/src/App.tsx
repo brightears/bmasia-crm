@@ -223,9 +223,30 @@ function App() {
         <Route path="/my-queue" element={<PlaceholderPage title="My Task Queue" />} />
 
         {/* Marketing routes */}
-        <Route path="/campaigns" element={<Campaigns />} />
-        <Route path="/campaigns/new" element={<CampaignCreate />} />
-        <Route path="/campaigns/:id" element={<CampaignDetail />} />
+        <Route
+          path="/campaigns"
+          element={
+            <ProtectedRoute requiredModule="campaigns">
+              <Campaigns />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/campaigns/new"
+          element={
+            <ProtectedRoute requiredModule="campaigns">
+              <CampaignCreate />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/campaigns/:id"
+          element={
+            <ProtectedRoute requiredModule="campaigns">
+              <CampaignDetail />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/email-templates" element={<PlaceholderPage title="Email Templates" />} />
         <Route path="/analytics" element={<PlaceholderPage title="Marketing Analytics" />} />
         <Route path="/segments" element={<PlaceholderPage title="Customer Segments" />} />
