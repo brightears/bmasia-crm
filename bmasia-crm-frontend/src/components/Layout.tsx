@@ -736,11 +736,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         transformOrigin={{ horizontal: 'right', vertical: 'top' }}
         anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
       >
-        <MenuItem>
+        <MenuItem onClick={() => { handleNavigate('/profile'); handleUserMenuClose(); }}>
           <PersonIcon sx={{ mr: 1 }} />
           Profile
         </MenuItem>
-        <MenuItem>
+        <MenuItem onClick={() => { handleNavigate('/settings'); handleUserMenuClose(); }}>
           <SettingsIcon sx={{ mr: 1 }} />
           Settings
         </MenuItem>
