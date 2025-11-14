@@ -16,7 +16,7 @@ from openpyxl.utils import get_column_letter
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice, Zone,
-    EmailTemplate, EmailLog, EmailCampaign, DocumentAttachment,
+    EmailTemplate, EmailLog, EmailCampaign, CampaignRecipient, DocumentAttachment,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity
 )
 
@@ -1481,41 +1481,410 @@ class EmailLogAdmin(admin.ModelAdmin):
         return False  # Email logs should not be edited
 
 
+class CampaignRecipientInline(admin.TabularInline):
+    """Inline admin for campaign recipients - show first 10"""
+    model = CampaignRecipient
+    extra = 0
+    max_num = 10
+    can_delete = False
+    fields = ['contact', 'contact_email', 'status', 'sent_at', 'opened_at', 'clicked_at']
+    readonly_fields = ['contact', 'contact_email', 'status', 'sent_at', 'opened_at', 'clicked_at']
+
+    def contact_email(self, obj):
+        return obj.contact.email if obj.contact else '-'
+    contact_email.short_description = 'Email'
+
+    def has_add_permission(self, request, obj):
+        return False
+
+
 @admin.register(EmailCampaign)
 class EmailCampaignAdmin(admin.ModelAdmin):
-    list_display = ['name', 'campaign_type', 'company', 'is_active', 'emails_sent', 'last_email_sent']
-    list_filter = ['campaign_type', 'is_active', 'created_at']
-    list_select_related = ['company', 'contract']
-    search_fields = ['name', 'company__name']
-    readonly_fields = ['created_at', 'updated_at', 'emails_sent', 'last_email_sent']
-    
+    list_display = [
+        'name', 'campaign_type', 'status', 'audience_count',
+        'scheduled_send_date', 'total_sent', 'open_rate_display',
+        'click_rate_display', 'bounce_rate_display'
+    ]
+    list_filter = ['status', 'campaign_type', 'created_at', 'scheduled_send_date']
+    list_select_related = ['company', 'contract', 'template']
+    search_fields = ['name', 'subject', 'company__name']
+    readonly_fields = [
+        'created_at', 'updated_at', 'actual_send_date', 'audience_count',
+        'total_sent', 'total_delivered', 'total_bounced', 'total_opened',
+        'total_clicked', 'total_unsubscribed', 'total_complained',
+        'open_rate_display', 'click_rate_display', 'bounce_rate_display',
+        'emails_sent', 'last_email_sent'  # Legacy fields
+    ]
+    inlines = [CampaignRecipientInline]
+    date_hierarchy = 'created_at'
+    actions = [
+        'mark_as_sent', 'pause_campaigns', 'resume_campaigns',
+        'cancel_campaigns', 'export_campaign_analytics'
+    ]
+
     fieldsets = (
-        ('Campaign Info', {
-            'fields': ('name', 'campaign_type', 'company', 'contract')
+        ('Campaign Information', {
+            'fields': ('name', 'campaign_type', 'subject', 'template', 'status')
         }),
-        ('Settings', {
-            'fields': ('is_active', 'start_date', 'end_date', 'stop_on_reply', 'replied')
+        ('Targeting', {
+            'fields': ('target_audience', 'audience_count'),
+            'description': 'Define audience segmentation criteria (JSON format). Leave blank to manually add recipients.'
         }),
-        ('Statistics', {
-            'fields': ('emails_sent', 'last_email_sent')
+        ('Scheduling', {
+            'fields': ('scheduled_send_date', 'actual_send_date', 'send_immediately')
+        }),
+        ('Email Settings', {
+            'fields': ('sender_email', 'reply_to_email'),
+            'description': 'Leave sender_email blank to use default system email'
+        }),
+        ('Analytics', {
+            'fields': (
+                ('total_sent', 'total_delivered', 'total_bounced'),
+                ('total_opened', 'total_clicked', 'total_unsubscribed'),
+                ('open_rate_display', 'click_rate_display', 'bounce_rate_display'),
+            ),
+            'description': 'Campaign performance metrics (auto-updated)'
+        }),
+        ('Legacy Fields (Backward Compatibility)', {
+            'fields': (
+                'company', 'contract', 'is_active', 'start_date', 'end_date',
+                'emails_sent', 'last_email_sent', 'stop_on_reply', 'replied'
+            ),
+            'classes': ('collapse',),
+            'description': 'These fields are kept for backward compatibility with older campaigns'
         }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at'),
             'classes': ('collapse',)
         }),
     )
-    
-    actions = ['pause_campaigns', 'resume_campaigns']
-    
+
+    def open_rate_display(self, obj):
+        """Display open rate with color coding"""
+        rate = obj.open_rate
+        if rate >= 20:
+            color = 'green'
+        elif rate >= 10:
+            color = 'orange'
+        else:
+            color = 'red'
+
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{:.1f}%</span>',
+            color, rate
+        )
+    open_rate_display.short_description = 'Open Rate'
+
+    def click_rate_display(self, obj):
+        """Display click rate with color coding"""
+        rate = obj.click_rate
+        if rate >= 3:
+            color = 'green'
+        elif rate >= 1:
+            color = 'orange'
+        else:
+            color = 'red'
+
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{:.1f}%</span>',
+            color, rate
+        )
+    click_rate_display.short_description = 'Click Rate'
+
+    def bounce_rate_display(self, obj):
+        """Display bounce rate with color coding"""
+        rate = obj.bounce_rate
+        if rate <= 2:
+            color = 'green'
+        elif rate <= 5:
+            color = 'orange'
+        else:
+            color = 'red'
+
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{:.1f}%</span>',
+            color, rate
+        )
+    bounce_rate_display.short_description = 'Bounce Rate'
+
+    def mark_as_sent(self, request, queryset):
+        """Mark selected campaigns as sent"""
+        count = 0
+        for campaign in queryset:
+            if campaign.status in ['draft', 'scheduled']:
+                campaign.status = 'sent'
+                campaign.actual_send_date = timezone.now()
+                campaign.save()
+                count += 1
+
+        if count > 0:
+            self.message_user(request, f'Marked {count} campaign(s) as sent')
+        else:
+            self.message_user(request, 'No campaigns were updated (already sent or in progress)', level='WARNING')
+    mark_as_sent.short_description = 'Mark selected campaigns as sent'
+
     def pause_campaigns(self, request, queryset):
-        count = queryset.update(is_active=False)
+        """Pause selected campaigns"""
+        count = queryset.filter(status__in=['draft', 'scheduled', 'sending']).update(
+            status='paused',
+            is_active=False
+        )
         self.message_user(request, f'Paused {count} campaign(s)')
     pause_campaigns.short_description = 'Pause selected campaigns'
-    
+
     def resume_campaigns(self, request, queryset):
-        count = queryset.update(is_active=True)
+        """Resume paused campaigns"""
+        count = queryset.filter(status='paused').update(
+            status='draft',
+            is_active=True
+        )
         self.message_user(request, f'Resumed {count} campaign(s)')
     resume_campaigns.short_description = 'Resume selected campaigns'
+
+    def cancel_campaigns(self, request, queryset):
+        """Cancel selected campaigns"""
+        count = queryset.exclude(status__in=['sent', 'cancelled']).update(
+            status='cancelled',
+            is_active=False
+        )
+        self.message_user(request, f'Cancelled {count} campaign(s)')
+    cancel_campaigns.short_description = 'Cancel selected campaigns'
+
+    def export_campaign_analytics(self, request, queryset):
+        """Export campaign analytics to Excel"""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Campaign Analytics"
+
+        # Define styles
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+
+        # Write headers
+        headers = [
+            'Campaign Name', 'Type', 'Status', 'Subject', 'Scheduled Date',
+            'Actual Send Date', 'Total Sent', 'Delivered', 'Bounced', 'Opened',
+            'Clicked', 'Unsubscribed', 'Open Rate %', 'Click Rate %', 'Bounce Rate %',
+            'Created Date'
+        ]
+
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+
+        # Write data
+        campaigns = queryset.select_related('company', 'template')
+
+        for row, campaign in enumerate(campaigns, 2):
+            ws.cell(row=row, column=1, value=campaign.name)
+            ws.cell(row=row, column=2, value=campaign.get_campaign_type_display())
+            ws.cell(row=row, column=3, value=campaign.get_status_display())
+            ws.cell(row=row, column=4, value=campaign.subject)
+            ws.cell(row=row, column=5, value=campaign.scheduled_send_date)
+            ws.cell(row=row, column=6, value=campaign.actual_send_date)
+            ws.cell(row=row, column=7, value=campaign.total_sent)
+            ws.cell(row=row, column=8, value=campaign.total_delivered)
+            ws.cell(row=row, column=9, value=campaign.total_bounced)
+            ws.cell(row=row, column=10, value=campaign.total_opened)
+            ws.cell(row=row, column=11, value=campaign.total_clicked)
+            ws.cell(row=row, column=12, value=campaign.total_unsubscribed)
+            ws.cell(row=row, column=13, value=campaign.open_rate)
+            ws.cell(row=row, column=14, value=campaign.click_rate)
+            ws.cell(row=row, column=15, value=campaign.bounce_rate)
+            ws.cell(row=row, column=16, value=campaign.created_at)
+
+        # Auto-adjust column widths
+        for col in range(1, len(headers) + 1):
+            column_letter = get_column_letter(col)
+            max_length = max(len(str(ws.cell(row=1, column=col).value)), 15)
+            ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
+
+        # Create response
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = f'attachment; filename="campaign_analytics_{timezone.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
+
+        wb.save(response)
+        self.message_user(request, f'Successfully exported {queryset.count()} campaigns to Excel')
+        return response
+    export_campaign_analytics.short_description = 'Export campaign analytics to Excel'
+
+    def get_queryset(self, request):
+        """Optimize queries"""
+        return super().get_queryset(request).select_related('company', 'contract', 'template')
+
+
+@admin.register(CampaignRecipient)
+class CampaignRecipientAdmin(admin.ModelAdmin):
+    list_display = [
+        'campaign', 'contact', 'contact_email', 'status',
+        'sent_at', 'opened_at', 'clicked_at', 'error_message_short'
+    ]
+    list_filter = ['status', 'sent_at', 'opened_at', 'clicked_at', 'bounced_at']
+    list_select_related = ['campaign', 'contact', 'contact__company', 'email_log']
+    search_fields = [
+        'contact__email', 'contact__name',
+        'contact__company__name', 'campaign__name', 'campaign__subject'
+    ]
+    readonly_fields = [
+        'campaign', 'contact', 'email_log', 'status',
+        'sent_at', 'delivered_at', 'opened_at', 'clicked_at',
+        'bounced_at', 'failed_at', 'error_message',
+        'created_at', 'updated_at'
+    ]
+    date_hierarchy = 'sent_at'
+    actions = ['export_recipients_csv', 'export_recipients_excel']
+
+    fieldsets = (
+        ('Recipient Information', {
+            'fields': ('campaign', 'contact', 'email_log')
+        }),
+        ('Status', {
+            'fields': ('status', 'error_message')
+        }),
+        ('Timeline', {
+            'fields': (
+                ('sent_at', 'delivered_at'),
+                ('opened_at', 'clicked_at'),
+                ('bounced_at', 'failed_at')
+            ),
+            'description': 'Detailed timeline of email journey'
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def contact_email(self, obj):
+        """Display contact email"""
+        return obj.contact.email if obj.contact else '-'
+    contact_email.short_description = 'Contact Email'
+    contact_email.admin_order_field = 'contact__email'
+
+    def error_message_short(self, obj):
+        """Display truncated error message"""
+        if obj.error_message:
+            msg = obj.error_message[:50]
+            if len(obj.error_message) > 50:
+                msg += '...'
+            return format_html('<span style="color: red;">{}</span>', msg)
+        return '-'
+    error_message_short.short_description = 'Error'
+
+    def has_add_permission(self, request):
+        """Prevent manual creation - recipients should be added programmatically"""
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """Allow deletion for cleanup"""
+        return True
+
+    def export_recipients_csv(self, request, queryset):
+        """Export selected recipients to CSV"""
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="campaign_recipients_{timezone.now().strftime("%Y%m%d_%H%M%S")}.csv"'
+
+        writer = csv.writer(response)
+        # Write headers
+        writer.writerow([
+            'Campaign Name', 'Campaign Subject', 'Contact Name', 'Contact Email',
+            'Company', 'Status', 'Sent At', 'Delivered At', 'Opened At',
+            'Clicked At', 'Bounced At', 'Failed At', 'Error Message'
+        ])
+
+        # Write data with optimized queries
+        recipients = queryset.select_related('campaign', 'contact', 'contact__company')
+
+        for recipient in recipients:
+            writer.writerow([
+                recipient.campaign.name,
+                recipient.campaign.subject,
+                recipient.contact.name,
+                recipient.contact.email,
+                recipient.contact.company.name,
+                recipient.get_status_display(),
+                recipient.sent_at.strftime('%Y-%m-%d %H:%M:%S') if recipient.sent_at else '',
+                recipient.delivered_at.strftime('%Y-%m-%d %H:%M:%S') if recipient.delivered_at else '',
+                recipient.opened_at.strftime('%Y-%m-%d %H:%M:%S') if recipient.opened_at else '',
+                recipient.clicked_at.strftime('%Y-%m-%d %H:%M:%S') if recipient.clicked_at else '',
+                recipient.bounced_at.strftime('%Y-%m-%d %H:%M:%S') if recipient.bounced_at else '',
+                recipient.failed_at.strftime('%Y-%m-%d %H:%M:%S') if recipient.failed_at else '',
+                recipient.error_message
+            ])
+
+        self.message_user(request, f'Successfully exported {queryset.count()} recipients to CSV')
+        return response
+    export_recipients_csv.short_description = 'Export selected recipients to CSV'
+
+    def export_recipients_excel(self, request, queryset):
+        """Export selected recipients to Excel with formatting"""
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Campaign Recipients"
+
+        # Define styles
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+
+        # Write headers
+        headers = [
+            'Campaign Name', 'Campaign Subject', 'Contact Name', 'Contact Email',
+            'Company', 'Status', 'Sent At', 'Delivered At', 'Opened At',
+            'Clicked At', 'Bounced At', 'Failed At', 'Error Message'
+        ]
+
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+
+        # Write data with optimized queries
+        recipients = queryset.select_related('campaign', 'contact', 'contact__company')
+
+        for row, recipient in enumerate(recipients, 2):
+            ws.cell(row=row, column=1, value=recipient.campaign.name)
+            ws.cell(row=row, column=2, value=recipient.campaign.subject)
+            ws.cell(row=row, column=3, value=recipient.contact.name)
+            ws.cell(row=row, column=4, value=recipient.contact.email)
+            ws.cell(row=row, column=5, value=recipient.contact.company.name)
+            ws.cell(row=row, column=6, value=recipient.get_status_display())
+            ws.cell(row=row, column=7, value=recipient.sent_at)
+            ws.cell(row=row, column=8, value=recipient.delivered_at)
+            ws.cell(row=row, column=9, value=recipient.opened_at)
+            ws.cell(row=row, column=10, value=recipient.clicked_at)
+            ws.cell(row=row, column=11, value=recipient.bounced_at)
+            ws.cell(row=row, column=12, value=recipient.failed_at)
+            ws.cell(row=row, column=13, value=recipient.error_message)
+
+        # Auto-adjust column widths
+        for col in range(1, len(headers) + 1):
+            column_letter = get_column_letter(col)
+            max_length = max(len(str(ws.cell(row=1, column=col).value)), 15)
+            ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
+
+        # Create response
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = f'attachment; filename="campaign_recipients_{timezone.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'
+
+        wb.save(response)
+        self.message_user(request, f'Successfully exported {queryset.count()} recipients to Excel')
+        return response
+    export_recipients_excel.short_description = 'Export selected recipients to Excel'
+
+    def get_queryset(self, request):
+        """Optimize queries"""
+        return super().get_queryset(request).select_related(
+            'campaign', 'contact', 'contact__company', 'email_log'
+        )
 
 
 @admin.register(DocumentAttachment)

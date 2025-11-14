@@ -1021,41 +1021,245 @@ class EmailLog(TimestampedModel):
 
 
 class EmailCampaign(TimestampedModel):
-    """Track email campaigns and sequences"""
+    """Track email campaigns and blast emails with advanced targeting and analytics"""
     CAMPAIGN_TYPE_CHOICES = [
         ('renewal_sequence', 'Renewal Reminder Sequence'),
         ('payment_sequence', 'Payment Reminder Sequence'),
         ('seasonal', 'Seasonal Campaign'),
         ('quarterly', 'Quarterly Check-in'),
         ('custom', 'Custom Campaign'),
+        ('newsletter', 'Newsletter'),
+        ('promotion', 'Promotional Campaign'),
+        ('onboarding', 'Onboarding Sequence'),
+        ('engagement', 'Engagement Campaign'),
     ]
-    
+
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('scheduled', 'Scheduled'),
+        ('sending', 'Sending'),
+        ('sent', 'Sent'),
+        ('paused', 'Paused'),
+        ('cancelled', 'Cancelled'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    name = models.CharField(max_length=100)
+    name = models.CharField(max_length=100, help_text="Campaign name for internal tracking")
     campaign_type = models.CharField(max_length=20, choices=CAMPAIGN_TYPE_CHOICES)
-    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='email_campaigns')
+    subject = models.CharField(max_length=200, blank=True, default='', help_text="Email subject line")
+    template = models.ForeignKey(EmailTemplate, on_delete=models.SET_NULL, null=True, blank=True, related_name='campaigns', help_text="Optional: Use existing template")
+
+    # Legacy fields (kept for backward compatibility)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='email_campaigns', null=True, blank=True, help_text="Optional: Specific company for single-company campaigns")
     contract = models.ForeignKey(Contract, on_delete=models.SET_NULL, null=True, blank=True, related_name='email_campaigns')
-    
-    # Campaign settings
+
+    # Targeting & Scheduling
+    target_audience = models.JSONField(
+        blank=True,
+        null=True,
+        help_text='Segmentation criteria e.g. {"industry": "Hotels", "country": "Thailand", "contact_type": "Primary"}'
+    )
+    audience_count = models.IntegerField(default=0, help_text="Cached count of recipients (auto-updated)")
+    scheduled_send_date = models.DateTimeField(null=True, blank=True, help_text="When to send this campaign")
+    actual_send_date = models.DateTimeField(null=True, blank=True, help_text="When campaign was actually sent")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    send_immediately = models.BooleanField(default=False, help_text="Send as soon as status is changed to 'sending'")
+
+    # Campaign Content
+    sender_email = models.EmailField(blank=True, help_text="Email address to send from (leave blank to use default)")
+    reply_to_email = models.EmailField(blank=True, null=True, help_text="Reply-to email address")
+
+    # Analytics (all IntegerFields for performance)
+    total_sent = models.IntegerField(default=0, help_text="Total emails sent")
+    total_delivered = models.IntegerField(default=0, help_text="Successfully delivered")
+    total_bounced = models.IntegerField(default=0, help_text="Bounced emails")
+    total_opened = models.IntegerField(default=0, help_text="Unique opens")
+    total_clicked = models.IntegerField(default=0, help_text="Unique clicks")
+    total_unsubscribed = models.IntegerField(default=0, help_text="Unsubscribed from this campaign")
+    total_complained = models.IntegerField(default=0, help_text="Marked as spam")
+
+    # Legacy tracking fields (kept for backward compatibility)
     is_active = models.BooleanField(default=True)
-    start_date = models.DateField()
+    start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
-    
-    # Tracking
     emails_sent = models.IntegerField(default=0)
     last_email_sent = models.DateTimeField(null=True, blank=True)
     stop_on_reply = models.BooleanField(default=True)
     replied = models.BooleanField(default=False)
-    
+
     class Meta:
+        db_table = 'crm_app_email_campaign'
+        verbose_name = 'Email Campaign'
+        verbose_name_plural = 'Email Campaigns'
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['company', 'is_active']),
-            models.Index(fields=['campaign_type', 'is_active']),
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['campaign_type', 'status']),
+            models.Index(fields=['scheduled_send_date', 'status']),
+            models.Index(fields=['company', 'is_active']),  # Legacy index
         ]
-    
+
     def __str__(self):
-        return f"{self.name} - {self.company.name}"
+        if self.company:
+            return f"{self.name} - {self.company.name}"
+        return self.name
+
+    @property
+    def open_rate(self):
+        """Calculate email open rate percentage"""
+        if self.total_sent > 0:
+            return round((self.total_opened / self.total_sent) * 100, 2)
+        return 0
+
+    @property
+    def click_rate(self):
+        """Calculate email click rate percentage"""
+        if self.total_sent > 0:
+            return round((self.total_clicked / self.total_sent) * 100, 2)
+        return 0
+
+    @property
+    def bounce_rate(self):
+        """Calculate email bounce rate percentage"""
+        if self.total_sent > 0:
+            return round((self.total_bounced / self.total_sent) * 100, 2)
+        return 0
+
+    def update_analytics(self):
+        """Recalculate analytics from campaign recipients"""
+        from django.db.models import Count, Q
+
+        recipients = self.recipients.all()
+
+        self.total_sent = recipients.filter(status__in=['sent', 'delivered', 'opened', 'clicked', 'bounced']).count()
+        self.total_delivered = recipients.filter(status__in=['delivered', 'opened', 'clicked']).count()
+        self.total_bounced = recipients.filter(status='bounced').count()
+        self.total_opened = recipients.filter(status__in=['opened', 'clicked']).count()
+        self.total_clicked = recipients.filter(status='clicked').count()
+        self.total_unsubscribed = recipients.filter(status='unsubscribed').count()
+
+        # Update legacy fields
+        self.emails_sent = self.total_sent
+        if self.total_sent > 0:
+            last_sent = recipients.exclude(sent_at__isnull=True).order_by('-sent_at').first()
+            if last_sent:
+                self.last_email_sent = last_sent.sent_at
+
+        self.save()
+
+
+class CampaignRecipient(TimestampedModel):
+    """Track individual recipients in email campaigns with detailed status"""
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('sent', 'Sent'),
+        ('delivered', 'Delivered'),
+        ('bounced', 'Bounced'),
+        ('opened', 'Opened'),
+        ('clicked', 'Clicked'),
+        ('unsubscribed', 'Unsubscribed'),
+        ('failed', 'Failed'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    campaign = models.ForeignKey(
+        EmailCampaign,
+        on_delete=models.CASCADE,
+        related_name='recipients',
+        help_text="Email campaign this recipient belongs to"
+    )
+    contact = models.ForeignKey(
+        Contact,
+        on_delete=models.CASCADE,
+        related_name='campaign_receipts',
+        help_text="Contact receiving the campaign email"
+    )
+    email_log = models.ForeignKey(
+        EmailLog,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='campaign_recipient',
+        help_text="Link to the actual email sent"
+    )
+
+    # Status tracking
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending',
+        help_text="Current status of this campaign recipient"
+    )
+
+    # Detailed timestamps for tracking email journey
+    sent_at = models.DateTimeField(null=True, blank=True, help_text="When email was sent")
+    delivered_at = models.DateTimeField(null=True, blank=True, help_text="When email was delivered")
+    opened_at = models.DateTimeField(null=True, blank=True, help_text="First time email was opened")
+    clicked_at = models.DateTimeField(null=True, blank=True, help_text="First time link was clicked")
+    bounced_at = models.DateTimeField(null=True, blank=True, help_text="When email bounced")
+    failed_at = models.DateTimeField(null=True, blank=True, help_text="When sending failed")
+
+    # Error tracking
+    error_message = models.TextField(blank=True, help_text="Error details if sending failed")
+
+    class Meta:
+        db_table = 'crm_app_campaign_recipient'
+        verbose_name = 'Campaign Recipient'
+        verbose_name_plural = 'Campaign Recipients'
+        unique_together = [['campaign', 'contact']]  # One recipient per campaign
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['campaign', 'status']),
+            models.Index(fields=['contact', 'status']),
+            models.Index(fields=['sent_at']),
+            models.Index(fields=['status', '-sent_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.campaign.name} - {self.contact.email}"
+
+    def mark_as_sent(self):
+        """Mark recipient as sent"""
+        self.status = 'sent'
+        self.sent_at = timezone.now()
+        self.save()
+
+    def mark_as_delivered(self):
+        """Mark recipient as delivered"""
+        self.status = 'delivered'
+        self.delivered_at = timezone.now()
+        self.save()
+
+    def mark_as_opened(self):
+        """Mark recipient as opened"""
+        if self.status not in ['opened', 'clicked']:
+            self.status = 'opened'
+            self.opened_at = timezone.now()
+            self.save()
+
+    def mark_as_clicked(self):
+        """Mark recipient as clicked"""
+        self.status = 'clicked'
+        if not self.clicked_at:
+            self.clicked_at = timezone.now()
+        if not self.opened_at:
+            self.opened_at = timezone.now()
+        self.save()
+
+    def mark_as_bounced(self, error_msg=''):
+        """Mark recipient as bounced"""
+        self.status = 'bounced'
+        self.bounced_at = timezone.now()
+        self.error_message = error_msg
+        self.save()
+
+    def mark_as_failed(self, error_msg=''):
+        """Mark recipient as failed"""
+        self.status = 'failed'
+        self.failed_at = timezone.now()
+        self.error_message = error_msg
+        self.save()
 
 
 class DocumentAttachment(TimestampedModel):

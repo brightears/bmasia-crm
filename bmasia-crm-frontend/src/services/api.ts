@@ -540,6 +540,66 @@ class ApiService {
     const response = await authApi.get<AutomatedEmail[]>('/automation/recent-emails/');
     return response.data;
   }
+
+  // Campaign methods
+  async getCampaigns(params?: any): Promise<any> {
+    const response = await authApi.get('/campaigns/', { params });
+    return response.data;
+  }
+
+  async getCampaign(id: string): Promise<any> {
+    const response = await authApi.get(`/campaigns/${id}/`);
+    return response.data;
+  }
+
+  async createCampaign(data: any): Promise<any> {
+    const response = await authApi.post('/campaigns/', data);
+    return response.data;
+  }
+
+  async updateCampaign(id: string, data: any): Promise<any> {
+    const response = await authApi.put(`/campaigns/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteCampaign(id: string): Promise<void> {
+    await authApi.delete(`/campaigns/${id}/`);
+  }
+
+  async sendCampaign(id: string, recipientIds?: string[]): Promise<any> {
+    const response = await authApi.post(`/campaigns/${id}/send/`, { recipient_ids: recipientIds });
+    return response.data;
+  }
+
+  async testCampaign(id: string, testEmails: string[]): Promise<any> {
+    const response = await authApi.post(`/campaigns/${id}/test/`, { test_emails: testEmails });
+    return response.data;
+  }
+
+  async getCampaignRecipients(id: string): Promise<any[]> {
+    const response = await authApi.get(`/campaigns/${id}/recipients/`);
+    return response.data;
+  }
+
+  async addCampaignRecipients(id: string, contactIds: string[]): Promise<any> {
+    const response = await authApi.post(`/campaigns/${id}/add_recipients/`, { contact_ids: contactIds });
+    return response.data;
+  }
+
+  async pauseCampaign(id: string): Promise<any> {
+    const response = await authApi.post(`/campaigns/${id}/pause/`);
+    return response.data;
+  }
+
+  async resumeCampaign(id: string): Promise<any> {
+    const response = await authApi.post(`/campaigns/${id}/resume/`);
+    return response.data;
+  }
+
+  async scheduleCampaign(id: string, scheduledSendDate: string): Promise<any> {
+    const response = await authApi.post(`/campaigns/${id}/schedule/`, { scheduled_send_date: scheduledSendDate });
+    return response.data;
+  }
 }
 
 export interface EmailSendData {

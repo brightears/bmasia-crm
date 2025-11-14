@@ -2299,6 +2299,362 @@ def apply_migration_0025_view(request):
 
 
 # ============================================================================
+# CAMPAIGN API ENDPOINTS
+# ============================================================================
+
+class CampaignViewSet(BaseModelViewSet):
+    """ViewSet for EmailCampaign management"""
+    from .serializers import EmailCampaignSerializer, EmailCampaignDetailSerializer, CampaignRecipientSerializer
+    from .models import EmailCampaign, CampaignRecipient, Contact
+
+    queryset = EmailCampaign.objects.all()
+    serializer_class = EmailCampaignSerializer
+    search_fields = ['name', 'subject', 'campaign_type']
+    ordering_fields = ['created_at', 'scheduled_send_date', 'actual_send_date', 'audience_count', 'total_sent']
+    ordering = ['-created_at']
+    filterset_fields = ['campaign_type', 'status', 'send_immediately']
+
+    def get_serializer_class(self):
+        """Use detail serializer for retrieve action"""
+        from .serializers import EmailCampaignDetailSerializer
+        if self.action == 'retrieve':
+            return EmailCampaignDetailSerializer
+        return super().get_serializer_class()
+
+    def get_queryset(self):
+        """Optimize queryset with select_related"""
+        queryset = super().get_queryset()
+        if self.action == 'retrieve':
+            queryset = queryset.prefetch_related('recipients__contact__company')
+        return queryset
+
+    @action(detail=True, methods=['post'])
+    def send(self, request, pk=None):
+        """
+        POST /api/v1/campaigns/{id}/send/
+        Send campaign to all recipients
+        """
+        from .models import CampaignRecipient, Contact, EmailLog
+        from .services.email_service import EmailService
+        from django.db import transaction
+
+        campaign = self.get_object()
+        email_service = EmailService()
+
+        # Validate campaign can be sent
+        if campaign.status == 'sent':
+            return Response(
+                {'error': 'Campaign has already been sent'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if campaign.status == 'cancelled':
+            return Response(
+                {'error': 'Cannot send cancelled campaign'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get or create recipients based on target_audience or manually selected contacts
+        recipient_contact_ids = request.data.get('recipient_ids', [])
+
+        if not campaign.recipients.exists() and recipient_contact_ids:
+            # Create recipients from provided contact IDs
+            for contact_id in recipient_contact_ids:
+                try:
+                    contact = Contact.objects.get(id=contact_id, is_active=True)
+                    CampaignRecipient.objects.get_or_create(
+                        campaign=campaign,
+                        contact=contact,
+                        defaults={'status': 'pending'}
+                    )
+                except Contact.DoesNotExist:
+                    pass
+
+        # Get all pending recipients
+        pending_recipients = campaign.recipients.filter(status='pending')
+
+        if not pending_recipients.exists():
+            return Response(
+                {'error': 'No pending recipients to send to'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Update campaign status
+        campaign.status = 'sending'
+        campaign.actual_send_date = timezone.now()
+        campaign.save()
+
+        # Send emails to each recipient
+        sent_count = 0
+        failed_count = 0
+
+        for recipient in pending_recipients:
+            try:
+                # Prepare email context
+                context = {
+                    'company_name': recipient.contact.company.name if recipient.contact.company else '',
+                    'contact_name': recipient.contact.name,
+                    'contact_email': recipient.contact.email,
+                }
+
+                # Render body with context if needed
+                body = campaign.body
+                if campaign.template:
+                    # Use template if specified
+                    from .services.email_service import EmailService
+                    body = EmailService().render_template(campaign.template, context)
+
+                # Send email
+                success, message = email_service.send_email(
+                    to_email=recipient.contact.email,
+                    subject=campaign.subject,
+                    body=body,
+                    sender_email=campaign.sender_email or request.user.email,
+                    request=request
+                )
+
+                if success:
+                    recipient.mark_as_sent()
+                    sent_count += 1
+                else:
+                    recipient.mark_as_failed(message)
+                    failed_count += 1
+
+            except Exception as e:
+                recipient.mark_as_failed(str(e))
+                failed_count += 1
+
+        # Update campaign analytics
+        campaign.update_analytics()
+        campaign.status = 'sent'
+        campaign.save()
+
+        self.log_action('UPDATE', campaign, {
+            'action': 'Campaign sent',
+            'sent_count': sent_count,
+            'failed_count': failed_count
+        })
+
+        return Response({
+            'message': f'Campaign sent to {sent_count} recipients',
+            'sent_count': sent_count,
+            'failed_count': failed_count,
+            'status': campaign.status
+        })
+
+    @action(detail=True, methods=['post'])
+    def test(self, request, pk=None):
+        """
+        POST /api/v1/campaigns/{id}/test/
+        Send test email to specified addresses
+        """
+        from .services.email_service import EmailService
+
+        campaign = self.get_object()
+        test_emails = request.data.get('test_emails', [])
+
+        if not test_emails:
+            return Response(
+                {'error': 'No test email addresses provided'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        email_service = EmailService()
+        results = []
+
+        for email in test_emails:
+            success, message = email_service.send_email(
+                to_email=email,
+                subject=f"[TEST] {campaign.subject}",
+                body=campaign.body,
+                sender_email=campaign.sender_email or request.user.email,
+                request=request
+            )
+            results.append({
+                'email': email,
+                'success': success,
+                'message': message
+            })
+
+        return Response({
+            'message': 'Test emails sent',
+            'results': results
+        })
+
+    @action(detail=True, methods=['get'])
+    def recipients(self, request, pk=None):
+        """
+        GET /api/v1/campaigns/{id}/recipients/
+        Get campaign recipients with pagination
+        """
+        from .serializers import CampaignRecipientSerializer
+
+        campaign = self.get_object()
+        recipients = campaign.recipients.select_related('contact__company', 'email_log').all()
+
+        # Apply pagination
+        page = self.paginate_queryset(recipients)
+        if page is not None:
+            serializer = CampaignRecipientSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = CampaignRecipientSerializer(recipients, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def add_recipients(self, request, pk=None):
+        """
+        POST /api/v1/campaigns/{id}/add_recipients/
+        Add contacts as campaign recipients
+        """
+        from .models import CampaignRecipient, Contact
+
+        campaign = self.get_object()
+        contact_ids = request.data.get('contact_ids', [])
+
+        if not contact_ids:
+            return Response(
+                {'error': 'No contact IDs provided'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        added_count = 0
+        skipped_count = 0
+
+        for contact_id in contact_ids:
+            try:
+                contact = Contact.objects.get(
+                    id=contact_id,
+                    is_active=True,
+                    receives_notifications=True
+                )
+                _, created = CampaignRecipient.objects.get_or_create(
+                    campaign=campaign,
+                    contact=contact,
+                    defaults={'status': 'pending'}
+                )
+                if created:
+                    added_count += 1
+                else:
+                    skipped_count += 1
+            except Contact.DoesNotExist:
+                skipped_count += 1
+
+        # Update audience count
+        campaign.audience_count = campaign.recipients.count()
+        campaign.save()
+
+        return Response({
+            'message': f'Added {added_count} recipients',
+            'added_count': added_count,
+            'skipped_count': skipped_count,
+            'total_recipients': campaign.audience_count
+        })
+
+    @action(detail=True, methods=['post'])
+    def pause(self, request, pk=None):
+        """
+        POST /api/v1/campaigns/{id}/pause/
+        Pause a scheduled campaign
+        """
+        campaign = self.get_object()
+
+        if campaign.status not in ['scheduled', 'sending']:
+            return Response(
+                {'error': 'Can only pause scheduled or sending campaigns'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        campaign.status = 'paused'
+        campaign.save()
+
+        self.log_action('UPDATE', campaign, {
+            'action': 'Campaign paused'
+        })
+
+        return Response({
+            'message': 'Campaign paused',
+            'status': campaign.status
+        })
+
+    @action(detail=True, methods=['post'])
+    def resume(self, request, pk=None):
+        """
+        POST /api/v1/campaigns/{id}/resume/
+        Resume a paused campaign
+        """
+        campaign = self.get_object()
+
+        if campaign.status != 'paused':
+            return Response(
+                {'error': 'Can only resume paused campaigns'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Resume to appropriate status
+        if campaign.scheduled_send_date:
+            campaign.status = 'scheduled'
+        else:
+            campaign.status = 'draft'
+        campaign.save()
+
+        self.log_action('UPDATE', campaign, {
+            'action': 'Campaign resumed'
+        })
+
+        return Response({
+            'message': 'Campaign resumed',
+            'status': campaign.status
+        })
+
+    @action(detail=True, methods=['post'])
+    def schedule(self, request, pk=None):
+        """
+        POST /api/v1/campaigns/{id}/schedule/
+        Schedule campaign for future sending
+        """
+        campaign = self.get_object()
+        scheduled_date = request.data.get('scheduled_send_date')
+
+        if not scheduled_date:
+            return Response(
+                {'error': 'scheduled_send_date is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Parse and validate date
+        try:
+            from dateutil import parser
+            scheduled_dt = parser.parse(scheduled_date)
+            if scheduled_dt < timezone.now():
+                return Response(
+                    {'error': 'Scheduled date must be in the future'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except:
+            return Response(
+                {'error': 'Invalid date format'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        campaign.scheduled_send_date = scheduled_dt
+        campaign.status = 'scheduled'
+        campaign.send_immediately = False
+        campaign.save()
+
+        self.log_action('UPDATE', campaign, {
+            'action': 'Campaign scheduled',
+            'scheduled_send_date': str(scheduled_dt)
+        })
+
+        return Response({
+            'message': 'Campaign scheduled',
+            'scheduled_send_date': campaign.scheduled_send_date,
+            'status': campaign.status
+        })
+
+
+# ============================================================================
 # AUTOMATION API ENDPOINTS
 # ============================================================================
 

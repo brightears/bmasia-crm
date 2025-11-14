@@ -21,6 +21,9 @@ import Quotes from './pages/Quotes';
 import QuoteDetail from './pages/QuoteDetail';
 import SalesTargets from './pages/SalesTargets';
 import Settings from './pages/Settings';
+import Campaigns from './pages/Campaigns';
+import CampaignCreate from './pages/CampaignCreate';
+import CampaignDetail from './pages/CampaignDetail';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -220,7 +223,9 @@ function App() {
         <Route path="/my-queue" element={<PlaceholderPage title="My Task Queue" />} />
 
         {/* Marketing routes */}
-        <Route path="/campaigns" element={<PlaceholderPage title="Marketing Campaigns" />} />
+        <Route path="/campaigns" element={<Campaigns />} />
+        <Route path="/campaigns/new" element={<CampaignCreate />} />
+        <Route path="/campaigns/:id" element={<CampaignDetail />} />
         <Route path="/email-templates" element={<PlaceholderPage title="Email Templates" />} />
         <Route path="/analytics" element={<PlaceholderPage title="Marketing Analytics" />} />
         <Route path="/segments" element={<PlaceholderPage title="Customer Segments" />} />

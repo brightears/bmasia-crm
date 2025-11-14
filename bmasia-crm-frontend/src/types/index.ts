@@ -649,3 +649,65 @@ export interface TargetPrediction {
   recommended_actions: string[];
   probability_of_success: number;
 }
+
+// Email Campaign Types
+export interface EmailCampaign {
+  id: string;
+  name: string;
+  campaign_type: 'renewal' | 'payment' | 'quarterly' | 'newsletter' | 'promotion' | 'onboarding' | 'engagement';
+  campaign_type_display: string;
+  subject: string;
+  body: string;
+  template: string | null;
+  template_name: string | null;
+  target_audience: Record<string, any> | null;
+  audience_count: number;
+  recipients_count: number;
+  scheduled_send_date: string | null;
+  actual_send_date: string | null;
+  status: 'draft' | 'scheduled' | 'sending' | 'sent' | 'paused' | 'cancelled';
+  status_display: string;
+  send_immediately: boolean;
+  sender_email: string;
+  reply_to_email: string | null;
+  total_sent: number;
+  total_delivered: number;
+  total_bounced: number;
+  total_opened: number;
+  total_clicked: number;
+  total_unsubscribed: number;
+  total_complained: number;
+  open_rate: number;
+  click_rate: number;
+  bounce_rate: number;
+  pending_count: number;
+  sent_count: number;
+  failed_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CampaignRecipient {
+  id: string;
+  campaign: string;
+  contact: string;
+  contact_name: string;
+  contact_email: string;
+  contact_company: string;
+  email_log: string | null;
+  status: 'pending' | 'sent' | 'delivered' | 'bounced' | 'opened' | 'clicked' | 'unsubscribed' | 'failed';
+  status_display: string;
+  sent_at: string | null;
+  delivered_at: string | null;
+  opened_at: string | null;
+  clicked_at: string | null;
+  bounced_at: string | null;
+  failed_at: string | null;
+  error_message: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EmailCampaignDetail extends EmailCampaign {
+  recipients: CampaignRecipient[];
+}

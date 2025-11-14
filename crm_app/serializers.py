@@ -5,7 +5,8 @@ from django.db.models import Sum
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice, Zone,
-    Quote, QuoteLineItem, QuoteAttachment, QuoteActivity
+    Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
+    EmailCampaign, CampaignRecipient
 )
 
 
@@ -608,3 +609,113 @@ class QuoteSerializer(serializers.ModelSerializer):
             )
 
         return instance
+
+
+class CampaignRecipientSerializer(serializers.ModelSerializer):
+    """Serializer for CampaignRecipient model"""
+    contact_name = serializers.CharField(source='contact.name', read_only=True)
+    contact_email = serializers.EmailField(source='contact.email', read_only=True)
+    contact_company = serializers.CharField(source='contact.company.name', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = CampaignRecipient
+        fields = [
+            'id', 'campaign', 'contact', 'contact_name', 'contact_email',
+            'contact_company', 'email_log', 'status', 'status_display',
+            'sent_at', 'delivered_at', 'opened_at', 'clicked_at',
+            'bounced_at', 'failed_at', 'error_message',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'contact_name', 'contact_email', 'contact_company',
+            'status_display', 'sent_at', 'delivered_at', 'opened_at',
+            'clicked_at', 'bounced_at', 'failed_at', 'created_at', 'updated_at'
+        ]
+
+
+class EmailCampaignSerializer(serializers.ModelSerializer):
+    """Serializer for EmailCampaign model with analytics"""
+    campaign_type_display = serializers.CharField(source='get_campaign_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    template_name = serializers.CharField(source='template.name', read_only=True, allow_null=True)
+    open_rate = serializers.ReadOnlyField()
+    click_rate = serializers.ReadOnlyField()
+    bounce_rate = serializers.ReadOnlyField()
+    recipients_count = serializers.SerializerMethodField()
+    pending_count = serializers.SerializerMethodField()
+    sent_count = serializers.SerializerMethodField()
+    failed_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EmailCampaign
+        fields = [
+            'id', 'name', 'campaign_type', 'campaign_type_display',
+            'subject', 'body', 'template', 'template_name',
+            'target_audience', 'audience_count', 'recipients_count',
+            'scheduled_send_date', 'actual_send_date', 'status', 'status_display',
+            'send_immediately', 'sender_email', 'reply_to_email',
+            'total_sent', 'total_delivered', 'total_bounced',
+            'total_opened', 'total_clicked', 'total_unsubscribed', 'total_complained',
+            'open_rate', 'click_rate', 'bounce_rate',
+            'pending_count', 'sent_count', 'failed_count',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'campaign_type_display', 'status_display', 'template_name',
+            'actual_send_date', 'open_rate', 'click_rate', 'bounce_rate',
+            'total_sent', 'total_delivered', 'total_bounced',
+            'total_opened', 'total_clicked', 'total_unsubscribed', 'total_complained',
+            'recipients_count', 'pending_count', 'sent_count', 'failed_count',
+            'created_at', 'updated_at'
+        ]
+
+    def get_recipients_count(self, obj):
+        """Get total number of recipients"""
+        return obj.recipients.count()
+
+    def get_pending_count(self, obj):
+        """Get number of pending recipients"""
+        return obj.recipients.filter(status='pending').count()
+
+    def get_sent_count(self, obj):
+        """Get number of sent recipients"""
+        return obj.recipients.filter(status__in=['sent', 'delivered', 'opened', 'clicked']).count()
+
+    def get_failed_count(self, obj):
+        """Get number of failed/bounced recipients"""
+        return obj.recipients.filter(status__in=['failed', 'bounced']).count()
+
+    def validate_scheduled_send_date(self, value):
+        """Ensure scheduled date is in the future"""
+        if value and value < timezone.now():
+            raise serializers.ValidationError(
+                "Scheduled send date must be in the future."
+            )
+        return value
+
+    def validate(self, data):
+        """Validate campaign data"""
+        # Require either body or template
+        if not data.get('body') and not data.get('template'):
+            raise serializers.ValidationError(
+                "Either email body or template must be provided."
+            )
+
+        # If send_immediately is True, clear scheduled_send_date
+        if data.get('send_immediately'):
+            data['scheduled_send_date'] = None
+
+        # If scheduled_send_date is provided, set send_immediately to False
+        if data.get('scheduled_send_date'):
+            data['send_immediately'] = False
+
+        return data
+
+
+class EmailCampaignDetailSerializer(EmailCampaignSerializer):
+    """Detailed serializer for EmailCampaign with recipients"""
+    recipients = CampaignRecipientSerializer(many=True, read_only=True)
+
+    class Meta(EmailCampaignSerializer.Meta):
+        fields = EmailCampaignSerializer.Meta.fields + ['recipients']
