@@ -45,7 +45,7 @@ def safe_rename_campaign_table(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('crm_app', '0026_merge_20251114_1416'),
+        ('crm_app', '0026a_create_campaign_table_if_missing'),
     ]
 
     operations = [
