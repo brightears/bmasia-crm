@@ -2,7 +2,44 @@
 
 import django.db.models.deletion
 import uuid
-from django.db import migrations, models
+from django.db import migrations, models, connection
+
+
+def safe_rename_campaign_table(apps, schema_editor):
+    """
+    Safely rename the campaign table if it exists.
+    If the table doesn't exist, create it with the new name.
+    """
+    with connection.cursor() as cursor:
+        # Check if new table already exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_schema = 'public'
+                AND table_name = 'crm_app_email_campaign'
+            )
+        """)
+        new_exists = cursor.fetchone()[0]
+
+        if new_exists:
+            print("✓ Table crm_app_email_campaign already exists")
+            return
+
+        # Check if old table exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_schema = 'public'
+                AND table_name = 'crm_app_emailcampaign'
+            )
+        """)
+        old_exists = cursor.fetchone()[0]
+
+        if old_exists:
+            print("Renaming crm_app_emailcampaign to crm_app_email_campaign")
+            cursor.execute("ALTER TABLE crm_app_emailcampaign RENAME TO crm_app_email_campaign")
+        else:
+            print("Neither table exists - table will be created by subsequent operations")
 
 
 class Migration(migrations.Migration):
@@ -194,10 +231,7 @@ class Migration(migrations.Migration):
             model_name='emailcampaign',
             index=models.Index(fields=['scheduled_send_date', 'status'], name='crm_app_ema_schedul_fd708b_idx'),
         ),
-        migrations.AlterModelTable(
-            name='emailcampaign',
-            table='crm_app_email_campaign',
-        ),
+        migrations.RunPython(safe_rename_campaign_table, reverse_code=migrations.RunPython.noop),
         migrations.AddField(
             model_name='campaignrecipient',
             name='campaign',
