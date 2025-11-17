@@ -9,9 +9,9 @@ if [ "$RESET_DB" = "true" ]; then
     python reset_db.py <<< "yes"
 fi
 
-# Ensure campaign tables exist before migrations (prevents migration 0027 failure)
-echo "Ensuring campaign tables exist..."
-python fix_campaign_tables.py || echo "Campaign tables check failed, continuing anyway..."
+# Create campaign tables directly via SQL (bypasses migration issues)
+echo "Creating campaign tables via direct SQL..."
+python create_campaign_table_direct.py || echo "Direct table creation failed, continuing anyway..."
 
 # Run database migrations first
 echo "Running database migrations..."
