@@ -11,7 +11,7 @@ fi
 
 # Ensure campaign tables exist before migrations (prevents migration 0027 failure)
 echo "Ensuring campaign tables exist..."
-python manage.py ensure_campaign_tables || echo "Campaign tables check skipped"
+python fix_campaign_tables.py || echo "Campaign tables check failed, continuing anyway..."
 
 # Run database migrations first
 echo "Running database migrations..."
