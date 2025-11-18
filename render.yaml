@@ -23,7 +23,27 @@ services:
     env: python
     schedule: "0 9 * * *"  # Run at 9 AM Bangkok time every day
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "python manage.py send_emails --type all"
+    startCommand: "python manage.py send_emails --type renewal payment quarterly zone-alerts"
+    envVars:
+      - key: SECRET_KEY
+        value: django-insecure-demo-key-replace-in-production
+      - key: DEBUG
+        value: "False"
+      - key: ALLOWED_HOSTS
+        value: "*"
+      - key: SOUNDTRACK_API_TOKEN
+        value: YVhId2UyTWJVWEhMRWlycUFPaUl3Y2NtOXNGeUoxR0Q6SVRHazZSWDVYV2FTenhiS1ZwNE1sSmhHUUJEVVRDdDZGU0FwVjZqMXNEQU1EMjRBT2pub2hmZ3NQODRRNndQWg==
+      - key: SOUNDTRACK_CLIENT_ID
+        value: VCZz6nGt0pkQ1fBsHuO8cqgR6Ctefv7f
+      - key: SOUNDTRACK_CLIENT_SECRET
+        value: Ht4g6isxxrNXeYgxNkDyfM0TJe508kqJHPdFVihi9KYbOnmfO8v2PipFUCf69zmc
+
+  - type: cron
+    name: bmasia-crm-email-sequences
+    env: python
+    schedule: "*/20 * * * *"  # Run every 20 minutes for email sequences
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python manage.py send_emails --type sequences"
     envVars:
       - key: SECRET_KEY
         value: django-insecure-demo-key-replace-in-production

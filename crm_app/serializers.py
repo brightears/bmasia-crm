@@ -6,7 +6,8 @@ from .models import (
     User, Company, Contact, Note, Task, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice, Zone,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
-    EmailCampaign, CampaignRecipient, EmailTemplate
+    EmailCampaign, CampaignRecipient, EmailTemplate,
+    EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution
 )
 
 
@@ -847,3 +848,75 @@ class EmailTemplateSerializer(serializers.ModelSerializer):
             )
 
         return value
+
+
+class SequenceStepSerializer(serializers.ModelSerializer):
+    """Serializer for SequenceStep model"""
+    email_template_name = serializers.CharField(source='email_template.name', read_only=True)
+
+    class Meta:
+        model = SequenceStep
+        fields = [
+            'id', 'sequence', 'step_number', 'name',
+            'email_template', 'email_template_name',
+            'delay_days', 'is_active',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class EmailSequenceSerializer(serializers.ModelSerializer):
+    """Serializer for EmailSequence model"""
+    steps = SequenceStepSerializer(many=True, read_only=True)
+    total_steps = serializers.IntegerField(source='get_total_steps', read_only=True)
+    active_enrollments = serializers.IntegerField(source='get_active_enrollments', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = EmailSequence
+        fields = [
+            'id', 'name', 'description', 'status',
+            'steps', 'total_steps', 'active_enrollments',
+            'created_by', 'created_by_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+
+
+class SequenceStepExecutionSerializer(serializers.ModelSerializer):
+    """Serializer for SequenceStepExecution model"""
+    step_name = serializers.CharField(source='step.name', read_only=True)
+    contact_email = serializers.CharField(source='enrollment.contact.email', read_only=True)
+
+    class Meta:
+        model = SequenceStepExecution
+        fields = [
+            'id', 'enrollment', 'step', 'step_name', 'contact_email',
+            'scheduled_for', 'sent_at', 'email_log', 'status',
+            'error_message', 'attempt_count',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class SequenceEnrollmentSerializer(serializers.ModelSerializer):
+    """Serializer for SequenceEnrollment model"""
+    sequence_name = serializers.CharField(source='sequence.name', read_only=True)
+    contact_name = serializers.CharField(source='contact.get_full_name', read_only=True)
+    contact_email = serializers.CharField(source='contact.email', read_only=True)
+    company_name = serializers.CharField(source='company.name', read_only=True, allow_null=True)
+    progress = serializers.CharField(source='get_progress', read_only=True)
+    step_executions = SequenceStepExecutionSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = SequenceEnrollment
+        fields = [
+            'id', 'sequence', 'sequence_name',
+            'contact', 'contact_name', 'contact_email',
+            'company', 'company_name',
+            'enrolled_at', 'started_at', 'completed_at',
+            'status', 'current_step_number', 'progress',
+            'notes', 'step_executions',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'enrolled_at', 'started_at', 'completed_at', 'created_at', 'updated_at']

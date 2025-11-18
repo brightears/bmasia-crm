@@ -1456,3 +1456,148 @@ class QuoteActivity(TimestampedModel):
 
     def __str__(self):
         return f"{self.activity_type} - {self.quote.quote_number}"
+
+
+# Email Sequence Models (Drip Campaign System)
+class EmailSequence(TimestampedModel):
+    """Define a multi-step automated email sequence"""
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('paused', 'Paused'),
+        ('archived', 'Archived'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=200, help_text="e.g., 'New Customer Onboarding'")
+    description = models.TextField(blank=True, help_text="What this sequence does")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_sequences')
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Email Sequence'
+        verbose_name_plural = 'Email Sequences'
+
+    def __str__(self):
+        return self.name
+
+    def get_total_steps(self):
+        """Return count of related steps"""
+        return self.steps.count()
+
+    def get_active_enrollments(self):
+        """Return count of enrollments with status='active'"""
+        return self.enrollments.filter(status='active').count()
+
+
+class SequenceStep(TimestampedModel):
+    """Individual step in a sequence (one email)"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    sequence = models.ForeignKey(EmailSequence, on_delete=models.CASCADE, related_name='steps')
+    step_number = models.PositiveIntegerField(help_text="Order in sequence (1, 2, 3...)")
+    name = models.CharField(max_length=200, help_text="e.g., 'Welcome Email', 'Day 3 Tips'")
+    email_template = models.ForeignKey(EmailTemplate, on_delete=models.PROTECT, related_name='sequence_steps')
+    delay_days = models.PositiveIntegerField(default=0, help_text="Send X days after previous step (or enrollment for step 1)")
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['sequence', 'step_number']
+        unique_together = [['sequence', 'step_number']]
+        verbose_name = 'Sequence Step'
+        verbose_name_plural = 'Sequence Steps'
+
+    def __str__(self):
+        return f"{self.sequence.name} - Step {self.step_number}: {self.name}"
+
+    def clean(self):
+        """Validate delay_days >= 0"""
+        from django.core.exceptions import ValidationError
+        if self.delay_days < 0:
+            raise ValidationError({'delay_days': 'Delay days must be 0 or greater'})
+
+
+class SequenceEnrollment(TimestampedModel):
+    """Track which contacts are enrolled in which sequences"""
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('paused', 'Paused'),
+        ('completed', 'Completed'),
+        ('unsubscribed', 'Unsubscribed'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    sequence = models.ForeignKey(EmailSequence, on_delete=models.CASCADE, related_name='enrollments')
+    contact = models.ForeignKey(Contact, on_delete=models.CASCADE, related_name='sequence_enrollments')
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, null=True, blank=True, related_name='sequence_enrollments')
+    enrolled_at = models.DateTimeField(auto_now_add=True, help_text="When enrolled")
+    started_at = models.DateTimeField(null=True, blank=True, help_text="When first email sent")
+    completed_at = models.DateTimeField(null=True, blank=True, help_text="When all steps done")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    current_step_number = models.PositiveIntegerField(default=1, help_text="Which step is next")
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-enrolled_at']
+        unique_together = [['sequence', 'contact']]
+        verbose_name = 'Sequence Enrollment'
+        verbose_name_plural = 'Sequence Enrollments'
+        indexes = [
+            models.Index(fields=['status', '-enrolled_at']),
+            models.Index(fields=['sequence', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.contact} enrolled in {self.sequence.name}"
+
+    def get_progress(self):
+        """Return progress as formatted string"""
+        total_steps = self.sequence.get_total_steps()
+        completed_steps = self.step_executions.filter(status='sent').count()
+
+        # Return as "X/Y" format
+        progress_str = f"{completed_steps}/{total_steps}"
+
+        # Also calculate percentage
+        if total_steps > 0:
+            percentage = round((completed_steps / total_steps) * 100, 1)
+            return f"{progress_str} ({percentage}%)"
+
+        return progress_str
+
+
+class SequenceStepExecution(TimestampedModel):
+    """Track each individual step execution per enrollment (audit log + scheduling)"""
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('scheduled', 'Scheduled'),
+        ('sent', 'Sent'),
+        ('failed', 'Failed'),
+        ('skipped', 'Skipped'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    enrollment = models.ForeignKey(SequenceEnrollment, on_delete=models.CASCADE, related_name='step_executions')
+    step = models.ForeignKey(SequenceStep, on_delete=models.CASCADE, related_name='executions')
+    scheduled_for = models.DateTimeField(help_text="When this step should be sent")
+    sent_at = models.DateTimeField(null=True, blank=True, help_text="When actually sent")
+    email_log = models.ForeignKey(EmailLog, on_delete=models.SET_NULL, null=True, blank=True, related_name='sequence_executions')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='scheduled')
+    error_message = models.TextField(blank=True)
+    attempt_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['scheduled_for']
+        unique_together = [['enrollment', 'step']]
+        verbose_name = 'Step Execution'
+        verbose_name_plural = 'Step Executions'
+        indexes = [
+            models.Index(fields=['status', 'scheduled_for']),
+            models.Index(fields=['enrollment', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.step.name} for {self.enrollment.contact} - {self.status}"
+
+    def is_due(self):
+        """Return True if scheduled_for <= timezone.now() and status='scheduled'"""
+        return self.scheduled_for <= timezone.now() and self.status == 'scheduled'

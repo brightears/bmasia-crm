@@ -19,7 +19,7 @@ class Command(BaseCommand):
         parser.add_argument(
             '--type',
             type=str,
-            choices=['all', 'renewal', 'payment', 'quarterly', 'zone-alerts'],
+            choices=['all', 'renewal', 'payment', 'quarterly', 'zone-alerts', 'sequences'],
             default='all',
             help='Type of emails to send'
         )
@@ -89,7 +89,33 @@ class Command(BaseCommand):
                     f"Quarterly check-ins: {results['sent']} sent, "
                     f"{results['failed']} failed"
                 )
-        
+
+        # Process email sequences
+        if email_type in ['all', 'sequences']:
+            self.stdout.write("Processing email sequences...")
+            if not dry_run:
+                results = email_service.process_sequence_steps(max_emails=100)
+                self._update_results(total_results, results)
+                self.stdout.write(
+                    f"Sequence processing: {results['sent']} sent, "
+                    f"{results['failed']} failed, "
+                    f"{results['skipped']} skipped"
+                )
+            else:
+                try:
+                    from crm_app.models import SequenceStepExecution
+
+                    pending_count = SequenceStepExecution.objects.filter(
+                        status='scheduled',
+                        scheduled_for__lte=timezone.now()
+                    ).count()
+
+                    self.stdout.write(f"Would process {pending_count} pending sequence steps")
+                except Exception as e:
+                    self.stdout.write(self.style.WARNING(
+                        f"Could not query sequence steps (table may not exist yet): {e}"
+                    ))
+
         # Summary
         self.stdout.write(self.style.SUCCESS(
             f"\nEmail send complete: {total_results['sent']} sent, "

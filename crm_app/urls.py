@@ -25,6 +25,10 @@ router.register(r'dashboard', views.DashboardViewSet, basename='dashboard')
 router.register(r'campaigns', views.CampaignViewSet, basename='campaign')
 router.register(r'automation', views.AutomationViewSet, basename='automation')
 router.register(r'email-templates', views.EmailTemplateViewSet, basename='emailtemplate')
+router.register(r'email-sequences', views.EmailSequenceViewSet, basename='emailsequence')
+router.register(r'sequence-steps', views.SequenceStepViewSet, basename='sequencestep')
+router.register(r'sequence-enrollments', views.SequenceEnrollmentViewSet, basename='sequenceenrollment')
+router.register(r'sequence-executions', views.SequenceStepExecutionViewSet, basename='sequencestepexecution')
 
 # The API URLs are now determined automatically by the router.
 urlpatterns = [

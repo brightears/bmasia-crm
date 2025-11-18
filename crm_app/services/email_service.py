@@ -16,8 +16,9 @@ from django.urls import reverse
 from django.db.models import Q
 
 from crm_app.models import (
-    EmailTemplate, EmailLog, EmailCampaign, 
-    Contact, Company, Contract, Invoice, DocumentAttachment
+    EmailTemplate, EmailLog, EmailCampaign,
+    Contact, Company, Contract, Invoice, DocumentAttachment,
+    EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution
 )
 
 logger = logging.getLogger(__name__)
@@ -1319,6 +1320,366 @@ class EmailService:
             return True, f"Renewal reminder sent successfully to {success_count} recipient(s)"
         else:
             return False, "Failed to send renewal reminder to any recipients"
+
+    # ============================================================================
+    # EMAIL SEQUENCE / DRIP CAMPAIGN METHODS
+    # ============================================================================
+
+    def enroll_contact_in_sequence(self, sequence_id, contact_id, company_id=None, notes=''):
+        """
+        Enroll a contact in an email sequence.
+
+        Args:
+            sequence_id: UUID of EmailSequence
+            contact_id: UUID of Contact
+            company_id: Optional UUID of Company
+            notes: Optional enrollment notes
+
+        Returns:
+            SequenceEnrollment object
+
+        Raises:
+            ValueError: If sequence not active, contact already enrolled, or contact unsubscribed
+        """
+        # Get sequence
+        try:
+            sequence = EmailSequence.objects.get(id=sequence_id)
+        except EmailSequence.DoesNotExist:
+            raise ValueError(f"Email sequence with ID {sequence_id} not found")
+
+        # Validate sequence is active
+        if sequence.status != 'active':
+            raise ValueError("Sequence is not active")
+
+        # Get contact
+        try:
+            contact = Contact.objects.get(id=contact_id)
+        except Contact.DoesNotExist:
+            raise ValueError(f"Contact with ID {contact_id} not found")
+
+        # Check if contact can receive emails
+        if not contact.receives_notifications:
+            raise ValueError("Contact has unsubscribed from emails")
+
+        # Check if already enrolled
+        existing_enrollment = SequenceEnrollment.objects.filter(
+            sequence=sequence,
+            contact=contact
+        ).first()
+
+        if existing_enrollment:
+            raise ValueError("Contact already enrolled in this sequence")
+
+        # Get company if provided
+        company = None
+        if company_id:
+            try:
+                company = Company.objects.get(id=company_id)
+            except Company.DoesNotExist:
+                logger.warning(f"Company with ID {company_id} not found, proceeding without company")
+
+        # Create enrollment
+        enrollment = SequenceEnrollment.objects.create(
+            sequence=sequence,
+            contact=contact,
+            company=company,
+            notes=notes,
+            status='active',
+            current_step_number=1,
+            started_at=None  # Will be set when first email sends
+        )
+
+        # Schedule first step
+        self.schedule_step_execution(enrollment, step_number=1)
+
+        logger.info(f"Enrolled {contact.email} in sequence '{sequence.name}' (ID: {sequence.id})")
+
+        return enrollment
+
+    def schedule_step_execution(self, enrollment, step_number):
+        """
+        Schedule a sequence step for execution.
+
+        Args:
+            enrollment: SequenceEnrollment object
+            step_number: Which step to schedule (1, 2, 3, etc.)
+
+        Returns:
+            SequenceStepExecution object or None if step doesn't exist
+        """
+        # Get the step
+        try:
+            step = SequenceStep.objects.get(
+                sequence=enrollment.sequence,
+                step_number=step_number,
+                is_active=True
+            )
+        except SequenceStep.DoesNotExist:
+            logger.info(f"No active step {step_number} found for sequence {enrollment.sequence.name}")
+            return None
+
+        # Calculate scheduled_for time
+        if step_number == 1:
+            # First step: schedule based on enrollment time
+            base_time = enrollment.enrolled_at
+        else:
+            # Subsequent steps: schedule based on previous step's sent_at time
+            previous_execution = SequenceStepExecution.objects.filter(
+                enrollment=enrollment,
+                step__step_number=step_number - 1,
+                status='sent'
+            ).first()
+
+            if not previous_execution or not previous_execution.sent_at:
+                # Previous step not sent yet, can't schedule this one
+                logger.debug(f"Previous step {step_number - 1} not sent yet, cannot schedule step {step_number}")
+                return None
+
+            base_time = previous_execution.sent_at
+
+        # Add delay
+        scheduled_for = base_time + timedelta(days=step.delay_days)
+
+        # Create execution
+        execution = SequenceStepExecution.objects.create(
+            enrollment=enrollment,
+            step=step,
+            scheduled_for=scheduled_for,
+            status='scheduled',
+            attempt_count=0
+        )
+
+        logger.info(f"Scheduled step {step_number} for {enrollment.contact.email} at {scheduled_for}")
+
+        return execution
+
+    def process_sequence_steps(self, max_emails=100):
+        """
+        Process pending sequence step executions.
+        This method is called by the cron job.
+
+        Args:
+            max_emails: Maximum number of emails to send in this run
+
+        Returns:
+            dict with stats: {'sent': X, 'failed': Y, 'skipped': Z}
+        """
+        results = {
+            'sent': 0,
+            'failed': 0,
+            'skipped': 0
+        }
+
+        # Find pending executions
+        pending_executions = SequenceStepExecution.objects.filter(
+            status='scheduled',
+            scheduled_for__lte=timezone.now()
+        ).select_related(
+            'enrollment__contact',
+            'enrollment__sequence',
+            'enrollment__company',
+            'step__email_template'
+        ).order_by('scheduled_for')[:max_emails]
+
+        logger.info(f"Found {pending_executions.count()} pending sequence step executions")
+
+        for execution in pending_executions:
+            enrollment = execution.enrollment
+            contact = enrollment.contact
+
+            # Check business hours - skip if outside business hours
+            if not self.is_business_hours():
+                logger.debug(f"Outside business hours, skipping execution {execution.id}")
+                results['skipped'] += 1
+                continue
+
+            # Check enrollment status
+            if enrollment.status != 'active':
+                logger.info(f"Enrollment {enrollment.id} is not active (status: {enrollment.status}), skipping execution")
+                execution.status = 'skipped'
+                execution.save()
+                results['skipped'] += 1
+                continue
+
+            # Check contact preferences
+            if not contact.receives_notifications:
+                logger.info(f"Contact {contact.email} has unsubscribed, marking enrollment as unsubscribed")
+                enrollment.status = 'unsubscribed'
+                enrollment.save()
+                execution.status = 'skipped'
+                execution.save()
+                results['skipped'] += 1
+                continue
+
+            # Execute the step
+            success = self.execute_sequence_step(execution.id)
+            if success:
+                results['sent'] += 1
+            else:
+                results['failed'] += 1
+
+        logger.info(f"Sequence processing complete: {results}")
+        return results
+
+    def execute_sequence_step(self, execution_id):
+        """
+        Execute a single sequence step (send the email).
+
+        Args:
+            execution_id: UUID of SequenceStepExecution
+
+        Returns:
+            bool: True if sent successfully, False otherwise
+        """
+        # Get execution
+        try:
+            execution = SequenceStepExecution.objects.select_related(
+                'enrollment__contact',
+                'enrollment__company',
+                'enrollment__sequence',
+                'step__email_template'
+            ).get(id=execution_id)
+        except SequenceStepExecution.DoesNotExist:
+            logger.error(f"SequenceStepExecution with ID {execution_id} not found")
+            return False
+
+        # Increment attempt count
+        execution.attempt_count += 1
+        execution.save()
+
+        # Get template, contact, and context
+        template = execution.step.email_template
+        contact = execution.enrollment.contact
+        company = execution.enrollment.company
+
+        # Render template with context
+        context = {
+            'contact': contact,
+            'company': company,
+            'sequence': execution.enrollment.sequence,
+        }
+
+        try:
+            rendered = template.render(context)
+            subject = rendered['subject']
+            html_content = rendered['body_html']
+            text_content = rendered['body_text']
+        except Exception as e:
+            logger.error(f"Failed to render template for execution {execution_id}: {e}")
+            execution.status = 'failed'
+            execution.error_message = f"Template rendering error: {str(e)}"
+            execution.save()
+            return False
+
+        # Send email using existing method
+        try:
+            success, message = self.send_email(
+                to_email=contact.email,
+                subject=subject,
+                body_html=html_content,
+                body_text=text_content,
+                company=company,
+                contact=contact,
+                email_type='sequence',
+                template=template
+            )
+
+            if not success:
+                raise Exception(message)
+
+            # Get the email log that was just created
+            email_log = EmailLog.objects.filter(
+                contact=contact,
+                subject=subject,
+                status='sent'
+            ).order_by('-sent_at').first()
+
+            # Update execution
+            execution.status = 'sent'
+            execution.sent_at = timezone.now()
+            execution.email_log = email_log
+            execution.save()
+
+            # Update enrollment
+            enrollment = execution.enrollment
+            if not enrollment.started_at:
+                enrollment.started_at = timezone.now()
+
+            # Schedule next step
+            next_step_number = execution.step.step_number + 1
+            next_scheduled = self.schedule_step_execution(enrollment, next_step_number)
+
+            # If no more steps, mark enrollment complete
+            if not next_scheduled:
+                enrollment.status = 'completed'
+                enrollment.completed_at = timezone.now()
+                logger.info(f"Enrollment {enrollment.id} completed - no more steps")
+            else:
+                enrollment.current_step_number = next_step_number
+                logger.info(f"Scheduled next step {next_step_number} for enrollment {enrollment.id}")
+
+            enrollment.save()
+
+            logger.info(f"Successfully executed step {execution.step.step_number} for {contact.email}")
+            return True
+
+        except Exception as e:
+            # Log error
+            error_msg = str(e)
+            execution.status = 'failed'
+            execution.error_message = error_msg
+            execution.save()
+
+            logger.error(f"Failed to execute sequence step {execution_id}: {error_msg}")
+
+            # Retry logic: if attempt_count < 3, reset to 'scheduled' to retry later
+            if execution.attempt_count < 3:
+                execution.status = 'scheduled'
+                execution.save()
+                logger.info(f"Execution {execution_id} will be retried (attempt {execution.attempt_count}/3)")
+            else:
+                logger.warning(f"Execution {execution_id} failed after 3 attempts, giving up")
+
+            return False
+
+    def unenroll_contact(self, enrollment_id, reason='manual'):
+        """
+        Unenroll a contact from a sequence.
+
+        Args:
+            enrollment_id: UUID of SequenceEnrollment
+            reason: 'manual', 'unsubscribed', 'completed', etc.
+
+        Returns:
+            bool: True if unenrolled successfully
+        """
+        # Get enrollment
+        try:
+            enrollment = SequenceEnrollment.objects.get(id=enrollment_id)
+        except SequenceEnrollment.DoesNotExist:
+            logger.error(f"SequenceEnrollment with ID {enrollment_id} not found")
+            return False
+
+        # Update enrollment status
+        if reason == 'manual':
+            enrollment.status = 'paused'
+        else:
+            enrollment.status = reason
+
+        # Cancel pending executions
+        cancelled_count = SequenceStepExecution.objects.filter(
+            enrollment=enrollment,
+            status='scheduled'
+        ).update(status='skipped')
+
+        # Add notes
+        timestamp = timezone.now().strftime('%Y-%m-%d %H:%M:%S')
+        enrollment.notes += f"\nUnenrolled on {timestamp}: {reason}"
+        enrollment.save()
+
+        logger.info(f"Unenrolled contact {enrollment.contact.email} from sequence {enrollment.sequence.name} (reason: {reason}). Cancelled {cancelled_count} pending steps.")
+
+        return True
 
 
 # Create singleton instance

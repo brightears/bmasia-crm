@@ -23,7 +23,7 @@ from .models import (
     User, Company, Contact, Note, Task, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
-    EmailTemplate
+    EmailTemplate, EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
@@ -31,7 +31,8 @@ from .serializers import (
     ContractSerializer, InvoiceSerializer, AuditLogSerializer,
     LoginSerializer, DashboardStatsSerializer, BulkOperationSerializer,
     QuoteSerializer, QuoteLineItemSerializer, QuoteAttachmentSerializer, QuoteActivitySerializer,
-    EmailTemplateSerializer
+    EmailTemplateSerializer, EmailSequenceSerializer, SequenceStepSerializer,
+    SequenceEnrollmentSerializer, SequenceStepExecutionSerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -3110,3 +3111,162 @@ class EmailTemplateViewSet(BaseModelViewSet):
                 'notes': f"Duplicated from {original.name}",
             }
         })
+
+
+class EmailSequenceViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for EmailSequence model.
+    Provides CRUD operations for email sequences.
+    """
+    queryset = EmailSequence.objects.all().prefetch_related('steps')
+    serializer_class = EmailSequenceSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['status']
+    search_fields = ['name', 'description']
+    ordering_fields = ['created_at', 'name']
+    ordering = ['-created_at']
+
+    def perform_create(self, serializer):
+        """Auto-set created_by to current user"""
+        serializer.save(created_by=self.request.user)
+
+
+class SequenceStepViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for SequenceStep model.
+    Provides CRUD operations for sequence steps.
+    """
+    queryset = SequenceStep.objects.all().select_related('sequence', 'email_template')
+    serializer_class = SequenceStepSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['sequence', 'is_active']
+    search_fields = ['name']
+    ordering_fields = ['step_number', 'created_at']
+    ordering = ['sequence', 'step_number']
+
+
+class SequenceEnrollmentViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for SequenceEnrollment model.
+    Provides CRUD operations plus custom actions for enrollment management.
+    """
+    queryset = SequenceEnrollment.objects.all().select_related(
+        'sequence', 'contact', 'company'
+    ).prefetch_related('step_executions')
+    serializer_class = SequenceEnrollmentSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['status', 'sequence', 'contact']
+    search_fields = ['contact__email', 'contact__first_name', 'contact__last_name', 'company__name']
+    ordering_fields = ['enrolled_at', 'started_at']
+    ordering = ['-enrolled_at']
+
+    @action(detail=False, methods=['post'])
+    def enroll(self, request):
+        """
+        Enroll a contact in a sequence.
+
+        Request body:
+        {
+            "sequence_id": "uuid",
+            "contact_id": "uuid",
+            "company_id": "uuid" (optional),
+            "notes": "string" (optional)
+        }
+        """
+        from crm_app.services.email_service import EmailService
+
+        sequence_id = request.data.get('sequence_id')
+        contact_id = request.data.get('contact_id')
+        company_id = request.data.get('company_id')
+        notes = request.data.get('notes', '')
+
+        if not sequence_id or not contact_id:
+            return Response(
+                {'error': 'sequence_id and contact_id are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            email_service = EmailService()
+            enrollment = email_service.enroll_contact_in_sequence(
+                sequence_id=sequence_id,
+                contact_id=contact_id,
+                company_id=company_id,
+                notes=notes
+            )
+
+            serializer = self.get_serializer(enrollment)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        except ValueError as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to enroll contact: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=True, methods=['post'])
+    def unenroll(self, request, pk=None):
+        """
+        Unenroll a contact from a sequence.
+
+        Request body:
+        {
+            "reason": "manual" (optional)
+        }
+        """
+        from crm_app.services.email_service import EmailService
+
+        enrollment = self.get_object()
+        reason = request.data.get('reason', 'manual')
+
+        try:
+            email_service = EmailService()
+            success = email_service.unenroll_contact(
+                enrollment_id=enrollment.id,
+                reason=reason
+            )
+
+            if success:
+                # Refresh from database
+                enrollment.refresh_from_db()
+                serializer = self.get_serializer(enrollment)
+                return Response(serializer.data)
+            else:
+                return Response(
+                    {'error': 'Failed to unenroll contact'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to unenroll contact: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class SequenceStepExecutionViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet for SequenceStepExecution model.
+    Read-only ViewSet for viewing execution logs.
+    """
+    queryset = SequenceStepExecution.objects.all().select_related(
+        'enrollment__contact',
+        'enrollment__sequence',
+        'step',
+        'email_log'
+    )
+    serializer_class = SequenceStepExecutionSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['status', 'enrollment', 'step']
+    search_fields = ['enrollment__contact__email', 'step__name']
+    ordering_fields = ['scheduled_for', 'sent_at']
+    ordering = ['-scheduled_for']

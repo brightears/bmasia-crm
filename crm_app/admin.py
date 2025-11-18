@@ -17,7 +17,8 @@ from .models import (
     User, Company, Contact, Note, Task, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice, Zone,
     EmailTemplate, EmailLog, EmailCampaign, CampaignRecipient, DocumentAttachment,
-    Quote, QuoteLineItem, QuoteAttachment, QuoteActivity
+    Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
+    EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution
 )
 
 
@@ -2121,3 +2122,220 @@ class QuoteActivityAdmin(admin.ModelAdmin):
     list_select_related = ['quote', 'user']
     search_fields = ['quote__quote_number', 'description']
     readonly_fields = ['created_at', 'updated_at']
+
+
+# ============================================================================
+# EMAIL SEQUENCE ADMIN (Drip Campaign System)
+# ============================================================================
+
+# INLINE 1: SequenceStepInline (used in EmailSequenceAdmin)
+class SequenceStepInline(admin.TabularInline):
+    model = SequenceStep
+    extra = 1  # Show 1 empty form for adding new step
+    fields = ['step_number', 'name', 'email_template', 'delay_days', 'is_active']
+    ordering = ['step_number']
+
+    verbose_name = 'Step'
+    verbose_name_plural = 'Sequence Steps'
+
+
+# ADMIN 1: EmailSequenceAdmin
+@admin.register(EmailSequence)
+class EmailSequenceAdmin(admin.ModelAdmin):
+    list_display = ['name', 'status', 'total_steps_display', 'active_enrollments_display', 'created_by', 'created_at']
+    list_filter = ['status', 'created_at']
+    search_fields = ['name', 'description']
+    readonly_fields = ['created_at', 'updated_at', 'created_by']
+
+    fieldsets = [
+        ('Sequence Details', {
+            'fields': ['name', 'description', 'status']
+        }),
+        ('Metadata', {
+            'fields': ['created_by', 'created_at', 'updated_at'],
+            'classes': ['collapse']
+        })
+    ]
+
+    inlines = [SequenceStepInline]
+
+    # Custom methods for list display
+    def total_steps_display(self, obj):
+        """Display total number of steps in sequence"""
+        return obj.get_total_steps()
+    total_steps_display.short_description = 'Total Steps'
+
+    def active_enrollments_display(self, obj):
+        """Display count of active enrollments"""
+        return obj.get_active_enrollments()
+    active_enrollments_display.short_description = 'Active Enrollments'
+
+    # Auto-populate created_by on save
+    def save_model(self, request, obj, form, change):
+        if not change:  # Only on create
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+    # Bulk actions
+    actions = ['activate_sequences', 'pause_sequences', 'archive_sequences']
+
+    def activate_sequences(self, request, queryset):
+        """Bulk activate selected sequences"""
+        count = queryset.update(status='active')
+        self.message_user(request, f'{count} sequence(s) activated', messages.SUCCESS)
+    activate_sequences.short_description = 'Activate selected sequences'
+
+    def pause_sequences(self, request, queryset):
+        """Bulk pause selected sequences"""
+        count = queryset.update(status='paused')
+        self.message_user(request, f'{count} sequence(s) paused', messages.SUCCESS)
+    pause_sequences.short_description = 'Pause selected sequences'
+
+    def archive_sequences(self, request, queryset):
+        """Bulk archive selected sequences"""
+        count = queryset.update(status='archived')
+        self.message_user(request, f'{count} sequence(s) archived', messages.SUCCESS)
+    archive_sequences.short_description = 'Archive selected sequences'
+
+
+# ADMIN 2: SequenceStepAdmin (Optional Standalone)
+@admin.register(SequenceStep)
+class SequenceStepAdmin(admin.ModelAdmin):
+    list_display = ['__str__', 'sequence', 'step_number', 'email_template', 'delay_days', 'is_active']
+    list_filter = ['sequence', 'is_active', 'created_at']
+    list_select_related = ['sequence', 'email_template']
+    search_fields = ['name', 'sequence__name']
+    readonly_fields = ['created_at', 'updated_at']
+
+    fieldsets = [
+        ('Step Configuration', {
+            'fields': ['sequence', 'step_number', 'name', 'email_template', 'delay_days', 'is_active']
+        }),
+        ('Metadata', {
+            'fields': ['created_at', 'updated_at'],
+            'classes': ['collapse']
+        })
+    ]
+
+    ordering = ['sequence', 'step_number']
+
+
+# INLINE 2: SequenceStepExecutionInline (used in SequenceEnrollmentAdmin)
+class SequenceStepExecutionInline(admin.TabularInline):
+    model = SequenceStepExecution
+    extra = 0  # Don't show empty forms (executions are auto-created)
+    can_delete = False  # Don't allow deletion (audit log)
+    fields = ['step', 'scheduled_for', 'sent_at', 'status', 'error_message']
+    readonly_fields = ['step', 'scheduled_for', 'sent_at', 'status', 'error_message']
+    ordering = ['scheduled_for']
+
+    verbose_name = 'Step Execution'
+    verbose_name_plural = 'Execution Log'
+
+    # Make it read-only
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+# ADMIN 3: SequenceEnrollmentAdmin
+@admin.register(SequenceEnrollment)
+class SequenceEnrollmentAdmin(admin.ModelAdmin):
+    list_display = ['contact', 'sequence', 'company', 'status', 'progress_display', 'enrolled_at', 'started_at']
+    list_filter = ['status', 'sequence', 'enrolled_at']
+    list_select_related = ['contact', 'sequence', 'company']
+    search_fields = ['contact__first_name', 'contact__last_name', 'contact__email', 'company__name', 'sequence__name']
+    readonly_fields = ['enrolled_at', 'started_at', 'completed_at', 'created_at', 'updated_at']
+
+    fieldsets = [
+        ('Enrollment Details', {
+            'fields': ['sequence', 'contact', 'company', 'status', 'current_step_number']
+        }),
+        ('Timeline', {
+            'fields': ['enrolled_at', 'started_at', 'completed_at']
+        }),
+        ('Notes', {
+            'fields': ['notes'],
+            'classes': ['collapse']
+        }),
+        ('Metadata', {
+            'fields': ['created_at', 'updated_at'],
+            'classes': ['collapse']
+        })
+    ]
+
+    inlines = [SequenceStepExecutionInline]
+
+    # Custom methods
+    def progress_display(self, obj):
+        """Display enrollment progress (e.g., '2/5 (40.0%)')"""
+        return obj.get_progress()
+    progress_display.short_description = 'Progress'
+
+    # Bulk actions
+    actions = ['pause_enrollments', 'resume_enrollments', 'complete_enrollments']
+
+    def pause_enrollments(self, request, queryset):
+        """Bulk pause active enrollments"""
+        count = queryset.filter(status='active').update(status='paused')
+        self.message_user(request, f'{count} enrollment(s) paused', messages.SUCCESS)
+    pause_enrollments.short_description = 'Pause selected enrollments'
+
+    def resume_enrollments(self, request, queryset):
+        """Bulk resume paused enrollments"""
+        count = queryset.filter(status='paused').update(status='active')
+        self.message_user(request, f'{count} enrollment(s) resumed', messages.SUCCESS)
+    resume_enrollments.short_description = 'Resume selected enrollments'
+
+    def complete_enrollments(self, request, queryset):
+        """Bulk mark enrollments as completed"""
+        count = queryset.filter(status='active').update(status='completed', completed_at=timezone.now())
+        self.message_user(request, f'{count} enrollment(s) marked complete', messages.SUCCESS)
+    complete_enrollments.short_description = 'Mark as completed'
+
+
+# ADMIN 4: SequenceStepExecutionAdmin
+@admin.register(SequenceStepExecution)
+class SequenceStepExecutionAdmin(admin.ModelAdmin):
+    list_display = ['__str__', 'enrollment_contact', 'enrollment_sequence', 'scheduled_for', 'sent_at', 'status', 'attempt_count']
+    list_filter = ['status', 'scheduled_for', 'sent_at']
+    list_select_related = ['enrollment__contact', 'enrollment__sequence', 'step', 'email_log']
+    search_fields = ['enrollment__contact__email', 'enrollment__sequence__name', 'step__name']
+    readonly_fields = ['enrollment', 'step', 'scheduled_for', 'sent_at', 'email_log', 'status', 'error_message', 'attempt_count', 'created_at', 'updated_at']
+
+    fieldsets = [
+        ('Execution Details', {
+            'fields': ['enrollment', 'step', 'status']
+        }),
+        ('Scheduling', {
+            'fields': ['scheduled_for', 'sent_at', 'attempt_count']
+        }),
+        ('Results', {
+            'fields': ['email_log', 'error_message']
+        }),
+        ('Metadata', {
+            'fields': ['created_at', 'updated_at'],
+            'classes': ['collapse']
+        })
+    ]
+
+    ordering = ['-scheduled_for']
+
+    # Custom methods for better display
+    def enrollment_contact(self, obj):
+        """Display contact name from enrollment"""
+        return obj.enrollment.contact
+    enrollment_contact.short_description = 'Contact'
+
+    def enrollment_sequence(self, obj):
+        """Display sequence name from enrollment"""
+        return obj.enrollment.sequence
+    enrollment_sequence.short_description = 'Sequence'
+
+    # Read-only admin (audit log)
+    def has_add_permission(self, request):
+        """Prevent manual creation of executions"""
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """Prevent deletion of audit records"""
+        return False
