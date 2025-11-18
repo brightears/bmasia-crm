@@ -324,14 +324,24 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
           </Grid>
 
           <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              label="Department"
-              value={formData.department}
-              onChange={(e) => handleFieldChange('department', e.target.value)}
-              placeholder="e.g., Sales, Marketing"
-              helperText="Optional: for organizational purposes"
-            />
+            <FormControl fullWidth>
+              <InputLabel>Department</InputLabel>
+              <Select
+                value={formData.department || ''}
+                onChange={(e) => handleFieldChange('department', e.target.value)}
+                label="Department"
+              >
+                <MenuItem value="">
+                  <em>None</em>
+                </MenuItem>
+                <MenuItem value="Sales">Sales</MenuItem>
+                <MenuItem value="Finance">Finance</MenuItem>
+                <MenuItem value="Tech">Tech Support</MenuItem>
+                <MenuItem value="Music">Music Design</MenuItem>
+                <MenuItem value="Admin">Admin</MenuItem>
+              </Select>
+              <FormHelperText>Optional: for organizational purposes</FormHelperText>
+            </FormControl>
           </Grid>
 
           <Grid item xs={12} sm={6}>
