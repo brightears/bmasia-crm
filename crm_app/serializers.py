@@ -735,7 +735,7 @@ class EmailTemplateSerializer(serializers.ModelSerializer):
             'is_active', 'department', 'notes', 'variable_list',
             'created_at', 'updated_at', 'campaigns_using'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'body_text', 'created_at', 'updated_at']
 
     def get_campaigns_using(self, obj):
         """Return count of campaigns using this template"""

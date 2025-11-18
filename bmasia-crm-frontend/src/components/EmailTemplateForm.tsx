@@ -50,7 +50,6 @@ interface FormData {
   language: 'en' | 'th';
   department: string;
   subject: string;
-  body_text: string;
   body_html: string;
   notes: string;
   is_active: boolean;
@@ -129,7 +128,6 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
     language: 'en',
     department: '',
     subject: '',
-    body_text: '',
     body_html: '',
     notes: '',
     is_active: true,
@@ -150,7 +148,6 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
         language: template.language || 'en',
         department: template.department || '',
         subject: template.subject || '',
-        body_text: template.body_text || '',
         body_html: template.body_html || '',
         notes: template.notes || '',
         is_active: template.is_active !== undefined ? template.is_active : true,
@@ -162,7 +159,6 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
         language: 'en',
         department: '',
         subject: '',
-        body_text: '',
         body_html: '',
         notes: '',
         is_active: true,
@@ -188,8 +184,18 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
       newErrors.subject = 'Subject is required';
     }
 
-    if (!formData.body_text.trim()) {
-      newErrors.body_text = 'Body text is required';
+    // Validate body_html is not empty
+    if (!formData.body_html || !formData.body_html.trim()) {
+      newErrors.body_html = 'Email body is required';
+    } else {
+      // Check for actual content (not just empty Quill tags like <p><br></p>)
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = formData.body_html;
+      const textContent = tempDiv.textContent || '';
+
+      if (!textContent.trim()) {
+        newErrors.body_html = 'Email body cannot be empty';
+      }
     }
 
     setErrors(newErrors);
@@ -206,7 +212,6 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
       const submitData = {
         ...formData,
         department: formData.department || undefined,
-        body_html: formData.body_html || undefined,
         notes: formData.notes || undefined,
       };
 
@@ -406,19 +411,70 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
             />
           </Grid>
 
+          {/* Email Body - Rich Text Editor */}
           <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Body (Text)"
-              multiline
-              rows={10}
-              value={formData.body_text}
-              onChange={(e) => handleFieldChange('body_text', e.target.value)}
-              error={!!errors.body_text}
-              helperText={errors.body_text || 'Plain text email body (required)'}
-              required
-              placeholder="Enter email body text. Use variables like {{company_name}}, {{contact_name}}, etc."
-            />
+            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600, mt: 2 }}>
+              Email Body
+            </Typography>
+          </Grid>
+
+          <Grid item xs={12}>
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="caption" color="text.secondary" gutterBottom>
+                Compose your email message using the formatting toolbar. Template variables like {'{{company_name}}'} can be inserted using the buttons below. A plain text version will be automatically generated.
+              </Typography>
+              <Box sx={{
+                mt: 1,
+                '& .ql-container': {
+                  minHeight: '300px',
+                  backgroundColor: 'white',
+                  borderBottomLeftRadius: '4px',
+                  borderBottomRightRadius: '4px',
+                },
+                '& .ql-editor': {
+                  minHeight: '300px',
+                  fontSize: '14px',
+                  fontFamily: 'inherit',
+                },
+                '& .ql-toolbar': {
+                  backgroundColor: '#f5f5f5',
+                  borderTopLeftRadius: '4px',
+                  borderTopRightRadius: '4px',
+                },
+                '& .ql-toolbar .ql-stroke': {
+                  stroke: '#424242',
+                },
+                '& .ql-toolbar .ql-fill': {
+                  fill: '#424242',
+                },
+                '& .ql-toolbar button:hover .ql-stroke': {
+                  stroke: '#FFA500',
+                },
+                '& .ql-toolbar button:hover .ql-fill': {
+                  fill: '#FFA500',
+                },
+                '& .ql-toolbar button.ql-active .ql-stroke': {
+                  stroke: '#FFA500',
+                },
+                '& .ql-toolbar button.ql-active .ql-fill': {
+                  fill: '#FFA500',
+                },
+              }}>
+                <ReactQuill
+                  ref={quillRef}
+                  theme="snow"
+                  value={formData.body_html || ''}
+                  onChange={(value) => handleFieldChange('body_html', value)}
+                  modules={quillModules}
+                  placeholder="Compose your email message..."
+                />
+              </Box>
+              {errors.body_html && (
+                <Typography variant="caption" color="error" sx={{ mt: 0.5, display: 'block' }}>
+                  {errors.body_html}
+                </Typography>
+              )}
+            </Box>
           </Grid>
 
           {/* Variable Guide */}
@@ -432,7 +488,7 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
                   </Typography>
                 </Box>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                  Click variable to copy, or use "Insert" button to add to HTML editor at cursor position
+                  Click "Insert" to add a variable at the cursor position in your email body, or click the variable to copy it.
                 </Typography>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                   {availableVariables.map((variable) => (
@@ -446,7 +502,7 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
                           sx={{ cursor: 'pointer' }}
                         />
                       </Tooltip>
-                      <Tooltip title="Insert at cursor position in HTML editor">
+                      <Tooltip title="Insert at cursor position">
                         <Button
                           size="small"
                           variant="outlined"
@@ -473,7 +529,7 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
             </Grid>
           )}
 
-          {/* Advanced Section */}
+          {/* Additional Options */}
           <Grid item xs={12}>
             <Accordion
               expanded={advancedExpanded}
@@ -481,66 +537,11 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
             >
               <AccordionSummary expandIcon={<ExpandMore />}>
                 <Typography variant="subtitle1" fontWeight={600}>
-                  Advanced Options
+                  Additional Options
                 </Typography>
               </AccordionSummary>
               <AccordionDetails>
                 <Grid container spacing={2}>
-                  <Grid item xs={12}>
-                    <Box sx={{ mb: 2 }}>
-                      <Typography variant="caption" color="text.secondary" gutterBottom sx={{ display: 'block', mb: 1 }}>
-                        Body (HTML) - Optional
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                        Rich text email body for HTML-capable email clients. Use the toolbar to format your content.
-                      </Typography>
-                      <Box sx={{
-                        '& .ql-container': {
-                          minHeight: '250px',
-                          backgroundColor: 'white',
-                          borderBottomLeftRadius: '4px',
-                          borderBottomRightRadius: '4px',
-                        },
-                        '& .ql-editor': {
-                          minHeight: '250px',
-                          fontSize: '14px',
-                          fontFamily: 'inherit',
-                        },
-                        '& .ql-toolbar': {
-                          backgroundColor: '#f5f5f5',
-                          borderTopLeftRadius: '4px',
-                          borderTopRightRadius: '4px',
-                        },
-                        '& .ql-toolbar .ql-stroke': {
-                          stroke: '#424242',
-                        },
-                        '& .ql-toolbar .ql-fill': {
-                          fill: '#424242',
-                        },
-                        '& .ql-toolbar button:hover .ql-stroke': {
-                          stroke: '#FFA500',
-                        },
-                        '& .ql-toolbar button:hover .ql-fill': {
-                          fill: '#FFA500',
-                        },
-                        '& .ql-toolbar button.ql-active .ql-stroke': {
-                          stroke: '#FFA500',
-                        },
-                        '& .ql-toolbar button.ql-active .ql-fill': {
-                          fill: '#FFA500',
-                        },
-                      }}>
-                        <ReactQuill
-                          ref={quillRef}
-                          theme="snow"
-                          value={formData.body_html || ''}
-                          onChange={(value) => handleFieldChange('body_html', value)}
-                          modules={quillModules}
-                          placeholder="Rich text email body (optional)... Use the 'Insert' buttons above to add variables."
-                        />
-                      </Box>
-                    </Box>
-                  </Grid>
                   <Grid item xs={12}>
                     <TextField
                       fullWidth

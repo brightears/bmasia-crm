@@ -41,3 +41,42 @@ def text_to_html(text):
     """
     
     return html
+
+
+def html_to_text(html):
+    """
+    Convert HTML to plain text for email fallback.
+    Strips HTML tags while preserving readability.
+
+    Args:
+        html (str): HTML content
+
+    Returns:
+        str: Plain text version
+    """
+    if not html:
+        return ''
+
+    from html import unescape
+
+    # Unescape HTML entities first
+    text = unescape(html)
+
+    # Convert <br> and <p> tags to newlines
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</p>', '\n\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'<p[^>]*>', '', text, flags=re.IGNORECASE)
+
+    # Convert list items to bullets
+    text = re.sub(r'<li[^>]*>', '• ', text, flags=re.IGNORECASE)
+    text = re.sub(r'</li>', '\n', text, flags=re.IGNORECASE)
+
+    # Remove remaining HTML tags
+    text = re.sub(r'<[^>]+>', '', text)
+
+    # Clean up whitespace
+    text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)  # Max 2 consecutive newlines
+    text = re.sub(r'[ \t]+', ' ', text)  # Multiple spaces to single
+    text = text.strip()
+
+    return text

@@ -923,11 +923,21 @@ class EmailTemplate(TimestampedModel):
         }
     
     def save(self, *args, **kwargs):
-        """Auto-generate HTML from text if not provided"""
-        if not self.body_html or self.body_html.strip() == '':
-            from crm_app.utils.email_utils import text_to_html
-            # Don't render template variables yet, just convert format
+        """Auto-generate plain text from HTML"""
+        from crm_app.utils.email_utils import html_to_text, text_to_html
+
+        # If HTML is provided, generate plain text from it
+        if self.body_html and self.body_html.strip():
+            self.body_text = html_to_text(self.body_html)
+        # If only plain text provided (backward compatibility)
+        elif self.body_text and self.body_text.strip():
+            # Generate HTML from text for old templates
             self.body_html = text_to_html(self.body_text)
+        else:
+            # Neither provided - validation error
+            from django.core.exceptions import ValidationError
+            raise ValidationError("Email body is required (HTML or text)")
+
         super().save(*args, **kwargs)
 
 
