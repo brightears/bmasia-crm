@@ -449,7 +449,7 @@ const CampaignDetail: React.FC = () => {
           Email Body
         </Typography>
         <Paper variant="outlined" sx={{ p: 2, mt: 1, whiteSpace: 'pre-wrap', backgroundColor: '#f5f5f5' }}>
-          {campaign.body}
+          {campaign.target_audience?.custom_body || 'No email body available'}
         </Paper>
       </Paper>
 
