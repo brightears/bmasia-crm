@@ -2328,6 +2328,45 @@ class CampaignViewSet(BaseModelViewSet):
             queryset = queryset.prefetch_related('recipients__contact__company')
         return queryset
 
+    def create(self, request, *args, **kwargs):
+        """
+        Create campaign and handle contact_ids for recipients
+        """
+        from .models import CampaignRecipient, Contact
+        from django.db import transaction
+        import copy
+
+        # Extract contact_ids from request data (not a model field)
+        # Create mutable copy of request.data to avoid modifying original QueryDict
+        data = copy.deepcopy(dict(request.data))
+        contact_ids = data.get('contact_ids', [])
+
+        # Create campaign using parent create method
+        response = super().create(request, *args, **kwargs)
+        campaign = self.queryset.get(id=response.data['id'])
+
+        # Create campaign recipients from contact_ids
+        if contact_ids:
+            with transaction.atomic():
+                for contact_id in contact_ids:
+                    try:
+                        contact = Contact.objects.get(id=contact_id, is_active=True)
+                        CampaignRecipient.objects.create(
+                            campaign=campaign,
+                            contact=contact,
+                            status='pending'
+                        )
+                    except Contact.DoesNotExist:
+                        pass
+
+                # Update audience_count
+                campaign.audience_count = campaign.recipients.count()
+                campaign.save(update_fields=['audience_count'])
+
+        self.log_action('CREATE', campaign, {'recipients_count': len(contact_ids)})
+
+        return response
+
     @action(detail=True, methods=['post'])
     def send(self, request, pk=None):
         """
@@ -2398,11 +2437,17 @@ class CampaignViewSet(BaseModelViewSet):
                 }
 
                 # Render body with context if needed
-                body = campaign.body
                 if campaign.template:
                     # Use template if specified
                     from .services.email_service import EmailService
                     body = EmailService().render_template(campaign.template, context)
+                else:
+                    # No template - extract custom body from target_audience JSON
+                    # For Phase 1, campaigns store custom content in target_audience.custom_body
+                    if campaign.target_audience and isinstance(campaign.target_audience, dict):
+                        body = campaign.target_audience.get('custom_body', campaign.subject)
+                    else:
+                        body = campaign.subject
 
                 # Send email
                 success, message = email_service.send_email(

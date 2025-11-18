@@ -657,7 +657,6 @@ export interface EmailCampaign {
   campaign_type: 'renewal' | 'payment' | 'quarterly' | 'newsletter' | 'promotion' | 'onboarding' | 'engagement';
   campaign_type_display: string;
   subject: string;
-  body: string;
   template: string | null;
   template_name: string | null;
   target_audience: Record<string, any> | null;

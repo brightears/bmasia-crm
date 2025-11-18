@@ -651,7 +651,7 @@ class EmailCampaignSerializer(serializers.ModelSerializer):
         model = EmailCampaign
         fields = [
             'id', 'name', 'campaign_type', 'campaign_type_display',
-            'subject', 'body', 'template', 'template_name',
+            'subject', 'template', 'template_name',
             'target_audience', 'audience_count', 'recipients_count',
             'scheduled_send_date', 'actual_send_date', 'status', 'status_display',
             'send_immediately', 'sender_email', 'reply_to_email',
@@ -696,11 +696,8 @@ class EmailCampaignSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         """Validate campaign data"""
-        # Require either body or template
-        if not data.get('body') and not data.get('template'):
-            raise serializers.ValidationError(
-                "Either email body or template must be provided."
-            )
+        # Template is optional - if not provided, campaign will use subject as body
+        # This allows for simple, custom campaigns without needing pre-defined templates
 
         # If send_immediately is True, clear scheduled_send_date
         if data.get('send_immediately'):

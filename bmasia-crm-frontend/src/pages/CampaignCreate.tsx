@@ -39,7 +39,7 @@ const CampaignCreate: React.FC = () => {
   const [name, setName] = useState('');
   const [campaignType, setCampaignType] = useState<string>('newsletter');
   const [subject, setSubject] = useState('');
-  const [body, setBody] = useState('');
+  const [emailBody, setEmailBody] = useState('');
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
   const [scheduledDate, setScheduledDate] = useState<Date | null>(null);
   const [sendImmediately, setSendImmediately] = useState(true);
@@ -50,7 +50,7 @@ const CampaignCreate: React.FC = () => {
       setError('Please fill in all required fields');
       return;
     }
-    if (activeStep === 1 && !body) {
+    if (activeStep === 1 && !emailBody) {
       setError('Please enter email content');
       return;
     }
@@ -81,7 +81,7 @@ const CampaignCreate: React.FC = () => {
         name,
         campaign_type: campaignType,
         subject,
-        body,
+        target_audience: { custom_body: emailBody },
         send_immediately: sendImmediately,
         scheduled_send_date: sendImmediately ? null : scheduledDate?.toISOString(),
         contact_ids: selectedContactIds,
@@ -173,8 +173,8 @@ const CampaignCreate: React.FC = () => {
               multiline
               rows={15}
               label="Email Body"
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
+              value={emailBody}
+              onChange={(e) => setEmailBody(e.target.value)}
               placeholder="Enter your email content here..."
               helperText="Tip: Keep your message clear and concise"
             />
