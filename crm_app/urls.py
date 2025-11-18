@@ -24,6 +24,7 @@ router.register(r'audit-logs', views.AuditLogViewSet, basename='auditlog')
 router.register(r'dashboard', views.DashboardViewSet, basename='dashboard')
 router.register(r'campaigns', views.CampaignViewSet, basename='campaign')
 router.register(r'automation', views.AutomationViewSet, basename='automation')
+router.register(r'email-templates', views.EmailTemplateViewSet, basename='emailtemplate')
 
 # The API URLs are now determined automatically by the router.
 urlpatterns = [

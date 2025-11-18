@@ -710,3 +710,21 @@ export interface CampaignRecipient {
 export interface EmailCampaignDetail extends EmailCampaign {
   recipients: CampaignRecipient[];
 }
+
+// Email Template Types
+export interface EmailTemplate {
+  id: string;
+  name: string;
+  template_type: string;
+  template_type_display?: string;
+  language: 'en' | 'th';
+  subject: string;
+  body_text: string;
+  body_html?: string;
+  is_active: boolean;
+  department?: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+  variable_list?: string[];
+}

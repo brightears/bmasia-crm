@@ -22,14 +22,16 @@ import os
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice,
-    Quote, QuoteLineItem, QuoteAttachment, QuoteActivity
+    Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
+    EmailTemplate
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
     TaskSerializer, OpportunitySerializer, OpportunityActivitySerializer,
     ContractSerializer, InvoiceSerializer, AuditLogSerializer,
     LoginSerializer, DashboardStatsSerializer, BulkOperationSerializer,
-    QuoteSerializer, QuoteLineItemSerializer, QuoteAttachmentSerializer, QuoteActivitySerializer
+    QuoteSerializer, QuoteLineItemSerializer, QuoteAttachmentSerializer, QuoteActivitySerializer,
+    EmailTemplateSerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -2852,3 +2854,194 @@ class AutomationViewSet(viewsets.ViewSet):
             })
 
         return Response(results)
+
+
+class EmailTemplateViewSet(BaseModelViewSet):
+    """ViewSet for EmailTemplate management with preview and duplication"""
+    queryset = EmailTemplate.objects.all()
+    serializer_class = EmailTemplateSerializer
+    permission_classes = [IsAuthenticated]
+    search_fields = ['name', 'template_type', 'subject', 'body_text']
+    ordering_fields = ['created_at', 'name', 'template_type', 'language']
+    ordering = ['-created_at', 'name']
+    filterset_fields = ['template_type', 'language', 'is_active', 'department']
+
+    @action(detail=True, methods=['get'])
+    def preview(self, request, pk=None):
+        """
+        GET /api/v1/email-templates/{id}/preview/
+        Renders template with sample data
+        """
+        template = self.get_object()
+
+        # Sample context data for preview
+        sample_context = {
+            # Common variables
+            'company_name': 'Acme Corp',
+            'contact_name': 'John Doe',
+            'current_year': '2025',
+            'unsubscribe_url': 'https://example.com/unsubscribe',
+
+            # Renewal variables
+            'contract_number': 'C-2025-001',
+            'end_date': '2025-12-31',
+            'days_until_expiry': '30',
+            'monthly_value': '$500',
+
+            # Invoice variables
+            'invoice_number': 'INV-2025-001',
+            'due_date': '2025-02-15',
+            'total_amount': '$1,500',
+            'payment_url': 'https://example.com/pay/inv-001',
+            'days_overdue': '7',
+
+            # Zone variables
+            'zone_name': 'Main Restaurant',
+            'offline_duration': '48 hours',
+            'support_email': 'support@bmasiamusic.com',
+
+            # Other variables
+            'login_url': 'https://example.com/login',
+            'start_date': '2025-01-01',
+        }
+
+        # Render template
+        rendered = template.render(sample_context)
+
+        return Response({
+            'subject': rendered['subject'],
+            'body_text': rendered['body_text'],
+            'body_html': rendered['body_html'],
+            'sample_context': sample_context
+        })
+
+    @action(detail=False, methods=['get'])
+    def variables(self, request):
+        """
+        GET /api/v1/email-templates/variables/?template_type=renewal_30_days
+        Returns list of available variables for a template type
+        """
+        template_type = request.query_params.get('template_type')
+
+        if not template_type:
+            return Response(
+                {'error': 'template_type query parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Common variables available to all templates
+        common_vars = [
+            {'name': 'company_name', 'description': 'Company name', 'example': 'Acme Corp'},
+            {'name': 'contact_name', 'description': 'Contact person name', 'example': 'John Doe'},
+            {'name': 'current_year', 'description': 'Current year', 'example': '2025'},
+            {'name': 'unsubscribe_url', 'description': 'Unsubscribe link', 'example': 'https://example.com/unsubscribe'},
+        ]
+
+        # Template-type specific variables
+        type_vars_map = {
+            # Renewal templates
+            'renewal_30_days': [
+                {'name': 'contract_number', 'description': 'Contract number', 'example': 'C-2025-001'},
+                {'name': 'end_date', 'description': 'Contract end date', 'example': '2025-12-31'},
+                {'name': 'days_until_expiry', 'description': 'Days until contract expires', 'example': '30'},
+                {'name': 'monthly_value', 'description': 'Monthly contract value', 'example': '$500'},
+            ],
+            'renewal_14_days': [
+                {'name': 'contract_number', 'description': 'Contract number', 'example': 'C-2025-001'},
+                {'name': 'end_date', 'description': 'Contract end date', 'example': '2025-12-31'},
+                {'name': 'days_until_expiry', 'description': 'Days until contract expires', 'example': '14'},
+                {'name': 'monthly_value', 'description': 'Monthly contract value', 'example': '$500'},
+            ],
+            'renewal_7_days': [
+                {'name': 'contract_number', 'description': 'Contract number', 'example': 'C-2025-001'},
+                {'name': 'end_date', 'description': 'Contract end date', 'example': '2025-12-31'},
+                {'name': 'days_until_expiry', 'description': 'Days until contract expires', 'example': '7'},
+                {'name': 'monthly_value', 'description': 'Monthly contract value', 'example': '$500'},
+            ],
+            'renewal_urgent': [
+                {'name': 'contract_number', 'description': 'Contract number', 'example': 'C-2025-001'},
+                {'name': 'end_date', 'description': 'Contract end date', 'example': '2025-12-31'},
+                {'name': 'days_until_expiry', 'description': 'Days until contract expires', 'example': '3'},
+                {'name': 'monthly_value', 'description': 'Monthly contract value', 'example': '$500'},
+            ],
+            # Invoice templates
+            'invoice_new': [
+                {'name': 'invoice_number', 'description': 'Invoice number', 'example': 'INV-2025-001'},
+                {'name': 'due_date', 'description': 'Payment due date', 'example': '2025-02-15'},
+                {'name': 'total_amount', 'description': 'Total invoice amount', 'example': '$1,500'},
+                {'name': 'payment_url', 'description': 'Payment link', 'example': 'https://example.com/pay'},
+            ],
+            'payment_reminder_7_days': [
+                {'name': 'invoice_number', 'description': 'Invoice number', 'example': 'INV-2025-001'},
+                {'name': 'due_date', 'description': 'Payment due date', 'example': '2025-02-15'},
+                {'name': 'total_amount', 'description': 'Total invoice amount', 'example': '$1,500'},
+                {'name': 'payment_url', 'description': 'Payment link', 'example': 'https://example.com/pay'},
+                {'name': 'days_overdue', 'description': 'Days payment is overdue', 'example': '7'},
+            ],
+            'payment_reminder_14_days': [
+                {'name': 'invoice_number', 'description': 'Invoice number', 'example': 'INV-2025-001'},
+                {'name': 'due_date', 'description': 'Payment due date', 'example': '2025-02-15'},
+                {'name': 'total_amount', 'description': 'Total invoice amount', 'example': '$1,500'},
+                {'name': 'payment_url', 'description': 'Payment link', 'example': 'https://example.com/pay'},
+                {'name': 'days_overdue', 'description': 'Days payment is overdue', 'example': '14'},
+            ],
+            'payment_overdue': [
+                {'name': 'invoice_number', 'description': 'Invoice number', 'example': 'INV-2025-001'},
+                {'name': 'due_date', 'description': 'Payment due date', 'example': '2025-02-15'},
+                {'name': 'total_amount', 'description': 'Total invoice amount', 'example': '$1,500'},
+                {'name': 'payment_url', 'description': 'Payment link', 'example': 'https://example.com/pay'},
+                {'name': 'days_overdue', 'description': 'Days payment is overdue', 'example': '30'},
+            ],
+            # Zone offline templates
+            'zone_offline_48h': [
+                {'name': 'zone_name', 'description': 'Zone name', 'example': 'Main Restaurant'},
+                {'name': 'offline_duration', 'description': 'How long zone has been offline', 'example': '48 hours'},
+                {'name': 'support_email', 'description': 'Support contact email', 'example': 'support@bmasiamusic.com'},
+            ],
+            'zone_offline_7d': [
+                {'name': 'zone_name', 'description': 'Zone name', 'example': 'Main Restaurant'},
+                {'name': 'offline_duration', 'description': 'How long zone has been offline', 'example': '7 days'},
+                {'name': 'support_email', 'description': 'Support contact email', 'example': 'support@bmasiamusic.com'},
+            ],
+            # General templates
+            'welcome': [
+                {'name': 'login_url', 'description': 'Login URL', 'example': 'https://example.com/login'},
+            ],
+            'contract_signed': [
+                {'name': 'contract_number', 'description': 'Contract number', 'example': 'C-2025-001'},
+                {'name': 'start_date', 'description': 'Contract start date', 'example': '2025-01-01'},
+            ],
+        }
+
+        # Get template-specific variables
+        type_vars = type_vars_map.get(template_type, [])
+
+        return Response({
+            'template_type': template_type,
+            'variables': common_vars + type_vars
+        })
+
+    @action(detail=True, methods=['post'])
+    def duplicate(self, request, pk=None):
+        """
+        POST /api/v1/email-templates/{id}/duplicate/
+        Returns template data for duplication (frontend creates new template with different type)
+        Note: Since template_type is unique, actual duplication must be done via POST /api/v1/email-templates/
+        """
+        original = self.get_object()
+
+        # Return template data that can be used to create a new template
+        # The frontend should create a new template with a different template_type
+        return Response({
+            'message': 'Use this data to create a new template with a different template type',
+            'template_data': {
+                'name': f"{original.name} (Copy)",
+                'subject': original.subject,
+                'body_text': original.body_text,
+                'body_html': original.body_html,
+                'language': original.language,
+                'department': original.department,
+                'is_active': False,
+                'notes': f"Duplicated from {original.name}",
+            }
+        })

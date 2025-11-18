@@ -24,6 +24,7 @@ import Settings from './pages/Settings';
 import Campaigns from './pages/Campaigns';
 import CampaignCreate from './pages/CampaignCreate';
 import CampaignDetail from './pages/CampaignDetail';
+import EmailTemplates from './pages/EmailTemplates';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -247,7 +248,14 @@ function App() {
             </ProtectedRoute>
           }
         />
-        <Route path="/email-templates" element={<PlaceholderPage title="Email Templates" />} />
+        <Route
+          path="/email-templates"
+          element={
+            <ProtectedRoute requiredModule="campaigns">
+              <EmailTemplates />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/analytics" element={<PlaceholderPage title="Marketing Analytics" />} />
         <Route path="/segments" element={<PlaceholderPage title="Customer Segments" />} />
 

@@ -6,7 +6,7 @@ from .models import (
     User, Company, Contact, Note, Task, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice, Zone,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
-    EmailCampaign, CampaignRecipient
+    EmailCampaign, CampaignRecipient, EmailTemplate
 )
 
 
@@ -716,3 +716,127 @@ class EmailCampaignDetailSerializer(EmailCampaignSerializer):
 
     class Meta(EmailCampaignSerializer.Meta):
         fields = EmailCampaignSerializer.Meta.fields + ['recipients']
+
+
+class EmailTemplateSerializer(serializers.ModelSerializer):
+    """Serializer for EmailTemplate model with variable list"""
+    template_type_display = serializers.CharField(source='get_template_type_display', read_only=True)
+    language_display = serializers.CharField(source='get_language_display', read_only=True)
+    variable_list = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EmailTemplate
+        fields = [
+            'id', 'name', 'template_type', 'template_type_display',
+            'language', 'language_display', 'subject', 'body_text', 'body_html',
+            'is_active', 'department', 'notes', 'variable_list',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_variable_list(self, obj):
+        """Return list of available variables for this template type"""
+        # Common variables available to all templates
+        common_vars = [
+            {'name': 'company_name', 'description': 'Company name'},
+            {'name': 'contact_name', 'description': 'Contact person name'},
+            {'name': 'current_year', 'description': 'Current year'},
+            {'name': 'unsubscribe_url', 'description': 'Unsubscribe link'},
+        ]
+
+        # Template-type specific variables
+        type_vars_map = {
+            # Renewal templates
+            'renewal_30_days': [
+                {'name': 'contract_number', 'description': 'Contract number'},
+                {'name': 'end_date', 'description': 'Contract end date'},
+                {'name': 'days_until_expiry', 'description': 'Days until contract expires'},
+                {'name': 'monthly_value', 'description': 'Monthly contract value'},
+            ],
+            'renewal_14_days': [
+                {'name': 'contract_number', 'description': 'Contract number'},
+                {'name': 'end_date', 'description': 'Contract end date'},
+                {'name': 'days_until_expiry', 'description': 'Days until contract expires'},
+                {'name': 'monthly_value', 'description': 'Monthly contract value'},
+            ],
+            'renewal_7_days': [
+                {'name': 'contract_number', 'description': 'Contract number'},
+                {'name': 'end_date', 'description': 'Contract end date'},
+                {'name': 'days_until_expiry', 'description': 'Days until contract expires'},
+                {'name': 'monthly_value', 'description': 'Monthly contract value'},
+            ],
+            'renewal_urgent': [
+                {'name': 'contract_number', 'description': 'Contract number'},
+                {'name': 'end_date', 'description': 'Contract end date'},
+                {'name': 'days_until_expiry', 'description': 'Days until contract expires'},
+                {'name': 'monthly_value', 'description': 'Monthly contract value'},
+            ],
+            # Invoice templates
+            'invoice_new': [
+                {'name': 'invoice_number', 'description': 'Invoice number'},
+                {'name': 'due_date', 'description': 'Payment due date'},
+                {'name': 'total_amount', 'description': 'Total invoice amount'},
+                {'name': 'payment_url', 'description': 'Payment link'},
+            ],
+            'payment_reminder_7_days': [
+                {'name': 'invoice_number', 'description': 'Invoice number'},
+                {'name': 'due_date', 'description': 'Payment due date'},
+                {'name': 'total_amount', 'description': 'Total invoice amount'},
+                {'name': 'payment_url', 'description': 'Payment link'},
+                {'name': 'days_overdue', 'description': 'Days payment is overdue'},
+            ],
+            'payment_reminder_14_days': [
+                {'name': 'invoice_number', 'description': 'Invoice number'},
+                {'name': 'due_date', 'description': 'Payment due date'},
+                {'name': 'total_amount', 'description': 'Total invoice amount'},
+                {'name': 'payment_url', 'description': 'Payment link'},
+                {'name': 'days_overdue', 'description': 'Days payment is overdue'},
+            ],
+            'payment_overdue': [
+                {'name': 'invoice_number', 'description': 'Invoice number'},
+                {'name': 'due_date', 'description': 'Payment due date'},
+                {'name': 'total_amount', 'description': 'Total invoice amount'},
+                {'name': 'payment_url', 'description': 'Payment link'},
+                {'name': 'days_overdue', 'description': 'Days payment is overdue'},
+            ],
+            # Zone offline templates
+            'zone_offline_48h': [
+                {'name': 'zone_name', 'description': 'Zone name'},
+                {'name': 'offline_duration', 'description': 'How long zone has been offline'},
+                {'name': 'support_email', 'description': 'Support contact email'},
+            ],
+            'zone_offline_7d': [
+                {'name': 'zone_name', 'description': 'Zone name'},
+                {'name': 'offline_duration', 'description': 'How long zone has been offline'},
+                {'name': 'support_email', 'description': 'Support contact email'},
+            ],
+            # General templates
+            'welcome': [
+                {'name': 'login_url', 'description': 'Login URL'},
+            ],
+            'contract_signed': [
+                {'name': 'contract_number', 'description': 'Contract number'},
+                {'name': 'start_date', 'description': 'Contract start date'},
+            ],
+        }
+
+        # Get template-specific variables
+        type_vars = type_vars_map.get(obj.template_type, [])
+
+        # Return combined list
+        return common_vars + type_vars
+
+    def validate_template_type(self, value):
+        """Validate that template_type is unique (enforced by model)"""
+        # Check for uniqueness (excluding current instance if updating)
+        query = EmailTemplate.objects.filter(template_type=value)
+
+        if self.instance:
+            query = query.exclude(pk=self.instance.pk)
+
+        if query.exists():
+            raise serializers.ValidationError(
+                f"A template with type '{value}' already exists. Each template type can only have one template."
+            )
+
+        return value

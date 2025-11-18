@@ -600,6 +600,41 @@ class ApiService {
     const response = await authApi.post(`/campaigns/${id}/schedule/`, { scheduled_send_date: scheduledSendDate });
     return response.data;
   }
+
+  // Email Templates
+  async getEmailTemplates(params?: any): Promise<any> {
+    const response = await authApi.get('/email-templates/', { params });
+    return response.data;
+  }
+
+  async getEmailTemplate(id: string): Promise<any> {
+    const response = await authApi.get(`/email-templates/${id}/`);
+    return response.data;
+  }
+
+  async createEmailTemplate(data: any): Promise<any> {
+    const response = await authApi.post('/email-templates/', data);
+    return response.data;
+  }
+
+  async updateEmailTemplate(id: string, data: any): Promise<any> {
+    const response = await authApi.put(`/email-templates/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteEmailTemplate(id: string): Promise<void> {
+    await authApi.delete(`/email-templates/${id}/`);
+  }
+
+  async previewEmailTemplate(id: string): Promise<{ subject: string; body_text: string; body_html?: string }> {
+    const response = await authApi.get(`/email-templates/${id}/preview/`);
+    return response.data;
+  }
+
+  async getTemplateVariables(templateType: string): Promise<string[]> {
+    const response = await authApi.get('/email-templates/variables/', { params: { template_type: templateType } });
+    return response.data;
+  }
 }
 
 export interface EmailSendData {
