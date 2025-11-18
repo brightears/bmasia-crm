@@ -640,6 +640,14 @@ class ApiService {
     const response = await authApi.post(`/email-templates/${id}/duplicate/`);
     return response.data;
   }
+
+  async bulkOperateEmailTemplates(action: string, ids: string[]): Promise<{ message: string; count: number }> {
+    const response = await authApi.post('/email-templates/bulk_operations/', {
+      action,
+      ids
+    });
+    return response.data;
+  }
 }
 
 export interface EmailSendData {

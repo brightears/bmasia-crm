@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -32,6 +32,8 @@ import {
   ContentCopy,
   Code,
 } from '@mui/icons-material';
+import ReactQuill from 'react-quill-new';
+import 'react-quill-new/dist/quill.snow.css';
 import { EmailTemplate } from '../types';
 import ApiService from '../services/api';
 
@@ -77,6 +79,18 @@ const TEMPLATE_TYPES = [
   { value: 'invoice_send', label: 'Invoice Send' },
   { value: 'renewal_manual', label: 'Renewal Manual' },
 ];
+
+// Quill editor configuration
+const quillModules = {
+  toolbar: [
+    [{ 'header': [1, 2, 3, false] }],
+    ['bold', 'italic', 'underline', 'strike'],
+    [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+    [{ 'color': [] }, { 'background': [] }],
+    ['link'],
+    ['clean']
+  ],
+};
 
 // Predefined variables for each template type
 const TEMPLATE_VARIABLES: Record<string, string[]> = {
@@ -125,6 +139,8 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
   const [error, setError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
+
+  const quillRef = useRef<ReactQuill>(null);
 
   useEffect(() => {
     if (template) {
@@ -244,6 +260,17 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
 
   const handleCopyVariable = (variable: string) => {
     navigator.clipboard.writeText(variable);
+  };
+
+  const handleInsertVariable = (variable: string) => {
+    if (quillRef.current) {
+      const editor = quillRef.current.getEditor();
+      const selection = editor.getSelection();
+      const index = selection ? selection.index : editor.getLength();
+      editor.insertText(index, variable);
+      // Move cursor after inserted variable
+      editor.setSelection(index + variable.length, 0);
+    }
   };
 
   const availableVariables = formData.template_type
@@ -405,19 +432,41 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
                   </Typography>
                 </Box>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-                  Click to copy a variable, then paste it into your subject or body
+                  Click variable to copy, or use "Insert" button to add to HTML editor at cursor position
                 </Typography>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                   {availableVariables.map((variable) => (
-                    <Tooltip key={variable} title="Click to copy">
-                      <Chip
-                        label={variable}
-                        size="small"
-                        onClick={() => handleCopyVariable(variable)}
-                        icon={<ContentCopy />}
-                        sx={{ cursor: 'pointer' }}
-                      />
-                    </Tooltip>
+                    <Box key={variable} sx={{ display: 'flex', gap: 0.5 }}>
+                      <Tooltip title="Click to copy">
+                        <Chip
+                          label={variable}
+                          size="small"
+                          onClick={() => handleCopyVariable(variable)}
+                          icon={<ContentCopy />}
+                          sx={{ cursor: 'pointer' }}
+                        />
+                      </Tooltip>
+                      <Tooltip title="Insert at cursor position in HTML editor">
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          onClick={() => handleInsertVariable(variable)}
+                          sx={{
+                            minWidth: 'auto',
+                            px: 1,
+                            fontSize: '0.7rem',
+                            borderColor: '#FFA500',
+                            color: '#FFA500',
+                            '&:hover': {
+                              backgroundColor: 'rgba(255, 165, 0, 0.1)',
+                              borderColor: '#FF8C00',
+                            }
+                          }}
+                        >
+                          Insert
+                        </Button>
+                      </Tooltip>
+                    </Box>
                   ))}
                 </Box>
               </Paper>
@@ -438,16 +487,59 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
               <AccordionDetails>
                 <Grid container spacing={2}>
                   <Grid item xs={12}>
-                    <TextField
-                      fullWidth
-                      label="Body (HTML)"
-                      multiline
-                      rows={10}
-                      value={formData.body_html}
-                      onChange={(e) => handleFieldChange('body_html', e.target.value)}
-                      helperText="Optional: HTML version for rich email clients"
-                      placeholder="<html><body>...</body></html>"
-                    />
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="caption" color="text.secondary" gutterBottom sx={{ display: 'block', mb: 1 }}>
+                        Body (HTML) - Optional
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                        Rich text email body for HTML-capable email clients. Use the toolbar to format your content.
+                      </Typography>
+                      <Box sx={{
+                        '& .ql-container': {
+                          minHeight: '250px',
+                          backgroundColor: 'white',
+                          borderBottomLeftRadius: '4px',
+                          borderBottomRightRadius: '4px',
+                        },
+                        '& .ql-editor': {
+                          minHeight: '250px',
+                          fontSize: '14px',
+                          fontFamily: 'inherit',
+                        },
+                        '& .ql-toolbar': {
+                          backgroundColor: '#f5f5f5',
+                          borderTopLeftRadius: '4px',
+                          borderTopRightRadius: '4px',
+                        },
+                        '& .ql-toolbar .ql-stroke': {
+                          stroke: '#424242',
+                        },
+                        '& .ql-toolbar .ql-fill': {
+                          fill: '#424242',
+                        },
+                        '& .ql-toolbar button:hover .ql-stroke': {
+                          stroke: '#FFA500',
+                        },
+                        '& .ql-toolbar button:hover .ql-fill': {
+                          fill: '#FFA500',
+                        },
+                        '& .ql-toolbar button.ql-active .ql-stroke': {
+                          stroke: '#FFA500',
+                        },
+                        '& .ql-toolbar button.ql-active .ql-fill': {
+                          fill: '#FFA500',
+                        },
+                      }}>
+                        <ReactQuill
+                          ref={quillRef}
+                          theme="snow"
+                          value={formData.body_html || ''}
+                          onChange={(value) => handleFieldChange('body_html', value)}
+                          modules={quillModules}
+                          placeholder="Rich text email body (optional)... Use the 'Insert' buttons above to add variables."
+                        />
+                      </Box>
+                    </Box>
                   </Grid>
                   <Grid item xs={12}>
                     <TextField

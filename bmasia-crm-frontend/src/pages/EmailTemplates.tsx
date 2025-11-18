@@ -29,6 +29,7 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  Checkbox,
 } from '@mui/material';
 import {
   Add,
@@ -40,6 +41,10 @@ import {
   ContentCopy,
   Email,
   Campaign,
+  CheckBox,
+  CheckBoxOutlineBlank,
+  IndeterminateCheckBox,
+  Close,
 } from '@mui/icons-material';
 import { EmailTemplate, ApiResponse } from '../types';
 import ApiService from '../services/api';
@@ -78,6 +83,11 @@ const EmailTemplates: React.FC = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingTemplate, setDeletingTemplate] = useState<EmailTemplate | null>(null);
 
+  // Bulk selection state
+  const [selected, setSelected] = useState<string[]>([]);
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+
   const loadTemplates = useCallback(async () => {
     try {
       setLoading(true);
@@ -112,6 +122,8 @@ const EmailTemplates: React.FC = () => {
 
   useEffect(() => {
     loadTemplates();
+    // Clear selection on page/filter changes
+    setSelected([]);
   }, [loadTemplates]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -231,6 +243,85 @@ const EmailTemplates: React.FC = () => {
     setPreviewOpen(false);
     setPreviewTemplateId(null);
   };
+
+  // Bulk selection handlers
+  const handleSelectAll = () => {
+    if (selected.length === templates.length) {
+      setSelected([]);
+    } else {
+      setSelected(templates.map((t) => t.id));
+    }
+  };
+
+  const handleSelectOne = (id: string) => {
+    setSelected((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkActivate = async () => {
+    try {
+      setBulkLoading(true);
+      setError('');
+      const result = await ApiService.bulkOperateEmailTemplates('activate', selected);
+      setSuccess(result.message || `${result.count} template(s) activated successfully`);
+      setSelected([]);
+      loadTemplates();
+    } catch (err: any) {
+      console.error('Bulk activate error:', err);
+      setError(`Failed to activate templates: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleBulkDeactivate = async () => {
+    try {
+      setBulkLoading(true);
+      setError('');
+      const result = await ApiService.bulkOperateEmailTemplates('deactivate', selected);
+      setSuccess(result.message || `${result.count} template(s) deactivated successfully`);
+      setSelected([]);
+      loadTemplates();
+    } catch (err: any) {
+      console.error('Bulk deactivate error:', err);
+      setError(`Failed to deactivate templates: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleBulkDeleteClick = () => {
+    setBulkDeleteDialogOpen(true);
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    try {
+      setBulkLoading(true);
+      setError('');
+      const result = await ApiService.bulkOperateEmailTemplates('delete', selected);
+      setSuccess(result.message || `${result.count} template(s) deleted successfully`);
+      setSelected([]);
+      setBulkDeleteDialogOpen(false);
+      loadTemplates();
+    } catch (err: any) {
+      console.error('Bulk delete error:', err);
+      setError(`Failed to delete templates: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleBulkDeleteCancel = () => {
+    setBulkDeleteDialogOpen(false);
+  };
+
+  const handleClearSelection = () => {
+    setSelected([]);
+  };
+
+  const isAllSelected = templates.length > 0 && selected.length === templates.length;
+  const isIndeterminate = selected.length > 0 && selected.length < templates.length;
 
   return (
     <Box>
@@ -378,6 +469,14 @@ const EmailTemplates: React.FC = () => {
         <Table>
           <TableHead>
             <TableRow>
+              <TableCell padding="checkbox">
+                <Checkbox
+                  indeterminate={isIndeterminate}
+                  checked={isAllSelected}
+                  onChange={handleSelectAll}
+                  disabled={loading || templates.length === 0}
+                />
+              </TableCell>
               <TableCell>Name</TableCell>
               <TableCell>Type</TableCell>
               <TableCell>Language</TableCell>
@@ -390,13 +489,13 @@ const EmailTemplates: React.FC = () => {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} align="center">
+                <TableCell colSpan={8} align="center">
                   <CircularProgress />
                 </TableCell>
               </TableRow>
             ) : templates.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} align="center">
+                <TableCell colSpan={8} align="center">
                   <Box sx={{ py: 4 }}>
                     <Email sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
                     <Typography variant="h6" color="text.secondary">
@@ -412,7 +511,25 @@ const EmailTemplates: React.FC = () => {
               </TableRow>
             ) : (
               templates.map((template) => (
-                <TableRow key={template.id} hover>
+                <TableRow
+                  key={template.id}
+                  hover
+                  selected={selected.includes(template.id)}
+                  sx={{
+                    '&.Mui-selected': {
+                      backgroundColor: 'rgba(255, 165, 0, 0.08)',
+                      '&:hover': {
+                        backgroundColor: 'rgba(255, 165, 0, 0.12)',
+                      }
+                    }
+                  }}
+                >
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      checked={selected.includes(template.id)}
+                      onChange={() => handleSelectOne(template.id)}
+                    />
+                  </TableCell>
                   <TableCell>
                     <Typography variant="body2" fontWeight="medium">
                       {template.name}
@@ -533,6 +650,87 @@ const EmailTemplates: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <Dialog open={bulkDeleteDialogOpen} onClose={handleBulkDeleteCancel}>
+        <DialogTitle>Delete {selected.length} Template{selected.length === 1 ? '' : 's'}?</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to delete {selected.length} template{selected.length === 1 ? '' : 's'}? This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleBulkDeleteCancel} disabled={bulkLoading}>Cancel</Button>
+          <Button onClick={handleBulkDeleteConfirm} color="error" variant="contained" disabled={bulkLoading}>
+            {bulkLoading ? <CircularProgress size={20} sx={{ mr: 1 }} /> : null}
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk Actions Bar */}
+      {selected.length > 0 && (
+        <Paper
+          elevation={8}
+          sx={{
+            position: 'fixed',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            p: 2,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 2,
+            zIndex: 1200,
+            borderTop: '3px solid #FFA500',
+            backgroundColor: 'background.paper',
+            flexWrap: 'wrap',
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Typography variant="body1" fontWeight="medium">
+              {selected.length} template{selected.length === 1 ? '' : 's'} selected
+            </Typography>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleBulkActivate}
+              disabled={bulkLoading}
+              startIcon={bulkLoading ? <CircularProgress size={16} /> : null}
+            >
+              Activate
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleBulkDeactivate}
+              disabled={bulkLoading}
+              startIcon={bulkLoading ? <CircularProgress size={16} /> : null}
+            >
+              Deactivate
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              color="error"
+              onClick={handleBulkDeleteClick}
+              disabled={bulkLoading}
+              startIcon={<Delete />}
+            >
+              Delete
+            </Button>
+          </Box>
+          <IconButton
+            size="small"
+            onClick={handleClearSelection}
+            disabled={bulkLoading}
+            sx={{ '&:hover': { backgroundColor: 'rgba(255, 165, 0, 0.1)' } }}
+          >
+            <Close />
+          </IconButton>
+        </Paper>
+      )}
 
       {/* Form Modal */}
       <EmailTemplateForm

@@ -456,6 +456,8 @@ class BulkOperationSerializer(serializers.Serializer):
         ('update_status', 'Update Status'),
         ('assign', 'Assign'),
         ('export', 'Export'),
+        ('activate', 'Activate'),
+        ('deactivate', 'Deactivate'),
     ])
     ids = serializers.ListField(
         child=serializers.UUIDField(),

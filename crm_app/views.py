@@ -2886,6 +2886,51 @@ class EmailTemplateViewSet(BaseModelViewSet):
 
         return queryset
 
+    @action(detail=False, methods=['post'])
+    def bulk_operations(self, request):
+        """
+        Handle bulk operations on email templates with activate/deactivate support.
+
+        POST /api/v1/email-templates/bulk_operations/
+        Body: {
+            "action": "activate" | "deactivate" | "delete" | "export",
+            "ids": ["uuid1", "uuid2", ...]
+        }
+        """
+        serializer = BulkOperationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        action_type = serializer.validated_data['action']
+        ids = serializer.validated_data['ids']
+
+        # Get queryset filtered by IDs
+        queryset = self.get_queryset().filter(id__in=ids)
+
+        if action_type == 'activate':
+            count = queryset.update(is_active=True)
+            return Response({
+                'message': f'{count} template{"s" if count != 1 else ""} activated',
+                'count': count
+            })
+
+        elif action_type == 'deactivate':
+            count = queryset.update(is_active=False)
+            return Response({
+                'message': f'{count} template{"s" if count != 1 else ""} deactivated',
+                'count': count
+            })
+
+        elif action_type == 'delete':
+            # Let parent class handle delete with audit logging
+            return super().bulk_operations(request)
+
+        elif action_type == 'export':
+            # Let parent class handle export
+            return super().bulk_operations(request)
+
+        # If action is not recognized, fall back to parent
+        return super().bulk_operations(request)
+
     @action(detail=True, methods=['get'])
     def preview(self, request, pk=None):
         """
