@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -17,14 +17,17 @@ import {
   Breadcrumbs,
   Link,
   Snackbar,
+  Autocomplete,
+  Chip,
 } from '@mui/material';
-import { NavigateNext, ArrowBack, Send, Schedule } from '@mui/icons-material';
+import { NavigateNext, ArrowBack, Send, Schedule, Close } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import ApiService from '../services/api';
 import AudienceSelector from '../components/AudienceSelector';
+import { EmailTemplate } from '../types';
 
 const steps = ['Campaign Basics', 'Email Content', 'Select Audience', 'Schedule', 'Review & Send'];
 
@@ -43,6 +46,35 @@ const CampaignCreate: React.FC = () => {
   const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
   const [scheduledDate, setScheduledDate] = useState<Date | null>(null);
   const [sendImmediately, setSendImmediately] = useState(true);
+
+  // Template selection
+  const [selectedTemplate, setSelectedTemplate] = useState<EmailTemplate | null>(null);
+  const [templates, setTemplates] = useState<EmailTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+
+  // Fetch templates on mount
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      try {
+        setTemplatesLoading(true);
+        const response = await ApiService.getEmailTemplates({ is_active: true });
+        setTemplates(response.results || []);
+      } catch (error) {
+        console.error('Failed to load templates:', error);
+      } finally {
+        setTemplatesLoading(false);
+      }
+    };
+    fetchTemplates();
+  }, []);
+
+  // Auto-fill subject and body when template is selected
+  useEffect(() => {
+    if (selectedTemplate) {
+      setSubject(selectedTemplate.subject || '');
+      setEmailBody(selectedTemplate.body_text || '');
+    }
+  }, [selectedTemplate]);
 
   const handleNext = () => {
     // Validate current step
@@ -82,6 +114,7 @@ const CampaignCreate: React.FC = () => {
         campaign_type: campaignType,
         subject,
         target_audience: { custom_body: emailBody },
+        template: selectedTemplate?.id || null,
         send_immediately: sendImmediately,
         scheduled_send_date: sendImmediately ? null : scheduledDate?.toISOString(),
         contact_ids: selectedContactIds,
@@ -127,6 +160,33 @@ const CampaignCreate: React.FC = () => {
               sx={{ mb: 3 }}
             />
 
+            <Autocomplete
+              fullWidth
+              options={templates}
+              value={selectedTemplate}
+              onChange={(event, newValue) => setSelectedTemplate(newValue)}
+              groupBy={(option) => option.template_type_display || option.template_type}
+              getOptionLabel={(option) => `${option.name} (${option.template_type_display || option.template_type})`}
+              loading={templatesLoading}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Email Template (Optional)"
+                  helperText="Select a template to auto-fill subject and body"
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <>
+                        {templatesLoading ? <CircularProgress color="inherit" size={20} /> : null}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
+                />
+              )}
+              sx={{ mb: 3 }}
+            />
+
             <FormControl fullWidth required sx={{ mb: 3 }}>
               <InputLabel>Campaign Type</InputLabel>
               <Select
@@ -143,6 +203,26 @@ const CampaignCreate: React.FC = () => {
                 <MenuItem value="engagement">Engagement</MenuItem>
               </Select>
             </FormControl>
+
+            {selectedTemplate && (
+              <Box sx={{ mb: 2 }}>
+                <Chip
+                  label={`Template: ${selectedTemplate.name}`}
+                  onDelete={() => setSelectedTemplate(null)}
+                  deleteIcon={<Close />}
+                  sx={{
+                    backgroundColor: '#FFA500',
+                    color: 'white',
+                    '& .MuiChip-deleteIcon': {
+                      color: 'white',
+                      '&:hover': {
+                        color: 'rgba(255, 255, 255, 0.7)',
+                      },
+                    },
+                  }}
+                />
+              </Box>
+            )}
 
             <TextField
               fullWidth
@@ -276,6 +356,17 @@ const CampaignCreate: React.FC = () => {
               <Typography variant="body1" sx={{ mb: 2 }}>
                 {campaignType}
               </Typography>
+
+              {selectedTemplate && (
+                <>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Template
+                  </Typography>
+                  <Typography variant="body1" sx={{ mb: 2 }}>
+                    {selectedTemplate.name}
+                  </Typography>
+                </>
+              )}
 
               <Typography variant="subtitle2" color="text.secondary">
                 Subject

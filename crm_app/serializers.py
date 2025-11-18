@@ -723,6 +723,7 @@ class EmailTemplateSerializer(serializers.ModelSerializer):
     template_type_display = serializers.CharField(source='get_template_type_display', read_only=True)
     language_display = serializers.CharField(source='get_language_display', read_only=True)
     variable_list = serializers.SerializerMethodField()
+    campaigns_using = serializers.SerializerMethodField()
 
     class Meta:
         model = EmailTemplate
@@ -730,9 +731,13 @@ class EmailTemplateSerializer(serializers.ModelSerializer):
             'id', 'name', 'template_type', 'template_type_display',
             'language', 'language_display', 'subject', 'body_text', 'body_html',
             'is_active', 'department', 'notes', 'variable_list',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at', 'campaigns_using'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_campaigns_using(self, obj):
+        """Return count of campaigns using this template"""
+        return obj.campaigns.count()
 
     def get_variable_list(self, obj):
         """Return list of available variables for this template type"""

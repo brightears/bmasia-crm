@@ -2866,6 +2866,26 @@ class EmailTemplateViewSet(BaseModelViewSet):
     ordering = ['-created_at', 'name']
     filterset_fields = ['template_type', 'language', 'is_active', 'department']
 
+    def get_queryset(self):
+        """Override queryset to support has_campaigns filter"""
+        queryset = super().get_queryset()
+
+        # Filter by has_campaigns parameter
+        has_campaigns = self.request.query_params.get('has_campaigns')
+        if has_campaigns is not None:
+            if has_campaigns.lower() in ['true', '1', 'yes']:
+                # Only templates used in campaigns
+                queryset = queryset.annotate(
+                    campaign_count=Count('campaigns')
+                ).filter(campaign_count__gt=0)
+            elif has_campaigns.lower() in ['false', '0', 'no']:
+                # Only templates NOT used in campaigns
+                queryset = queryset.annotate(
+                    campaign_count=Count('campaigns')
+                ).filter(campaign_count=0)
+
+        return queryset
+
     @action(detail=True, methods=['get'])
     def preview(self, request, pk=None):
         """

@@ -39,6 +39,7 @@ import {
   Preview,
   ContentCopy,
   Email,
+  Campaign,
 } from '@mui/icons-material';
 import { EmailTemplate, ApiResponse } from '../types';
 import ApiService from '../services/api';
@@ -50,10 +51,12 @@ const EmailTemplates: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [info, setInfo] = useState('');
   const [search, setSearch] = useState('');
   const [templateTypeFilter, setTemplateTypeFilter] = useState('');
   const [languageFilter, setLanguageFilter] = useState('');
   const [activeFilter, setActiveFilter] = useState('');
+  const [usageFilter, setUsageFilter] = useState<string>('all');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [totalCount, setTotalCount] = useState(0);
@@ -61,6 +64,7 @@ const EmailTemplates: React.FC = () => {
   // Form modal state
   const [formOpen, setFormOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null);
+  const [duplicateData, setDuplicateData] = useState<Partial<EmailTemplate> | null>(null);
 
   // Preview modal state
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -87,6 +91,8 @@ const EmailTemplates: React.FC = () => {
       if (templateTypeFilter) params.template_type = templateTypeFilter;
       if (languageFilter) params.language = languageFilter;
       if (activeFilter) params.is_active = activeFilter === 'true';
+      if (usageFilter === 'used') params.has_campaigns = true;
+      if (usageFilter === 'unused') params.has_campaigns = false;
 
       console.log('Loading email templates with params:', params);
       const response: ApiResponse<EmailTemplate> = await ApiService.getEmailTemplates(params);
@@ -102,7 +108,7 @@ const EmailTemplates: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, rowsPerPage, search, templateTypeFilter, languageFilter, activeFilter]);
+  }, [page, rowsPerPage, search, templateTypeFilter, languageFilter, activeFilter, usageFilter]);
 
   useEffect(() => {
     loadTemplates();
@@ -152,16 +158,25 @@ const EmailTemplates: React.FC = () => {
   const handleDuplicateTemplate = async (template: EmailTemplate) => {
     try {
       setError('');
-      const duplicateData = {
-        ...template,
-        name: `${template.name} (Copy)`,
+      setInfo('');
+      // Call the backend duplicate endpoint to get template data without saving
+      const duplicatedData = await ApiService.duplicateEmailTemplate(template.id);
+
+      // Remove id and timestamps to ensure form treats it as new template
+      // Append " (Copy)" to the name
+      const templateWithCopy = {
+        ...duplicatedData,
         id: undefined,
         created_at: undefined,
         updated_at: undefined,
-      };
-      await ApiService.createEmailTemplate(duplicateData);
-      setSuccess('Template duplicated successfully');
-      loadTemplates();
+        name: `${duplicatedData.name || template.name} (Copy)`,
+      } as Partial<EmailTemplate>;
+
+      // Set the duplicate data and open the form in create mode
+      setDuplicateData(templateWithCopy);
+      setEditingTemplate(null); // Ensure we're in create mode
+      setFormOpen(true);
+      setInfo('Template duplicated. Change the template type to save.');
     } catch (err: any) {
       console.error('Duplicate template error:', err);
       setError(`Failed to duplicate template: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
@@ -199,6 +214,8 @@ const EmailTemplates: React.FC = () => {
   const handleFormSave = () => {
     setFormOpen(false);
     setEditingTemplate(null);
+    setDuplicateData(null);
+    setInfo('');
     setSuccess(editingTemplate ? 'Template updated successfully' : 'Template created successfully');
     loadTemplates();
   };
@@ -206,6 +223,8 @@ const EmailTemplates: React.FC = () => {
   const handleFormClose = () => {
     setFormOpen(false);
     setEditingTemplate(null);
+    setDuplicateData(null);
+    setInfo('');
   };
 
   const handlePreviewClose = () => {
@@ -241,9 +260,15 @@ const EmailTemplates: React.FC = () => {
         </Alert>
       )}
 
+      {info && (
+        <Alert severity="info" sx={{ mb: 2 }} onClose={() => setInfo('')}>
+          {info}
+        </Alert>
+      )}
+
       <Paper sx={{ mb: 2, p: 2 }}>
         <Grid container spacing={2}>
-          <Grid item xs={12} md={6}>
+          <Grid item xs={12} md={12} lg={4}>
             <TextField
               fullWidth
               size="small"
@@ -259,7 +284,7 @@ const EmailTemplates: React.FC = () => {
               }}
             />
           </Grid>
-          <Grid item xs={12} sm={6} md={2}>
+          <Grid item xs={12} sm={6} md={3} lg={2}>
             <FormControl fullWidth size="small">
               <InputLabel>Type</InputLabel>
               <Select
@@ -295,7 +320,7 @@ const EmailTemplates: React.FC = () => {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={12} sm={6} md={2}>
+          <Grid item xs={12} sm={6} md={3} lg={2}>
             <FormControl fullWidth size="small">
               <InputLabel>Language</InputLabel>
               <Select
@@ -312,7 +337,24 @@ const EmailTemplates: React.FC = () => {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={12} sm={6} md={2}>
+          <Grid item xs={12} sm={6} md={3} lg={2}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Usage</InputLabel>
+              <Select
+                value={usageFilter}
+                label="Usage"
+                onChange={(e) => {
+                  setUsageFilter(e.target.value);
+                  setPage(0);
+                }}
+              >
+                <MenuItem value="all">All Templates</MenuItem>
+                <MenuItem value="used">Used in Campaigns</MenuItem>
+                <MenuItem value="unused">Not Used</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} sm={6} md={3} lg={2}>
             <FormControl fullWidth size="small">
               <InputLabel>Status</InputLabel>
               <Select
@@ -340,6 +382,7 @@ const EmailTemplates: React.FC = () => {
               <TableCell>Type</TableCell>
               <TableCell>Language</TableCell>
               <TableCell>Department</TableCell>
+              <TableCell>Campaigns</TableCell>
               <TableCell>Status</TableCell>
               <TableCell align="right">Actions</TableCell>
             </TableRow>
@@ -347,13 +390,13 @@ const EmailTemplates: React.FC = () => {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={6} align="center">
+                <TableCell colSpan={7} align="center">
                   <CircularProgress />
                 </TableCell>
               </TableRow>
             ) : templates.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} align="center">
+                <TableCell colSpan={7} align="center">
                   <Box sx={{ py: 4 }}>
                     <Email sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
                     <Typography variant="h6" color="text.secondary">
@@ -398,6 +441,18 @@ const EmailTemplates: React.FC = () => {
                       <Typography variant="body2">{template.department}</Typography>
                     ) : (
                       <Typography variant="caption" color="text.secondary">-</Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {template.campaigns_using !== undefined ? (
+                      <Chip
+                        label={template.campaigns_using === 0 ? 'Not used' : `${template.campaigns_using} campaign${template.campaigns_using === 1 ? '' : 's'}`}
+                        size="small"
+                        color={template.campaigns_using > 0 ? 'primary' : 'default'}
+                        icon={template.campaigns_using > 0 ? <Campaign /> : undefined}
+                      />
+                    ) : (
+                      '-'
                     )}
                   </TableCell>
                   <TableCell>
@@ -483,7 +538,7 @@ const EmailTemplates: React.FC = () => {
       <EmailTemplateForm
         open={formOpen}
         onClose={handleFormClose}
-        template={editingTemplate}
+        template={(editingTemplate || duplicateData) as EmailTemplate | null}
         onSave={handleFormSave}
       />
 

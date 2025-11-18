@@ -635,6 +635,11 @@ class ApiService {
     const response = await authApi.get('/email-templates/variables/', { params: { template_type: templateType } });
     return response.data;
   }
+
+  async duplicateEmailTemplate(id: string): Promise<Partial<any>> {
+    const response = await authApi.post(`/email-templates/${id}/duplicate/`);
+    return response.data;
+  }
 }
 
 export interface EmailSendData {

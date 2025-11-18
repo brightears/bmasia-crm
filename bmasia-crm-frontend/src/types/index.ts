@@ -727,4 +727,5 @@ export interface EmailTemplate {
   created_at: string;
   updated_at: string;
   variable_list?: string[];
+  campaigns_using?: number;
 }
