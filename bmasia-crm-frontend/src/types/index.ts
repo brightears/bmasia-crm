@@ -942,3 +942,69 @@ export interface TicketStats {
   unassigned: number;
   overdue: number;
 }
+
+// Knowledge Base Types
+export interface KBCategory {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  parent: string | null;
+  icon: string;
+  display_order: number;
+  is_active: boolean;
+  article_count: number;
+  full_path: string;
+  children?: KBCategory[];
+}
+
+export interface KBTag {
+  id: string;
+  name: string;
+  slug: string;
+  color: string;
+  article_count: number;
+}
+
+export interface KBArticle {
+  id: string;
+  article_number: string;
+  title: string;
+  slug: string;
+  content: string;
+  excerpt: string;
+  category: {
+    id: string;
+    name: string;
+    slug: string;
+  };
+  tags: KBTag[];
+  status: 'draft' | 'published' | 'archived';
+  visibility: 'public' | 'internal';
+  author: {
+    id: string;
+    username: string;
+    full_name: string;
+  };
+  featured: boolean;
+  view_count: number;
+  helpful_count: number;
+  not_helpful_count: number;
+  helpfulness_ratio: number;
+  published_at: string;
+  created_at: string;
+  updated_at: string;
+  related_articles?: KBArticle[];
+  attachments?: KBAttachment[];
+}
+
+export interface KBAttachment {
+  id: string;
+  article: string;
+  name: string;
+  file: string;
+  size: number;
+  uploaded_by: string;
+  uploaded_by_name: string;
+  created_at: string;
+}

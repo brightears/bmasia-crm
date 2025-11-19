@@ -32,6 +32,8 @@ import SegmentForm from './pages/SegmentForm';
 import Tickets from './pages/Tickets';
 import TicketDetail from './pages/TicketDetail';
 import TicketForm from './pages/TicketForm';
+import KnowledgeBase from './pages/KnowledgeBase';
+import KnowledgeBaseArticle from './pages/KnowledgeBaseArticle';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -338,7 +340,22 @@ function App() {
             </ProtectedRoute>
           }
         />
-        <Route path="/knowledge-base" element={<PlaceholderPage title="Knowledge Base" />} />
+        <Route
+          path="/knowledge-base"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <KnowledgeBase />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/knowledge-base/:id"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <KnowledgeBaseArticle />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/equipment" element={<PlaceholderPage title="Equipment Management" />} />
         <Route path="/slas" element={<PlaceholderPage title="Service Level Agreements" />} />
 
