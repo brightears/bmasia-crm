@@ -34,7 +34,7 @@ import {
 } from '@mui/icons-material';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
-import { EmailTemplate } from '../types';
+import { EmailTemplate, TemplateVariable } from '../types';
 import ApiService from '../services/api';
 
 interface EmailTemplateFormProps {
@@ -91,29 +91,96 @@ const quillModules = {
   ],
 };
 
-// Predefined variables for each template type
-const TEMPLATE_VARIABLES: Record<string, string[]> = {
-  renewal_30_days: ['{{company_name}}', '{{contract_number}}', '{{end_date}}', '{{contact_name}}'],
-  renewal_14_days: ['{{company_name}}', '{{contract_number}}', '{{end_date}}', '{{contact_name}}'],
-  renewal_7_days: ['{{company_name}}', '{{contract_number}}', '{{end_date}}', '{{contact_name}}'],
-  renewal_urgent: ['{{company_name}}', '{{contract_number}}', '{{end_date}}', '{{contact_name}}'],
-  invoice_new: ['{{company_name}}', '{{invoice_number}}', '{{amount}}', '{{due_date}}', '{{contact_name}}'],
-  payment_reminder_7_days: ['{{company_name}}', '{{invoice_number}}', '{{amount}}', '{{due_date}}', '{{contact_name}}'],
-  payment_reminder_14_days: ['{{company_name}}', '{{invoice_number}}', '{{amount}}', '{{due_date}}', '{{contact_name}}'],
-  payment_overdue: ['{{company_name}}', '{{invoice_number}}', '{{amount}}', '{{days_overdue}}', '{{contact_name}}'],
-  quarterly_checkin: ['{{company_name}}', '{{contact_name}}', '{{quarter}}'],
-  seasonal_christmas: ['{{company_name}}', '{{contact_name}}'],
-  seasonal_newyear: ['{{company_name}}', '{{contact_name}}'],
-  seasonal_songkran: ['{{company_name}}', '{{contact_name}}'],
-  seasonal_ramadan: ['{{company_name}}', '{{contact_name}}'],
-  zone_offline_48h: ['{{company_name}}', '{{zone_name}}', '{{offline_duration}}', '{{contact_name}}'],
-  zone_offline_7d: ['{{company_name}}', '{{zone_name}}', '{{offline_duration}}', '{{contact_name}}'],
-  welcome: ['{{company_name}}', '{{contact_name}}'],
-  contract_signed: ['{{company_name}}', '{{contract_number}}', '{{contact_name}}'],
-  quote_send: ['{{company_name}}', '{{quote_number}}', '{{amount}}', '{{contact_name}}'],
-  contract_send: ['{{company_name}}', '{{contract_number}}', '{{contact_name}}'],
-  invoice_send: ['{{company_name}}', '{{invoice_number}}', '{{amount}}', '{{contact_name}}'],
-  renewal_manual: ['{{company_name}}', '{{contract_number}}', '{{end_date}}', '{{contact_name}}'],
+// Predefined variables for each template type (matches backend structure)
+const TEMPLATE_VARIABLES: Record<string, TemplateVariable[]> = {
+  // Common variables included in all templates
+  common: [
+    { name: 'company_name', description: 'Company name' },
+    { name: 'contact_name', description: 'Contact person name' },
+    { name: 'current_year', description: 'Current year' },
+    { name: 'unsubscribe_url', description: 'Unsubscribe link' },
+  ],
+  // Renewal templates
+  renewal_30_days: [
+    { name: 'contract_number', description: 'Contract number' },
+    { name: 'end_date', description: 'Contract end date' },
+    { name: 'days_until_expiry', description: 'Days until contract expires' },
+    { name: 'monthly_value', description: 'Monthly contract value' },
+  ],
+  renewal_14_days: [
+    { name: 'contract_number', description: 'Contract number' },
+    { name: 'end_date', description: 'Contract end date' },
+    { name: 'days_until_expiry', description: 'Days until contract expires' },
+    { name: 'monthly_value', description: 'Monthly contract value' },
+  ],
+  renewal_7_days: [
+    { name: 'contract_number', description: 'Contract number' },
+    { name: 'end_date', description: 'Contract end date' },
+    { name: 'days_until_expiry', description: 'Days until contract expires' },
+    { name: 'monthly_value', description: 'Monthly contract value' },
+  ],
+  renewal_urgent: [
+    { name: 'contract_number', description: 'Contract number' },
+    { name: 'end_date', description: 'Contract end date' },
+    { name: 'days_until_expiry', description: 'Days until contract expires' },
+    { name: 'monthly_value', description: 'Monthly contract value' },
+  ],
+  // Invoice templates
+  invoice_new: [
+    { name: 'invoice_number', description: 'Invoice number' },
+    { name: 'due_date', description: 'Payment due date' },
+    { name: 'total_amount', description: 'Total invoice amount' },
+    { name: 'payment_url', description: 'Payment link' },
+  ],
+  payment_reminder_7_days: [
+    { name: 'invoice_number', description: 'Invoice number' },
+    { name: 'due_date', description: 'Payment due date' },
+    { name: 'total_amount', description: 'Total invoice amount' },
+    { name: 'payment_url', description: 'Payment link' },
+    { name: 'days_overdue', description: 'Days payment is overdue' },
+  ],
+  payment_reminder_14_days: [
+    { name: 'invoice_number', description: 'Invoice number' },
+    { name: 'due_date', description: 'Payment due date' },
+    { name: 'total_amount', description: 'Total invoice amount' },
+    { name: 'payment_url', description: 'Payment link' },
+    { name: 'days_overdue', description: 'Days payment is overdue' },
+  ],
+  payment_overdue: [
+    { name: 'invoice_number', description: 'Invoice number' },
+    { name: 'due_date', description: 'Payment due date' },
+    { name: 'total_amount', description: 'Total invoice amount' },
+    { name: 'payment_url', description: 'Payment link' },
+    { name: 'days_overdue', description: 'Days payment is overdue' },
+  ],
+  // Zone offline templates
+  zone_offline_48h: [
+    { name: 'zone_name', description: 'Zone name' },
+    { name: 'offline_duration', description: 'How long zone has been offline' },
+    { name: 'support_email', description: 'Support contact email' },
+  ],
+  zone_offline_7d: [
+    { name: 'zone_name', description: 'Zone name' },
+    { name: 'offline_duration', description: 'How long zone has been offline' },
+    { name: 'support_email', description: 'Support contact email' },
+  ],
+  // Quarterly checkin
+  quarterly_checkin: [
+    { name: 'quarter', description: 'Current quarter (Q1, Q2, Q3, Q4)' },
+  ],
+  // Seasonal templates
+  seasonal_christmas: [],
+  seasonal_newyear: [],
+  seasonal_songkran: [],
+  seasonal_ramadan: [],
+  // General templates
+  welcome: [
+    { name: 'login_url', description: 'Login URL' },
+  ],
+  contract_signed: [
+    { name: 'contract_number', description: 'Contract number' },
+    { name: 'start_date', description: 'Contract start date' },
+  ],
 };
 
 const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
@@ -278,9 +345,22 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
     }
   };
 
-  const availableVariables = formData.template_type
-    ? TEMPLATE_VARIABLES[formData.template_type] || []
-    : [];
+  // Get available variables - prioritize backend data if available
+  const availableVariables: TemplateVariable[] = React.useMemo(() => {
+    // If editing existing template with variable_list from backend, use that
+    if (template?.variable_list && template.variable_list.length > 0) {
+      return template.variable_list as TemplateVariable[];
+    }
+
+    // Otherwise, combine common variables with template-specific ones
+    if (formData.template_type) {
+      const common = TEMPLATE_VARIABLES.common || [];
+      const specific = TEMPLATE_VARIABLES[formData.template_type] || [];
+      return [...common, ...specific];
+    }
+
+    return [];
+  }, [template, formData.template_type]);
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
@@ -491,39 +571,42 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
                   Click "Insert" to add a variable at the cursor position in your email body, or click the variable to copy it.
                 </Typography>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                  {availableVariables.map((variable) => (
-                    <Box key={variable} sx={{ display: 'flex', gap: 0.5 }}>
-                      <Tooltip title="Click to copy">
-                        <Chip
-                          label={variable}
-                          size="small"
-                          onClick={() => handleCopyVariable(variable)}
-                          icon={<ContentCopy />}
-                          sx={{ cursor: 'pointer' }}
-                        />
-                      </Tooltip>
-                      <Tooltip title="Insert at cursor position">
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          onClick={() => handleInsertVariable(variable)}
-                          sx={{
-                            minWidth: 'auto',
-                            px: 1,
-                            fontSize: '0.7rem',
-                            borderColor: '#FFA500',
-                            color: '#FFA500',
-                            '&:hover': {
-                              backgroundColor: 'rgba(255, 165, 0, 0.1)',
-                              borderColor: '#FF8C00',
-                            }
-                          }}
-                        >
-                          Insert
-                        </Button>
-                      </Tooltip>
-                    </Box>
-                  ))}
+                  {availableVariables.map((variable) => {
+                    const varString = `{{${variable.name}}}`;
+                    return (
+                      <Box key={variable.name} sx={{ display: 'flex', gap: 0.5 }}>
+                        <Tooltip title={`${variable.description} - Click to copy`}>
+                          <Chip
+                            label={varString}
+                            size="small"
+                            onClick={() => handleCopyVariable(varString)}
+                            icon={<ContentCopy />}
+                            sx={{ cursor: 'pointer' }}
+                          />
+                        </Tooltip>
+                        <Tooltip title={`Insert ${variable.description.toLowerCase()} at cursor`}>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => handleInsertVariable(varString)}
+                            sx={{
+                              minWidth: 'auto',
+                              px: 1,
+                              fontSize: '0.7rem',
+                              borderColor: '#FFA500',
+                              color: '#FFA500',
+                              '&:hover': {
+                                backgroundColor: 'rgba(255, 165, 0, 0.1)',
+                                borderColor: '#FF8C00',
+                              }
+                            }}
+                          >
+                            Insert
+                          </Button>
+                        </Tooltip>
+                      </Box>
+                    );
+                  })}
                 </Box>
               </Paper>
             </Grid>

@@ -712,6 +712,11 @@ export interface EmailCampaignDetail extends EmailCampaign {
 }
 
 // Email Template Types
+export interface TemplateVariable {
+  name: string;
+  description: string;
+}
+
 export interface EmailTemplate {
   id: string;
   name: string;
@@ -726,7 +731,7 @@ export interface EmailTemplate {
   notes?: string;
   created_at: string;
   updated_at: string;
-  variable_list?: string[];
+  variable_list?: TemplateVariable[];  // Array of {name, description} objects from backend
   campaigns_using?: number;
 }
 
