@@ -1793,10 +1793,21 @@ class CustomerSegment(TimestampedModel):
         else:
             field_path = field
 
+        # Define boolean fields that should use __exact instead of __iexact
+        boolean_fields = [
+            'is_active', 'unsubscribed', 'is_billing_contact',
+            'is_decision_maker', 'is_primary_contact',
+            'company.is_active'
+        ]
+
+        # Check if this is a boolean field
+        is_boolean = field in boolean_fields
+
         # Build Q object based on operator
+        # Use case-sensitive exact match for booleans, case-insensitive for strings
         operator_mapping = {
-            'equals': f'{field_path}__iexact',
-            'not_equals': f'{field_path}__iexact',
+            'equals': f'{field_path}__exact' if is_boolean else f'{field_path}__iexact',
+            'not_equals': f'{field_path}__exact' if is_boolean else f'{field_path}__iexact',
             'contains': f'{field_path}__icontains',
             'not_contains': f'{field_path}__icontains',
             'starts_with': f'{field_path}__istartswith',
