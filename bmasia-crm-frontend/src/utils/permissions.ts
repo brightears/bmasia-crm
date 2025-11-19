@@ -36,6 +36,9 @@ export const ROLE_PERMISSIONS = {
     'view_campaigns',
     'create_campaigns',
     'edit_campaigns',
+    'view_tickets',
+    'create_tickets',
+    'edit_own_tickets',
   ],
   Marketing: [
     'view_companies',
@@ -67,6 +70,9 @@ export const ROLE_PERMISSIONS = {
     'create_campaigns',
     'edit_campaigns',
     'delete_campaigns',
+    'view_tickets',
+    'create_tickets',
+    'edit_own_tickets',
   ],
   'Tech Support': [
     'view_companies',
@@ -86,6 +92,11 @@ export const ROLE_PERMISSIONS = {
     'edit_all_notes',
     'manage_technical_settings',
     'view_campaigns',
+    'view_tickets',
+    'create_tickets',
+    'edit_tickets',
+    'delete_tickets',
+    'assign_tickets',
   ],
   Admin: [
     // Admins have all permissions
@@ -135,6 +146,11 @@ export const ROLE_PERMISSIONS = {
     'create_campaigns',
     'edit_campaigns',
     'delete_campaigns',
+    'view_tickets',
+    'create_tickets',
+    'edit_tickets',
+    'delete_tickets',
+    'assign_tickets',
   ],
 } as const;
 
@@ -212,7 +228,7 @@ export const canAccessModule = (user: User | null, module: string): boolean => {
     'email-templates': 'view_campaigns',
     segments: 'view_campaigns',
     analytics: 'view_analytics',
-    tickets: 'manage_technical_settings',
+    tickets: 'view_tickets',
     'knowledge-base': 'manage_technical_settings',
     equipment: 'manage_technical_settings',
     users: 'manage_users',
