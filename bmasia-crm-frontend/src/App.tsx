@@ -31,6 +31,7 @@ import Segments from './pages/Segments';
 import SegmentForm from './pages/SegmentForm';
 import Tickets from './pages/Tickets';
 import TicketDetail from './pages/TicketDetail';
+import TicketForm from './pages/TicketForm';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -317,7 +318,7 @@ function App() {
           path="/tickets/new"
           element={
             <ProtectedRoute requiredModule="tickets">
-              <PlaceholderPage title="New Ticket" />
+              <TicketForm />
             </ProtectedRoute>
           }
         />
@@ -333,7 +334,7 @@ function App() {
           path="/tickets/:id/edit"
           element={
             <ProtectedRoute requiredModule="tickets">
-              <PlaceholderPage title="Edit Ticket" />
+              <TicketForm />
             </ProtectedRoute>
           }
         />
