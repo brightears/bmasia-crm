@@ -859,3 +859,86 @@ export interface EnrollInSequenceResponse {
   sequence_name: string;
   segment_name: string;
 }
+
+// Support Ticket Types
+export interface Ticket {
+  id: string;
+  ticket_number: string;
+  subject: string;
+  description: string;
+  status: 'new' | 'assigned' | 'in_progress' | 'pending' | 'resolved' | 'closed';
+  priority: 'low' | 'medium' | 'high' | 'urgent';
+  category: 'technical' | 'billing' | 'zone_config' | 'account' | 'feature_request' | 'general';
+
+  company: string;
+  company_name: string;
+  contact: string | null;
+  contact_name: string | null;
+  assigned_to: string | null;
+  assigned_to_name: string | null;
+  assigned_team: string;
+  created_by: string | null;
+  created_by_name: string | null;
+
+  first_response_at: string | null;
+  resolved_at: string | null;
+  closed_at: string | null;
+  due_date: string | null;
+
+  first_response_time_hours: number | null;
+  resolution_time_hours: number | null;
+  is_overdue: boolean;
+
+  tags: string;
+  comments: TicketComment[];
+  attachments: TicketAttachment[];
+  comments_count: number;
+  internal_notes_count: number;
+
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TicketComment {
+  id: string;
+  ticket: string;
+  author: string | null;
+  author_name: string | null;
+  author_role: string | null;
+  text: string;
+  is_internal: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TicketAttachment {
+  id: string;
+  ticket: string;
+  file: string;
+  name: string;
+  size: number;
+  uploaded_by: string | null;
+  uploaded_by_name: string | null;
+  created_at: string;
+}
+
+export interface TicketStats {
+  total: number;
+  by_status: {
+    new: number;
+    assigned: number;
+    in_progress: number;
+    pending: number;
+    resolved: number;
+    closed: number;
+  };
+  by_priority: {
+    urgent: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  my_open_tickets: number;
+  unassigned: number;
+  overdue: number;
+}

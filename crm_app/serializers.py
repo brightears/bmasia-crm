@@ -8,7 +8,7 @@ from .models import (
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailCampaign, CampaignRecipient, EmailTemplate,
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
-    CustomerSegment
+    CustomerSegment, Ticket, TicketComment, TicketAttachment
 )
 
 
@@ -999,3 +999,96 @@ class CustomerSegmentSerializer(serializers.ModelSerializer):
             print(f"Error calculating member count: {e}")
 
         return segment
+
+
+# Support Ticket System Serializers
+class TicketAttachmentSerializer(serializers.ModelSerializer):
+    """Serializer for TicketAttachment model"""
+    uploaded_by_name = serializers.CharField(source='uploaded_by.get_full_name', read_only=True)
+
+    class Meta:
+        model = TicketAttachment
+        fields = [
+            'id', 'ticket', 'file', 'name', 'size',
+            'uploaded_by', 'uploaded_by_name', 'created_at'
+        ]
+        read_only_fields = ['id', 'uploaded_by_name', 'created_at']
+
+
+class TicketCommentSerializer(serializers.ModelSerializer):
+    """Serializer for TicketComment model"""
+    author_name = serializers.CharField(source='author.get_full_name', read_only=True)
+    author_role = serializers.CharField(source='author.role', read_only=True)
+
+    class Meta:
+        model = TicketComment
+        fields = [
+            'id', 'ticket', 'author', 'author_name', 'author_role',
+            'text', 'is_internal', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'author', 'author_name', 'author_role', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        """Auto-set author from request user"""
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            validated_data['author'] = request.user
+        return super().create(validated_data)
+
+
+class TicketSerializer(serializers.ModelSerializer):
+    """Serializer for Ticket model with nested comments and attachments"""
+    company_name = serializers.CharField(source='company.name', read_only=True)
+    contact_name = serializers.CharField(source='contact.name', read_only=True, allow_null=True)
+    assigned_to_name = serializers.CharField(source='assigned_to.get_full_name', read_only=True, allow_null=True)
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True, allow_null=True)
+
+    # Computed fields
+    first_response_time_hours = serializers.ReadOnlyField()
+    resolution_time_hours = serializers.ReadOnlyField()
+    is_overdue = serializers.ReadOnlyField()
+
+    # Nested data
+    comments = TicketCommentSerializer(many=True, read_only=True)
+    attachments = TicketAttachmentSerializer(many=True, read_only=True)
+
+    # Count fields
+    comments_count = serializers.SerializerMethodField()
+    internal_notes_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Ticket
+        fields = [
+            'id', 'ticket_number', 'subject', 'description',
+            'status', 'priority', 'category',
+            'company', 'company_name', 'contact', 'contact_name',
+            'assigned_to', 'assigned_to_name', 'assigned_team',
+            'created_by', 'created_by_name',
+            'first_response_at', 'resolved_at', 'closed_at', 'due_date',
+            'first_response_time_hours', 'resolution_time_hours', 'is_overdue',
+            'tags', 'comments', 'attachments',
+            'comments_count', 'internal_notes_count',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'ticket_number', 'company_name', 'contact_name',
+            'assigned_to_name', 'created_by_name', 'first_response_at',
+            'resolved_at', 'closed_at', 'first_response_time_hours',
+            'resolution_time_hours', 'is_overdue', 'comments_count',
+            'internal_notes_count', 'created_at', 'updated_at'
+        ]
+
+    def get_comments_count(self, obj):
+        """Count public comments (exclude internal notes)"""
+        return obj.comments.filter(is_internal=False).count()
+
+    def get_internal_notes_count(self, obj):
+        """Count internal notes"""
+        return obj.comments.filter(is_internal=True).count()
+
+    def create(self, validated_data):
+        """Auto-set created_by from request user"""
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            validated_data['created_by'] = request.user
+        return super().create(validated_data)

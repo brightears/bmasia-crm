@@ -30,6 +30,9 @@ router.register(r'sequence-steps', views.SequenceStepViewSet, basename='sequence
 router.register(r'sequence-enrollments', views.SequenceEnrollmentViewSet, basename='sequenceenrollment')
 router.register(r'sequence-executions', views.SequenceStepExecutionViewSet, basename='sequencestepexecution')
 router.register(r'segments', views.CustomerSegmentViewSet, basename='segment')
+router.register(r'tickets', views.TicketViewSet, basename='ticket')
+router.register(r'ticket-comments', views.TicketCommentViewSet, basename='ticketcomment')
+router.register(r'ticket-attachments', views.TicketAttachmentViewSet, basename='ticketattachment')
 
 # The API URLs are now determined automatically by the router.
 urlpatterns = [

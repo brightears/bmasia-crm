@@ -19,7 +19,7 @@ from .models import (
     EmailTemplate, EmailLog, EmailCampaign, CampaignRecipient, DocumentAttachment,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
-    CustomerSegment
+    CustomerSegment, Ticket, TicketComment, TicketAttachment
 )
 
 
@@ -2380,3 +2380,247 @@ class CustomerSegmentAdmin(admin.ModelAdmin):
         # Calculate member count after save
         if obj.segment_type == 'dynamic':
             obj.update_member_count()
+
+
+# Support Ticket System Admin
+class TicketCommentInline(admin.TabularInline):
+    """Inline admin for ticket comments"""
+    model = TicketComment
+    extra = 1
+    fields = ['author', 'text', 'is_internal', 'created_at']
+    readonly_fields = ['created_at']
+
+    def get_queryset(self, request):
+        """Optimize inline queries"""
+        return super().get_queryset(request).select_related('author', 'ticket')
+
+
+class TicketAttachmentInline(admin.TabularInline):
+    """Inline admin for ticket attachments"""
+    model = TicketAttachment
+    extra = 1
+    fields = ['file', 'name', 'size_display', 'uploaded_by', 'created_at']
+    readonly_fields = ['size_display', 'created_at']
+
+    def size_display(self, obj):
+        """Display file size in human-readable format"""
+        if obj.size:
+            if obj.size < 1024:
+                return f"{obj.size} bytes"
+            elif obj.size < 1024 * 1024:
+                return f"{obj.size / 1024:.2f} KB"
+            else:
+                return f"{obj.size / (1024 * 1024):.2f} MB"
+        return "Unknown"
+    size_display.short_description = "File Size"
+
+    def get_queryset(self, request):
+        """Optimize inline queries"""
+        return super().get_queryset(request).select_related('uploaded_by', 'ticket')
+
+
+@admin.register(Ticket)
+class TicketAdmin(admin.ModelAdmin):
+    """Admin interface for support tickets"""
+    list_display = [
+        'ticket_number',
+        'subject',
+        'company',
+        'status_badge',
+        'priority_badge',
+        'category',
+        'assigned_to',
+        'created_at',
+        'is_overdue_badge'
+    ]
+    list_filter = [
+        'status',
+        'priority',
+        'category',
+        'assigned_team',
+        'created_at',
+        'assigned_to'
+    ]
+    search_fields = [
+        'ticket_number',
+        'subject',
+        'description',
+        'company__name',
+        'contact__name',
+        'contact__email'
+    ]
+    readonly_fields = [
+        'ticket_number',
+        'created_by',
+        'created_at',
+        'updated_at',
+        'first_response_time_display',
+        'resolution_time_display',
+        'is_overdue_badge'
+    ]
+
+    fieldsets = (
+        ('Ticket Information', {
+            'fields': (
+                'ticket_number',
+                'subject',
+                'description',
+                'company',
+                'contact'
+            )
+        }),
+        ('Classification', {
+            'fields': (
+                'status',
+                'priority',
+                'category',
+                'tags'
+            )
+        }),
+        ('Assignment', {
+            'fields': (
+                'assigned_to',
+                'assigned_team',
+                'created_by'
+            )
+        }),
+        ('Time Tracking', {
+            'fields': (
+                'due_date',
+                'first_response_at',
+                'first_response_time_display',
+                'resolved_at',
+                'resolution_time_display',
+                'closed_at',
+                'is_overdue_badge'
+            )
+        }),
+        ('Metadata', {
+            'fields': (
+                'created_at',
+                'updated_at'
+            ),
+            'classes': ('collapse',)
+        }),
+    )
+
+    inlines = [TicketCommentInline, TicketAttachmentInline]
+
+    def get_queryset(self, request):
+        """Optimize queryset with select_related"""
+        return super().get_queryset(request).select_related(
+            'company',
+            'contact',
+            'assigned_to',
+            'created_by'
+        )
+
+    def status_badge(self, obj):
+        """Display status with color badge"""
+        colors = {
+            'new': '#e74c3c',  # Red
+            'assigned': '#f39c12',  # Orange
+            'in_progress': '#3498db',  # Blue
+            'pending': '#9b59b6',  # Purple
+            'resolved': '#2ecc71',  # Green
+            'closed': '#95a5a6',  # Gray
+        }
+        color = colors.get(obj.status, '#95a5a6')
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 8px; border-radius: 3px; font-weight: bold;">{}</span>',
+            color,
+            obj.get_status_display()
+        )
+    status_badge.short_description = 'Status'
+
+    def priority_badge(self, obj):
+        """Display priority with color badge"""
+        colors = {
+            'low': '#95a5a6',  # Gray
+            'medium': '#3498db',  # Blue
+            'high': '#f39c12',  # Orange
+            'urgent': '#e74c3c',  # Red
+        }
+        color = colors.get(obj.priority, '#95a5a6')
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 8px; border-radius: 3px; font-weight: bold;">{}</span>',
+            color,
+            obj.get_priority_display()
+        )
+    priority_badge.short_description = 'Priority'
+
+    def is_overdue_badge(self, obj):
+        """Display overdue status"""
+        if obj.is_overdue:
+            return format_html(
+                '<span style="background-color: #e74c3c; color: white; padding: 3px 8px; border-radius: 3px; font-weight: bold;">OVERDUE</span>'
+            )
+        return format_html(
+            '<span style="color: #2ecc71; font-weight: bold;">On Track</span>'
+        )
+    is_overdue_badge.short_description = 'Status'
+
+    def first_response_time_display(self, obj):
+        """Display first response time in hours"""
+        hours = obj.first_response_time_hours
+        if hours is not None:
+            return f"{hours} hours"
+        return "No response yet"
+    first_response_time_display.short_description = 'First Response Time'
+
+    def resolution_time_display(self, obj):
+        """Display resolution time in hours"""
+        hours = obj.resolution_time_hours
+        if hours is not None:
+            return f"{hours} hours"
+        return "Not resolved"
+    resolution_time_display.short_description = 'Resolution Time'
+
+    def save_model(self, request, obj, form, change):
+        """Set created_by on new tickets"""
+        if not change:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(TicketComment)
+class TicketCommentAdmin(admin.ModelAdmin):
+    """Admin interface for ticket comments"""
+    list_display = ['ticket', 'author', 'comment_preview', 'is_internal', 'created_at']
+    list_filter = ['is_internal', 'created_at']
+    search_fields = ['ticket__ticket_number', 'ticket__subject', 'text', 'author__username']
+    readonly_fields = ['created_at', 'updated_at']
+
+    def get_queryset(self, request):
+        """Optimize queryset"""
+        return super().get_queryset(request).select_related('ticket', 'author')
+
+    def comment_preview(self, obj):
+        """Show preview of comment text"""
+        return obj.text[:100] + '...' if len(obj.text) > 100 else obj.text
+    comment_preview.short_description = 'Comment'
+
+
+@admin.register(TicketAttachment)
+class TicketAttachmentAdmin(admin.ModelAdmin):
+    """Admin interface for ticket attachments"""
+    list_display = ['name', 'ticket', 'size_display', 'uploaded_by', 'created_at']
+    list_filter = ['created_at']
+    search_fields = ['name', 'ticket__ticket_number', 'ticket__subject']
+    readonly_fields = ['size', 'created_at']
+
+    def get_queryset(self, request):
+        """Optimize queryset"""
+        return super().get_queryset(request).select_related('ticket', 'uploaded_by')
+
+    def size_display(self, obj):
+        """Display file size in human-readable format"""
+        if obj.size:
+            if obj.size < 1024:
+                return f"{obj.size} bytes"
+            elif obj.size < 1024 * 1024:
+                return f"{obj.size / 1024:.2f} KB"
+            else:
+                return f"{obj.size / (1024 * 1024):.2f} MB"
+        return "Unknown"
+    size_display.short_description = 'File Size'

@@ -29,6 +29,8 @@ import EmailSequences from './pages/EmailSequences';
 import SequenceDetail from './pages/SequenceDetail';
 import Segments from './pages/Segments';
 import SegmentForm from './pages/SegmentForm';
+import Tickets from './pages/Tickets';
+import TicketDetail from './pages/TicketDetail';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -303,7 +305,38 @@ function App() {
         />
 
         {/* Tech Support routes */}
-        <Route path="/tickets" element={<PlaceholderPage title="Support Tickets" />} />
+        <Route
+          path="/tickets"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <Tickets />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/tickets/new"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <PlaceholderPage title="New Ticket" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/tickets/:id"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <TicketDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/tickets/:id/edit"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <PlaceholderPage title="Edit Ticket" />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/knowledge-base" element={<PlaceholderPage title="Knowledge Base" />} />
         <Route path="/equipment" element={<PlaceholderPage title="Equipment Management" />} />
         <Route path="/slas" element={<PlaceholderPage title="Service Level Agreements" />} />

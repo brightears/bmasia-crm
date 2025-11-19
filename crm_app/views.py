@@ -2,6 +2,7 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Sum, Count, Avg
 from django.utils import timezone
@@ -24,7 +25,8 @@ from .models import (
     Opportunity, OpportunityActivity, Contract, Invoice,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailTemplate, EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
-    CustomerSegment, EmailCampaign, CampaignRecipient
+    CustomerSegment, EmailCampaign, CampaignRecipient,
+    Ticket, TicketComment, TicketAttachment
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
@@ -34,7 +36,7 @@ from .serializers import (
     QuoteSerializer, QuoteLineItemSerializer, QuoteAttachmentSerializer, QuoteActivitySerializer,
     EmailTemplateSerializer, EmailSequenceSerializer, SequenceStepSerializer,
     SequenceEnrollmentSerializer, SequenceStepExecutionSerializer,
-    CustomerSegmentSerializer
+    CustomerSegmentSerializer, TicketSerializer, TicketCommentSerializer, TicketAttachmentSerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -3537,3 +3539,273 @@ class CustomerSegmentViewSet(viewsets.ModelViewSet):
                 'valid': False,
                 'error': str(e)
             }, status=status.HTTP_400_BAD_REQUEST)
+
+
+# Support Ticket System ViewSets
+class TicketViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing support tickets with filtering, search, and custom actions.
+    Provides comprehensive ticket management including assignment, comments, and statistics.
+    """
+    queryset = Ticket.objects.all()
+    serializer_class = TicketSerializer
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ['status', 'priority', 'category', 'company', 'assigned_to']
+    search_fields = ['ticket_number', 'subject', 'description', 'company__name']
+    ordering_fields = ['created_at', 'priority', 'status', 'due_date']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        """Apply custom filters and optimize queries"""
+        queryset = super().get_queryset()
+
+        # Custom filters from query parameters
+        assigned_team = self.request.query_params.get('assigned_team', None)
+        my_tickets = self.request.query_params.get('my_tickets', None)
+        unassigned = self.request.query_params.get('unassigned', None)
+        open_tickets = self.request.query_params.get('open', None)
+
+        # Filter by team
+        if assigned_team:
+            queryset = queryset.filter(assigned_team=assigned_team)
+
+        # Filter by current user's assigned tickets
+        if my_tickets == 'true' and self.request.user.is_authenticated:
+            queryset = queryset.filter(assigned_to=self.request.user)
+
+        # Filter unassigned tickets
+        if unassigned == 'true':
+            queryset = queryset.filter(assigned_to__isnull=True)
+
+        # Filter open tickets (exclude resolved and closed)
+        if open_tickets == 'true':
+            queryset = queryset.exclude(status__in=['resolved', 'closed'])
+
+        # Optimize with select_related and prefetch_related
+        queryset = queryset.select_related(
+            'company', 'contact', 'assigned_to', 'created_by'
+        ).prefetch_related('comments', 'attachments')
+
+        return queryset
+
+    @action(detail=True, methods=['post'])
+    def add_comment(self, request, pk=None):
+        """
+        Add a comment to a ticket.
+
+        Request body:
+        {
+            "text": "Comment text here",
+            "is_internal": false
+        }
+        """
+        ticket = self.get_object()
+        text = request.data.get('text')
+        is_internal = request.data.get('is_internal', False)
+
+        if not text:
+            return Response(
+                {'error': 'text is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Create the comment
+            comment = TicketComment.objects.create(
+                ticket=ticket,
+                author=request.user,
+                text=text,
+                is_internal=is_internal
+            )
+
+            # Return updated ticket with new comment
+            serializer = self.get_serializer(ticket)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=True, methods=['post'])
+    def assign(self, request, pk=None):
+        """
+        Assign or unassign a ticket to a user.
+
+        Request body:
+        {
+            "user_id": "uuid-string"  // or null to unassign
+        }
+        """
+        ticket = self.get_object()
+        user_id = request.data.get('user_id')
+
+        try:
+            if user_id:
+                # Assign to user
+                user = User.objects.get(pk=user_id)
+                ticket.assigned_to = user
+                ticket.assigned_team = user.role
+                ticket.status = 'assigned'
+            else:
+                # Unassign ticket
+                ticket.assigned_to = None
+                ticket.assigned_team = ''
+                ticket.status = 'new'
+
+            ticket.save()
+
+            # Return updated ticket
+            serializer = self.get_serializer(ticket)
+            return Response(serializer.data)
+
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'User not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """
+        Get ticket statistics including counts by status, priority, and user.
+
+        Returns:
+        {
+            "total": 150,
+            "by_status": {"new": 20, "assigned": 30, ...},
+            "by_priority": {"low": 10, "medium": 50, ...},
+            "my_open_tickets": 5,
+            "unassigned": 10,
+            "overdue": 3
+        }
+        """
+        queryset = self.get_queryset()
+
+        # Total tickets
+        total = queryset.count()
+
+        # Count by status
+        by_status = {}
+        for status_choice in Ticket.STATUS_CHOICES:
+            status_key = status_choice[0]
+            by_status[status_key] = queryset.filter(status=status_key).count()
+
+        # Count by priority
+        by_priority = {}
+        for priority_choice in Ticket.PRIORITY_CHOICES:
+            priority_key = priority_choice[0]
+            by_priority[priority_key] = queryset.filter(priority=priority_key).count()
+
+        # My open tickets
+        my_open_tickets = 0
+        if request.user.is_authenticated:
+            my_open_tickets = queryset.filter(
+                assigned_to=request.user
+            ).exclude(status__in=['resolved', 'closed']).count()
+
+        # Unassigned tickets
+        unassigned = queryset.filter(assigned_to__isnull=True).count()
+
+        # Overdue tickets (using property, so need to iterate)
+        overdue_count = 0
+        for ticket in queryset.exclude(status__in=['resolved', 'closed']):
+            if ticket.is_overdue:
+                overdue_count += 1
+
+        return Response({
+            'total': total,
+            'by_status': by_status,
+            'by_priority': by_priority,
+            'my_open_tickets': my_open_tickets,
+            'unassigned': unassigned,
+            'overdue': overdue_count
+        })
+
+
+class TicketCommentViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing ticket comments.
+    Supports filtering by ticket and auto-sets author from request user.
+    """
+    queryset = TicketComment.objects.all()
+    serializer_class = TicketCommentSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """Filter by ticket if provided"""
+        queryset = super().get_queryset()
+
+        # Filter by ticket if provided in query params
+        ticket_id = self.request.query_params.get('ticket', None)
+        if ticket_id:
+            queryset = queryset.filter(ticket_id=ticket_id)
+
+        # Optimize with select_related
+        queryset = queryset.select_related('author', 'ticket')
+
+        return queryset
+
+
+class TicketAttachmentViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing ticket file attachments.
+    Supports file uploads with metadata tracking.
+    """
+    queryset = TicketAttachment.objects.all()
+    serializer_class = TicketAttachmentSerializer
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def create(self, request, *args, **kwargs):
+        """Handle file upload with metadata"""
+        try:
+            # Get file from request
+            file = request.FILES.get('file')
+            if not file:
+                return Response(
+                    {'error': 'file is required'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Get ticket_id from request data
+            ticket_id = request.data.get('ticket')
+            if not ticket_id:
+                return Response(
+                    {'error': 'ticket is required'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Verify ticket exists
+            try:
+                ticket = Ticket.objects.get(pk=ticket_id)
+            except Ticket.DoesNotExist:
+                return Response(
+                    {'error': 'Ticket not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # Create attachment
+            attachment = TicketAttachment.objects.create(
+                ticket=ticket,
+                file=file,
+                name=file.name,
+                size=file.size,
+                uploaded_by=request.user
+            )
+
+            # Serialize and return
+            serializer = self.get_serializer(attachment)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )

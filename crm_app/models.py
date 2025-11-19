@@ -1854,3 +1854,299 @@ class CustomerSegment(TimestampedModel):
         self.last_used_at = timezone.now()
         self.times_used += 1
         self.save(update_fields=['last_used_at', 'times_used'])
+
+
+# Support Ticket System Models
+class Ticket(TimestampedModel):
+    """
+    Support ticket system for tracking customer issues and requests.
+    Auto-generates ticket numbers and manages ticket lifecycle.
+    """
+    STATUS_CHOICES = [
+        ('new', 'New'),
+        ('assigned', 'Assigned'),
+        ('in_progress', 'In Progress'),
+        ('pending', 'Pending Customer Response'),
+        ('resolved', 'Resolved'),
+        ('closed', 'Closed'),
+    ]
+
+    PRIORITY_CHOICES = [
+        ('low', 'Low'),
+        ('medium', 'Medium'),
+        ('high', 'High'),
+        ('urgent', 'Urgent'),
+    ]
+
+    CATEGORY_CHOICES = [
+        ('technical', 'Technical Issue'),
+        ('billing', 'Billing Question'),
+        ('zone_config', 'Zone Configuration'),
+        ('account', 'Account Management'),
+        ('feature_request', 'Feature Request'),
+        ('general', 'General Inquiry'),
+    ]
+
+    # Category to team mapping for auto-assignment
+    CATEGORY_TEAM_MAP = {
+        'technical': 'Tech',
+        'billing': 'Finance',
+        'zone_config': 'Music',
+        'account': 'Sales',
+    }
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    ticket_number = models.CharField(
+        max_length=50,
+        unique=True,
+        db_index=True,
+        help_text="Auto-generated ticket number (T-YYYYMMDD-NNNN)"
+    )
+
+    # Ticket details
+    subject = models.CharField(max_length=200)
+    description = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='new', db_index=True)
+    priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='medium', db_index=True)
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='general')
+
+    # Relationships
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        related_name='tickets',
+        help_text="Company this ticket is for"
+    )
+    contact = models.ForeignKey(
+        Contact,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tickets',
+        help_text="Contact who submitted the ticket"
+    )
+
+    # Assignment
+    assigned_to = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_tickets',
+        help_text="User assigned to handle this ticket"
+    )
+    assigned_team = models.CharField(
+        max_length=20,
+        choices=User.ROLE_CHOICES,
+        blank=True,
+        help_text="Team responsible for this ticket"
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='created_tickets',
+        help_text="User who created this ticket"
+    )
+
+    # Time tracking
+    first_response_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When first comment/response was added"
+    )
+    resolved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When ticket was marked as resolved"
+    )
+    closed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When ticket was closed"
+    )
+    due_date = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When ticket should be resolved by"
+    )
+
+    # Additional metadata
+    tags = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="Comma-separated tags for categorization"
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Support Ticket'
+        verbose_name_plural = 'Support Tickets'
+        indexes = [
+            models.Index(fields=['company', 'status']),
+            models.Index(fields=['assigned_to', 'status']),
+            models.Index(fields=['priority', 'status']),
+            models.Index(fields=['category', 'status']),
+            models.Index(fields=['-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.ticket_number} - {self.subject}"
+
+    def save(self, *args, **kwargs):
+        """Auto-generate ticket number and set timestamps"""
+        # Generate ticket number if not set
+        if not self.ticket_number:
+            self.ticket_number = self._generate_ticket_number()
+
+        # Auto-set timestamps based on status changes
+        if self.status == 'resolved' and not self.resolved_at:
+            self.resolved_at = timezone.now()
+        elif self.status == 'closed' and not self.closed_at:
+            self.closed_at = timezone.now()
+
+        # Auto-assign team based on category if not already set
+        if not self.assigned_team and self.category in self.CATEGORY_TEAM_MAP:
+            self.assigned_team = self.CATEGORY_TEAM_MAP[self.category]
+
+        super().save(*args, **kwargs)
+
+    def _generate_ticket_number(self):
+        """Generate unique ticket number in format T-YYYYMMDD-NNNN"""
+        today = timezone.now().date()
+        date_prefix = f"T-{today.strftime('%Y%m%d')}"
+
+        # Find the highest ticket number for today
+        from django.db.models import Max
+        latest_ticket = Ticket.objects.filter(
+            ticket_number__startswith=date_prefix
+        ).aggregate(Max('ticket_number'))
+
+        latest_number = latest_ticket['ticket_number__max']
+
+        if latest_number:
+            # Extract the counter and increment
+            counter = int(latest_number.split('-')[-1]) + 1
+        else:
+            # First ticket of the day
+            counter = 1
+
+        return f"{date_prefix}-{counter:04d}"
+
+    @property
+    def first_response_time_hours(self):
+        """Calculate hours between creation and first response"""
+        if self.first_response_at:
+            delta = self.first_response_at - self.created_at
+            return round(delta.total_seconds() / 3600, 2)
+        return None
+
+    @property
+    def resolution_time_hours(self):
+        """Calculate hours between creation and resolution"""
+        if self.resolved_at:
+            delta = self.resolved_at - self.created_at
+            return round(delta.total_seconds() / 3600, 2)
+        return None
+
+    @property
+    def is_overdue(self):
+        """Check if ticket is past due date and not resolved/closed"""
+        if self.due_date and self.status not in ['resolved', 'closed']:
+            return timezone.now() > self.due_date
+        return False
+
+
+class TicketComment(TimestampedModel):
+    """
+    Comments and internal notes for support tickets.
+    Tracks communication history and first response time.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name='comments',
+        help_text="Ticket this comment belongs to"
+    )
+    author = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        help_text="User who wrote this comment"
+    )
+    text = models.TextField(help_text="Comment text")
+    is_internal = models.BooleanField(
+        default=False,
+        help_text="True for internal notes, False for public comments"
+    )
+
+    class Meta:
+        ordering = ['created_at']
+        verbose_name = 'Ticket Comment'
+        verbose_name_plural = 'Ticket Comments'
+        indexes = [
+            models.Index(fields=['ticket', 'created_at']),
+        ]
+
+    def __str__(self):
+        comment_type = 'Internal Note' if self.is_internal else 'Comment'
+        return f"{comment_type} on {self.ticket.ticket_number}"
+
+    def save(self, *args, **kwargs):
+        """Set first_response_at on ticket when first comment is added"""
+        is_new = self._state.adding
+
+        super().save(*args, **kwargs)
+
+        # Update ticket's first_response_at if this is the first comment
+        if is_new and not self.ticket.first_response_at and not self.is_internal:
+            self.ticket.first_response_at = self.created_at
+            self.ticket.save(update_fields=['first_response_at'])
+
+
+class TicketAttachment(TimestampedModel):
+    """
+    File attachments for support tickets.
+    Stores files and tracks metadata.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name='attachments',
+        help_text="Ticket this attachment belongs to"
+    )
+    file = models.FileField(
+        upload_to='tickets/attachments/%Y/%m/',
+        help_text="Upload file"
+    )
+    name = models.CharField(
+        max_length=200,
+        help_text="File name"
+    )
+    size = models.IntegerField(
+        help_text="File size in bytes"
+    )
+    uploaded_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        help_text="User who uploaded this file"
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Ticket Attachment'
+        verbose_name_plural = 'Ticket Attachments'
+
+    def __str__(self):
+        return f"{self.name} - {self.ticket.ticket_number}"
+
+    def save(self, *args, **kwargs):
+        """Auto-populate name and size from file"""
+        if self.file and not self.name:
+            self.name = self.file.name
+        if self.file and not self.size:
+            self.size = self.file.size
+        super().save(*args, **kwargs)

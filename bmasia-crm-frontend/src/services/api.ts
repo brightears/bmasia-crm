@@ -789,6 +789,57 @@ class ApiService {
     const response = await authApi.post<SegmentValidationResponse>('/segments/validate_filters/', { filter_criteria });
     return response.data;
   }
+
+  // Ticket API methods
+  async getTickets(params?: any): Promise<ApiResponse<any>> {
+    const response = await authApi.get('/tickets/', { params });
+    return response.data;
+  }
+
+  async getTicket(id: string): Promise<any> {
+    const response = await authApi.get(`/tickets/${id}/`);
+    return response.data;
+  }
+
+  async createTicket(data: Partial<any>): Promise<any> {
+    const response = await authApi.post('/tickets/', data);
+    return response.data;
+  }
+
+  async updateTicket(id: string, data: Partial<any>): Promise<any> {
+    const response = await authApi.patch(`/tickets/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteTicket(id: string): Promise<void> {
+    await authApi.delete(`/tickets/${id}/`);
+  }
+
+  async assignTicket(id: string, userId: string | null): Promise<any> {
+    const response = await authApi.post(`/tickets/${id}/assign/`, { user_id: userId });
+    return response.data;
+  }
+
+  async addTicketComment(ticketId: string, data: Partial<any>): Promise<any> {
+    const response = await authApi.post(`/tickets/${ticketId}/add_comment/`, data);
+    return response.data;
+  }
+
+  async getTicketStats(): Promise<any> {
+    const response = await authApi.get('/tickets/stats/');
+    return response.data;
+  }
+
+  async uploadTicketAttachment(ticketId: string, file: File): Promise<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('ticket', ticketId);
+
+    const response = await authApi.post('/ticket-attachments/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return response.data;
+  }
 }
 
 export interface EmailSendData {
