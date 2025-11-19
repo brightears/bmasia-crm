@@ -648,6 +648,95 @@ class ApiService {
     });
     return response.data;
   }
+
+  // Email Sequences
+  async getEmailSequences(params?: any): Promise<any> {
+    const response = await authApi.get('/email-sequences/', { params });
+    return response.data;
+  }
+
+  async getEmailSequence(id: string): Promise<any> {
+    const response = await authApi.get(`/email-sequences/${id}/`);
+    return response.data;
+  }
+
+  async createEmailSequence(data: any): Promise<any> {
+    const response = await authApi.post('/email-sequences/', data);
+    return response.data;
+  }
+
+  async updateEmailSequence(id: string, data: any): Promise<any> {
+    const response = await authApi.put(`/email-sequences/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteEmailSequence(id: string): Promise<void> {
+    await authApi.delete(`/email-sequences/${id}/`);
+  }
+
+  async duplicateEmailSequence(id: string): Promise<any> {
+    const original = await this.getEmailSequence(id);
+    const duplicate = {
+      name: `${original.name} (Copy)`,
+      description: original.description,
+      status: 'paused' as const,
+    };
+    return this.createEmailSequence(duplicate);
+  }
+
+  // Sequence Steps
+  async getSequenceSteps(params?: any): Promise<ApiResponse<any>> {
+    const response = await authApi.get('/sequence-steps/', { params });
+    return response.data;
+  }
+
+  async createSequenceStep(data: Partial<any>): Promise<any> {
+    const response = await authApi.post('/sequence-steps/', data);
+    return response.data;
+  }
+
+  async updateSequenceStep(id: string, data: Partial<any>): Promise<any> {
+    const response = await authApi.put(`/sequence-steps/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteSequenceStep(id: string): Promise<void> {
+    await authApi.delete(`/sequence-steps/${id}/`);
+  }
+
+  // Sequence Enrollments
+  async getSequenceEnrollments(params?: any): Promise<ApiResponse<any>> {
+    const response = await authApi.get('/sequence-enrollments/', { params });
+    return response.data;
+  }
+
+  async createSequenceEnrollment(data: Partial<any>): Promise<any> {
+    const response = await authApi.post('/sequence-enrollments/', data);
+    return response.data;
+  }
+
+  async updateSequenceEnrollment(id: string, data: Partial<any>): Promise<any> {
+    const response = await authApi.put(`/sequence-enrollments/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteSequenceEnrollment(id: string): Promise<void> {
+    await authApi.delete(`/sequence-enrollments/${id}/`);
+  }
+
+  async pauseSequenceEnrollment(id: string): Promise<any> {
+    return this.updateSequenceEnrollment(id, { status: 'paused' });
+  }
+
+  async resumeSequenceEnrollment(id: string): Promise<any> {
+    return this.updateSequenceEnrollment(id, { status: 'active' });
+  }
+
+  // Sequence Step Executions
+  async getSequenceStepExecutions(params?: any): Promise<ApiResponse<any>> {
+    const response = await authApi.get('/sequence-step-executions/', { params });
+    return response.data;
+  }
 }
 
 export interface EmailSendData {

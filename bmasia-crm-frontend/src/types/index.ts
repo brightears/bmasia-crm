@@ -729,3 +729,68 @@ export interface EmailTemplate {
   variable_list?: string[];
   campaigns_using?: number;
 }
+
+// Email Sequence Types
+export interface SequenceStep {
+  id: string;
+  sequence: string;
+  step_number: number;
+  name: string;
+  email_template: string;
+  email_template_name: string;
+  delay_days: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EmailSequence {
+  id: string;
+  name: string;
+  description: string;
+  status: 'active' | 'paused' | 'archived';
+  steps: SequenceStep[];
+  total_steps: number;
+  active_enrollments: number;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SequenceStepExecution {
+  id: string;
+  enrollment: string;
+  step: string;
+  step_name: string;
+  contact_email: string;
+  scheduled_for: string;
+  sent_at: string | null;
+  email_log: string | null;
+  status: 'pending' | 'scheduled' | 'sent' | 'failed' | 'skipped';
+  error_message: string;
+  attempt_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SequenceEnrollment {
+  id: string;
+  sequence: string;
+  sequence_name: string;
+  contact: string;
+  contact_name: string;
+  contact_email: string;
+  company: string | null;
+  company_name: string | null;
+  enrolled_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  status: 'active' | 'paused' | 'completed' | 'unsubscribed';
+  current_step_number: number;
+  progress: string;
+  notes: string;
+  step_executions: SequenceStepExecution[];
+  created_at: string;
+  updated_at: string;
+}

@@ -126,6 +126,7 @@ const unifiedNavigation = [
     items: [
       { text: 'Campaigns', icon: <CampaignIcon />, path: '/campaigns' },
       { text: 'Email Templates', icon: <EmailIcon />, path: '/email-templates' },
+      { text: 'Email Sequences', icon: <HistoryIcon />, path: '/email-sequences' },
       { text: 'Segments', icon: <GroupIcon />, path: '/segments' },
     ],
   },

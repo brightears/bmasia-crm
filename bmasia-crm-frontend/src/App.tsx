@@ -25,6 +25,8 @@ import Campaigns from './pages/Campaigns';
 import CampaignCreate from './pages/CampaignCreate';
 import CampaignDetail from './pages/CampaignDetail';
 import EmailTemplates from './pages/EmailTemplates';
+import EmailSequences from './pages/EmailSequences';
+import SequenceDetail from './pages/SequenceDetail';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -253,6 +255,22 @@ function App() {
           element={
             <ProtectedRoute requiredModule="campaigns">
               <EmailTemplates />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/email-sequences"
+          element={
+            <ProtectedRoute requiredModule="campaigns">
+              <EmailSequences />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/email-sequences/:id"
+          element={
+            <ProtectedRoute requiredModule="campaigns">
+              <SequenceDetail />
             </ProtectedRoute>
           }
         />
