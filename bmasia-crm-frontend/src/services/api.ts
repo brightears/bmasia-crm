@@ -843,12 +843,12 @@ class ApiService {
 
   // Knowledge Base API methods
   async getKBCategories(): Promise<any> {
-    const response = await authApi.get('/v1/kb/categories/');
+    const response = await authApi.get('/kb/categories/');
     return response;
   }
 
   async getKBTags(): Promise<any> {
-    const response = await authApi.get('/v1/kb/tags/');
+    const response = await authApi.get('/kb/tags/');
     return response;
   }
 
@@ -861,37 +861,37 @@ class ApiService {
     status?: string;
     ordering?: string;
   }): Promise<ApiResponse<any>> {
-    const response = await authApi.get('/v1/kb/articles/', { params });
+    const response = await authApi.get('/kb/articles/', { params });
     return response.data;
   }
 
   async getKBArticle(id: string): Promise<any> {
-    const response = await authApi.get(`/v1/kb/articles/${id}/`);
+    const response = await authApi.get(`/kb/articles/${id}/`);
     return response.data;
   }
 
   async searchKBArticles(query: string): Promise<any> {
-    const response = await authApi.get('/v1/kb/articles/search/', { params: { q: query } });
+    const response = await authApi.get('/kb/articles/search/', { params: { q: query } });
     return response.data;
   }
 
   async getFeaturedArticles(): Promise<any> {
-    const response = await authApi.get('/v1/kb/articles/featured/');
+    const response = await authApi.get('/kb/articles/featured/');
     return response;
   }
 
   async getPopularArticles(limit: number = 5): Promise<any> {
-    const response = await authApi.get('/v1/kb/articles/popular/', { params: { limit } });
+    const response = await authApi.get('/kb/articles/popular/', { params: { limit } });
     return response.data;
   }
 
   async recordArticleView(id: string): Promise<any> {
-    const response = await authApi.post(`/v1/kb/articles/${id}/record_view/`);
+    const response = await authApi.post(`/kb/articles/${id}/record_view/`);
     return response.data;
   }
 
   async rateArticle(id: string, isHelpful: boolean): Promise<any> {
-    const response = await authApi.post(`/v1/kb/articles/${id}/rate/`, { is_helpful: isHelpful });
+    const response = await authApi.post(`/kb/articles/${id}/rate/`, { is_helpful: isHelpful });
     return response.data;
   }
 }
