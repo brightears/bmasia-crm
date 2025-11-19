@@ -27,6 +27,8 @@ import CampaignDetail from './pages/CampaignDetail';
 import EmailTemplates from './pages/EmailTemplates';
 import EmailSequences from './pages/EmailSequences';
 import SequenceDetail from './pages/SequenceDetail';
+import Segments from './pages/Segments';
+import SegmentForm from './pages/SegmentForm';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -275,7 +277,30 @@ function App() {
           }
         />
         <Route path="/analytics" element={<PlaceholderPage title="Marketing Analytics" />} />
-        <Route path="/segments" element={<PlaceholderPage title="Customer Segments" />} />
+        <Route
+          path="/segments"
+          element={
+            <ProtectedRoute requiredModule="campaigns">
+              <Segments />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/segments/new"
+          element={
+            <ProtectedRoute requiredModule="campaigns">
+              <SegmentForm />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/segments/:id/edit"
+          element={
+            <ProtectedRoute requiredModule="campaigns">
+              <SegmentForm />
+            </ProtectedRoute>
+          }
+        />
 
         {/* Tech Support routes */}
         <Route path="/tickets" element={<PlaceholderPage title="Support Tickets" />} />

@@ -23,7 +23,8 @@ from .models import (
     User, Company, Contact, Note, Task, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
-    EmailTemplate, EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution
+    EmailTemplate, EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
+    CustomerSegment, EmailCampaign, CampaignRecipient
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
@@ -32,7 +33,8 @@ from .serializers import (
     LoginSerializer, DashboardStatsSerializer, BulkOperationSerializer,
     QuoteSerializer, QuoteLineItemSerializer, QuoteAttachmentSerializer, QuoteActivitySerializer,
     EmailTemplateSerializer, EmailSequenceSerializer, SequenceStepSerializer,
-    SequenceEnrollmentSerializer, SequenceStepExecutionSerializer
+    SequenceEnrollmentSerializer, SequenceStepExecutionSerializer,
+    CustomerSegmentSerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -3270,3 +3272,268 @@ class SequenceStepExecutionViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['enrollment__contact__email', 'step__name']
     ordering_fields = ['scheduled_for', 'sent_at']
     ordering = ['-scheduled_for']
+
+
+class CustomerSegmentViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for CustomerSegment model.
+    Provides CRUD operations plus custom actions for segment management.
+    """
+    queryset = CustomerSegment.objects.all().select_related('created_by')
+    serializer_class = CustomerSegmentSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['status', 'segment_type', 'created_by']
+    search_fields = ['name', 'description', 'tags']
+    ordering_fields = ['created_at', 'name', 'member_count', 'last_used_at']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        """Filter based on user role"""
+        queryset = super().get_queryset()
+        user = self.request.user
+
+        # Non-admins only see their own segments + active public segments
+        if user.role != 'Admin':
+            queryset = queryset.filter(
+                Q(created_by=user) | Q(status='active')
+            )
+
+        return queryset
+
+    @action(detail=True, methods=['get'])
+    def members(self, request, pk=None):
+        """
+        Get all members of this segment.
+
+        Query params:
+        - limit: Max number of results (default: 100)
+        - offset: Pagination offset
+        """
+        segment = self.get_object()
+        limit = int(request.query_params.get('limit', 100))
+        offset = int(request.query_params.get('offset', 0))
+
+        try:
+            members = segment.get_members()
+            total_count = members.count()
+
+            # Paginate
+            members_page = members[offset:offset+limit]
+
+            # Serialize
+            serializer = ContactSerializer(members_page, many=True, context={'request': request})
+
+            return Response({
+                'count': total_count,
+                'results': serializer.data,
+                'segment_name': segment.name,
+                'segment_type': segment.segment_type,
+            })
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=True, methods=['post'])
+    def recalculate(self, request, pk=None):
+        """
+        Manually recalculate segment member count.
+        Useful after bulk data changes.
+        """
+        segment = self.get_object()
+
+        try:
+            new_count = segment.update_member_count()
+
+            return Response({
+                'message': 'Segment recalculated successfully',
+                'member_count': new_count,
+                'last_calculated_at': segment.last_calculated_at,
+            })
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @action(detail=True, methods=['post'])
+    def enroll_in_sequence(self, request, pk=None):
+        """
+        Enroll all segment members in an email sequence.
+
+        Request body:
+        {
+            "sequence_id": "uuid",
+            "notes": "string" (optional)
+        }
+        """
+        from crm_app.services.email_service import EmailService
+
+        segment = self.get_object()
+        sequence_id = request.data.get('sequence_id')
+        notes = request.data.get('notes', f'Enrolled via segment: {segment.name}')
+
+        if not sequence_id:
+            return Response(
+                {'error': 'sequence_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Verify sequence exists
+        try:
+            sequence = EmailSequence.objects.get(id=sequence_id)
+        except EmailSequence.DoesNotExist:
+            return Response(
+                {'error': 'Email sequence not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Get all segment members
+        try:
+            members = segment.get_members()
+        except Exception as e:
+            return Response(
+                {'error': f'Error getting segment members: {str(e)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        email_service = EmailService()
+        enrolled_count = 0
+        skipped_count = 0
+        errors = []
+
+        for contact in members:
+            try:
+                # Check if already enrolled
+                existing = SequenceEnrollment.objects.filter(
+                    sequence=sequence,
+                    contact=contact
+                ).exists()
+
+                if existing:
+                    skipped_count += 1
+                    continue
+
+                # Enroll contact
+                email_service.enroll_in_sequence(
+                    company=contact.company,
+                    contact=contact,
+                    sequence=sequence,
+                    enrolled_by=request.user
+                )
+                enrolled_count += 1
+
+            except Exception as e:
+                errors.append(f'{contact.email}: {str(e)}')
+                skipped_count += 1
+
+        # Mark segment as used
+        try:
+            segment.mark_as_used()
+        except Exception:
+            pass  # Don't fail if tracking fails
+
+        return Response({
+            'message': f'Enrolled {enrolled_count} contacts in sequence',
+            'enrolled_count': enrolled_count,
+            'skipped_count': skipped_count,
+            'total_members': members.count(),
+            'errors': errors[:10],  # Limit error list
+            'sequence_name': sequence.name,
+            'segment_name': segment.name,
+        }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'])
+    def duplicate(self, request, pk=None):
+        """
+        Duplicate this segment with a new name.
+
+        Request body:
+        {
+            "name": "New Segment Name"
+        }
+        """
+        segment = self.get_object()
+        new_name = request.data.get('name')
+
+        if not new_name:
+            return Response(
+                {'error': 'name is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check name uniqueness
+        if CustomerSegment.objects.filter(name=new_name).exists():
+            return Response(
+                {'error': 'Segment with this name already exists'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Clone segment
+        new_segment = CustomerSegment.objects.create(
+            name=new_name,
+            description=f'Cloned from: {segment.name}',
+            segment_type=segment.segment_type,
+            status='active',
+            filter_criteria=segment.filter_criteria.copy() if segment.filter_criteria else {},
+            created_by=request.user,
+            tags=segment.tags,
+        )
+
+        # Copy static members if static segment
+        if segment.segment_type == 'static':
+            new_segment.static_contacts.set(segment.static_contacts.all())
+            new_segment.static_companies.set(segment.static_companies.all())
+
+        # Calculate member count
+        try:
+            new_segment.update_member_count()
+        except Exception:
+            pass  # Don't fail if calculation fails
+
+        serializer = self.get_serializer(new_segment)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'])
+    def validate_filters(self, request):
+        """
+        Validate filter criteria and return estimated member count.
+        Used for preview before saving.
+
+        Request body:
+        {
+            "filter_criteria": {...}
+        }
+        """
+        filter_criteria = request.data.get('filter_criteria')
+
+        if not filter_criteria:
+            return Response(
+                {'error': 'filter_criteria is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Create temporary segment (don't save)
+        temp_segment = CustomerSegment(
+            name='temp',
+            segment_type='dynamic',
+            filter_criteria=filter_criteria
+        )
+
+        try:
+            members = temp_segment.get_members()
+            count = members.count()
+            preview = members[:5]
+
+            return Response({
+                'valid': True,
+                'estimated_count': count,
+                'preview': ContactSerializer(preview, many=True, context={'request': request}).data
+            })
+        except Exception as e:
+            return Response({
+                'valid': False,
+                'error': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)

@@ -18,7 +18,8 @@ from .models import (
     Opportunity, OpportunityActivity, Contract, Invoice, Zone,
     EmailTemplate, EmailLog, EmailCampaign, CampaignRecipient, DocumentAttachment,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
-    EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution
+    EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
+    CustomerSegment
 )
 
 
@@ -2339,3 +2340,43 @@ class SequenceStepExecutionAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         """Prevent deletion of audit records"""
         return False
+
+
+# Customer Segmentation Admin
+@admin.register(CustomerSegment)
+class CustomerSegmentAdmin(admin.ModelAdmin):
+    list_display = ['name', 'segment_type', 'status', 'member_count', 'created_by', 'created_at']
+    list_filter = ['segment_type', 'status', 'created_at']
+    search_fields = ['name', 'description', 'tags']
+    readonly_fields = ['member_count', 'last_calculated_at', 'last_used_at', 'times_used', 'created_at', 'updated_at']
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('name', 'description', 'segment_type', 'status', 'tags')
+        }),
+        ('Filter Criteria (Dynamic Segments)', {
+            'fields': ('filter_criteria',),
+            'classes': ('collapse',),
+        }),
+        ('Static Contacts (Static Segments)', {
+            'fields': ('static_contacts', 'static_companies'),
+            'classes': ('collapse',),
+        }),
+        ('Statistics', {
+            'fields': ('member_count', 'last_calculated_at', 'last_used_at', 'times_used')
+        }),
+        ('Metadata', {
+            'fields': ('created_by', 'created_at', 'updated_at')
+        }),
+    )
+
+    filter_horizontal = ('static_contacts', 'static_companies')
+
+    def save_model(self, request, obj, form, change):
+        if not change:  # New object
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+        # Calculate member count after save
+        if obj.segment_type == 'dynamic':
+            obj.update_member_count()

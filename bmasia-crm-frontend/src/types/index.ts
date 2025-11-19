@@ -799,3 +799,63 @@ export interface SequenceEnrollment {
   created_at: string;
   updated_at: string;
 }
+
+// Customer Segments
+export interface SegmentFilterRule {
+  field: string;
+  operator: 'equals' | 'not_equals' | 'contains' | 'not_contains' |
+           'starts_with' | 'ends_with' | 'greater_than' | 'greater_than_or_equal' |
+           'less_than' | 'less_than_or_equal' | 'between' | 'in_list' |
+           'is_empty' | 'is_not_empty';
+  value: any;
+}
+
+export interface SegmentFilterCriteria {
+  entity: 'company' | 'contact';
+  match_type: 'all' | 'any';  // AND or OR
+  rules: SegmentFilterRule[];
+}
+
+export interface CustomerSegment {
+  id: string;
+  name: string;
+  description: string;
+  segment_type: 'dynamic' | 'static';
+  status: 'active' | 'paused' | 'archived';
+  filter_criteria: SegmentFilterCriteria;
+  member_count: number;
+  last_calculated_at: string | null;
+  created_by: string;
+  created_by_name?: string;
+  tags: string;
+  last_used_at: string | null;
+  times_used: number;
+  member_preview?: Contact[];
+  can_edit?: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SegmentMemberResponse {
+  count: number;
+  results: Contact[];
+  segment_name: string;
+  segment_type: string;
+}
+
+export interface SegmentValidationResponse {
+  valid: boolean;
+  estimated_count?: number;
+  preview?: Contact[];
+  error?: string;
+}
+
+export interface EnrollInSequenceResponse {
+  message: string;
+  enrolled_count: number;
+  skipped_count: number;
+  total_members: number;
+  errors: string[];
+  sequence_name: string;
+  segment_name: string;
+}

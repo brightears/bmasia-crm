@@ -1,6 +1,8 @@
 import {
   User, Company, Contact, Note, Task, Opportunity, OpportunityActivity,
-  Contract, Invoice, Quote, DashboardStats, AuditLog, ApiResponse
+  Contract, Invoice, Quote, DashboardStats, AuditLog, ApiResponse,
+  CustomerSegment, SegmentMemberResponse, SegmentValidationResponse,
+  EnrollInSequenceResponse, SegmentFilterCriteria
 } from '../types';
 import { authApi } from './authService';
 import { MockApiService } from './mockData';
@@ -735,6 +737,56 @@ class ApiService {
   // Sequence Step Executions
   async getSequenceStepExecutions(params?: any): Promise<ApiResponse<any>> {
     const response = await authApi.get('/sequence-step-executions/', { params });
+    return response.data;
+  }
+
+  // Customer Segments
+  async getSegments(params?: any): Promise<ApiResponse<CustomerSegment>> {
+    const response = await authApi.get<ApiResponse<CustomerSegment>>('/segments/', { params });
+    return response.data;
+  }
+
+  async getSegment(id: string): Promise<CustomerSegment> {
+    const response = await authApi.get<CustomerSegment>(`/segments/${id}/`);
+    return response.data;
+  }
+
+  async createSegment(data: Partial<CustomerSegment>): Promise<CustomerSegment> {
+    const response = await authApi.post<CustomerSegment>('/segments/', data);
+    return response.data;
+  }
+
+  async updateSegment(id: string, data: Partial<CustomerSegment>): Promise<CustomerSegment> {
+    const response = await authApi.put<CustomerSegment>(`/segments/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteSegment(id: string): Promise<void> {
+    await authApi.delete(`/segments/${id}/`);
+  }
+
+  async getSegmentMembers(id: string, params?: { limit?: number; offset?: number }): Promise<SegmentMemberResponse> {
+    const response = await authApi.get<SegmentMemberResponse>(`/segments/${id}/members/`, { params });
+    return response.data;
+  }
+
+  async recalculateSegment(id: string): Promise<CustomerSegment> {
+    const response = await authApi.post<CustomerSegment>(`/segments/${id}/recalculate/`);
+    return response.data;
+  }
+
+  async enrollSegmentInSequence(id: string, data: { sequence_id: string; notes?: string }): Promise<EnrollInSequenceResponse> {
+    const response = await authApi.post<EnrollInSequenceResponse>(`/segments/${id}/enroll_in_sequence/`, data);
+    return response.data;
+  }
+
+  async duplicateSegment(id: string, data: { name: string }): Promise<CustomerSegment> {
+    const response = await authApi.post<CustomerSegment>(`/segments/${id}/duplicate/`, data);
+    return response.data;
+  }
+
+  async validateSegmentFilters(filter_criteria: SegmentFilterCriteria): Promise<SegmentValidationResponse> {
+    const response = await authApi.post<SegmentValidationResponse>('/segments/validate_filters/', { filter_criteria });
     return response.data;
   }
 }

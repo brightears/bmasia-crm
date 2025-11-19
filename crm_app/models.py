@@ -1601,3 +1601,245 @@ class SequenceStepExecution(TimestampedModel):
     def is_due(self):
         """Return True if scheduled_for <= timezone.now() and status='scheduled'"""
         return self.scheduled_for <= timezone.now() and self.status == 'scheduled'
+
+
+# Customer Segmentation Models
+class CustomerSegment(TimestampedModel):
+    """
+    Dynamic customer segmentation for targeted marketing campaigns.
+    Segments automatically update based on filter criteria.
+    """
+
+    SEGMENT_TYPE_CHOICES = [
+        ('dynamic', 'Dynamic - Auto-updates based on rules'),
+        ('static', 'Static - Manually curated list'),
+    ]
+
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('paused', 'Paused'),
+        ('archived', 'Archived'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=200, unique=True, help_text="Segment name (e.g., 'High-Value Hotels in Thailand')")
+    description = models.TextField(blank=True, help_text="What this segment represents")
+    segment_type = models.CharField(max_length=20, choices=SEGMENT_TYPE_CHOICES, default='dynamic')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+
+    # Filter criteria stored as JSON (for dynamic segments)
+    filter_criteria = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Dynamic filter rules in JSON format"
+    )
+
+    # For static segments - manually selected contacts/companies
+    static_contacts = models.ManyToManyField(
+        'Contact',
+        blank=True,
+        related_name='segments',
+        help_text="Manually selected contacts (for static segments)"
+    )
+    static_companies = models.ManyToManyField(
+        'Company',
+        blank=True,
+        related_name='segments',
+        help_text="Manually selected companies (for static segments)"
+    )
+
+    # Performance caching
+    member_count = models.IntegerField(
+        default=0,
+        help_text="Cached count of members (auto-updated)"
+    )
+    last_calculated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When member count was last recalculated"
+    )
+
+    # Metadata
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='created_segments'
+    )
+    tags = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="Comma-separated tags for organization"
+    )
+
+    # Usage tracking
+    last_used_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this segment was last used in a campaign"
+    )
+    times_used = models.IntegerField(
+        default=0,
+        help_text="How many times used in campaigns/sequences"
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Customer Segment'
+        verbose_name_plural = 'Customer Segments'
+        indexes = [
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['segment_type', 'status']),
+            models.Index(fields=['created_by', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.member_count} members)"
+
+    def get_members(self, limit=None):
+        """
+        Get all contacts matching this segment's criteria.
+        Returns QuerySet of Contact objects.
+        """
+        if self.segment_type == 'static':
+            queryset = self.static_contacts.filter(is_active=True, unsubscribed=False)
+        else:
+            queryset = self._evaluate_dynamic_filters()
+
+        if limit:
+            return queryset[:limit]
+        return queryset
+
+    def _evaluate_dynamic_filters(self):
+        """
+        Build Django QuerySet from filter_criteria JSON.
+        Returns QuerySet of Contact objects.
+        """
+        from django.db.models import Q
+
+        if not self.filter_criteria or not self.filter_criteria.get('rules'):
+            return Contact.objects.none()
+
+        entity = self.filter_criteria.get('entity', 'contact')
+        match_type = self.filter_criteria.get('match_type', 'all')
+        rules = self.filter_criteria.get('rules', [])
+
+        # Build Q objects from rules
+        q_objects = []
+        for rule in rules:
+            q_obj = self._build_q_object(rule, entity)
+            if q_obj:
+                q_objects.append(q_obj)
+
+        if not q_objects:
+            return Contact.objects.none()
+
+        # Combine Q objects with AND or OR
+        if match_type == 'all':
+            combined_q = q_objects[0]
+            for q in q_objects[1:]:
+                combined_q &= q
+        else:  # 'any'
+            combined_q = q_objects[0]
+            for q in q_objects[1:]:
+                combined_q |= q
+
+        # Apply filters based on entity type
+        if entity == 'company':
+            # Filter companies, then get their contacts
+            companies = Company.objects.filter(combined_q)
+            return Contact.objects.filter(
+                company__in=companies,
+                is_active=True,
+                unsubscribed=False
+            ).distinct()
+        else:  # 'contact'
+            return Contact.objects.filter(
+                combined_q,
+                is_active=True,
+                unsubscribed=False
+            ).distinct()
+
+    def _build_q_object(self, rule, entity):
+        """
+        Convert a single filter rule to Django Q object.
+
+        Rule format:
+        {
+            "field": "industry",
+            "operator": "equals",
+            "value": "Hotels"
+        }
+        """
+        from django.db.models import Q
+
+        field = rule.get('field')
+        operator = rule.get('operator')
+        value = rule.get('value')
+
+        if not field or not operator:
+            return None
+
+        # Map field paths for contact entity accessing company fields
+        if entity == 'contact' and field.startswith('company.'):
+            # Contact accessing company field
+            field_path = field.replace('company.', 'company__')
+        elif entity == 'contact' and field.startswith('contract.'):
+            # Contact accessing contract through company
+            field_path = field.replace('contract.', 'company__contracts__')
+        elif entity == 'company':
+            # Company field direct access
+            field_path = field
+        else:
+            field_path = field
+
+        # Build Q object based on operator
+        operator_mapping = {
+            'equals': f'{field_path}__iexact',
+            'not_equals': f'{field_path}__iexact',
+            'contains': f'{field_path}__icontains',
+            'not_contains': f'{field_path}__icontains',
+            'starts_with': f'{field_path}__istartswith',
+            'ends_with': f'{field_path}__iendswith',
+            'greater_than': f'{field_path}__gt',
+            'greater_than_or_equal': f'{field_path}__gte',
+            'less_than': f'{field_path}__lt',
+            'less_than_or_equal': f'{field_path}__lte',
+            'between': f'{field_path}__range',
+            'in_list': f'{field_path}__in',
+            'is_empty': f'{field_path}__isnull',
+            'is_not_empty': f'{field_path}__isnull',
+        }
+
+        lookup = operator_mapping.get(operator)
+        if not lookup:
+            return None
+
+        # Special handling for negation operators
+        if operator == 'not_equals':
+            return ~Q(**{operator_mapping['equals']: value})
+        elif operator == 'not_contains':
+            return ~Q(**{operator_mapping['contains']: value})
+        elif operator == 'is_empty':
+            return Q(**{lookup: True}) | Q(**{f'{field_path}__exact': ''})
+        elif operator == 'is_not_empty':
+            return Q(**{lookup: False}) & ~Q(**{f'{field_path}__exact': ''})
+        else:
+            return Q(**{lookup: value})
+
+    def update_member_count(self):
+        """Recalculate and cache member count"""
+        self.member_count = self.get_members().count()
+        self.last_calculated_at = timezone.now()
+        self.save(update_fields=['member_count', 'last_calculated_at'])
+        return self.member_count
+
+    def preview_members(self, limit=10):
+        """Get preview of segment members for UI"""
+        return self.get_members(limit=limit)
+
+    def mark_as_used(self):
+        """Track segment usage when used in campaigns"""
+        self.last_used_at = timezone.now()
+        self.times_used += 1
+        self.save(update_fields=['last_used_at', 'times_used'])

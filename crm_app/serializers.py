@@ -7,7 +7,8 @@ from .models import (
     Opportunity, OpportunityActivity, Contract, Invoice, Zone,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailCampaign, CampaignRecipient, EmailTemplate,
-    EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution
+    EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
+    CustomerSegment
 )
 
 
@@ -920,3 +921,81 @@ class SequenceEnrollmentSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'enrolled_at', 'started_at', 'completed_at', 'created_at', 'updated_at']
+
+
+class CustomerSegmentSerializer(serializers.ModelSerializer):
+    """Serializer for CustomerSegment model"""
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True, allow_null=True)
+    member_preview = serializers.SerializerMethodField()
+    can_edit = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CustomerSegment
+        fields = [
+            'id', 'name', 'description', 'segment_type', 'status',
+            'filter_criteria', 'member_count', 'last_calculated_at',
+            'created_by', 'created_by_name', 'tags',
+            'last_used_at', 'times_used', 'member_preview', 'can_edit',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'member_count', 'last_calculated_at', 'last_used_at',
+            'times_used', 'created_at', 'updated_at'
+        ]
+
+    def get_member_preview(self, obj):
+        """Return preview of first 5 members"""
+        try:
+            preview = obj.preview_members(limit=5)
+            return ContactSerializer(preview, many=True, context=self.context).data
+        except Exception as e:
+            return []
+
+    def get_can_edit(self, obj):
+        """Check if current user can edit this segment"""
+        request = self.context.get('request')
+        if not request or not request.user:
+            return False
+        return request.user.role == 'Admin' or request.user == obj.created_by
+
+    def validate_filter_criteria(self, value):
+        """Validate filter_criteria JSON structure"""
+        if self.initial_data.get('segment_type') == 'dynamic':
+            if not value:
+                raise serializers.ValidationError("Filter criteria required for dynamic segments")
+
+            # Validate structure
+            if not isinstance(value, dict):
+                raise serializers.ValidationError("Filter criteria must be a JSON object")
+
+            if 'entity' not in value or value['entity'] not in ['company', 'contact']:
+                raise serializers.ValidationError("Must specify entity: 'company' or 'contact'")
+
+            if 'rules' not in value or not isinstance(value['rules'], list):
+                raise serializers.ValidationError("Must include 'rules' array")
+
+            # Validate each rule
+            for rule in value['rules']:
+                if not isinstance(rule, dict):
+                    raise serializers.ValidationError("Each rule must be an object")
+                if 'field' not in rule or 'operator' not in rule:
+                    raise serializers.ValidationError("Each rule must have 'field' and 'operator'")
+
+        return value
+
+    def create(self, validated_data):
+        """Auto-set created_by and calculate initial member count"""
+        request = self.context.get('request')
+        if request and request.user:
+            validated_data['created_by'] = request.user
+
+        segment = super().create(validated_data)
+
+        # Calculate initial member count
+        try:
+            segment.update_member_count()
+        except Exception as e:
+            # Log error but don't fail creation
+            print(f"Error calculating member count: {e}")
+
+        return segment
