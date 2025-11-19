@@ -2,6 +2,9 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import EmailValidator, RegexValidator
 from django.utils import timezone
+from django.utils.text import slugify
+from django.contrib.postgres.search import SearchVectorField, SearchVector
+from django.db.models import signals
 import uuid
 
 
@@ -2150,3 +2153,541 @@ class TicketAttachment(TimestampedModel):
         if self.file and not self.size:
             self.size = self.file.size
         super().save(*args, **kwargs)
+
+
+# Knowledge Base System Models
+class KBCategory(TimestampedModel):
+    """
+    Hierarchical categories for organizing knowledge base articles.
+    Supports parent/child relationships for nested categorization.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100, help_text="Category name")
+    slug = models.SlugField(max_length=100, unique=True, help_text="URL-friendly slug (auto-generated)")
+    description = models.TextField(blank=True, help_text="Category description")
+    parent = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='children',
+        help_text="Parent category (null for top-level categories)"
+    )
+    icon = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Icon name (e.g., 'wrench', 'dollar-sign', 'music') for UI display"
+    )
+    display_order = models.IntegerField(
+        default=0,
+        help_text="Order for displaying categories (lower numbers first)"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this category is visible"
+    )
+
+    class Meta:
+        ordering = ['display_order', 'name']
+        verbose_name = 'KB Category'
+        verbose_name_plural = 'KB Categories'
+        indexes = [
+            models.Index(fields=['parent', 'is_active']),
+            models.Index(fields=['display_order', 'name']),
+        ]
+
+    def __str__(self):
+        return self.get_full_path()
+
+    def save(self, *args, **kwargs):
+        """Auto-generate slug from name"""
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+    def get_full_path(self):
+        """Return full category path: 'Parent > Child'"""
+        if self.parent:
+            return f"{self.parent.get_full_path()} > {self.name}"
+        return self.name
+
+    @property
+    def article_count(self):
+        """Count articles in this category"""
+        return self.articles.filter(status='published').count()
+
+
+class KBTag(TimestampedModel):
+    """
+    Tags for knowledge base articles.
+    Allows flexible categorization beyond hierarchical categories.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=50, unique=True, help_text="Tag name")
+    slug = models.SlugField(max_length=50, unique=True, help_text="URL-friendly slug (auto-generated)")
+    color = models.CharField(
+        max_length=7,
+        default='#3B82F6',
+        help_text="Hex color code for UI display (e.g., #3B82F6)"
+    )
+
+    class Meta:
+        ordering = ['name']
+        verbose_name = 'KB Tag'
+        verbose_name_plural = 'KB Tags'
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        """Auto-generate slug from name"""
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+    @property
+    def article_count(self):
+        """Count articles with this tag"""
+        return self.articles.filter(status='published').count()
+
+
+class KBArticle(TimestampedModel):
+    """
+    Core knowledge base article model with auto-generated article numbers.
+    Includes full-text search, ratings, and view tracking.
+    """
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('published', 'Published'),
+        ('archived', 'Archived'),
+    ]
+
+    VISIBILITY_CHOICES = [
+        ('public', 'Public - Visible to customers'),
+        ('internal', 'Internal - Only visible to staff'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    article_number = models.CharField(
+        max_length=20,
+        unique=True,
+        db_index=True,
+        editable=False,
+        help_text="Auto-generated article number (KB-YYYYMMDD-NNNN)"
+    )
+    title = models.CharField(max_length=255, help_text="Article title")
+    slug = models.SlugField(
+        max_length=255,
+        unique=True,
+        help_text="URL-friendly slug (auto-generated from title)"
+    )
+    content = models.TextField(help_text="Main article content (supports HTML)")
+    excerpt = models.TextField(
+        blank=True,
+        help_text="Short summary/preview (optional, auto-generated from content if empty)"
+    )
+
+    # Categorization
+    category = models.ForeignKey(
+        KBCategory,
+        on_delete=models.PROTECT,
+        related_name='articles',
+        help_text="Primary category for this article"
+    )
+    tags = models.ManyToManyField(
+        KBTag,
+        blank=True,
+        related_name='articles',
+        help_text="Tags for flexible categorization"
+    )
+
+    # Publishing
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='draft',
+        db_index=True,
+        help_text="Publication status"
+    )
+    visibility = models.CharField(
+        max_length=20,
+        choices=VISIBILITY_CHOICES,
+        default='internal',
+        help_text="Who can view this article"
+    )
+    author = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='kb_articles',
+        help_text="Article author"
+    )
+    featured = models.BooleanField(
+        default=False,
+        help_text="Feature this article on KB homepage"
+    )
+
+    # Analytics (updated automatically)
+    view_count = models.IntegerField(
+        default=0,
+        editable=False,
+        help_text="Total views"
+    )
+    helpful_count = models.IntegerField(
+        default=0,
+        editable=False,
+        help_text="Number of 'helpful' votes"
+    )
+    not_helpful_count = models.IntegerField(
+        default=0,
+        editable=False,
+        help_text="Number of 'not helpful' votes"
+    )
+
+    # Timestamps
+    published_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When article was published"
+    )
+
+    # Full-text search
+    search_vector = SearchVectorField(null=True, editable=False)
+
+    class Meta:
+        ordering = ['-published_at', '-created_at']
+        verbose_name = 'KB Article'
+        verbose_name_plural = 'KB Articles'
+        indexes = [
+            models.Index(fields=['status', 'visibility']),
+            models.Index(fields=['category', 'status']),
+            models.Index(fields=['featured', 'status']),
+            models.Index(fields=['-published_at']),
+            models.Index(fields=['article_number']),
+        ]
+
+    def __str__(self):
+        return f"{self.article_number} - {self.title}"
+
+    def save(self, *args, **kwargs):
+        """Auto-generate article number and slug"""
+        # Generate article number if not set
+        if not self.article_number:
+            self.article_number = self._generate_article_number()
+
+        # Generate slug from title if not set
+        if not self.slug:
+            self.slug = slugify(self.title)
+            # Ensure unique slug
+            base_slug = self.slug
+            counter = 1
+            while KBArticle.objects.filter(slug=self.slug).exclude(pk=self.pk).exists():
+                self.slug = f"{base_slug}-{counter}"
+                counter += 1
+
+        # Set published_at when status changes to published
+        if self.status == 'published' and not self.published_at:
+            self.published_at = timezone.now()
+
+        # Auto-generate excerpt from content if empty
+        if not self.excerpt and self.content:
+            # Strip HTML tags and take first 200 characters
+            import re
+            text = re.sub('<[^<]+?>', '', self.content)
+            self.excerpt = text[:200] + ('...' if len(text) > 200 else '')
+
+        super().save(*args, **kwargs)
+
+        # Update search vector after save
+        if self.status == 'published':
+            self._update_search_vector()
+
+    def _generate_article_number(self):
+        """Generate unique article number in format KB-YYYYMMDD-NNNN"""
+        today = timezone.now().date()
+        date_prefix = f"KB-{today.strftime('%Y%m%d')}"
+
+        # Find the highest article number for today
+        from django.db.models import Max
+        latest_article = KBArticle.objects.filter(
+            article_number__startswith=date_prefix
+        ).aggregate(Max('article_number'))
+
+        latest_number = latest_article['article_number__max']
+
+        if latest_number:
+            # Extract the counter and increment
+            counter = int(latest_number.split('-')[-1]) + 1
+        else:
+            # First article of the day
+            counter = 1
+
+        return f"{date_prefix}-{counter:04d}"
+
+    def _update_search_vector(self):
+        """Update PostgreSQL full-text search vector (PostgreSQL only)"""
+        from django.db import connection
+
+        # Only update search vector on PostgreSQL (not SQLite for local dev)
+        if connection.vendor == 'postgresql':
+            KBArticle.objects.filter(pk=self.pk).update(
+                search_vector=SearchVector('title', weight='A') + SearchVector('content', weight='B')
+            )
+
+    def get_helpfulness_ratio(self):
+        """Calculate helpfulness percentage (0-100)"""
+        total_votes = self.helpful_count + self.not_helpful_count
+        if total_votes == 0:
+            return None
+        return round((self.helpful_count / total_votes) * 100, 1)
+
+    @property
+    def helpfulness_percentage(self):
+        """Alias for get_helpfulness_ratio()"""
+        return self.get_helpfulness_ratio()
+
+
+class KBArticleView(TimestampedModel):
+    """
+    Track article views for analytics.
+    Prevents duplicate counting per session/user.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    article = models.ForeignKey(
+        KBArticle,
+        on_delete=models.CASCADE,
+        related_name='views',
+        help_text="Article that was viewed"
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='kb_article_views',
+        help_text="User who viewed (null for anonymous)"
+    )
+    ip_address = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+        help_text="IP address of viewer"
+    )
+    session_id = models.CharField(
+        max_length=100,
+        help_text="Session ID to prevent duplicate counting"
+    )
+    viewed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-viewed_at']
+        verbose_name = 'KB Article View'
+        verbose_name_plural = 'KB Article Views'
+        unique_together = [['article', 'session_id']]
+        indexes = [
+            models.Index(fields=['article', '-viewed_at']),
+            models.Index(fields=['user', '-viewed_at']),
+        ]
+
+    def __str__(self):
+        user_info = f"by {self.user.username}" if self.user else "anonymous"
+        return f"View of {self.article.article_number} {user_info}"
+
+
+class KBArticleRating(TimestampedModel):
+    """
+    Helpful/Not Helpful votes for articles.
+    One vote per user per article.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    article = models.ForeignKey(
+        KBArticle,
+        on_delete=models.CASCADE,
+        related_name='ratings',
+        help_text="Article being rated"
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='kb_article_ratings',
+        help_text="User who voted"
+    )
+    is_helpful = models.BooleanField(help_text="True = Helpful, False = Not Helpful")
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'KB Article Rating'
+        verbose_name_plural = 'KB Article Ratings'
+        unique_together = [['article', 'user']]
+        indexes = [
+            models.Index(fields=['article', 'is_helpful']),
+        ]
+
+    def __str__(self):
+        vote_type = "Helpful" if self.is_helpful else "Not Helpful"
+        return f"{vote_type} vote for {self.article.article_number}"
+
+
+class KBArticleRelation(TimestampedModel):
+    """
+    Related articles feature.
+    Links articles together with relationship types.
+    """
+    RELATION_TYPE_CHOICES = [
+        ('related', 'Related Article'),
+        ('see_also', 'See Also'),
+        ('prerequisite', 'Prerequisite Reading'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    from_article = models.ForeignKey(
+        KBArticle,
+        on_delete=models.CASCADE,
+        related_name='outgoing_relations',
+        help_text="Source article"
+    )
+    to_article = models.ForeignKey(
+        KBArticle,
+        on_delete=models.CASCADE,
+        related_name='incoming_relations',
+        help_text="Related article"
+    )
+    relation_type = models.CharField(
+        max_length=20,
+        choices=RELATION_TYPE_CHOICES,
+        default='related',
+        help_text="Type of relationship"
+    )
+    display_order = models.IntegerField(
+        default=0,
+        help_text="Order for displaying related articles"
+    )
+
+    class Meta:
+        ordering = ['from_article', 'display_order']
+        verbose_name = 'KB Article Relation'
+        verbose_name_plural = 'KB Article Relations'
+        unique_together = [['from_article', 'to_article']]
+        indexes = [
+            models.Index(fields=['from_article', 'relation_type']),
+        ]
+
+    def __str__(self):
+        return f"{self.from_article.article_number} → {self.to_article.article_number} ({self.get_relation_type_display()})"
+
+
+class KBArticleAttachment(TimestampedModel):
+    """
+    File attachments for KB articles.
+    Supports PDFs, images, documents, etc.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    article = models.ForeignKey(
+        KBArticle,
+        on_delete=models.CASCADE,
+        related_name='attachments',
+        help_text="Article this attachment belongs to"
+    )
+    file = models.FileField(
+        upload_to='kb_attachments/%Y/%m/',
+        help_text="Attachment file"
+    )
+    filename = models.CharField(
+        max_length=200,
+        help_text="Original filename"
+    )
+    file_size = models.IntegerField(
+        help_text="File size in bytes"
+    )
+    uploaded_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='kb_attachments',
+        help_text="User who uploaded this file"
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+        verbose_name = 'KB Article Attachment'
+        verbose_name_plural = 'KB Article Attachments'
+        indexes = [
+            models.Index(fields=['article', '-uploaded_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.filename} - {self.article.article_number}"
+
+    def save(self, *args, **kwargs):
+        """Auto-populate filename and file_size from file"""
+        if self.file and not self.filename:
+            self.filename = self.file.name
+        if self.file and not self.file_size:
+            self.file_size = self.file.size
+        super().save(*args, **kwargs)
+
+    def get_file_extension(self):
+        """Extract file extension from filename"""
+        import os
+        return os.path.splitext(self.filename)[1].lower()
+
+
+class TicketKBArticle(TimestampedModel):
+    """
+    Link KB articles to support tickets.
+    Tracks which articles were helpful for resolving tickets.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name='kb_articles',
+        help_text="Support ticket"
+    )
+    article = models.ForeignKey(
+        KBArticle,
+        on_delete=models.CASCADE,
+        related_name='linked_tickets',
+        help_text="KB article linked to this ticket"
+    )
+    linked_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='ticket_kb_links',
+        help_text="User who linked this article"
+    )
+    linked_at = models.DateTimeField(auto_now_add=True)
+    is_helpful = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text="Was this article helpful for resolving the ticket? (optional)"
+    )
+
+    class Meta:
+        ordering = ['-linked_at']
+        verbose_name = 'Ticket KB Article Link'
+        verbose_name_plural = 'Ticket KB Article Links'
+        unique_together = [['ticket', 'article']]
+        indexes = [
+            models.Index(fields=['ticket', '-linked_at']),
+            models.Index(fields=['article', '-linked_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.article.article_number} linked to {self.ticket.ticket_number}"
+
+
+# Signal handlers for KB system
+def update_article_rating_counts(sender, instance, **kwargs):
+    """Update article's helpful/not_helpful counts when rating is saved"""
+    article = instance.article
+    article.helpful_count = article.ratings.filter(is_helpful=True).count()
+    article.not_helpful_count = article.ratings.filter(is_helpful=False).count()
+    article.save(update_fields=['helpful_count', 'not_helpful_count'])
+
+
+# Connect signals
+signals.post_save.connect(update_article_rating_counts, sender=KBArticleRating)
+signals.post_delete.connect(update_article_rating_counts, sender=KBArticleRating)

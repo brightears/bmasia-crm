@@ -8,7 +8,9 @@ from .models import (
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailCampaign, CampaignRecipient, EmailTemplate,
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
-    CustomerSegment, Ticket, TicketComment, TicketAttachment
+    CustomerSegment, Ticket, TicketComment, TicketAttachment,
+    KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
+    KBArticleRelation, KBArticleAttachment, TicketKBArticle
 )
 
 
@@ -1091,4 +1093,454 @@ class TicketSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if request and request.user.is_authenticated:
             validated_data['created_by'] = request.user
+        return super().create(validated_data)
+
+
+# ============================================================================
+# Knowledge Base System Serializers
+# ============================================================================
+
+class KBCategorySerializer(serializers.ModelSerializer):
+    """Serializer for KBCategory model with hierarchical support"""
+    # Nested parent display
+    parent_detail = serializers.SerializerMethodField()
+
+    # Read-only computed fields
+    article_count = serializers.ReadOnlyField()
+    full_path = serializers.CharField(source='get_full_path', read_only=True)
+
+    # Children categories (recursive, depth limited to 2)
+    children = serializers.SerializerMethodField()
+
+    class Meta:
+        model = KBCategory
+        fields = [
+            'id', 'name', 'slug', 'description', 'parent', 'parent_detail',
+            'icon', 'display_order', 'is_active', 'article_count',
+            'full_path', 'children', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'slug', 'article_count', 'full_path', 'created_at', 'updated_at']
+
+    def get_parent_detail(self, obj):
+        """Return nested parent category info"""
+        if obj.parent:
+            return {
+                'id': obj.parent.id,
+                'name': obj.parent.name,
+                'slug': obj.parent.slug
+            }
+        return None
+
+    def get_children(self, obj):
+        """Return children categories (max depth 2 to avoid recursion issues)"""
+        # Only include children if this is not already a nested call
+        depth = self.context.get('depth', 0)
+        if depth >= 2:
+            return []
+
+        children = obj.children.filter(is_active=True)
+        # Pass incremented depth to prevent infinite recursion
+        context = self.context.copy()
+        context['depth'] = depth + 1
+        return KBCategorySerializer(children, many=True, context=context).data
+
+
+class KBTagSerializer(serializers.ModelSerializer):
+    """Serializer for KBTag model"""
+    article_count = serializers.ReadOnlyField()
+
+    class Meta:
+        model = KBTag
+        fields = [
+            'id', 'name', 'slug', 'color', 'article_count',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'slug', 'article_count', 'created_at', 'updated_at']
+
+
+class KBArticleListSerializer(serializers.ModelSerializer):
+    """Lightweight serializer for KBArticle list views (better performance)"""
+    category_detail = serializers.SerializerMethodField()
+    helpfulness_ratio = serializers.SerializerMethodField()
+
+    class Meta:
+        model = KBArticle
+        fields = [
+            'id', 'article_number', 'title', 'slug', 'excerpt',
+            'category_detail', 'status', 'visibility', 'view_count',
+            'helpful_count', 'not_helpful_count', 'helpfulness_ratio',
+            'published_at', 'featured'
+        ]
+        read_only_fields = [
+            'id', 'article_number', 'slug', 'view_count', 'helpful_count',
+            'not_helpful_count', 'helpfulness_ratio', 'published_at'
+        ]
+
+    def get_category_detail(self, obj):
+        """Return minimal category info"""
+        return {
+            'id': obj.category.id,
+            'name': obj.category.name,
+            'slug': obj.category.slug
+        }
+
+    def get_helpfulness_ratio(self, obj):
+        """Calculate helpfulness percentage"""
+        return obj.get_helpfulness_ratio()
+
+
+class KBArticleSerializer(serializers.ModelSerializer):
+    """Full serializer for KBArticle model with all nested data"""
+    # Nested reads
+    category = KBCategorySerializer(read_only=True)
+    tags = KBTagSerializer(many=True, read_only=True)
+    author_detail = serializers.SerializerMethodField()
+
+    # Write support
+    category_id = serializers.UUIDField(write_only=True, source='category')
+    tag_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        write_only=True,
+        required=False,
+        allow_empty=True
+    )
+
+    # Read-only computed fields
+    helpfulness_ratio = serializers.SerializerMethodField()
+    related_articles = serializers.SerializerMethodField()
+    attachments = serializers.SerializerMethodField()
+
+    class Meta:
+        model = KBArticle
+        fields = [
+            'id', 'article_number', 'title', 'slug', 'content', 'excerpt',
+            'category', 'category_id', 'tags', 'tag_ids',
+            'status', 'visibility', 'author', 'author_detail', 'featured',
+            'view_count', 'helpful_count', 'not_helpful_count',
+            'helpfulness_ratio', 'published_at', 'related_articles',
+            'attachments', 'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'article_number', 'slug', 'view_count', 'helpful_count',
+            'not_helpful_count', 'published_at', 'created_at', 'updated_at'
+        ]
+
+    def get_author_detail(self, obj):
+        """Return author info"""
+        if obj.author:
+            return {
+                'id': obj.author.id,
+                'username': obj.author.username,
+                'full_name': obj.author.get_full_name()
+            }
+        return None
+
+    def get_helpfulness_ratio(self, obj):
+        """Calculate helpfulness percentage"""
+        return obj.get_helpfulness_ratio()
+
+    def get_related_articles(self, obj):
+        """Get related articles from relations"""
+        related = obj.outgoing_relations.select_related('to_article').all()
+        return [{
+            'id': rel.to_article.id,
+            'article_number': rel.to_article.article_number,
+            'title': rel.to_article.title,
+            'relation_type': rel.relation_type
+        } for rel in related]
+
+    def get_attachments(self, obj):
+        """Get article attachments"""
+        attachments = obj.attachments.all()
+        return [{
+            'id': att.id,
+            'filename': att.filename,
+            'file_size': att.file_size,
+            'file_extension': att.get_file_extension(),
+            'file_url': att.file.url if att.file else None,
+            'uploaded_at': att.uploaded_at
+        } for att in attachments]
+
+    def validate_content(self, value):
+        """Validate content length (minimum 100 chars)"""
+        # Strip HTML tags for length check
+        import re
+        text = re.sub('<[^<]+?>', '', value)
+        if len(text.strip()) < 100:
+            raise serializers.ValidationError(
+                "Article content must be at least 100 characters (excluding HTML tags)."
+            )
+        return value
+
+    def validate(self, data):
+        """Validate title uniqueness per category"""
+        title = data.get('title')
+        category = data.get('category')
+
+        if title and category:
+            # Check for duplicate title in same category
+            query = KBArticle.objects.filter(title=title, category=category)
+
+            # Exclude current instance if updating
+            if self.instance:
+                query = query.exclude(pk=self.instance.pk)
+
+            if query.exists():
+                raise serializers.ValidationError({
+                    'title': f"An article with title '{title}' already exists in this category."
+                })
+
+        return data
+
+    def create(self, validated_data):
+        """Create article with author from request user and handle tags"""
+        # Extract tag_ids if provided
+        tag_ids = validated_data.pop('tag_ids', [])
+
+        # Auto-set author from request user
+        request = self.context.get('request')
+        if request and request.user.is_authenticated and not validated_data.get('author'):
+            validated_data['author'] = request.user
+
+        # Create article
+        article = KBArticle.objects.create(**validated_data)
+
+        # Add tags
+        if tag_ids:
+            tags = KBTag.objects.filter(id__in=tag_ids)
+            article.tags.set(tags)
+
+        return article
+
+    def update(self, instance, validated_data):
+        """Update article and handle tags"""
+        # Extract tag_ids if provided
+        tag_ids = validated_data.pop('tag_ids', None)
+
+        # Update article fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        # Update tags if provided
+        if tag_ids is not None:
+            tags = KBTag.objects.filter(id__in=tag_ids)
+            instance.tags.set(tags)
+
+        return instance
+
+
+class KBArticleViewSerializer(serializers.ModelSerializer):
+    """Serializer for KBArticleView model (analytics)"""
+    article_detail = serializers.SerializerMethodField()
+    user_detail = serializers.SerializerMethodField()
+
+    class Meta:
+        model = KBArticleView
+        fields = [
+            'id', 'article', 'article_detail', 'user', 'user_detail',
+            'ip_address', 'session_id', 'viewed_at', 'created_at'
+        ]
+        read_only_fields = ['id', 'viewed_at', 'created_at']
+
+    def get_article_detail(self, obj):
+        """Return minimal article info"""
+        return {
+            'id': obj.article.id,
+            'article_number': obj.article.article_number,
+            'title': obj.article.title
+        }
+
+    def get_user_detail(self, obj):
+        """Return user info"""
+        if obj.user:
+            return {
+                'id': obj.user.id,
+                'username': obj.user.username
+            }
+        return None
+
+
+class KBArticleRatingSerializer(serializers.ModelSerializer):
+    """Serializer for KBArticleRating model"""
+    article_detail = serializers.SerializerMethodField()
+    user_detail = serializers.SerializerMethodField()
+
+    class Meta:
+        model = KBArticleRating
+        fields = [
+            'id', 'article', 'article_detail', 'user', 'user_detail',
+            'is_helpful', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_article_detail(self, obj):
+        """Return minimal article info"""
+        return {
+            'id': obj.article.id,
+            'article_number': obj.article.article_number,
+            'title': obj.article.title
+        }
+
+    def get_user_detail(self, obj):
+        """Return user info"""
+        if obj.user:
+            return {
+                'id': obj.user.id,
+                'username': obj.user.username
+            }
+        return None
+
+    def validate(self, data):
+        """Validate: One vote per user per article"""
+        article = data.get('article')
+        user = data.get('user')
+
+        if article and user:
+            # Check for existing rating
+            query = KBArticleRating.objects.filter(article=article, user=user)
+
+            # Exclude current instance if updating
+            if self.instance:
+                query = query.exclude(pk=self.instance.pk)
+
+            if query.exists():
+                raise serializers.ValidationError(
+                    "You have already rated this article. Please update your existing rating instead."
+                )
+
+        return data
+
+
+class KBArticleRelationSerializer(serializers.ModelSerializer):
+    """Serializer for KBArticleRelation model"""
+    from_article_detail = serializers.SerializerMethodField()
+    to_article_detail = serializers.SerializerMethodField()
+
+    class Meta:
+        model = KBArticleRelation
+        fields = [
+            'id', 'from_article', 'from_article_detail',
+            'to_article', 'to_article_detail', 'relation_type',
+            'display_order', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_from_article_detail(self, obj):
+        """Return minimal from_article info"""
+        return {
+            'id': obj.from_article.id,
+            'article_number': obj.from_article.article_number,
+            'title': obj.from_article.title
+        }
+
+    def get_to_article_detail(self, obj):
+        """Return minimal to_article info"""
+        return {
+            'id': obj.to_article.id,
+            'article_number': obj.to_article.article_number,
+            'title': obj.to_article.title
+        }
+
+    def validate(self, data):
+        """Validate: Cannot relate article to itself"""
+        from_article = data.get('from_article')
+        to_article = data.get('to_article')
+
+        if from_article and to_article and from_article == to_article:
+            raise serializers.ValidationError(
+                "Cannot relate an article to itself."
+            )
+
+        return data
+
+
+class KBArticleAttachmentSerializer(serializers.ModelSerializer):
+    """Serializer for KBArticleAttachment model"""
+    article_detail = serializers.SerializerMethodField()
+    uploaded_by_detail = serializers.SerializerMethodField()
+    file_extension = serializers.CharField(source='get_file_extension', read_only=True)
+
+    class Meta:
+        model = KBArticleAttachment
+        fields = [
+            'id', 'article', 'article_detail', 'file', 'filename',
+            'file_size', 'file_extension', 'uploaded_by', 'uploaded_by_detail',
+            'uploaded_at', 'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'id', 'filename', 'file_size', 'file_extension',
+            'uploaded_at', 'created_at', 'updated_at'
+        ]
+
+    def get_article_detail(self, obj):
+        """Return minimal article info"""
+        return {
+            'id': obj.article.id,
+            'article_number': obj.article.article_number,
+            'title': obj.article.title
+        }
+
+    def get_uploaded_by_detail(self, obj):
+        """Return user info"""
+        if obj.uploaded_by:
+            return {
+                'id': obj.uploaded_by.id,
+                'username': obj.uploaded_by.username
+            }
+        return None
+
+    def create(self, validated_data):
+        """Auto-set uploaded_by from request user"""
+        request = self.context.get('request')
+        if request and request.user.is_authenticated and not validated_data.get('uploaded_by'):
+            validated_data['uploaded_by'] = request.user
+        return super().create(validated_data)
+
+
+class TicketKBArticleSerializer(serializers.ModelSerializer):
+    """Serializer for TicketKBArticle link model"""
+    ticket_detail = serializers.SerializerMethodField()
+    article_detail = serializers.SerializerMethodField()
+    linked_by_detail = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TicketKBArticle
+        fields = [
+            'id', 'ticket', 'ticket_detail', 'article', 'article_detail',
+            'linked_by', 'linked_by_detail', 'linked_at', 'is_helpful',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'linked_at', 'created_at', 'updated_at']
+
+    def get_ticket_detail(self, obj):
+        """Return minimal ticket info"""
+        return {
+            'id': obj.ticket.id,
+            'ticket_number': obj.ticket.ticket_number,
+            'subject': obj.ticket.subject
+        }
+
+    def get_article_detail(self, obj):
+        """Return minimal article info"""
+        return {
+            'id': obj.article.id,
+            'article_number': obj.article.article_number,
+            'title': obj.article.title
+        }
+
+    def get_linked_by_detail(self, obj):
+        """Return user info"""
+        if obj.linked_by:
+            return {
+                'id': obj.linked_by.id,
+                'username': obj.linked_by.username
+            }
+        return None
+
+    def create(self, validated_data):
+        """Auto-set linked_by from request user"""
+        request = self.context.get('request')
+        if request and request.user.is_authenticated and not validated_data.get('linked_by'):
+            validated_data['linked_by'] = request.user
         return super().create(validated_data)

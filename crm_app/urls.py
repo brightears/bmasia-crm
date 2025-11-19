@@ -34,6 +34,16 @@ router.register(r'tickets', views.TicketViewSet, basename='ticket')
 router.register(r'ticket-comments', views.TicketCommentViewSet, basename='ticketcomment')
 router.register(r'ticket-attachments', views.TicketAttachmentViewSet, basename='ticketattachment')
 
+# Knowledge Base routes
+router.register(r'kb/categories', views.KBCategoryViewSet, basename='kb-category')
+router.register(r'kb/tags', views.KBTagViewSet, basename='kb-tag')
+router.register(r'kb/articles', views.KBArticleViewSet, basename='kb-article')
+router.register(r'kb/article-views', views.KBArticleViewViewSet, basename='kb-article-view')
+router.register(r'kb/article-ratings', views.KBArticleRatingViewSet, basename='kb-article-rating')
+router.register(r'kb/article-relations', views.KBArticleRelationViewSet, basename='kb-article-relation')
+router.register(r'kb/article-attachments', views.KBArticleAttachmentViewSet, basename='kb-article-attachment')
+router.register(r'kb/ticket-articles', views.TicketKBArticleViewSet, basename='kb-ticket-article')
+
 # The API URLs are now determined automatically by the router.
 urlpatterns = [
     path('v1/', include(router.urls)),

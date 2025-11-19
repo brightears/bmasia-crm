@@ -19,7 +19,9 @@ from .models import (
     EmailTemplate, EmailLog, EmailCampaign, CampaignRecipient, DocumentAttachment,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
-    CustomerSegment, Ticket, TicketComment, TicketAttachment
+    CustomerSegment, Ticket, TicketComment, TicketAttachment,
+    KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
+    KBArticleRelation, KBArticleAttachment, TicketKBArticle
 )
 
 
@@ -2624,3 +2626,642 @@ class TicketAttachmentAdmin(admin.ModelAdmin):
                 return f"{obj.size / (1024 * 1024):.2f} MB"
         return "Unknown"
     size_display.short_description = 'File Size'
+# =============================================================================
+# KNOWLEDGE BASE SYSTEM ADMIN INTERFACES
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# KBCategory Admin with Hierarchical Categories Support
+# -----------------------------------------------------------------------------
+
+class ChildCategoryInline(admin.TabularInline):
+    """Inline editor for child categories"""
+    model = KBCategory
+    fk_name = 'parent'
+    extra = 0
+    fields = ['name', 'slug', 'display_order', 'is_active', 'icon']
+    prepopulated_fields = {'slug': ('name',)}
+
+
+@admin.register(KBCategory)
+class KBCategoryAdmin(admin.ModelAdmin):
+    """Admin interface for KB categories with hierarchical support"""
+    list_display = ['name', 'parent', 'article_count_display', 'display_order', 'is_active', 'icon']
+    list_filter = ['is_active', 'parent']
+    search_fields = ['name', 'description', 'slug']
+    prepopulated_fields = {'slug': ('name',)}
+    readonly_fields = ['created_at', 'updated_at']
+    list_per_page = 25
+    inlines = [ChildCategoryInline]
+    actions = ['activate_categories', 'deactivate_categories']
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('name', 'slug', 'description', 'parent')
+        }),
+        ('Display Settings', {
+            'fields': ('icon', 'display_order', 'is_active')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def article_count_display(self, obj):
+        """Display count of published articles in this category"""
+        count = obj.article_count
+        if count > 0:
+            return format_html(
+                '<span style="background-color: #4CAF50; color: white; padding: 3px 8px; '
+                'border-radius: 3px; font-weight: bold;">{}</span>',
+                count
+            )
+        return format_html('<span style="color: #999;">0</span>')
+    article_count_display.short_description = 'Published Articles'
+
+    def activate_categories(self, request, queryset):
+        """Bulk activate selected categories"""
+        count = queryset.update(is_active=True)
+        self.message_user(request, f'Successfully activated {count} categories')
+    activate_categories.short_description = 'Activate selected categories'
+
+    def deactivate_categories(self, request, queryset):
+        """Bulk deactivate selected categories"""
+        count = queryset.update(is_active=False)
+        self.message_user(request, f'Successfully deactivated {count} categories')
+    deactivate_categories.short_description = 'Deactivate selected categories'
+
+
+# -----------------------------------------------------------------------------
+# KBTag Admin with Color Preview
+# -----------------------------------------------------------------------------
+
+@admin.register(KBTag)
+class KBTagAdmin(admin.ModelAdmin):
+    """Admin interface for KB tags with color preview"""
+    list_display = ['name', 'color_preview', 'article_count_display', 'slug']
+    search_fields = ['name', 'slug']
+    prepopulated_fields = {'slug': ('name',)}
+    readonly_fields = ['created_at', 'updated_at']
+    list_per_page = 50
+
+    fieldsets = (
+        ('Tag Information', {
+            'fields': ('name', 'slug', 'color')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def color_preview(self, obj):
+        """Display color with visual preview"""
+        return format_html(
+            '<span style="display: inline-block; width: 80px; padding: 5px 10px; '
+            'background-color: {}; color: white; border-radius: 3px; text-align: center;">{}</span>',
+            obj.color, obj.color
+        )
+    color_preview.short_description = 'Color'
+
+    def article_count_display(self, obj):
+        """Display count of published articles with this tag"""
+        count = obj.article_count
+        if count > 0:
+            return format_html(
+                '<span style="background-color: #2196F3; color: white; padding: 3px 8px; '
+                'border-radius: 3px; font-weight: bold;">{}</span>',
+                count
+            )
+        return format_html('<span style="color: #999;">0</span>')
+    article_count_display.short_description = 'Articles'
+
+
+# -----------------------------------------------------------------------------
+# KBArticle Admin - Main Knowledge Base Interface
+# -----------------------------------------------------------------------------
+
+class KBArticleAttachmentInline(admin.TabularInline):
+    """Inline editor for article attachments"""
+    model = KBArticleAttachment
+    extra = 0
+    fields = ['file', 'filename', 'file_size_display', 'uploaded_by']
+    readonly_fields = ['filename', 'file_size_display', 'uploaded_by']
+
+    def file_size_display(self, obj):
+        """Display file size in human-readable format"""
+        if obj.file_size:
+            if obj.file_size < 1024:
+                return f"{obj.file_size} bytes"
+            elif obj.file_size < 1024 * 1024:
+                return f"{obj.file_size / 1024:.2f} KB"
+            else:
+                return f"{obj.file_size / (1024 * 1024):.2f} MB"
+        return "Unknown"
+    file_size_display.short_description = 'File Size'
+
+
+class KBArticleRelationInline(admin.TabularInline):
+    """Inline editor for related articles"""
+    model = KBArticleRelation
+    fk_name = 'from_article'
+    extra = 0
+    fields = ['to_article', 'relation_type', 'display_order']
+    autocomplete_fields = ['to_article']
+
+
+@admin.register(KBArticle)
+class KBArticleAdmin(admin.ModelAdmin):
+    """Comprehensive admin interface for KB articles"""
+    list_display = [
+        'article_number', 'title', 'category', 'status_badge', 'visibility_badge',
+        'author', 'view_count_display', 'helpfulness_display', 'published_at', 'featured_badge'
+    ]
+    list_filter = ['status', 'visibility', 'category', 'featured', 'tags', 'created_at']
+    search_fields = ['article_number', 'title', 'content', 'excerpt']
+    prepopulated_fields = {'slug': ('title',)}
+    # Enable autocomplete for use in relations and ticket linking
+    autocomplete_fields = []
+    readonly_fields = [
+        'article_number', 'view_count', 'helpful_count', 'not_helpful_count',
+        'search_vector', 'created_at', 'updated_at', 'preview_link'
+    ]
+    filter_horizontal = ['tags']
+    list_per_page = 25
+    date_hierarchy = 'created_at'
+    inlines = [KBArticleAttachmentInline, KBArticleRelationInline]
+    actions = [
+        'publish_articles', 'archive_articles', 'mark_as_featured',
+        'remove_from_featured', 'export_articles_csv'
+    ]
+
+    fieldsets = (
+        ('Content', {
+            'fields': ('title', 'slug', 'content', 'excerpt', 'category', 'tags')
+        }),
+        ('Publishing', {
+            'fields': ('status', 'visibility', 'author', 'featured', 'published_at', 'preview_link')
+        }),
+        ('Metadata', {
+            'fields': ('article_number',),
+            'classes': ('collapse',)
+        }),
+        ('Statistics', {
+            'fields': ('view_count', 'helpful_count', 'not_helpful_count'),
+            'classes': ('collapse',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def get_queryset(self, request):
+        """Optimize queryset with related data"""
+        return super().get_queryset(request).select_related(
+            'category', 'author'
+        ).prefetch_related('tags')
+
+    def status_badge(self, obj):
+        """Display status with color coding"""
+        colors = {
+            'draft': '#FF9800',
+            'published': '#4CAF50',
+            'archived': '#9E9E9E',
+        }
+        color = colors.get(obj.status, '#999')
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 8px; '
+            'border-radius: 3px; font-weight: bold;">{}</span>',
+            color, obj.get_status_display()
+        )
+    status_badge.short_description = 'Status'
+
+    def visibility_badge(self, obj):
+        """Display visibility with color coding"""
+        colors = {
+            'public': '#2196F3',
+            'internal': '#9C27B0',
+        }
+        color = colors.get(obj.visibility, '#999')
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 6px; '
+            'border-radius: 3px; font-size: 11px;">{}</span>',
+            color, obj.get_visibility_display()
+        )
+    visibility_badge.short_description = 'Visibility'
+
+    def featured_badge(self, obj):
+        """Display featured status"""
+        if obj.featured:
+            return format_html(
+                '<span style="color: #FFA500; font-size: 16px;" title="Featured">★</span>'
+            )
+        return format_html('<span style="color: #CCC;">☆</span>')
+    featured_badge.short_description = 'Featured'
+
+    def view_count_display(self, obj):
+        """Display view count with formatting"""
+        if obj.view_count > 100:
+            return format_html('<strong style="color: #4CAF50;">{}</strong>', obj.view_count)
+        elif obj.view_count > 10:
+            return format_html('<span style="color: #FF9800;">{}</span>', obj.view_count)
+        return str(obj.view_count)
+    view_count_display.short_description = 'Views'
+
+    def helpfulness_display(self, obj):
+        """Display helpfulness as percentage with color coding"""
+        ratio = obj.get_helpfulness_ratio()
+        if ratio is None:
+            return format_html('<span style="color: #999;">No votes</span>')
+
+        # Color coding: green >70%, yellow 40-70%, red <40%
+        if ratio >= 70:
+            color = '#4CAF50'
+        elif ratio >= 40:
+            color = '#FF9800'
+        else:
+            color = '#F44336'
+
+        total_votes = obj.helpful_count + obj.not_helpful_count
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 8px; '
+            'border-radius: 3px; font-weight: bold;">{:.1f}%</span> '
+            '<span style="color: #999; font-size: 11px;">({} votes)</span>',
+            color, ratio, total_votes
+        )
+    helpfulness_display.short_description = 'Helpfulness'
+
+    def preview_link(self, obj):
+        """Display article preview link if published"""
+        if obj.status == 'published':
+            # Assuming frontend URL pattern: /kb/articles/{slug}
+            url = f"/kb/articles/{obj.slug}"
+            return format_html(
+                '<a href="{}" target="_blank" style="color: #2196F3; text-decoration: underline;">'
+                'View Article →</a>',
+                url
+            )
+        return format_html('<span style="color: #999;">Not published yet</span>')
+    preview_link.short_description = 'Preview'
+
+    def publish_articles(self, request, queryset):
+        """Publish selected articles"""
+        count = queryset.filter(status='draft').update(
+            status='published',
+            published_at=timezone.now()
+        )
+        self.message_user(request, f'Successfully published {count} articles')
+    publish_articles.short_description = 'Publish selected articles'
+
+    def archive_articles(self, request, queryset):
+        """Archive selected articles"""
+        count = queryset.update(status='archived')
+        self.message_user(request, f'Successfully archived {count} articles')
+    archive_articles.short_description = 'Archive selected articles'
+
+    def mark_as_featured(self, request, queryset):
+        """Mark selected articles as featured"""
+        count = queryset.update(featured=True)
+        self.message_user(request, f'Successfully marked {count} articles as featured')
+    mark_as_featured.short_description = 'Mark as featured'
+
+    def remove_from_featured(self, request, queryset):
+        """Remove selected articles from featured"""
+        count = queryset.update(featured=False)
+        self.message_user(request, f'Successfully removed {count} articles from featured')
+    remove_from_featured.short_description = 'Remove from featured'
+
+    def export_articles_csv(self, request, queryset):
+        """Export selected articles to CSV"""
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="kb_articles_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.csv"'
+
+        writer = csv.writer(response)
+        writer.writerow([
+            'Article Number', 'Title', 'Category', 'Status', 'Visibility',
+            'Author', 'Views', 'Helpful Votes', 'Not Helpful Votes', 'Helpfulness %',
+            'Featured', 'Published Date', 'Created Date'
+        ])
+
+        articles = queryset.select_related('category', 'author')
+        for article in articles:
+            ratio = article.get_helpfulness_ratio()
+            writer.writerow([
+                article.article_number,
+                article.title,
+                article.category.name,
+                article.get_status_display(),
+                article.get_visibility_display(),
+                article.author.username if article.author else 'N/A',
+                article.view_count,
+                article.helpful_count,
+                article.not_helpful_count,
+                f'{ratio:.1f}%' if ratio is not None else 'N/A',
+                'Yes' if article.featured else 'No',
+                article.published_at.strftime('%Y-%m-%d %H:%M') if article.published_at else 'Not published',
+                article.created_at.strftime('%Y-%m-%d %H:%M')
+            ])
+
+        self.message_user(request, f'Successfully exported {queryset.count()} articles to CSV')
+        return response
+    export_articles_csv.short_description = 'Export to CSV'
+
+    def save_model(self, request, obj, form, change):
+        """Auto-populate author from request.user on create"""
+        if not change and not obj.author:
+            obj.author = request.user
+        super().save_model(request, obj, form, change)
+
+
+# -----------------------------------------------------------------------------
+# KBArticleView Admin - Analytics
+# -----------------------------------------------------------------------------
+
+@admin.register(KBArticleView)
+class KBArticleViewAdmin(admin.ModelAdmin):
+    """Admin interface for KB article views (analytics only)"""
+    list_display = ['article_number', 'article_title', 'user_display', 'ip_address', 'viewed_at']
+    list_filter = ['viewed_at', 'user']
+    search_fields = ['article__title', 'article__article_number', 'ip_address']
+    readonly_fields = ['article', 'user', 'ip_address', 'session_id', 'viewed_at']
+    date_hierarchy = 'viewed_at'
+    list_per_page = 50
+
+    fieldsets = (
+        ('View Information', {
+            'fields': ('article', 'user', 'ip_address', 'session_id', 'viewed_at')
+        }),
+    )
+
+    def get_queryset(self, request):
+        """Optimize queryset"""
+        return super().get_queryset(request).select_related('article', 'user')
+
+    def article_number(self, obj):
+        """Display article number"""
+        return obj.article.article_number
+    article_number.short_description = 'Article #'
+
+    def article_title(self, obj):
+        """Display article title with link"""
+        url = reverse('admin:crm_app_kbarticle_change', args=[obj.article.pk])
+        return format_html('<a href="{}">{}</a>', url, obj.article.title[:50])
+    article_title.short_description = 'Article'
+
+    def user_display(self, obj):
+        """Display user or anonymous"""
+        if obj.user:
+            return obj.user.username
+        return format_html('<span style="color: #999;">Anonymous</span>')
+    user_display.short_description = 'User'
+
+    def has_add_permission(self, request):
+        """Disable manual adding (analytics only)"""
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """Allow deletion for data cleanup"""
+        return True
+
+
+# -----------------------------------------------------------------------------
+# KBArticleRating Admin
+# -----------------------------------------------------------------------------
+
+@admin.register(KBArticleRating)
+class KBArticleRatingAdmin(admin.ModelAdmin):
+    """Admin interface for KB article ratings"""
+    list_display = ['article_number', 'article_title', 'user', 'vote_badge', 'created_at']
+    list_filter = ['is_helpful', 'created_at']
+    search_fields = ['article__title', 'article__article_number', 'user__username']
+    readonly_fields = ['article', 'user', 'is_helpful', 'created_at']
+    date_hierarchy = 'created_at'
+    list_per_page = 50
+
+    fieldsets = (
+        ('Rating Information', {
+            'fields': ('article', 'user', 'is_helpful', 'created_at')
+        }),
+    )
+
+    def get_queryset(self, request):
+        """Optimize queryset"""
+        return super().get_queryset(request).select_related('article', 'user')
+
+    def article_number(self, obj):
+        """Display article number"""
+        return obj.article.article_number
+    article_number.short_description = 'Article #'
+
+    def article_title(self, obj):
+        """Display article title with link"""
+        url = reverse('admin:crm_app_kbarticle_change', args=[obj.article.pk])
+        return format_html('<a href="{}">{}</a>', url, obj.article.title[:50])
+    article_title.short_description = 'Article'
+
+    def vote_badge(self, obj):
+        """Display vote type with color"""
+        if obj.is_helpful:
+            return format_html(
+                '<span style="background-color: #4CAF50; color: white; padding: 3px 8px; '
+                'border-radius: 3px; font-weight: bold;">👍 Helpful</span>'
+            )
+        return format_html(
+            '<span style="background-color: #F44336; color: white; padding: 3px 8px; '
+            'border-radius: 3px; font-weight: bold;">👎 Not Helpful</span>'
+        )
+    vote_badge.short_description = 'Vote'
+
+    def has_add_permission(self, request):
+        """Disable manual adding"""
+        return False
+
+
+# -----------------------------------------------------------------------------
+# KBArticleRelation Admin
+# -----------------------------------------------------------------------------
+
+@admin.register(KBArticleRelation)
+class KBArticleRelationAdmin(admin.ModelAdmin):
+    """Admin interface for related articles"""
+    list_display = ['from_article_number', 'relation_type_badge', 'to_article_number', 'display_order']
+    list_filter = ['relation_type']
+    search_fields = ['from_article__title', 'to_article__title', 'from_article__article_number', 'to_article__article_number']
+    autocomplete_fields = ['from_article', 'to_article']
+    list_per_page = 50
+
+    fieldsets = (
+        ('Relation Information', {
+            'fields': ('from_article', 'to_article', 'relation_type', 'display_order')
+        }),
+    )
+
+    def get_queryset(self, request):
+        """Optimize queryset"""
+        return super().get_queryset(request).select_related('from_article', 'to_article')
+
+    def from_article_number(self, obj):
+        """Display source article number"""
+        return obj.from_article.article_number
+    from_article_number.short_description = 'From Article'
+
+    def to_article_number(self, obj):
+        """Display target article number"""
+        return obj.to_article.article_number
+    to_article_number.short_description = 'To Article'
+
+    def relation_type_badge(self, obj):
+        """Display relation type with styling"""
+        colors = {
+            'related': '#2196F3',
+            'see_also': '#9C27B0',
+            'prerequisite': '#FF9800',
+        }
+        color = colors.get(obj.relation_type, '#999')
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 8px; '
+            'border-radius: 3px; font-size: 11px;">{}</span>',
+            color, obj.get_relation_type_display()
+        )
+    relation_type_badge.short_description = 'Relation Type'
+
+
+# -----------------------------------------------------------------------------
+# KBArticleAttachment Admin
+# -----------------------------------------------------------------------------
+
+@admin.register(KBArticleAttachment)
+class KBArticleAttachmentAdmin(admin.ModelAdmin):
+    """Admin interface for KB article attachments"""
+    list_display = ['filename', 'article_number', 'file_size_display', 'file_extension', 'uploaded_by', 'uploaded_at']
+    list_filter = ['uploaded_at']
+    search_fields = ['filename', 'article__title', 'article__article_number']
+    readonly_fields = ['filename', 'file_size', 'uploaded_by', 'uploaded_at']
+    date_hierarchy = 'uploaded_at'
+    list_per_page = 50
+
+    fieldsets = (
+        ('Attachment Information', {
+            'fields': ('article', 'file', 'filename', 'file_size')
+        }),
+        ('Upload Details', {
+            'fields': ('uploaded_by', 'uploaded_at')
+        }),
+    )
+
+    def get_queryset(self, request):
+        """Optimize queryset"""
+        return super().get_queryset(request).select_related('article', 'uploaded_by')
+
+    def article_number(self, obj):
+        """Display article number"""
+        return obj.article.article_number
+    article_number.short_description = 'Article #'
+
+    def file_size_display(self, obj):
+        """Display file size in human-readable format"""
+        if obj.file_size:
+            if obj.file_size < 1024:
+                return f"{obj.file_size} bytes"
+            elif obj.file_size < 1024 * 1024:
+                return f"{obj.file_size / 1024:.2f} KB"
+            elif obj.file_size < 1024 * 1024 * 1024:
+                return f"{obj.file_size / (1024 * 1024):.2f} MB"
+            else:
+                return f"{obj.file_size / (1024 * 1024 * 1024):.2f} GB"
+        return "Unknown"
+    file_size_display.short_description = 'File Size'
+
+    def file_extension(self, obj):
+        """Display file extension with icon-style badge"""
+        ext = obj.get_file_extension().upper().replace('.', '')
+
+        # Color coding by file type
+        color_map = {
+            'PDF': '#F44336',
+            'DOC': '#2196F3', 'DOCX': '#2196F3',
+            'XLS': '#4CAF50', 'XLSX': '#4CAF50',
+            'JPG': '#FF9800', 'JPEG': '#FF9800', 'PNG': '#FF9800', 'GIF': '#FF9800',
+            'ZIP': '#9C27B0', 'RAR': '#9C27B0',
+        }
+        color = color_map.get(ext, '#607D8B')
+
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 6px; '
+            'border-radius: 3px; font-size: 10px; font-weight: bold;">{}</span>',
+            color, ext if ext else 'FILE'
+        )
+    file_extension.short_description = 'Type'
+
+    def save_model(self, request, obj, form, change):
+        """Auto-populate uploaded_by from request.user on create"""
+        if not change and not obj.uploaded_by:
+            obj.uploaded_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+# -----------------------------------------------------------------------------
+# TicketKBArticle Admin
+# -----------------------------------------------------------------------------
+
+@admin.register(TicketKBArticle)
+class TicketKBArticleAdmin(admin.ModelAdmin):
+    """Admin interface for ticket-article links"""
+    list_display = ['ticket_number', 'article_number', 'linked_by', 'helpful_badge', 'linked_at']
+    list_filter = ['is_helpful', 'linked_at']
+    search_fields = ['ticket__ticket_number', 'article__article_number', 'article__title']
+    autocomplete_fields = ['ticket', 'article']
+    readonly_fields = ['linked_by', 'linked_at']
+    date_hierarchy = 'linked_at'
+    list_per_page = 50
+
+    fieldsets = (
+        ('Link Information', {
+            'fields': ('ticket', 'article', 'linked_by', 'linked_at')
+        }),
+        ('Feedback', {
+            'fields': ('is_helpful',),
+            'description': 'Was this article helpful for resolving the ticket?'
+        }),
+    )
+
+    def get_queryset(self, request):
+        """Optimize queryset"""
+        return super().get_queryset(request).select_related('ticket', 'article', 'linked_by')
+
+    def ticket_number(self, obj):
+        """Display ticket number with link"""
+        url = reverse('admin:crm_app_ticket_change', args=[obj.ticket.pk])
+        return format_html('<a href="{}">{}</a>', url, obj.ticket.ticket_number)
+    ticket_number.short_description = 'Ticket'
+
+    def article_number(self, obj):
+        """Display article number with link"""
+        url = reverse('admin:crm_app_kbarticle_change', args=[obj.article.pk])
+        return format_html('<a href="{}">{}</a>', url, obj.article.article_number)
+    article_number.short_description = 'KB Article'
+
+    def helpful_badge(self, obj):
+        """Display helpfulness status"""
+        if obj.is_helpful is None:
+            return format_html('<span style="color: #999;">Not rated</span>')
+        elif obj.is_helpful:
+            return format_html(
+                '<span style="background-color: #4CAF50; color: white; padding: 3px 8px; '
+                'border-radius: 3px; font-weight: bold;">✓ Helpful</span>'
+            )
+        else:
+            return format_html(
+                '<span style="background-color: #F44336; color: white; padding: 3px 8px; '
+                'border-radius: 3px; font-weight: bold;">✗ Not Helpful</span>'
+            )
+    helpful_badge.short_description = 'Helpful?'
+
+    def save_model(self, request, obj, form, change):
+        """Auto-populate linked_by from request.user on create"""
+        if not change and not obj.linked_by:
+            obj.linked_by = request.user
+        super().save_model(request, obj, form, change)

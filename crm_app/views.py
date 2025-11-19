@@ -26,7 +26,9 @@ from .models import (
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailTemplate, EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
     CustomerSegment, EmailCampaign, CampaignRecipient,
-    Ticket, TicketComment, TicketAttachment
+    Ticket, TicketComment, TicketAttachment,
+    KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
+    KBArticleRelation, KBArticleAttachment, TicketKBArticle
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
@@ -36,7 +38,10 @@ from .serializers import (
     QuoteSerializer, QuoteLineItemSerializer, QuoteAttachmentSerializer, QuoteActivitySerializer,
     EmailTemplateSerializer, EmailSequenceSerializer, SequenceStepSerializer,
     SequenceEnrollmentSerializer, SequenceStepExecutionSerializer,
-    CustomerSegmentSerializer, TicketSerializer, TicketCommentSerializer, TicketAttachmentSerializer
+    CustomerSegmentSerializer, TicketSerializer, TicketCommentSerializer, TicketAttachmentSerializer,
+    KBCategorySerializer, KBTagSerializer, KBArticleSerializer, KBArticleListSerializer,
+    KBArticleViewSerializer, KBArticleRatingSerializer, KBArticleRelationSerializer,
+    KBArticleAttachmentSerializer, TicketKBArticleSerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -3809,3 +3814,445 @@ class TicketAttachmentViewSet(viewsets.ModelViewSet):
                 {'error': str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+
+# ============================================================================
+# Knowledge Base System ViewSets
+# ============================================================================
+
+class KBCategoryViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing KB categories with hierarchical support.
+    Supports parent/child relationships and active/inactive filtering.
+    """
+    queryset = KBCategory.objects.all().prefetch_related('parent', 'children')
+    serializer_class = KBCategorySerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['is_active', 'parent']
+    search_fields = ['name', 'description']
+    ordering_fields = ['name', 'display_order']
+    ordering = ['display_order', 'name']
+
+
+class KBTagViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing KB tags.
+    Simple CRUD operations for article tagging.
+    """
+    queryset = KBTag.objects.all().order_by('name')
+    serializer_class = KBTagSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name']
+    ordering = ['name']
+
+
+class KBArticleViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing KB articles with full-text search and analytics.
+    Supports custom actions for view tracking, ratings, and related articles.
+    """
+    queryset = KBArticle.objects.all()
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['status', 'visibility', 'category', 'featured', 'tags']
+    search_fields = ['article_number', 'title', 'content', 'excerpt']
+    ordering_fields = ['created_at', 'updated_at', 'published_at', 'view_count', 'helpful_count']
+    ordering = ['-published_at', '-created_at']
+
+    def get_queryset(self):
+        """Optimize queryset with select_related and prefetch_related"""
+        queryset = super().get_queryset()
+        queryset = queryset.select_related('category', 'author').prefetch_related(
+            'tags',
+            'attachments',
+            'outgoing_relations__to_article'
+        )
+        return queryset
+
+    def get_serializer_class(self):
+        """Use lightweight serializer for list views"""
+        if self.action == 'list':
+            return KBArticleListSerializer
+        return KBArticleSerializer
+
+    @action(detail=True, methods=['post'])
+    def record_view(self, request, pk=None):
+        """
+        Record article view for analytics.
+        POST /api/v1/kb/articles/{id}/record_view/
+        Body: { "session_id": "unique-session-id" }
+        """
+        article = self.get_object()
+        session_id = request.data.get('session_id')
+
+        if not session_id:
+            return Response(
+                {'error': 'session_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get IP address
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            ip_address = x_forwarded_for.split(',')[0]
+        else:
+            ip_address = request.META.get('REMOTE_ADDR')
+
+        # Create view record (unique constraint prevents duplicates)
+        try:
+            view_record = KBArticleView.objects.create(
+                article=article,
+                user=request.user if request.user.is_authenticated else None,
+                ip_address=ip_address,
+                session_id=session_id
+            )
+
+            # Increment view count
+            article.view_count += 1
+            article.save(update_fields=['view_count'])
+
+            return Response({
+                'message': 'View recorded',
+                'view_count': article.view_count
+            }, status=status.HTTP_201_CREATED)
+
+        except Exception as e:
+            # View already exists for this session
+            return Response({
+                'message': 'View already recorded for this session',
+                'view_count': article.view_count
+            }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'])
+    def rate(self, request, pk=None):
+        """
+        Rate article as helpful or not helpful.
+        POST /api/v1/kb/articles/{id}/rate/
+        Body: { "is_helpful": true/false }
+        """
+        article = self.get_object()
+        is_helpful = request.data.get('is_helpful')
+
+        if is_helpful is None:
+            return Response(
+                {'error': 'is_helpful field is required (true or false)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Create or update rating
+        rating, created = KBArticleRating.objects.update_or_create(
+            article=article,
+            user=request.user,
+            defaults={'is_helpful': is_helpful}
+        )
+
+        # Recalculate counts
+        article.helpful_count = article.ratings.filter(is_helpful=True).count()
+        article.not_helpful_count = article.ratings.filter(is_helpful=False).count()
+        article.save(update_fields=['helpful_count', 'not_helpful_count'])
+
+        return Response({
+            'message': 'Rating saved' if created else 'Rating updated',
+            'helpful_count': article.helpful_count,
+            'not_helpful_count': article.not_helpful_count,
+            'helpfulness_ratio': article.get_helpfulness_ratio()
+        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=True, methods=['get'])
+    def related(self, request, pk=None):
+        """
+        Get related articles.
+        GET /api/v1/kb/articles/{id}/related/
+        """
+        article = self.get_object()
+        relations = article.outgoing_relations.select_related('to_article').all()
+
+        related_articles = []
+        for relation in relations:
+            related_articles.append({
+                'id': relation.to_article.id,
+                'article_number': relation.to_article.article_number,
+                'title': relation.to_article.title,
+                'slug': relation.to_article.slug,
+                'relation_type': relation.relation_type,
+                'relation_type_display': relation.get_relation_type_display()
+            })
+
+        return Response(related_articles)
+
+    @action(detail=True, methods=['post'], parser_classes=[MultiPartParser, FormParser])
+    def add_attachment(self, request, pk=None):
+        """
+        Upload file attachment to article.
+        POST /api/v1/kb/articles/{id}/add_attachment/
+        Body: multipart/form-data with 'file' field
+        """
+        article = self.get_object()
+        file = request.FILES.get('file')
+
+        if not file:
+            return Response(
+                {'error': 'file is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Create attachment
+        attachment = KBArticleAttachment.objects.create(
+            article=article,
+            file=file,
+            filename=file.name,
+            file_size=file.size,
+            uploaded_by=request.user
+        )
+
+        serializer = KBArticleAttachmentSerializer(attachment)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def link_to_ticket(self, request, pk=None):
+        """
+        Link article to a support ticket.
+        POST /api/v1/kb/articles/{id}/link_to_ticket/
+        Body: { "ticket_id": "uuid", "is_helpful": true/false (optional) }
+        """
+        article = self.get_object()
+        ticket_id = request.data.get('ticket_id')
+        is_helpful = request.data.get('is_helpful')
+
+        if not ticket_id:
+            return Response(
+                {'error': 'ticket_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Verify ticket exists
+        try:
+            ticket = Ticket.objects.get(pk=ticket_id)
+        except Ticket.DoesNotExist:
+            return Response(
+                {'error': 'Ticket not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Create or update link
+        link, created = TicketKBArticle.objects.update_or_create(
+            ticket=ticket,
+            article=article,
+            defaults={
+                'linked_by': request.user,
+                'is_helpful': is_helpful
+            }
+        )
+
+        serializer = TicketKBArticleSerializer(link)
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        )
+
+    @action(detail=False, methods=['get'])
+    def search(self, request):
+        """
+        Full-text search using PostgreSQL search_vector.
+        GET /api/v1/kb/articles/search/?q=query
+        Falls back to simple filtering on SQLite.
+        """
+        query = request.query_params.get('q', '').strip()
+
+        if not query:
+            return Response(
+                {'error': 'q parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check database vendor
+        from django.db import connection
+
+        if connection.vendor == 'postgresql':
+            # Use full-text search on PostgreSQL
+            from django.contrib.postgres.search import SearchQuery
+            search_query = SearchQuery(query)
+            queryset = self.get_queryset().filter(
+                search_vector=search_query,
+                status='published'
+            )
+        else:
+            # Fallback to icontains on SQLite
+            queryset = self.get_queryset().filter(
+                Q(title__icontains=query) | Q(content__icontains=query),
+                status='published'
+            )
+
+        # Paginate results
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = KBArticleListSerializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = KBArticleListSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def featured(self, request):
+        """
+        Get featured articles.
+        GET /api/v1/kb/articles/featured/
+        """
+        queryset = self.get_queryset().filter(
+            status='published',
+            featured=True
+        ).order_by('-published_at')[:10]
+
+        serializer = KBArticleListSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def popular(self, request):
+        """
+        Get most viewed articles.
+        GET /api/v1/kb/articles/popular/?limit=10
+        """
+        limit = int(request.query_params.get('limit', 10))
+        queryset = self.get_queryset().filter(
+            status='published'
+        ).order_by('-view_count')[:limit]
+
+        serializer = KBArticleListSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def helpful(self, request):
+        """
+        Get most helpful articles.
+        GET /api/v1/kb/articles/helpful/?limit=10
+        """
+        limit = int(request.query_params.get('limit', 10))
+        queryset = self.get_queryset().filter(
+            status='published'
+        ).order_by('-helpful_count')[:limit]
+
+        serializer = KBArticleListSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+
+class KBArticleViewViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Read-only ViewSet for KB article view analytics.
+    Used for tracking and reporting purposes.
+    """
+    queryset = KBArticleView.objects.all().select_related('article', 'user')
+    serializer_class = KBArticleViewSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['article', 'user', 'viewed_at']
+    ordering = ['-viewed_at']
+
+
+class KBArticleRatingViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing KB article ratings.
+    Enforces unique constraint: one vote per user per article.
+    """
+    queryset = KBArticleRating.objects.all().select_related('article', 'user')
+    serializer_class = KBArticleRatingSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['article', 'user', 'is_helpful']
+    ordering = ['-created_at']
+
+    def create(self, request, *args, **kwargs):
+        """
+        Create rating with validation for unique constraint.
+        Auto-sets user from request.
+        """
+        # Auto-set user from request
+        data = request.data.copy()
+        data['user'] = request.user.id
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class KBArticleRelationViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing relationships between KB articles.
+    Validates that articles cannot be related to themselves.
+    """
+    queryset = KBArticleRelation.objects.all().select_related('from_article', 'to_article')
+    serializer_class = KBArticleRelationSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['from_article', 'to_article', 'relation_type']
+    ordering = ['from_article', 'display_order']
+
+
+class KBArticleAttachmentViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing KB article file attachments.
+    Supports file uploads with metadata tracking.
+    """
+    queryset = KBArticleAttachment.objects.all().select_related('article', 'uploaded_by')
+    serializer_class = KBArticleAttachmentSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['article']
+    ordering = ['-uploaded_at']
+    parser_classes = [MultiPartParser, FormParser]
+
+    def create(self, request, *args, **kwargs):
+        """
+        Handle file upload with automatic metadata population.
+        Auto-sets uploaded_by from request user.
+        """
+        # Validate file is present
+        if 'file' not in request.FILES:
+            return Response(
+                {'error': 'file is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Auto-set uploaded_by
+        data = request.data.copy()
+        # uploaded_by is auto-set in serializer.create()
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class TicketKBArticleViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for linking KB articles to support tickets.
+    Tracks which articles were helpful for resolving tickets.
+    """
+    queryset = TicketKBArticle.objects.all().select_related('ticket', 'article', 'linked_by')
+    serializer_class = TicketKBArticleSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['ticket', 'article', 'is_helpful']
+    ordering = ['-linked_at']
+
+    def create(self, request, *args, **kwargs):
+        """
+        Create ticket-article link.
+        Auto-sets linked_by from request user.
+        """
+        # Auto-set linked_by
+        data = request.data.copy()
+        # linked_by is auto-set in serializer.create()
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
