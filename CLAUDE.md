@@ -163,13 +163,48 @@ Use this agent when:
 - **UI**: Clear percentage display in form with centered text and proper styling
 - **File**: `bmasia-crm-frontend/src/components/QuoteForm.tsx`
 
+### Email Campaign Management (November 2025) ✅ COMPLETE
+
+#### Email Sequences (Drip Campaigns)
+- **Multi-Step Automation**: Create sequences with unlimited steps, each with customizable delays
+- **Conditional Logic**: Steps can include conditions (field, operator, value) to control execution flow
+- **Trigger Types**: Manual enrollment or automatic triggers (contract_signed, renewal_30_days, renewal_7_days, payment_overdue)
+- **Time Control**: Specify days delay + send time (e.g., "3 days after enrollment at 9:00 AM")
+- **Enrollment Tracking**: Full lifecycle tracking (pending → active → completed/paused/cancelled)
+- **Email History**: Individual email tracking with status (pending, sent, failed, bounced, opened, clicked)
+- **Cron Processing**: Automated execution every 20 minutes via Render cron job
+- **Models**: EmailSequence, EmailSequenceStep, SequenceEnrollment, SequenceEmail (`crm_app/models.py` lines 1320-1599)
+- **UI Components**: EmailSequences.tsx, EmailSequenceForm.tsx, EmailSequenceStepForm.tsx, SequenceEnrollments.tsx, EnrollSequenceDialog.tsx
+
+#### Automatic Renewal Reminders
+- **Smart Timing**: Automatically sends at 30/14/7 days before contract expiration
+- **Template Matching**: Uses EmailTemplate with type: renewal_30_days, renewal_14_days, renewal_7_days, renewal_urgent
+- **Daily Processing**: Cron job runs at 9 AM Bangkok time daily
+- **Duplicate Prevention**: 24-hour block prevents re-sending
+- **Variable Support**: {{company_name}}, {{contact_name}}, {{contract_number}}, {{end_date}}, {{days_until_expiry}}, {{monthly_value}}
+- **Smart Recipients**: Auto-selects billing contacts (or all contacts if none specified)
+- **Zero Configuration**: Just create active template with correct type - system handles the rest
+
+#### Email Template Variable Guide
+- **Rich Variable Display**: Shows all available variables with descriptions in tooltips
+- **Template-Specific**: Different variables per template type (renewal, invoice, payment, etc.)
+- **Common Variables**: Shared variables (company_name, contact_name, current_year, unsubscribe_url) for all templates
+- **Insert Functionality**: One-click insertion at cursor position
+- **Copy to Clipboard**: Click chip to copy variable
+- **Backend Sync**: Frontend matches backend TemplateVariable structure exactly
+- **File**: `EmailTemplateForm.tsx` lines 94-616, `types/index.ts` lines 714-736
+
 ## Key Project Files and Locations
 
 ### Backend (Django)
-- **Models**: `crm_app/models.py` (16+ entities including Company, Contact, Contract, Zone, Quote)
+- **Models**: `crm_app/models.py` (20+ entities including Company, Contact, Contract, Zone, Quote, Email Sequences)
   - Company model (lines 87-170): billing_entity, legal_entity_name fields
   - Quote model (lines 1069-1150): subtotal, tax_amount, discount_amount
   - QuoteLineItem model (lines 1153-1177): discount_percentage, tax_rate
+  - EmailSequence model (lines 1320-1389): name, sequence_type, trigger_event, steps
+  - EmailSequenceStep model (lines 1392-1465): step_order, days_delay, send_time, conditions
+  - SequenceEnrollment model (lines 1468-1539): status, current_step_index, next_send_date
+  - SequenceEmail model (lines 1542-1599): tracks individual emails sent in sequences
 - **Admin**: `crm_app/admin.py` (comprehensive admin interface)
 - **Views/PDFs**: `crm_app/views.py` - PDF generation for Quotes, Invoices, Contracts
 - **Services**: `crm_app/services/` (business logic, API integrations)
@@ -184,10 +219,17 @@ Use this agent when:
   - `CompanyForm.tsx` - Modal dialog for create/edit (with legal_entity_name, billing_entity)
   - `QuoteForm.tsx` - Quote creation with line items (discount %, tax %)
   - Company pages: `CompanyNew.tsx`, `CompanyEdit.tsx`, `Companies.tsx`
+  - **Email Campaign Components**:
+    - `EmailSequences.tsx` - List all sequences with create/edit/view actions
+    - `EmailSequenceForm.tsx` - Create/edit sequences with step management
+    - `EmailSequenceStepForm.tsx` - Configure individual sequence steps with conditions
+    - `SequenceEnrollments.tsx` - View/manage enrollments for a sequence
+    - `EnrollSequenceDialog.tsx` - Enroll companies/contacts in sequences
+    - `EmailTemplateForm.tsx` - Create/edit templates with variable guide (enhanced Nov 2025)
 - **Services**:
-  - `api.ts` - API service layer with Axios
+  - `api.ts` - API service layer with Axios (includes sequence methods)
   - `authService.ts` - JWT authentication
-- **Types**: `types/index.ts` - TypeScript interfaces for all entities
+- **Types**: `types/index.ts` - TypeScript interfaces for all entities (includes EmailSequence, SequenceEnrollment, TemplateVariable)
 - **Context**: `AuthContext.tsx` - Authentication state management
 
 ### Database
@@ -195,7 +237,9 @@ Use this agent when:
 - **Production**: PostgreSQL on Render (dpg-d3cbikd6ubrc73el0ke0-a)
 - **Migrations**: `crm_app/migrations/`
   - Latest: `0025_user_smtp_email_user_smtp_password.py` (Added per-user SMTP fields for email authentication)
-  - Previous: `0024_add_legal_entity_name_to_company.py`
+  - `0024_sequenceenrollment_company_name.py` (Email sequences company name field)
+  - `0023_remove_emailsequence_department_and_more.py` (Email sequences cleanup)
+  - `0022_emailsequence_emailsequencestep_sequenceenrollment_sequenceemail.py` (Email sequences models)
 
 ## Environment Variables (.env)
 
@@ -287,7 +331,7 @@ npm run build  # Production build
 6. **Test locally** before pushing to production
 7. **Use environment variables** for sensitive data, never hardcode
 
-## Current Status (October 2025)
+## Current Status (November 2025)
 
 ### Backend (Django)
 - ✅ Core CRM functionality (Companies, Contacts, Contracts, Quotes, Invoices)
@@ -298,6 +342,9 @@ npm run build  # Production build
 - ✅ Multi-entity support (BMAsia Limited HK + BMAsia Thailand Co., Ltd.)
 - ✅ Legal entity name field for registered company names
 - ✅ Smart billing entity defaults based on country
+- ✅ **Email Sequences (Drip Campaigns)** - Complete with conditional logic and cron automation
+- ✅ **Automatic Renewal Reminders** - Daily processing with 30/14/7-day advance notices
+- ✅ **Email Template Variable System** - Rich variable guide with descriptions
 
 ### Frontend (React + TypeScript)
 - ✅ Authentication with JWT tokens (AuthContext)
@@ -309,8 +356,31 @@ npm run build  # Production build
 - ✅ Material-UI components throughout
 - ✅ Legal entity name + billing entity in all company forms
 - ✅ Email sending UI (EmailSendDialog component integrated in Contracts/Quotes)
+- ✅ **Email Sequences UI** - Full CRUD with step configuration and enrollment management
+- ✅ **Email Template Variable Guide** - Interactive variable insertion with tooltips
 
-### Recent Improvements (October 2025)
+### Recent Improvements (November 2025)
+- ✅ **Email Sequences (Drip Campaigns)** - Complete 4-phase implementation (Nov 19, 2025)
+  - Multi-step automation with conditional logic
+  - Time-based delays and send scheduling
+  - Enrollment tracking with full lifecycle management
+  - Email history and status tracking
+  - Cron job processing every 20 minutes
+  - 5 new React components for UI
+  - 4 new Django models (EmailSequence, EmailSequenceStep, SequenceEnrollment, SequenceEmail)
+- ✅ **Automatic Renewal Reminders** - Zero-configuration automation (Nov 19, 2025)
+  - Template type matching (renewal_30_days, renewal_14_days, renewal_7_days, renewal_urgent)
+  - Daily cron at 9 AM Bangkok time
+  - Smart recipient selection and duplicate prevention
+  - Full variable substitution support
+- ✅ **Email Template Variable Guide Enhancement** - Improved UX (Nov 19, 2025)
+  - Rich variable display with descriptions in tooltips
+  - One-click insertion at cursor position
+  - Copy to clipboard functionality
+  - Template-specific variable filtering
+  - Backend/frontend structure alignment
+
+### Previous Improvements (October 2025)
 - ✅ PDF design overhaul - modern 2025 professional layouts
 - ✅ Logo optimization (auto-cropped, proper sizing)
 - ✅ Single-page quotes for simple items
@@ -395,9 +465,11 @@ npm run build  # Production build
 ### Areas for Future Development
 - 🚧 Test coverage needs improvement
 - 🚧 Invoice management UI expansion
-- 🚧 Email campaign dashboard
+- 🚧 Email analytics dashboard (open rates, click tracking)
 - 🚧 Soundtrack API sync automation
-- 🚧 Smart renewal notice UI with status indicators
+- 🚧 A/B testing for email sequences
+- 🚧 Template versioning and rollback
+- 🚧 Advanced audience segmentation
 - 🚧 AI email drafting integration (Optional)
 
 ## Support and Documentation
@@ -407,6 +479,8 @@ npm run build  # Production build
 - **Database Setup**: `DATABASE_SETUP.md`
 - **Soundtrack API**: `SOUNDTRACK_API_SETUP.md`
 - **Zone Tracking**: `ZONE_TRACKING_GUIDE.md`
+- **Session Checkpoints**: `SESSION_CHECKPOINT_2025-*.md` (detailed session histories)
+  - `SESSION_CHECKPOINT_2025-11-19.md` - Email Sequences, Renewal Reminders, Variable Guide (latest)
 
 ## Render Platform Access
 
