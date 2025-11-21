@@ -414,7 +414,7 @@ function App() {
         <Route
           path="/equipment-types"
           element={
-            <ProtectedRoute requiredModule="equipment">
+            <ProtectedRoute requiredModule="tickets">
               <EquipmentTypes />
             </ProtectedRoute>
           }
