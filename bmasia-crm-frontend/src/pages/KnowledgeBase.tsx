@@ -8,12 +8,14 @@ import {
   IconButton,
   useMediaQuery,
   useTheme,
+  Button,
 } from '@mui/material';
 import { GridLegacy as Grid } from '@mui/material';
-import { Menu as MenuIcon } from '@mui/icons-material';
+import { Menu as MenuIcon, AddCircle } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { KBArticle, KBCategory, KBTag, ApiResponse } from '../types';
 import ApiService from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 import KBSearchBar from '../components/KBSearchBar';
 import KBCategoryTree from '../components/KBCategoryTree';
 import KBFeaturedArticles from '../components/KBFeaturedArticles';
@@ -23,6 +25,7 @@ const KnowledgeBase: React.FC = () => {
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const { user } = useAuth();
 
   const [articles, setArticles] = useState<KBArticle[]>([]);
   const [featuredArticles, setFeaturedArticles] = useState<KBArticle[]>([]);
@@ -171,23 +174,41 @@ const KnowledgeBase: React.FC = () => {
     </Box>
   );
 
+  // Check if user can create articles (Tech Support or Admin)
+  const canCreateArticles = user?.role === 'Tech Support' || user?.role === 'Admin';
+
   return (
     <Box>
       {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 3, gap: 2 }}>
-        {isMobile && (
-          <IconButton onClick={() => setSidebarOpen(!sidebarOpen)}>
-            <MenuIcon />
-          </IconButton>
-        )}
-        <Box>
-          <Typography variant="h4" component="h1" gutterBottom>
-            Knowledge Base
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Find answers, tutorials, and helpful guides
-          </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3, gap: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          {isMobile && (
+            <IconButton onClick={() => setSidebarOpen(!sidebarOpen)}>
+              <MenuIcon />
+            </IconButton>
+          )}
+          <Box>
+            <Typography variant="h4" component="h1" gutterBottom>
+              Knowledge Base
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Find answers, tutorials, and helpful guides
+            </Typography>
+          </Box>
         </Box>
+        {canCreateArticles && (
+          <Button
+            variant="contained"
+            startIcon={<AddCircle />}
+            onClick={() => navigate('/knowledge-base/new')}
+            sx={{
+              bgcolor: '#FFA500',
+              '&:hover': { bgcolor: '#FF8C00' },
+            }}
+          >
+            New Article
+          </Button>
+        )}
       </Box>
 
       {/* Error Alert */}

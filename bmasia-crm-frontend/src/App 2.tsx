@@ -27,15 +27,6 @@ import CampaignDetail from './pages/CampaignDetail';
 import EmailTemplates from './pages/EmailTemplates';
 import EmailSequences from './pages/EmailSequences';
 import SequenceDetail from './pages/SequenceDetail';
-import Segments from './pages/Segments';
-import SegmentForm from './pages/SegmentForm';
-import Tickets from './pages/Tickets';
-import TicketDetail from './pages/TicketDetail';
-import TicketForm from './pages/TicketForm';
-import KnowledgeBase from './pages/KnowledgeBase';
-import KnowledgeBaseArticle from './pages/KnowledgeBaseArticle';
-import KBArticleNew from './pages/KBArticleNew';
-import KBArticleEdit from './pages/KBArticleEdit';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -284,96 +275,11 @@ function App() {
           }
         />
         <Route path="/analytics" element={<PlaceholderPage title="Marketing Analytics" />} />
-        <Route
-          path="/segments"
-          element={
-            <ProtectedRoute requiredModule="campaigns">
-              <Segments />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/segments/new"
-          element={
-            <ProtectedRoute requiredModule="campaigns">
-              <SegmentForm />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/segments/:id/edit"
-          element={
-            <ProtectedRoute requiredModule="campaigns">
-              <SegmentForm />
-            </ProtectedRoute>
-          }
-        />
+        <Route path="/segments" element={<PlaceholderPage title="Customer Segments" />} />
 
         {/* Tech Support routes */}
-        <Route
-          path="/tickets"
-          element={
-            <ProtectedRoute requiredModule="tickets">
-              <Tickets />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/tickets/new"
-          element={
-            <ProtectedRoute requiredModule="tickets">
-              <TicketForm />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/tickets/:id"
-          element={
-            <ProtectedRoute requiredModule="tickets">
-              <TicketDetail />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/tickets/:id/edit"
-          element={
-            <ProtectedRoute requiredModule="tickets">
-              <TicketForm />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/knowledge-base"
-          element={
-            <ProtectedRoute requiredModule="tickets">
-              <KnowledgeBase />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/knowledge-base/new"
-          element={
-            <ProtectedRoute requiredModule="tickets">
-              <KBArticleNew />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/knowledge-base/:id"
-          element={
-            <ProtectedRoute requiredModule="tickets">
-              <KnowledgeBaseArticle />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/knowledge-base/:id/edit"
-          element={
-            <ProtectedRoute requiredModule="tickets">
-              <KBArticleEdit />
-            </ProtectedRoute>
-          }
-        />
+        <Route path="/tickets" element={<PlaceholderPage title="Support Tickets" />} />
+        <Route path="/knowledge-base" element={<PlaceholderPage title="Knowledge Base" />} />
         <Route path="/equipment" element={<PlaceholderPage title="Equipment Management" />} />
         <Route path="/slas" element={<PlaceholderPage title="Service Level Agreements" />} />
 

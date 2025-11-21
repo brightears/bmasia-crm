@@ -23,17 +23,20 @@ import {
   Update,
   GetApp,
   Article as ArticleIcon,
+  Edit,
 } from '@mui/icons-material';
 import { useNavigate, useParams } from 'react-router-dom';
 import { formatDistanceToNow, format } from 'date-fns';
 import DOMPurify from 'dompurify';
 import { KBArticle } from '../types';
 import ApiService from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 import KBVotingButtons from '../components/KBVotingButtons';
 
 const KnowledgeBaseArticle: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const { user } = useAuth();
   const [article, setArticle] = useState<KBArticle | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -155,16 +158,37 @@ const KnowledgeBaseArticle: React.FC = () => {
     ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'id'],
   });
 
+  // Check if user can edit (author or admin/tech support)
+  const canEdit = user && (
+    user.id === article?.author.id ||
+    user.role === 'Admin' ||
+    user.role === 'Tech Support'
+  );
+
   return (
     <Box>
-      {/* Back Button */}
-      <Button
-        startIcon={<ArrowBack />}
-        onClick={() => navigate('/knowledge-base')}
-        sx={{ mb: 3 }}
-      >
-        Back to Knowledge Base
-      </Button>
+      {/* Back and Edit Buttons */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Button
+          startIcon={<ArrowBack />}
+          onClick={() => navigate('/knowledge-base')}
+        >
+          Back to Knowledge Base
+        </Button>
+        {canEdit && (
+          <Button
+            variant="contained"
+            startIcon={<Edit />}
+            onClick={() => navigate(`/knowledge-base/${id}/edit`)}
+            sx={{
+              bgcolor: '#FFA500',
+              '&:hover': { bgcolor: '#FF8C00' },
+            }}
+          >
+            Edit Article
+          </Button>
+        )}
+      </Box>
 
       <Grid container spacing={3}>
         {/* Main Content */}
