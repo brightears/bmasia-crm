@@ -57,6 +57,7 @@ import {
   Support as SupportIcon,
   MenuBook as MenuBookIcon,
   Devices as DevicesIcon,
+  Category,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -136,6 +137,7 @@ const unifiedNavigation = [
       { text: 'Tickets', icon: <SupportIcon />, path: '/tickets' },
       { text: 'Knowledge Base', icon: <MenuBookIcon />, path: '/knowledge-base' },
       { text: 'Equipment', icon: <DevicesIcon />, path: '/equipment' },
+      { text: 'Equipment Types', icon: <Category />, path: '/equipment-types' },
     ],
   },
   {

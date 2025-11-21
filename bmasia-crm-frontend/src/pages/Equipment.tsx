@@ -20,6 +20,7 @@ import {
   Search,
   Build,
   FilterList,
+  Settings,
 } from '@mui/icons-material';
 import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 import { useNavigate } from 'react-router-dom';
@@ -180,14 +181,23 @@ const EquipmentPage: React.FC = () => {
             Track and manage all customer equipment and devices
           </Typography>
         </Box>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={() => navigate('/equipment/new')}
-          sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
-        >
-          New Equipment
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            startIcon={<Settings />}
+            onClick={() => navigate('/equipment-types')}
+          >
+            Manage Types
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={() => navigate('/equipment/new')}
+            sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
+          >
+            New Equipment
+          </Button>
+        </Box>
       </Box>
 
       {error && (

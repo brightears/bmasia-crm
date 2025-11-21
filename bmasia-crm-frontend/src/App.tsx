@@ -40,6 +40,7 @@ import Equipment from './pages/Equipment';
 import EquipmentDetail from './pages/EquipmentDetail';
 import EquipmentNew from './pages/EquipmentNew';
 import EquipmentEdit from './pages/EquipmentEdit';
+import EquipmentTypes from './pages/EquipmentTypes';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -413,8 +414,8 @@ function App() {
         <Route
           path="/equipment-types"
           element={
-            <ProtectedRoute requiredModule="tickets">
-              <PlaceholderPage title="Equipment Types Management" />
+            <ProtectedRoute requiredModule="equipment">
+              <EquipmentTypes />
             </ProtectedRoute>
           }
         />
