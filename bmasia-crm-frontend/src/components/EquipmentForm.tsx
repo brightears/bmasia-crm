@@ -106,7 +106,7 @@ const EquipmentForm: React.FC<EquipmentFormProps> = ({ equipment, mode }) => {
         ApiService.getEquipmentTypes(),
         ApiService.getCompanies({ is_active: true }),
       ]);
-      setEquipmentTypes(typesResponse);
+      setEquipmentTypes(typesResponse.results || []);
       setCompanies(companiesResponse.results || companiesResponse);
     } catch (err: any) {
       console.error('Load data error:', err);
