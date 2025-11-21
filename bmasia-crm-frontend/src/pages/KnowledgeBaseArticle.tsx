@@ -158,12 +158,8 @@ const KnowledgeBaseArticle: React.FC = () => {
     ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'id'],
   });
 
-  // Check if user can edit (author or admin/tech support)
-  const canEdit = user && (
-    user.id === article?.author.id ||
-    user.role === 'Admin' ||
-    user.role === 'Tech Support'
-  );
+  // Check if user can edit (All authenticated users)
+  const canEdit = !!user; // All authenticated users can edit any article
 
   return (
     <Box>

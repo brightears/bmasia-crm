@@ -49,6 +49,13 @@ venv.bak/
 *.swo
 *~
 
+# Editor backup files (prevent accidental commits)
+**/*\ 2.*
+**/*\ 3.*
+**/*\ 4.*
+**/*\ 5.*
+**/~*
+
 # OS
 .DS_Store
 .DS_Store?

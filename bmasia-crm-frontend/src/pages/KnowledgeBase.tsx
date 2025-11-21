@@ -174,8 +174,8 @@ const KnowledgeBase: React.FC = () => {
     </Box>
   );
 
-  // Check if user can create articles (Tech Support or Admin)
-  const canCreateArticles = user?.role === 'Tech Support' || user?.role === 'Admin';
+  // Check if user can create articles (All authenticated users)
+  const canCreateArticles = !!user; // All authenticated users can create articles
 
   return (
     <Box>
