@@ -10,7 +10,8 @@ from .models import (
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
     CustomerSegment, Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
-    KBArticleRelation, KBArticleAttachment, TicketKBArticle
+    KBArticleRelation, KBArticleAttachment, TicketKBArticle,
+    EquipmentType, Equipment, EquipmentHistory
 )
 
 
@@ -105,7 +106,7 @@ class CompanySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'legal_entity_name', 'country', 'website', 'industry',
             'location_count', 'music_zone_count', 'avg_zones_per_location',
-            'soundtrack_account_id', 'is_active', 'notes',
+            'soundtrack_account_id', 'is_active', 'notes', 'it_notes',
             'address_line1', 'address_line2', 'city', 'state', 'postal_code',
             'billing_entity', 'full_address', 'total_contract_value', 'contacts', 'zones', 'zones_summary',
             'subscription_summary', 'primary_contact', 'opportunities_count',
@@ -1544,3 +1545,45 @@ class TicketKBArticleSerializer(serializers.ModelSerializer):
         if request and request.user.is_authenticated and not validated_data.get('linked_by'):
             validated_data['linked_by'] = request.user
         return super().create(validated_data)
+
+
+# ============================================================================
+# Equipment Management Serializers
+# ============================================================================
+
+class EquipmentTypeSerializer(serializers.ModelSerializer):
+    """Serializer for EquipmentType model"""
+    equipment_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EquipmentType
+        fields = '__all__'
+
+    def get_equipment_count(self, obj):
+        return obj.equipment_items.count()
+
+
+class EquipmentHistorySerializer(serializers.ModelSerializer):
+    """Serializer for EquipmentHistory model"""
+    performed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EquipmentHistory
+        fields = '__all__'
+
+    def get_performed_by_name(self, obj):
+        if obj.performed_by:
+            return obj.performed_by.get_full_name() or obj.performed_by.username
+        return "System"
+
+
+class EquipmentSerializer(serializers.ModelSerializer):
+    """Serializer for Equipment model"""
+    equipment_type_name = serializers.CharField(source='equipment_type.name', read_only=True)
+    company_name = serializers.CharField(source='company.name', read_only=True)
+    history = EquipmentHistorySerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Equipment
+        fields = '__all__'
+        read_only_fields = ['equipment_number']

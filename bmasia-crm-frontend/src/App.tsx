@@ -36,6 +36,10 @@ import KnowledgeBase from './pages/KnowledgeBase';
 import KnowledgeBaseArticle from './pages/KnowledgeBaseArticle';
 import KBArticleNew from './pages/KBArticleNew';
 import KBArticleEdit from './pages/KBArticleEdit';
+import Equipment from './pages/Equipment';
+import EquipmentDetail from './pages/EquipmentDetail';
+import EquipmentNew from './pages/EquipmentNew';
+import EquipmentEdit from './pages/EquipmentEdit';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -374,7 +378,46 @@ function App() {
             </ProtectedRoute>
           }
         />
-        <Route path="/equipment" element={<PlaceholderPage title="Equipment Management" />} />
+        <Route
+          path="/equipment"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <Equipment />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/equipment/new"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <EquipmentNew />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/equipment/:id"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <EquipmentDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/equipment/:id/edit"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <EquipmentEdit />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/equipment-types"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <PlaceholderPage title="Equipment Types Management" />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/slas" element={<PlaceholderPage title="Service Level Agreements" />} />
 
         {/* Admin routes */}

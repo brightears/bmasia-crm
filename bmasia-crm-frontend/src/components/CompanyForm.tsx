@@ -45,6 +45,7 @@ interface CompanyFormData {
   state: string;
   postal_code: string;
   notes: string;
+  it_notes: string;
   is_active: boolean;
   soundtrack_account_id: string;
 }
@@ -121,6 +122,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
     state: '',
     postal_code: '',
     notes: '',
+    it_notes: '',
     is_active: true,
     soundtrack_account_id: '',
   });
@@ -146,6 +148,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
         state: company.state || '',
         postal_code: company.postal_code || '',
         notes: company.notes || '',
+        it_notes: company.it_notes || '',
         is_active: company.is_active !== undefined ? company.is_active : true,
         soundtrack_account_id: '', // Will need to be added to Company type
       });
@@ -166,6 +169,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
         state: '',
         postal_code: '',
         notes: '',
+        it_notes: '',
         is_active: true,
         soundtrack_account_id: '',
       });
@@ -560,6 +564,19 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
                 label="Active"
               />
             </Box>
+          </Grid>
+
+          <Grid item xs={12}>
+            <TextField
+              fullWidth
+              label="IT Notes"
+              multiline
+              rows={4}
+              value={formData.it_notes}
+              onChange={(e) => handleFieldChange('it_notes', e.target.value)}
+              placeholder="IT-related notes: remote access details, contact preferences, configurations..."
+              helperText="General IT notes for this company"
+            />
           </Grid>
 
           <Grid item xs={12}>

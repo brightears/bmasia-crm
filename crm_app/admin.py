@@ -21,7 +21,8 @@ from .models import (
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
     CustomerSegment, Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
-    KBArticleRelation, KBArticleAttachment, TicketKBArticle
+    KBArticleRelation, KBArticleAttachment, TicketKBArticle,
+    EquipmentType, Equipment, EquipmentHistory
 )
 
 
@@ -148,7 +149,7 @@ class CompanyAdmin(admin.ModelAdmin):
     list_display = ['name', 'country', 'industry', 'location_count', 'music_zone_count', 'soundtrack_status', 'billing_entity']
     list_filter = ['country', 'industry', 'is_active', 'billing_entity', 'created_at']
     list_select_related = []  # Company has no ForeignKey fields to select_related on
-    search_fields = ['name', 'legal_entity_name', 'website', 'notes', 'soundtrack_account_id']
+    search_fields = ['name', 'legal_entity_name', 'website', 'notes', 'it_notes', 'soundtrack_account_id']
     readonly_fields = ['created_at', 'updated_at', 'current_subscription_summary', 'zones_status_summary']
     actions = ['sync_soundtrack_zones', 'preview_email_to_contacts', 'send_email_to_contacts', 'bulk_send_email_to_contacts', 'bulk_sync_soundtrack_zones', 'export_companies_csv', 'export_companies_excel']
     
@@ -3265,3 +3266,73 @@ class TicketKBArticleAdmin(admin.ModelAdmin):
         if not change and not obj.linked_by:
             obj.linked_by = request.user
         super().save_model(request, obj, form, change)
+
+
+# -----------------------------------------------------------------------------
+# Equipment Management Admin
+# -----------------------------------------------------------------------------
+
+@admin.register(EquipmentType)
+class EquipmentTypeAdmin(admin.ModelAdmin):
+    """Admin interface for equipment types"""
+    list_display = ('name', 'icon', 'equipment_count', 'created_at')
+    search_fields = ('name', 'description')
+    readonly_fields = ('created_at', 'updated_at')
+
+    def equipment_count(self, obj):
+        """Display count of equipment items of this type"""
+        return obj.equipment_items.count()
+    equipment_count.short_description = 'Equipment Count'
+
+
+@admin.register(Equipment)
+class EquipmentAdmin(admin.ModelAdmin):
+    """Admin interface for customer equipment"""
+    list_display = (
+        'equipment_number', 'equipment_type', 'company',
+        'status', 'installed_date', 'created_at'
+    )
+    list_filter = ('status', 'equipment_type', 'created_at')
+    search_fields = (
+        'equipment_number', 'serial_number', 'model_name',
+        'company__name', 'notes'
+    )
+    readonly_fields = ('equipment_number', 'created_at', 'updated_at')
+    autocomplete_fields = ['company', 'equipment_type']
+
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('equipment_number', 'equipment_type', 'company', 'status')
+        }),
+        ('Hardware Details', {
+            'fields': ('serial_number', 'model_name', 'manufacturer')
+        }),
+        ('Network Configuration', {
+            'fields': ('ip_address', 'mac_address')
+        }),
+        ('Remote Access (Encrypted)', {
+            'fields': ('remote_username', 'remote_password'),
+            'classes': ('collapse',)
+        }),
+        ('Notes & Configuration', {
+            'fields': ('setup_details', 'notes')
+        }),
+        ('Important Dates', {
+            'fields': ('installed_date', 'warranty_expiry')
+        }),
+        ('Metadata', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+
+@admin.register(EquipmentHistory)
+class EquipmentHistoryAdmin(admin.ModelAdmin):
+    """Admin interface for equipment history"""
+    list_display = ('equipment', 'action', 'performed_by', 'performed_at')
+    list_filter = ('action', 'performed_at')
+    search_fields = ('equipment__equipment_number', 'description')
+    readonly_fields = ('performed_at',)
+    autocomplete_fields = ['equipment']
+    date_hierarchy = 'performed_at'

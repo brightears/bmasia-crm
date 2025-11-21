@@ -28,7 +28,8 @@ from .models import (
     CustomerSegment, EmailCampaign, CampaignRecipient,
     Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
-    KBArticleRelation, KBArticleAttachment, TicketKBArticle
+    KBArticleRelation, KBArticleAttachment, TicketKBArticle,
+    EquipmentType, Equipment, EquipmentHistory
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
@@ -41,7 +42,8 @@ from .serializers import (
     CustomerSegmentSerializer, TicketSerializer, TicketCommentSerializer, TicketAttachmentSerializer,
     KBCategorySerializer, KBTagSerializer, KBArticleSerializer, KBArticleListSerializer,
     KBArticleViewSerializer, KBArticleRatingSerializer, KBArticleRelationSerializer,
-    KBArticleAttachmentSerializer, TicketKBArticleSerializer
+    KBArticleAttachmentSerializer, TicketKBArticleSerializer,
+    EquipmentTypeSerializer, EquipmentSerializer, EquipmentHistorySerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -4256,3 +4258,63 @@ class TicketKBArticleViewSet(viewsets.ModelViewSet):
 
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+# ============================================================================
+# Equipment Management ViewSets
+# ============================================================================
+
+class EquipmentTypeViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing equipment types (PC, Tablet, Music Player Box, etc.)
+    """
+    queryset = EquipmentType.objects.all()
+    serializer_class = EquipmentTypeSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name', 'description']
+    ordering_fields = ['name', 'created_at']
+    ordering = ['name']
+
+
+class EquipmentViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing customer equipment with full CRUD operations
+    """
+    queryset = Equipment.objects.select_related(
+        'equipment_type', 'company'
+    ).prefetch_related('history')
+    serializer_class = EquipmentSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['status', 'equipment_type', 'company']
+    search_fields = ['equipment_number', 'serial_number', 'model_name', 'manufacturer', 'notes']
+    ordering_fields = ['equipment_number', 'created_at', 'installed_date']
+    ordering = ['-created_at']
+
+    @action(detail=True, methods=['post'])
+    def add_history(self, request, pk=None):
+        """Add a history entry to equipment"""
+        equipment = self.get_object()
+        serializer = EquipmentHistorySerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(
+                equipment=equipment,
+                performed_by=request.user
+            )
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['get'])
+    def by_company(self, request):
+        """Get equipment filtered by company"""
+        company_id = request.query_params.get('company_id')
+        if not company_id:
+            return Response(
+                {'error': 'company_id parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        equipment = self.queryset.filter(company_id=company_id)
+        serializer = self.get_serializer(equipment, many=True)
+        return Response(serializer.data)

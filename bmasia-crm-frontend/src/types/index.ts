@@ -48,6 +48,7 @@ export interface Company {
   annual_revenue?: number;
   is_active: boolean;
   notes?: string;
+  it_notes?: string;
   address_line1?: string;
   address_line2?: string;
   city?: string;
@@ -1007,4 +1008,49 @@ export interface KBAttachment {
   uploaded_by: string;
   uploaded_by_name: string;
   created_at: string;
+}
+
+// Equipment Management Types
+export interface EquipmentType {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  equipment_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Equipment {
+  id: string;
+  equipment_number: string;
+  equipment_type: string; // UUID
+  equipment_type_name?: string;
+  company: string; // UUID
+  company_name?: string;
+  serial_number: string;
+  model_name: string;
+  manufacturer: string;
+  status: 'active' | 'inactive' | 'maintenance' | 'retired';
+  remote_username: string;
+  remote_password: string;
+  ip_address: string;
+  mac_address: string;
+  setup_details: string;
+  notes: string;
+  installed_date: string | null;
+  warranty_expiry: string | null;
+  history?: EquipmentHistory[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EquipmentHistory {
+  id: string;
+  equipment: string; // UUID
+  action: 'installed' | 'maintenance' | 'repair' | 'upgrade' | 'replaced' | 'retired' | 'note';
+  description: string;
+  performed_by: string | null; // UUID
+  performed_by_name?: string;
+  performed_at: string;
 }

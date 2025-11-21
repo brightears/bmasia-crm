@@ -914,6 +914,66 @@ class ApiService {
     });
     return response.data;
   }
+
+  // Equipment Types API methods
+  async getEquipmentTypes(): Promise<any[]> {
+    const response = await authApi.get('/equipment-types/');
+    return response.data;
+  }
+
+  async getEquipmentType(id: string): Promise<any> {
+    const response = await authApi.get(`/equipment-types/${id}/`);
+    return response.data;
+  }
+
+  async createEquipmentType(data: Partial<any>): Promise<any> {
+    const response = await authApi.post('/equipment-types/', data);
+    return response.data;
+  }
+
+  async updateEquipmentType(id: string, data: Partial<any>): Promise<any> {
+    const response = await authApi.put(`/equipment-types/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteEquipmentType(id: string): Promise<void> {
+    await authApi.delete(`/equipment-types/${id}/`);
+  }
+
+  // Equipment API methods
+  async getEquipment(params?: any): Promise<ApiResponse<any>> {
+    const response = await authApi.get('/equipment/', { params });
+    return response.data;
+  }
+
+  async getEquipmentItem(id: string): Promise<any> {
+    const response = await authApi.get(`/equipment/${id}/`);
+    return response.data;
+  }
+
+  async createEquipment(data: Partial<any>): Promise<any> {
+    const response = await authApi.post('/equipment/', data);
+    return response.data;
+  }
+
+  async updateEquipment(id: string, data: Partial<any>): Promise<any> {
+    const response = await authApi.put(`/equipment/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteEquipment(id: string): Promise<void> {
+    await authApi.delete(`/equipment/${id}/`);
+  }
+
+  async addEquipmentHistory(equipmentId: string, data: { action: string; description: string }): Promise<any> {
+    const response = await authApi.post(`/equipment/${equipmentId}/add_history/`, data);
+    return response.data;
+  }
+
+  async getEquipmentByCompany(companyId: string): Promise<any[]> {
+    const response = await authApi.get('/equipment/by_company/', { params: { company_id: companyId } });
+    return response.data;
+  }
 }
 
 export interface EmailSendData {
