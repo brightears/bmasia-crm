@@ -49,8 +49,8 @@ const EquipmentPage: React.FC = () => {
         ApiService.getEquipment(),
         ApiService.getEquipmentTypes(),
       ]);
-      setEquipment(equipmentResponse.results || equipmentResponse);
-      setEquipmentTypes(typesResponse);
+      setEquipment(equipmentResponse.results || []);
+      setEquipmentTypes(typesResponse.results || []);
     } catch (err: any) {
       console.error('Equipment load error:', err);
       setError('Failed to load equipment');

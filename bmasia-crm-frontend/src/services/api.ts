@@ -916,7 +916,7 @@ class ApiService {
   }
 
   // Equipment Types API methods
-  async getEquipmentTypes(): Promise<any[]> {
+  async getEquipmentTypes(): Promise<ApiResponse<any>> {
     const response = await authApi.get('/equipment-types/');
     return response.data;
   }
