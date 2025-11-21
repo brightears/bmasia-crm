@@ -46,7 +46,7 @@ const EquipmentHistoryTimeline: React.FC<EquipmentHistoryTimelineProps> = ({ his
     }
   };
 
-  const getActionColor = (action: string): 'success' | 'info' | 'warning' | 'error' | 'grey' => {
+  const getTimelineDotColor = (action: string): 'success' | 'info' | 'warning' | 'error' | 'grey' => {
     switch (action) {
       case 'installed':
         return 'success';
@@ -58,6 +58,21 @@ const EquipmentHistoryTimeline: React.FC<EquipmentHistoryTimelineProps> = ({ his
         return 'error';
       default:
         return 'grey';
+    }
+  };
+
+  const getChipColor = (action: string): 'success' | 'info' | 'warning' | 'error' | 'default' => {
+    switch (action) {
+      case 'installed':
+        return 'success';
+      case 'maintenance':
+        return 'info';
+      case 'repair':
+        return 'warning';
+      case 'retired':
+        return 'error';
+      default:
+        return 'default';
     }
   };
 
@@ -79,7 +94,7 @@ const EquipmentHistoryTimeline: React.FC<EquipmentHistoryTimelineProps> = ({ his
             </Typography>
           </TimelineOppositeContent>
           <TimelineSeparator>
-            <TimelineDot color={getActionColor(entry.action)}>
+            <TimelineDot color={getTimelineDotColor(entry.action)}>
               {getActionIcon(entry.action)}
             </TimelineDot>
             {index < sortedHistory.length - 1 && <TimelineConnector />}
@@ -90,7 +105,7 @@ const EquipmentHistoryTimeline: React.FC<EquipmentHistoryTimelineProps> = ({ his
                 <Chip
                   label={entry.action}
                   size="small"
-                  color={getActionColor(entry.action)}
+                  color={getChipColor(entry.action)}
                   sx={{ textTransform: 'capitalize' }}
                 />
                 {entry.performed_by_name && (

@@ -23,7 +23,7 @@ import { Equipment, EquipmentType, Company } from '../types';
 import ApiService from '../services/api';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@date-io/date-fns';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 
 interface EquipmentFormProps {
   equipment?: Equipment | null;
