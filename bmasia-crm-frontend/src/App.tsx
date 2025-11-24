@@ -41,6 +41,10 @@ import EquipmentDetail from './pages/EquipmentDetail';
 import EquipmentNew from './pages/EquipmentNew';
 import EquipmentEdit from './pages/EquipmentEdit';
 import EquipmentTypes from './pages/EquipmentTypes';
+import Zones from './pages/Zones';
+import ZoneDetail from './pages/ZoneDetail';
+import ZoneNew from './pages/ZoneNew';
+import ZoneEdit from './pages/ZoneEdit';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -416,6 +420,38 @@ function App() {
           element={
             <ProtectedRoute requiredModule="tickets">
               <EquipmentTypes />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/zones"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <Zones />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/zones/new"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <ZoneNew />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/zones/:id"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <ZoneDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/zones/:id/edit"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <ZoneEdit />
             </ProtectedRoute>
           }
         />

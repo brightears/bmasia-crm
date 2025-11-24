@@ -987,6 +987,33 @@ class ApiService {
     });
     return response.data; // Direct array, not paginated
   }
+
+  async getZone(id: string): Promise<Zone> {
+    const response = await authApi.get(`/zones/${id}/`);
+    return response.data;
+  }
+
+  async createZone(data: Partial<Zone>): Promise<Zone> {
+    const response = await authApi.post('/zones/', data);
+    return response.data;
+  }
+
+  async updateZone(id: string, data: Partial<Zone>): Promise<Zone> {
+    const response = await authApi.patch(`/zones/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteZone(id: string): Promise<void> {
+    await authApi.delete(`/zones/${id}/`);
+  }
+
+  // Get equipment for a zone (for ZoneDetail Equipment tab)
+  async getEquipmentByZone(zoneId: string): Promise<any[]> {
+    const response = await authApi.get('/equipment/', {
+      params: { zone: zoneId }
+    });
+    return response.data.results || [];
+  }
 }
 
 export interface EmailSendData {

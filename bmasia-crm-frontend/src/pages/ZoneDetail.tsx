@@ -1,0 +1,531 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Box,
+  Paper,
+  Typography,
+  Button,
+  Chip,
+  Alert,
+  CircularProgress,
+  Card,
+  CardContent,
+  GridLegacy as Grid,
+  Tabs,
+  Tab,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
+} from '@mui/material';
+import {
+  LocationOn,
+  Edit,
+  Delete,
+  ArrowBack,
+  CloudQueue,
+  Devices,
+  Notes as NotesIcon,
+  CalendarMonth,
+  Build,
+} from '@mui/icons-material';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Zone } from '../types';
+import ApiService from '../services/api';
+import { format } from 'date-fns';
+import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
+
+interface TabPanelProps {
+  children?: React.ReactNode;
+  index: number;
+  value: number;
+}
+
+function TabPanel(props: TabPanelProps) {
+  const { children, value, index, ...other } = props;
+  return (
+    <div
+      role="tabpanel"
+      hidden={value !== index}
+      id={`zone-tabpanel-${index}`}
+      aria-labelledby={`zone-tab-${index}`}
+      {...other}
+    >
+      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
+    </div>
+  );
+}
+
+const ZoneDetail: React.FC = () => {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [zone, setZone] = useState<Zone | null>(null);
+  const [equipment, setEquipment] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [tabValue, setTabValue] = useState(0);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    if (id) {
+      loadZone();
+      loadEquipment();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  const loadZone = async () => {
+    if (!id) return;
+    try {
+      setLoading(true);
+      setError('');
+      const data = await ApiService.getZone(id);
+      setZone(data);
+    } catch (err: any) {
+      console.error('Zone load error:', err);
+      setError('Failed to load zone details');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadEquipment = async () => {
+    if (!id) return;
+    try {
+      const data = await ApiService.getEquipmentByZone(id);
+      setEquipment(data);
+    } catch (err: any) {
+      console.error('Equipment load error:', err);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!id) return;
+
+    // Check if zone has equipment
+    if (equipment.length > 0) {
+      setError(
+        `Cannot delete zone with ${equipment.length} equipment item(s) assigned. Please reassign or remove the equipment first.`
+      );
+      setDeleteDialogOpen(false);
+      return;
+    }
+
+    try {
+      setDeleting(true);
+      await ApiService.deleteZone(id);
+      navigate('/zones');
+    } catch (err: any) {
+      console.error('Delete error:', err);
+      setError('Failed to delete zone. Please try again.');
+      setDeleteDialogOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'online':
+        return 'success';
+      case 'offline':
+        return 'error';
+      case 'no_device':
+        return 'warning';
+      case 'expired':
+        return 'error';
+      case 'pending':
+        return 'default';
+      default:
+        return 'default';
+    }
+  };
+
+  const getEquipmentStatusColor = (status: string) => {
+    switch (status) {
+      case 'active':
+        return 'success';
+      case 'inactive':
+        return 'default';
+      case 'maintenance':
+        return 'warning';
+      case 'retired':
+        return 'error';
+      default:
+        return 'default';
+    }
+  };
+
+  const equipmentColumns: GridColDef[] = [
+    {
+      field: 'equipment_number',
+      headerName: 'Equipment #',
+      width: 150,
+      renderCell: (params: GridRenderCellParams) => (
+        <Box
+          sx={{
+            cursor: 'pointer',
+            color: 'primary.main',
+            fontWeight: 500,
+            '&:hover': { textDecoration: 'underline' },
+          }}
+          onClick={() => navigate(`/equipment/${params.row.id}`)}
+        >
+          {params.value}
+        </Box>
+      ),
+    },
+    {
+      field: 'equipment_type_name',
+      headerName: 'Type',
+      width: 150,
+    },
+    {
+      field: 'model_name',
+      headerName: 'Model',
+      width: 180,
+    },
+    {
+      field: 'manufacturer',
+      headerName: 'Manufacturer',
+      width: 150,
+    },
+    {
+      field: 'status',
+      headerName: 'Status',
+      width: 120,
+      renderCell: (params: GridRenderCellParams) => (
+        <Chip
+          label={params.value}
+          size="small"
+          color={getEquipmentStatusColor(params.value as string) as any}
+          sx={{ textTransform: 'capitalize' }}
+        />
+      ),
+    },
+  ];
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
+        <CircularProgress size={40} />
+      </Box>
+    );
+  }
+
+  if (error && !zone) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error || 'Zone not found'}
+        </Alert>
+        <Button variant="contained" onClick={() => navigate('/zones')} startIcon={<ArrowBack />}>
+          Back to Zones
+        </Button>
+      </Box>
+    );
+  }
+
+  if (!zone) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
+          Zone not found
+        </Alert>
+        <Button variant="contained" onClick={() => navigate('/zones')} startIcon={<ArrowBack />}>
+          Back to Zones
+        </Button>
+      </Box>
+    );
+  }
+
+  return (
+    <Box>
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
+        <Box>
+          <Button
+            startIcon={<ArrowBack />}
+            onClick={() => navigate('/zones')}
+            sx={{ mb: 1 }}
+          >
+            Back to Zones
+          </Button>
+          <Typography variant="h4" component="h1" gutterBottom>
+            <LocationOn sx={{ mr: 1, verticalAlign: 'bottom' }} />
+            {zone.name}
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+            <Chip
+              label={zone.status?.replace('_', ' ')}
+              size="small"
+              color={getStatusColor(zone.status) as any}
+              sx={{ textTransform: 'capitalize' }}
+            />
+            <Chip
+              label={zone.platform}
+              size="small"
+              variant="outlined"
+              sx={{ textTransform: 'capitalize' }}
+            />
+          </Box>
+        </Box>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            startIcon={<Delete />}
+            onClick={() => setDeleteDialogOpen(true)}
+            color="error"
+          >
+            Delete
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<Edit />}
+            onClick={() => navigate(`/zones/${id}/edit`)}
+            sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
+          >
+            Edit Zone
+          </Button>
+        </Box>
+      </Box>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Tabs */}
+      <Paper sx={{ mb: 3 }}>
+        <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)}>
+          <Tab label="Overview" />
+          <Tab label={`Equipment (${equipment.length})`} />
+        </Tabs>
+
+        {/* Overview Tab */}
+        <TabPanel value={tabValue} index={0}>
+          <Grid container spacing={3}>
+            {/* Zone Info */}
+            <Grid item xs={12} md={6}>
+              <Card variant="outlined">
+                <CardContent>
+                  <Typography variant="h6" gutterBottom>
+                    <LocationOn sx={{ mr: 1, verticalAlign: 'bottom', fontSize: 20 }} />
+                    Zone Information
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Zone Name
+                      </Typography>
+                      <Typography variant="body1">{zone.name}</Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Company
+                      </Typography>
+                      <Typography
+                        variant="body1"
+                        sx={{
+                          color: 'primary.main',
+                          cursor: 'pointer',
+                          '&:hover': { textDecoration: 'underline' },
+                        }}
+                        onClick={() => navigate(`/companies/${zone.company}`)}
+                      >
+                        {zone.company_name}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Platform
+                      </Typography>
+                      <Typography variant="body1" sx={{ textTransform: 'capitalize' }}>
+                        {zone.platform}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Status
+                      </Typography>
+                      <Box sx={{ mt: 0.5 }}>
+                        <Chip
+                          label={zone.status?.replace('_', ' ')}
+                          size="small"
+                          color={getStatusColor(zone.status) as any}
+                          sx={{ textTransform: 'capitalize' }}
+                        />
+                      </Box>
+                    </Box>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+
+            {/* Platform Details */}
+            <Grid item xs={12} md={6}>
+              <Card variant="outlined">
+                <CardContent>
+                  <Typography variant="h6" gutterBottom>
+                    <CloudQueue sx={{ mr: 1, verticalAlign: 'bottom', fontSize: 20 }} />
+                    Platform Details
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+                    {zone.soundtrack_zone_id && (
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">
+                          Soundtrack Zone ID
+                        </Typography>
+                        <Typography variant="body1" fontFamily="monospace">
+                          {zone.soundtrack_zone_id}
+                        </Typography>
+                      </Box>
+                    )}
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Device Name
+                      </Typography>
+                      <Typography variant="body1">
+                        {zone.device_name || '-'}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+
+            {/* Dates */}
+            <Grid item xs={12} md={6}>
+              <Card variant="outlined">
+                <CardContent>
+                  <Typography variant="h6" gutterBottom>
+                    <CalendarMonth sx={{ mr: 1, verticalAlign: 'bottom', fontSize: 20 }} />
+                    Important Dates
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Created
+                      </Typography>
+                      <Typography variant="body1">
+                        {zone.created_at
+                          ? format(new Date(zone.created_at), 'MMM dd, yyyy')
+                          : '-'}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Last Updated
+                      </Typography>
+                      <Typography variant="body1">
+                        {zone.updated_at
+                          ? format(new Date(zone.updated_at), 'MMM dd, yyyy')
+                          : '-'}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+
+            {/* Notes */}
+            {zone.notes && (
+              <Grid item xs={12}>
+                <Card variant="outlined">
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      <NotesIcon sx={{ mr: 1, verticalAlign: 'bottom', fontSize: 20 }} />
+                      Notes
+                    </Typography>
+                    <Typography variant="body2" sx={{ mt: 1, whiteSpace: 'pre-wrap' }}>
+                      {zone.notes}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            )}
+          </Grid>
+        </TabPanel>
+
+        {/* Equipment Tab */}
+        <TabPanel value={tabValue} index={1}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
+            <Typography variant="h6">
+              <Build sx={{ mr: 1, verticalAlign: 'bottom' }} />
+              Equipment in this Zone
+            </Typography>
+          </Box>
+          {equipment.length > 0 ? (
+            <DataGrid
+              rows={equipment}
+              columns={equipmentColumns}
+              initialState={{
+                pagination: {
+                  paginationModel: { pageSize: 10, page: 0 },
+                },
+              }}
+              pageSizeOptions={[10, 25, 50]}
+              disableRowSelectionOnClick
+              autoHeight
+              sx={{
+                border: 0,
+                '& .MuiDataGrid-cell:focus': {
+                  outline: 'none',
+                },
+                '& .MuiDataGrid-row:hover': {
+                  backgroundColor: 'action.hover',
+                  cursor: 'pointer',
+                },
+              }}
+            />
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Devices sx={{ fontSize: 60, color: 'text.disabled', mb: 2 }} />
+              <Typography variant="body1" color="text.secondary">
+                No equipment assigned to this zone
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Equipment can be assigned when creating or editing equipment items
+              </Typography>
+            </Box>
+          )}
+        </TabPanel>
+      </Paper>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+        <DialogTitle>Delete Zone?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to delete the zone "{zone.name}"?
+            {equipment.length > 0 && (
+              <Box sx={{ mt: 2, p: 2, bgcolor: 'error.light', borderRadius: 1 }}>
+                <Typography variant="body2" color="error.dark" fontWeight="bold">
+                  Warning: This zone has {equipment.length} equipment item(s) assigned.
+                </Typography>
+                <Typography variant="body2" color="error.dark" sx={{ mt: 1 }}>
+                  You must reassign or remove all equipment before deleting this zone.
+                </Typography>
+              </Box>
+            )}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+          <Button
+            onClick={handleDelete}
+            color="error"
+            variant="contained"
+            disabled={deleting || equipment.length > 0}
+          >
+            {deleting ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+};
+
+export default ZoneDetail;
