@@ -2731,6 +2731,14 @@ class Equipment(TimestampedModel):
         on_delete=models.CASCADE,
         related_name='equipment'
     )
+    zone = models.ForeignKey(
+        Zone,
+        on_delete=models.PROTECT,
+        related_name='equipment',
+        null=True,
+        blank=True,
+        help_text="Location/zone where this equipment is installed"
+    )
 
     # Hardware details
     serial_number = models.CharField(max_length=100, blank=True)

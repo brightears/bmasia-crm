@@ -19,7 +19,7 @@ import {
 } from '@mui/material';
 import { Save, Cancel, Visibility, VisibilityOff, ArrowBack } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { Equipment, EquipmentType, Company } from '../types';
+import { Equipment, EquipmentType, Company, Zone } from '../types';
 import ApiService from '../services/api';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -33,6 +33,7 @@ interface EquipmentFormProps {
 interface FormData {
   equipment_type: string;
   company: string;
+  zone: string;
   serial_number: string;
   model_name: string;
   manufacturer: string;
@@ -52,6 +53,7 @@ const EquipmentForm: React.FC<EquipmentFormProps> = ({ equipment, mode }) => {
   const [formData, setFormData] = useState<FormData>({
     equipment_type: '',
     company: '',
+    zone: '',
     serial_number: '',
     model_name: '',
     manufacturer: '',
@@ -68,6 +70,8 @@ const EquipmentForm: React.FC<EquipmentFormProps> = ({ equipment, mode }) => {
 
   const [equipmentTypes, setEquipmentTypes] = useState<EquipmentType[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [zones, setZones] = useState<Zone[]>([]);
+  const [loadingZones, setLoadingZones] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -83,6 +87,7 @@ const EquipmentForm: React.FC<EquipmentFormProps> = ({ equipment, mode }) => {
       setFormData({
         equipment_type: equipment.equipment_type || '',
         company: equipment.company || '',
+        zone: equipment.zone || '',
         serial_number: equipment.serial_number || '',
         model_name: equipment.model_name || '',
         manufacturer: equipment.manufacturer || '',
@@ -98,6 +103,17 @@ const EquipmentForm: React.FC<EquipmentFormProps> = ({ equipment, mode }) => {
       });
     }
   }, [equipment, mode]);
+
+  // Cascading dropdown: Load zones when company changes
+  useEffect(() => {
+    if (formData.company) {
+      loadZonesForCompany(formData.company);
+    } else {
+      setZones([]);
+      setFormData((prev) => ({ ...prev, zone: '' }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.company]);
 
   const loadInitialData = async () => {
     try {
@@ -116,6 +132,20 @@ const EquipmentForm: React.FC<EquipmentFormProps> = ({ equipment, mode }) => {
     }
   };
 
+  const loadZonesForCompany = async (companyId: string) => {
+    try {
+      setLoadingZones(true);
+      const zonesData = await ApiService.getZonesByCompany(companyId);
+      setZones(zonesData);
+    } catch (err) {
+      console.error('Failed to load zones:', err);
+      setError('Failed to load zones for selected company');
+      setZones([]);
+    } finally {
+      setLoadingZones(false);
+    }
+  };
+
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
@@ -124,6 +154,9 @@ const EquipmentForm: React.FC<EquipmentFormProps> = ({ equipment, mode }) => {
     }
     if (!formData.company) {
       newErrors.company = 'Company is required';
+    }
+    if (!formData.zone) {
+      newErrors.zone = 'Zone/Location is required';
     }
     if (!formData.serial_number?.trim()) {
       newErrors.serial_number = 'Serial number is required';
@@ -165,6 +198,7 @@ const EquipmentForm: React.FC<EquipmentFormProps> = ({ equipment, mode }) => {
       const submitData = {
         equipment_type: formData.equipment_type,
         company: formData.company,
+        zone: formData.zone,
         serial_number: formData.serial_number,
         model_name: formData.model_name,
         manufacturer: formData.manufacturer,
@@ -289,6 +323,45 @@ const EquipmentForm: React.FC<EquipmentFormProps> = ({ equipment, mode }) => {
                   />
                 )}
               />
+            </Grid>
+
+            {/* Zone/Location */}
+            <Grid item xs={12} sm={6}>
+              <FormControl
+                fullWidth
+                error={!!errors.zone}
+                required
+                disabled={!formData.company || loadingZones}
+              >
+                <InputLabel>Zone/Location</InputLabel>
+                <Select
+                  value={formData.zone}
+                  onChange={(e) => handleFieldChange('zone', e.target.value)}
+                  label="Zone/Location *"
+                >
+                  {loadingZones ? (
+                    <MenuItem disabled>
+                      <CircularProgress size={20} sx={{ mr: 1 }} />
+                      Loading zones...
+                    </MenuItem>
+                  ) : zones.length === 0 ? (
+                    <MenuItem disabled>
+                      {formData.company ? 'No zones found for this company' : 'Select a company first'}
+                    </MenuItem>
+                  ) : (
+                    zones.map((zone) => (
+                      <MenuItem key={zone.id} value={zone.id}>
+                        {zone.name}
+                      </MenuItem>
+                    ))
+                  )}
+                </Select>
+                {errors.zone && (
+                  <Typography variant="caption" color="error" sx={{ mt: 0.5, display: 'block' }}>
+                    {errors.zone}
+                  </Typography>
+                )}
+              </FormControl>
             </Grid>
 
             <Grid item xs={12} sm={4}>

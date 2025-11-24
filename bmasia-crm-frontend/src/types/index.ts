@@ -1021,6 +1021,21 @@ export interface EquipmentType {
   updated_at: string;
 }
 
+export interface Zone {
+  id: string;
+  company: string; // UUID
+  company_name?: string;
+  name: string;
+  platform: 'soundtrack' | 'beatbreeze';
+  status: 'online' | 'offline' | 'no_device' | 'expired' | 'pending';
+  status_display?: string;
+  soundtrack_zone_id?: string;
+  device_name?: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Equipment {
   id: string;
   equipment_number: string;
@@ -1028,6 +1043,8 @@ export interface Equipment {
   equipment_type_name?: string;
   company: string; // UUID
   company_name?: string;
+  zone?: string; // UUID
+  zone_name?: string; // Display name
   serial_number: string;
   model_name: string;
   manufacturer: string;

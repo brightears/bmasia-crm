@@ -130,6 +130,16 @@ const EquipmentPage: React.FC = () => {
       ),
     },
     {
+      field: 'zone_name',
+      headerName: 'Zone/Location',
+      width: 180,
+      renderCell: (params: GridRenderCellParams) => (
+        <Box>
+          {params.value || <Typography color="text.secondary" fontSize="0.875rem">-</Typography>}
+        </Box>
+      ),
+    },
+    {
       field: 'model_name',
       headerName: 'Model',
       width: 180,

@@ -2,7 +2,7 @@ import {
   User, Company, Contact, Note, Task, Opportunity, OpportunityActivity,
   Contract, Invoice, Quote, DashboardStats, AuditLog, ApiResponse,
   CustomerSegment, SegmentMemberResponse, SegmentValidationResponse,
-  EnrollInSequenceResponse, SegmentFilterCriteria
+  EnrollInSequenceResponse, SegmentFilterCriteria, Zone
 } from '../types';
 import { authApi } from './authService';
 import { MockApiService } from './mockData';
@@ -973,6 +973,19 @@ class ApiService {
   async getEquipmentByCompany(companyId: string): Promise<any[]> {
     const response = await authApi.get('/equipment/by_company/', { params: { company_id: companyId } });
     return response.data;
+  }
+
+  // Zone Management
+  async getZones(params?: any): Promise<ApiResponse<Zone>> {
+    const response = await authApi.get('/zones/', { params });
+    return response.data;
+  }
+
+  async getZonesByCompany(companyId: string): Promise<Zone[]> {
+    const response = await authApi.get(`/zones/by_company/`, {
+      params: { company_id: companyId }
+    });
+    return response.data; // Direct array, not paginated
   }
 }
 

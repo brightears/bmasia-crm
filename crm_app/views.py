@@ -29,7 +29,7 @@ from .models import (
     Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
-    EquipmentType, Equipment, EquipmentHistory
+    Zone, EquipmentType, Equipment, EquipmentHistory
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
@@ -43,7 +43,7 @@ from .serializers import (
     KBCategorySerializer, KBTagSerializer, KBArticleSerializer, KBArticleListSerializer,
     KBArticleViewSerializer, KBArticleRatingSerializer, KBArticleRelationSerializer,
     KBArticleAttachmentSerializer, TicketKBArticleSerializer,
-    EquipmentTypeSerializer, EquipmentSerializer, EquipmentHistorySerializer
+    ZoneSerializer, EquipmentTypeSerializer, EquipmentSerializer, EquipmentHistorySerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -4317,4 +4317,29 @@ class EquipmentViewSet(viewsets.ModelViewSet):
 
         equipment = self.queryset.filter(company_id=company_id)
         serializer = self.get_serializer(equipment, many=True)
+        return Response(serializer.data)
+
+
+class ZoneViewSet(viewsets.ModelViewSet):
+    """ViewSet for Zone model with company filtering"""
+    queryset = Zone.objects.select_related('company')
+    serializer_class = ZoneSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['company', 'platform', 'status']
+    search_fields = ['name', 'company__name']
+    ordering = ['company__name', 'name']
+
+    @action(detail=False, methods=['get'])
+    def by_company(self, request):
+        """Get zones filtered by company - for equipment form dropdown"""
+        company_id = request.query_params.get('company_id')
+        if not company_id:
+            return Response(
+                {'error': 'company_id parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        zones = self.queryset.filter(company_id=company_id)
+        serializer = self.get_serializer(zones, many=True)
         return Response(serializer.data)

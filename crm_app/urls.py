@@ -47,6 +47,7 @@ router.register(r'kb/ticket-articles', views.TicketKBArticleViewSet, basename='k
 # Equipment Management routes
 router.register(r'equipment-types', views.EquipmentTypeViewSet, basename='equipment-type')
 router.register(r'equipment', views.EquipmentViewSet, basename='equipment')
+router.register(r'zones', views.ZoneViewSet, basename='zone')
 
 # The API URLs are now determined automatically by the router.
 urlpatterns = [

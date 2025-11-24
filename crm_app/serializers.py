@@ -1581,6 +1581,7 @@ class EquipmentSerializer(serializers.ModelSerializer):
     """Serializer for Equipment model"""
     equipment_type_name = serializers.CharField(source='equipment_type.name', read_only=True)
     company_name = serializers.CharField(source='company.name', read_only=True)
+    zone_name = serializers.CharField(source='zone.name', read_only=True)
     history = EquipmentHistorySerializer(many=True, read_only=True)
 
     class Meta:
