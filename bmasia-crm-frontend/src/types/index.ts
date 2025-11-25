@@ -1,17 +1,77 @@
+// User Management Types
+// New role types for User Management system
+export type UserRole = 'Sales' | 'Finance' | 'Tech' | 'Music' | 'Admin';
+
+// Legacy role types (still used in some parts of the app)
+export type LegacyUserRole = 'Sales' | 'Marketing' | 'Tech Support' | 'Admin';
+
 export interface User {
   id: string;
   username: string;
   email: string;
   first_name: string;
   last_name: string;
-  role: 'Sales' | 'Marketing' | 'Tech Support' | 'Admin';
-  phone?: string;
-  department?: string;
+  full_name?: string;
+  role: UserRole | LegacyUserRole; // Support both for backward compatibility
+  phone?: string; // Optional for backward compatibility
+  department?: string; // Optional for backward compatibility
   is_active: boolean;
+  smtp_email?: string | null; // Optional for backward compatibility
+  smtp_configured?: boolean; // Optional for backward compatibility
+  last_login?: string | null; // Optional for backward compatibility
   date_joined: string;
   permissions?: string[];
   groups?: string[];
 }
+
+export interface UserCreateData {
+  username: string;
+  email: string;
+  password: string;
+  first_name?: string;
+  last_name?: string;
+  role: UserRole;
+  phone?: string;
+  department?: string;
+  is_active?: boolean;
+}
+
+export interface UserUpdateData {
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+  role?: UserRole;
+  phone?: string;
+  department?: string;
+  is_active?: boolean;
+  password?: string;  // Optional for updates
+}
+
+export interface PasswordChangeData {
+  old_password: string;
+  new_password: string;
+}
+
+export interface SmtpSettingsData {
+  smtp_email: string;
+  smtp_password: string;
+}
+
+export const USER_ROLE_LABELS: Record<UserRole, string> = {
+  Sales: 'Sales',
+  Finance: 'Finance',
+  Tech: 'Tech Support',
+  Music: 'Music Design',
+  Admin: 'Administrator',
+};
+
+export const USER_ROLE_COLORS: Record<UserRole, string> = {
+  Sales: '#4CAF50',      // Green
+  Finance: '#2196F3',    // Blue
+  Tech: '#FF9800',       // Orange
+  Music: '#9C27B0',      // Purple
+  Admin: '#F44336',      // Red
+};
 
 export interface SubscriptionPlan {
   id: string;

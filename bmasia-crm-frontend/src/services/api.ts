@@ -1,5 +1,6 @@
 import {
-  User, Company, Contact, Note, Task, Opportunity, OpportunityActivity,
+  User, UserCreateData, UserUpdateData, PasswordChangeData, SmtpSettingsData,
+  Company, Contact, Note, Task, Opportunity, OpportunityActivity,
   Contract, Invoice, Quote, DashboardStats, AuditLog, ApiResponse,
   CustomerSegment, SegmentMemberResponse, SegmentValidationResponse,
   EnrollInSequenceResponse, SegmentFilterCriteria, Zone, ContractZone, Device
@@ -490,9 +491,69 @@ class ApiService {
     await authApi.delete(`/quotes/${quoteId}/attachments/${attachmentId}/`);
   }
 
-  // Users
+  // User Management
   async getUsers(params?: any): Promise<ApiResponse<User>> {
     const response = await authApi.get<ApiResponse<User>>('/users/', { params });
+    return response.data;
+  }
+
+  async getUser(id: string): Promise<User> {
+    const response = await authApi.get<User>(`/users/${id}/`);
+    return response.data;
+  }
+
+  async createUser(data: UserCreateData): Promise<User> {
+    const response = await authApi.post<User>('/users/', data);
+    return response.data;
+  }
+
+  async updateUser(id: string, data: UserUpdateData): Promise<User> {
+    const response = await authApi.patch<User>(`/users/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    await authApi.delete(`/users/${id}/`);
+  }
+
+  async deactivateUser(id: string): Promise<User> {
+    const response = await authApi.patch<User>(`/users/${id}/`, { is_active: false });
+    return response.data;
+  }
+
+  async activateUser(id: string): Promise<User> {
+    const response = await authApi.patch<User>(`/users/${id}/`, { is_active: true });
+    return response.data;
+  }
+
+  // Current User Profile
+  async getMyProfile(): Promise<User> {
+    const response = await authApi.get<User>('/users/me/');
+    return response.data;
+  }
+
+  async updateMyProfile(data: Partial<UserUpdateData>): Promise<User> {
+    const response = await authApi.patch<User>('/users/me/', data);
+    return response.data;
+  }
+
+  async changePassword(data: PasswordChangeData): Promise<{ message: string }> {
+    const response = await authApi.post<{ message: string }>('/users/change_password/', data);
+    return response.data;
+  }
+
+  async updateSmtpSettings(data: SmtpSettingsData): Promise<{ message: string; smtp_email: string; smtp_configured: boolean }> {
+    const response = await authApi.post('/users/update_smtp/', data);
+    return response.data;
+  }
+
+  async testSmtpConnection(): Promise<{ success: boolean; message?: string; error?: string }> {
+    const response = await authApi.post('/users/test_smtp/');
+    return response.data;
+  }
+
+  async clearSmtpSettings(): Promise<{ message: string; smtp_configured: boolean }> {
+    const response = await authApi.post('/users/update_smtp/', { smtp_email: '', smtp_password: '' });
     return response.data;
   }
 

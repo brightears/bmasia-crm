@@ -1,13 +1,14 @@
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from rest_framework.parsers import MultiPartParser, FormParser
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Sum, Count, Avg
 from django.utils import timezone
 from datetime import datetime, timedelta
 from django.contrib.auth import login, logout
+from django.contrib.auth.hashers import check_password
 from rest_framework.authtoken.models import Token
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.db import transaction
@@ -188,12 +189,128 @@ class BaseModelViewSet(viewsets.ModelViewSet):
 
 
 class UserViewSet(BaseModelViewSet):
-    """ViewSet for User management"""
-    queryset = User.objects.all()
+    """
+    ViewSet for User management.
+    - List/Create/Update/Delete: Admin only
+    - Profile actions: Authenticated user (self only)
+    """
+    queryset = User.objects.all().order_by('-date_joined')
     serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['role', 'is_active', 'department']
     search_fields = ['username', 'email', 'first_name', 'last_name']
-    ordering_fields = ['username', 'email', 'date_joined']
+    ordering_fields = ['username', 'email', 'role', 'date_joined', 'last_login']
     ordering = ['-date_joined']
+
+    def get_permissions(self):
+        """Admin required for create/update/delete, authenticated for list/retrieve"""
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [IsAdminUser()]
+        return [IsAuthenticated()]
+
+    @action(detail=False, methods=['get', 'patch'])
+    def me(self, request):
+        """Get or update current user's profile"""
+        if request.method == 'GET':
+            serializer = self.get_serializer(request.user)
+            return Response(serializer.data)
+
+        # PATCH - update own profile (but not role)
+        data = request.data.copy()
+        data.pop('role', None)  # Users cannot change their own role
+        data.pop('is_active', None)  # Users cannot deactivate themselves
+        serializer = self.get_serializer(request.user, data=data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['post'])
+    def change_password(self, request):
+        """Change current user's password"""
+        user = request.user
+        old_password = request.data.get('old_password')
+        new_password = request.data.get('new_password')
+
+        if not old_password or not new_password:
+            return Response(
+                {'error': 'Both old_password and new_password are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not check_password(old_password, user.password):
+            return Response(
+                {'error': 'Current password is incorrect'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if len(new_password) < 8:
+            return Response(
+                {'error': 'Password must be at least 8 characters'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user.set_password(new_password)
+        user.save()
+        return Response({'message': 'Password changed successfully'})
+
+    @action(detail=False, methods=['post'])
+    def update_smtp(self, request):
+        """Update current user's SMTP settings"""
+        user = request.user
+        smtp_email = request.data.get('smtp_email')
+        smtp_password = request.data.get('smtp_password')
+
+        # Allow clearing SMTP settings
+        if smtp_email == '' and smtp_password == '':
+            user.smtp_email = None
+            user.smtp_password = None
+            user.save()
+            return Response({
+                'message': 'SMTP settings cleared',
+                'smtp_configured': False
+            })
+
+        if smtp_email:
+            user.smtp_email = smtp_email
+        if smtp_password:
+            user.smtp_password = smtp_password
+        user.save()
+
+        return Response({
+            'message': 'SMTP settings updated',
+            'smtp_email': user.smtp_email,
+            'smtp_configured': bool(user.smtp_email and user.smtp_password)
+        })
+
+    @action(detail=False, methods=['post'])
+    def test_smtp(self, request):
+        """Test current user's SMTP configuration by sending a test email"""
+        user = request.user
+        if not user.smtp_email or not user.smtp_password:
+            return Response(
+                {'error': 'SMTP not configured'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            import smtplib
+
+            # Test SMTP connection
+            smtp = smtplib.SMTP('smtp.gmail.com', 587)
+            smtp.starttls()
+            smtp.login(user.smtp_email, user.smtp_password)
+            smtp.quit()
+
+            return Response({
+                'success': True,
+                'message': 'SMTP connection successful'
+            })
+        except Exception as e:
+            return Response(
+                {'success': False, 'error': str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 
 class CompanyViewSet(BaseModelViewSet):

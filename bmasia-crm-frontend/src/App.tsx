@@ -40,6 +40,8 @@ import Zones from './pages/Zones';
 import ZoneDetail from './pages/ZoneDetail';
 import ZoneNew from './pages/ZoneNew';
 import ZoneEdit from './pages/ZoneEdit';
+import Users from './pages/Users';
+import MyProfile from './pages/MyProfile';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -413,8 +415,18 @@ function App() {
         <Route path="/slas" element={<PlaceholderPage title="Service Level Agreements" />} />
 
         {/* Admin routes */}
-        <Route path="/users" element={<PlaceholderPage title="User Management" />} />
+        <Route
+          path="/users"
+          element={
+            <ProtectedRoute requiredModule="users">
+              <Users />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/settings" element={<Settings />} />
+
+        {/* Profile route - accessible to all authenticated users */}
+        <Route path="/profile" element={<MyProfile />} />
         <Route path="/audit-logs" element={<PlaceholderPage title="Audit Logs" />} />
         <Route path="/system-status" element={<PlaceholderPage title="System Status" />} />
 
