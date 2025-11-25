@@ -28,6 +28,7 @@ import {
   Notes as NotesIcon,
   CalendarMonth,
   Build,
+  Assignment,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Zone, ContractZone } from '../types';

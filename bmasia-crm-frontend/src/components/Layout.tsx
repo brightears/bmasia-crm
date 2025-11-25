@@ -58,6 +58,7 @@ import {
   MenuBook as MenuBookIcon,
   Devices as DevicesIcon,
   Category,
+  LocationOn,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
