@@ -30,7 +30,7 @@ import {
   Build,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Zone } from '../types';
+import { Zone, ContractZone } from '../types';
 import ApiService from '../services/api';
 import { format } from 'date-fns';
 import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
@@ -61,6 +61,7 @@ const ZoneDetail: React.FC = () => {
   const navigate = useNavigate();
   const [zone, setZone] = useState<Zone | null>(null);
   const [equipment, setEquipment] = useState<any[]>([]);
+  const [contracts, setContracts] = useState<ContractZone[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tabValue, setTabValue] = useState(0);
@@ -69,34 +70,32 @@ const ZoneDetail: React.FC = () => {
 
   useEffect(() => {
     if (id) {
-      loadZone();
-      loadEquipment();
+      loadZoneData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const loadZone = async () => {
+  const loadZoneData = async () => {
     if (!id) return;
     try {
       setLoading(true);
       setError('');
-      const data = await ApiService.getZone(id);
-      setZone(data);
+
+      // Load zone, equipment, and contracts in parallel
+      const [zoneData, equipmentData, contractsData] = await Promise.all([
+        ApiService.getZone(id),
+        ApiService.getEquipmentByZone(id),
+        ApiService.getZoneContracts(id),
+      ]);
+
+      setZone(zoneData);
+      setEquipment(equipmentData);
+      setContracts(contractsData);
     } catch (err: any) {
       console.error('Zone load error:', err);
       setError('Failed to load zone details');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadEquipment = async () => {
-    if (!id) return;
-    try {
-      const data = await ApiService.getEquipmentByZone(id);
-      setEquipment(data);
-    } catch (err: any) {
-      console.error('Equipment load error:', err);
     }
   };
 
@@ -301,6 +300,7 @@ const ZoneDetail: React.FC = () => {
       <Paper sx={{ mb: 3 }}>
         <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)}>
           <Tab label="Overview" />
+          <Tab label={`Contract History (${contracts.length})`} />
           <Tab label={`Equipment (${equipment.length})`} />
         </Tabs>
 
@@ -449,8 +449,167 @@ const ZoneDetail: React.FC = () => {
           </Grid>
         </TabPanel>
 
-        {/* Equipment Tab */}
+        {/* Contract History Tab */}
         <TabPanel value={tabValue} index={1}>
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              <Assignment sx={{ mr: 1, verticalAlign: 'bottom' }} />
+              Contract History
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              All contracts associated with this zone, past and present
+            </Typography>
+
+            {contracts.length > 0 ? (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {/* Active Contracts */}
+                {contracts.filter(c => c.is_active).length > 0 && (
+                  <Box>
+                    <Typography variant="subtitle1" fontWeight={600} color="success.main" sx={{ mb: 2 }}>
+                      Active Contracts
+                    </Typography>
+                    {contracts
+                      .filter(c => c.is_active)
+                      .map((contractZone) => (
+                        <Card key={contractZone.id} variant="outlined" sx={{ mb: 2 }}>
+                          <CardContent>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                              <Box sx={{ flexGrow: 1 }}>
+                                <Box
+                                  sx={{
+                                    cursor: 'pointer',
+                                    color: 'primary.main',
+                                    fontWeight: 600,
+                                    fontSize: '1.1rem',
+                                    mb: 1,
+                                    '&:hover': { textDecoration: 'underline' },
+                                  }}
+                                  onClick={() => navigate(`/contracts/${contractZone.contract}`)}
+                                >
+                                  {contractZone.contract_number}
+                                </Box>
+                                <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
+                                  <Box>
+                                    <Typography variant="caption" color="text.secondary">
+                                      Start Date
+                                    </Typography>
+                                    <Typography variant="body2">
+                                      {format(new Date(contractZone.start_date), 'MMM dd, yyyy')}
+                                    </Typography>
+                                  </Box>
+                                  {contractZone.end_date && (
+                                    <Box>
+                                      <Typography variant="caption" color="text.secondary">
+                                        End Date
+                                      </Typography>
+                                      <Typography variant="body2">
+                                        {format(new Date(contractZone.end_date), 'MMM dd, yyyy')}
+                                      </Typography>
+                                    </Box>
+                                  )}
+                                </Box>
+                                {contractZone.notes && (
+                                  <Box sx={{ mt: 1 }}>
+                                    <Typography variant="caption" color="text.secondary">
+                                      Notes
+                                    </Typography>
+                                    <Typography variant="body2">{contractZone.notes}</Typography>
+                                  </Box>
+                                )}
+                              </Box>
+                              <Chip label="Active" color="success" size="small" />
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      ))}
+                  </Box>
+                )}
+
+                {/* Historical Contracts */}
+                {contracts.filter(c => !c.is_active).length > 0 && (
+                  <Box>
+                    <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mb: 2 }}>
+                      Historical Contracts
+                    </Typography>
+                    {contracts
+                      .filter(c => !c.is_active)
+                      .sort((a, b) => {
+                        // Sort by end_date descending (most recent first)
+                        const dateA = a.end_date ? new Date(a.end_date).getTime() : 0;
+                        const dateB = b.end_date ? new Date(b.end_date).getTime() : 0;
+                        return dateB - dateA;
+                      })
+                      .map((contractZone) => (
+                        <Card key={contractZone.id} variant="outlined" sx={{ mb: 2, bgcolor: 'grey.50' }}>
+                          <CardContent>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                              <Box sx={{ flexGrow: 1 }}>
+                                <Box
+                                  sx={{
+                                    cursor: 'pointer',
+                                    color: 'primary.main',
+                                    fontWeight: 500,
+                                    fontSize: '1rem',
+                                    mb: 1,
+                                    '&:hover': { textDecoration: 'underline' },
+                                  }}
+                                  onClick={() => navigate(`/contracts/${contractZone.contract}`)}
+                                >
+                                  {contractZone.contract_number}
+                                </Box>
+                                <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
+                                  <Box>
+                                    <Typography variant="caption" color="text.secondary">
+                                      Start Date
+                                    </Typography>
+                                    <Typography variant="body2">
+                                      {format(new Date(contractZone.start_date), 'MMM dd, yyyy')}
+                                    </Typography>
+                                  </Box>
+                                  {contractZone.end_date && (
+                                    <Box>
+                                      <Typography variant="caption" color="text.secondary">
+                                        End Date
+                                      </Typography>
+                                      <Typography variant="body2">
+                                        {format(new Date(contractZone.end_date), 'MMM dd, yyyy')}
+                                      </Typography>
+                                    </Box>
+                                  )}
+                                </Box>
+                                {contractZone.notes && (
+                                  <Box sx={{ mt: 1 }}>
+                                    <Typography variant="caption" color="text.secondary">
+                                      Notes
+                                    </Typography>
+                                    <Typography variant="body2">{contractZone.notes}</Typography>
+                                  </Box>
+                                )}
+                              </Box>
+                              <Chip label="Ended" color="default" size="small" />
+                            </Box>
+                          </CardContent>
+                        </Card>
+                      ))}
+                  </Box>
+                )}
+              </Box>
+            ) : (
+              <Box sx={{ textAlign: 'center', py: 4 }}>
+                <Assignment sx={{ fontSize: 60, color: 'text.disabled', mb: 2 }} />
+                <Typography variant="body1" color="text.secondary">
+                  No contracts associated with this zone
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                  Contracts can be linked to zones from the contract management page
+                </Typography>
+              </Box>
+            )}
+          </Box>
+        </TabPanel>
+
+        {/* Equipment Tab */}
+        <TabPanel value={tabValue} index={2}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
             <Typography variant="h6">
               <Build sx={{ mr: 1, verticalAlign: 'bottom' }} />

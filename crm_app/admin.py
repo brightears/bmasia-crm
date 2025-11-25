@@ -15,7 +15,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
-    Opportunity, OpportunityActivity, Contract, Invoice, Zone,
+    Opportunity, OpportunityActivity, Contract, Invoice, Zone, ContractZone,
     EmailTemplate, EmailLog, EmailCampaign, CampaignRecipient, DocumentAttachment,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
@@ -844,6 +844,22 @@ class InvoiceInline(admin.TabularInline):
         return super().get_queryset(request).select_related('contract')
 
 
+class ContractZoneInline(admin.TabularInline):
+    """Inline admin for zones linked to a contract"""
+    model = ContractZone
+    extra = 0
+    fields = ('zone', 'start_date', 'end_date', 'is_active', 'notes')
+    readonly_fields = ('zone',)  # Can't change zone after creation
+
+    def get_queryset(self, request):
+        """Optimize inline queries"""
+        return super().get_queryset(request).select_related('zone', 'zone__company')
+
+    def has_delete_permission(self, request, obj=None):
+        # Allow deletion only for inactive relationships
+        return False
+
+
 class ContractAdminForm(forms.ModelForm):
     """Custom form for Contract admin with better number formatting"""
     class Meta:
@@ -860,7 +876,7 @@ class ContractAdmin(admin.ModelAdmin):
     list_select_related = ['company', 'opportunity']
     search_fields = ['contract_number', 'company__name']
     readonly_fields = ['created_at', 'updated_at', 'days_until_expiry', 'formatted_monthly_value']
-    inlines = [InvoiceInline]
+    inlines = [InvoiceInline, ContractZoneInline]
     actions = ['bulk_update_status_active', 'bulk_update_status_inactive', 'export_contracts_csv', 'export_contracts_excel']
     
     def is_expiring_soon(self, obj):
@@ -1057,6 +1073,39 @@ class ContractAdmin(admin.ModelAdmin):
     export_contracts_excel.short_description = 'Export selected contracts to Excel'
 
     # list_select_related handles the optimization
+
+
+@admin.register(ContractZone)
+class ContractZoneAdmin(admin.ModelAdmin):
+    """Admin interface for ContractZone - historical tracking of zone-contract relationships"""
+    list_display = ('contract', 'zone', 'start_date', 'end_date', 'is_active', 'created_at')
+    list_filter = ('is_active', 'start_date', 'end_date')
+    list_select_related = ('contract', 'contract__company', 'zone', 'zone__company')
+    search_fields = ('contract__contract_number', 'zone__name', 'zone__company__name')
+    date_hierarchy = 'start_date'
+    readonly_fields = ('created_at', 'updated_at')
+
+    fieldsets = (
+        ('Relationship', {
+            'fields': ('contract', 'zone')
+        }),
+        ('Dates', {
+            'fields': ('start_date', 'end_date', 'is_active')
+        }),
+        ('Additional Information', {
+            'fields': ('notes', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def get_queryset(self, request):
+        """Optimize queries with select_related"""
+        return super().get_queryset(request).select_related(
+            'contract',
+            'contract__company',
+            'zone',
+            'zone__company'
+        )
 
 
 @admin.register(Invoice)

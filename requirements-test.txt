@@ -1,0 +1,14 @@
+# Testing dependencies for BMAsia CRM
+-r requirements.txt
+
+# Testing framework
+pytest==7.4.3
+pytest-django==4.7.0
+pytest-cov==4.1.0
+
+# Test data generation
+factory-boy==3.3.0
+Faker==20.1.0
+
+# Additional testing utilities
+freezegun==1.4.0  # For time-dependent tests

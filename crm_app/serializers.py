@@ -4,7 +4,7 @@ from django.utils import timezone
 from django.db.models import Sum
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
-    Opportunity, OpportunityActivity, Contract, Invoice, Zone,
+    Opportunity, OpportunityActivity, Contract, Invoice, Zone, ContractZone,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailCampaign, CampaignRecipient, EmailTemplate,
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
@@ -73,16 +73,38 @@ class ZoneSerializer(serializers.ModelSerializer):
     company_name = serializers.CharField(source='company.name', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     soundtrack_account_id = serializers.CharField(source='company.soundtrack_account_id', read_only=True)
-    
+
+    # NEW FIELDS for contracts
+    current_contract = serializers.SerializerMethodField()
+    contract_count = serializers.SerializerMethodField()
+
     class Meta:
         model = Zone
         fields = [
             'id', 'company', 'company_name', 'name', 'platform', 'status', 'status_display',
             'soundtrack_account_id', 'soundtrack_zone_id', 'soundtrack_admin_email',
             'device_name', 'last_seen_online', 'notes', 'last_api_sync',
-            'is_online', 'created_at', 'updated_at'
+            'is_online', 'current_contract', 'contract_count',
+            'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'soundtrack_account_id', 'last_api_sync', 'created_at', 'updated_at']
+
+    def get_current_contract(self, obj):
+        """Get the currently active contract for this zone"""
+        active_link = obj.zone_contracts.filter(is_active=True).select_related('contract').first()
+        if active_link:
+            return {
+                'id': str(active_link.contract.id),
+                'contract_number': active_link.contract.contract_number,
+                'status': active_link.contract.status,
+                'start_date': active_link.start_date,
+                'end_date': active_link.end_date,
+            }
+        return None
+
+    def get_contract_count(self, obj):
+        """Total number of contracts this zone has been linked to"""
+        return obj.zone_contracts.count()
 
 
 # SubscriptionPlanSerializer removed - use ContractSerializer with service_type instead
@@ -338,6 +360,29 @@ class InvoiceSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'total_amount', 'created_at', 'updated_at']
 
 
+class ContractZoneSerializer(serializers.ModelSerializer):
+    """
+    Serializer for ContractZone intermediate model.
+    Shows the relationship between a contract and a zone with historical tracking.
+    """
+    zone_id = serializers.UUIDField(source='zone.id', read_only=True)
+    zone_name = serializers.CharField(source='zone.name', read_only=True)
+    zone_platform = serializers.CharField(source='zone.platform', read_only=True)
+    zone_status = serializers.CharField(source='zone.status', read_only=True)
+    contract_number = serializers.CharField(source='contract.contract_number', read_only=True)
+    company_name = serializers.CharField(source='contract.company.name', read_only=True)
+
+    class Meta:
+        model = ContractZone
+        fields = [
+            'id', 'contract', 'contract_number', 'zone', 'zone_id', 'zone_name',
+            'zone_platform', 'zone_status', 'company_name',
+            'start_date', 'end_date', 'is_active', 'notes',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['created_at', 'updated_at']
+
+
 class ContractSerializer(serializers.ModelSerializer):
     """Serializer for Contract model with renewal tracking"""
     company_name = serializers.CharField(source='company.name', read_only=True)
@@ -348,6 +393,11 @@ class ContractSerializer(serializers.ModelSerializer):
     invoices = InvoiceSerializer(many=True, read_only=True)
     paid_invoices_count = serializers.SerializerMethodField()
     outstanding_amount = serializers.SerializerMethodField()
+
+    # NEW FIELDS for zones
+    contract_zones = ContractZoneSerializer(many=True, read_only=True)
+    active_zone_count = serializers.SerializerMethodField()
+    total_zone_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Contract
@@ -358,21 +408,30 @@ class ContractSerializer(serializers.ModelSerializer):
             'payment_terms', 'billing_frequency', 'discount_percentage', 'notes',
             'renewal_notice_sent', 'renewal_notice_date', 'days_until_expiry',
             'is_expiring_soon', 'monthly_value', 'invoices', 'paid_invoices_count',
-            'outstanding_amount', 'created_at', 'updated_at'
+            'outstanding_amount', 'contract_zones', 'active_zone_count', 'total_zone_count',
+            'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'contract_number', 'created_at', 'updated_at']
         extra_kwargs = {
             'contract_number': {'required': False}
         }
-    
+
     def get_paid_invoices_count(self, obj):
         return obj.invoices.filter(status='Paid').count()
-    
+
     def get_outstanding_amount(self, obj):
         outstanding = obj.invoices.exclude(status='Paid').aggregate(
             total=Sum('total_amount')
         )['total']
         return outstanding or 0
+
+    def get_active_zone_count(self, obj):
+        """Count of currently active zones"""
+        return obj.contract_zones.filter(is_active=True).count()
+
+    def get_total_zone_count(self, obj):
+        """Total count of all zones (active + historical)"""
+        return obj.contract_zones.count()
 
     def create(self, validated_data):
         """Create contract with auto-generated contract number"""

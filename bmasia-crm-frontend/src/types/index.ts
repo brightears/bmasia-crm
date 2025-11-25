@@ -260,6 +260,27 @@ export interface Contract {
   invoices: Invoice[];
   paid_invoices_count: number;
   outstanding_amount: number;
+  contract_zones?: ContractZone[];
+  active_zone_count?: number;
+  total_zone_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContractZone {
+  id: string;
+  contract: string;
+  contract_number?: string;
+  zone: string;
+  zone_id?: string;
+  zone_name?: string;
+  zone_platform?: 'soundtrack' | 'beatbreeze';
+  zone_status?: string;
+  company_name?: string;
+  start_date: string;
+  end_date?: string | null;
+  is_active: boolean;
+  notes?: string;
   created_at: string;
   updated_at: string;
 }
@@ -1032,6 +1053,14 @@ export interface Zone {
   soundtrack_zone_id?: string;
   device_name?: string;
   notes?: string;
+  current_contract?: {
+    id: string;
+    contract_number: string;
+    status: string;
+    start_date: string;
+    end_date?: string;
+  } | null;
+  contract_count?: number;
   created_at: string;
   updated_at: string;
 }

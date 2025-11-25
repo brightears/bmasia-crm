@@ -52,8 +52,9 @@ import {
   Email,
   GetApp,
   Print,
+  LocationOn as LocationOnIcon,
 } from '@mui/icons-material';
-import { Contract, Invoice } from '../types';
+import { Contract, Invoice, ContractZone } from '../types';
 import ApiService from '../services/api';
 
 interface ContractDetailProps {
@@ -93,6 +94,8 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
   const [paymentHistory] = useState<PaymentHistory[]>([]);
   const [contractEvents] = useState<ContractEvent[]>([]);
   const [sendingRenewal, setSendingRenewal] = useState(false);
+  const [contractZones, setContractZones] = useState<ContractZone[]>([]);
+  const [loadingZones, setLoadingZones] = useState(false);
 
   useEffect(() => {
     if (open && contractId) {
@@ -121,6 +124,26 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
       setLoading(false);
     }
   };
+
+  const loadContractZones = async () => {
+    if (!contract?.id) return;
+
+    try {
+      setLoadingZones(true);
+      const zones = await ApiService.getContractZones(contract.id);
+      setContractZones(zones);
+    } catch (err) {
+      console.error('Failed to load contract zones:', err);
+    } finally {
+      setLoadingZones(false);
+    }
+  };
+
+  useEffect(() => {
+    if (contract) {
+      loadContractZones();
+    }
+  }, [contract]);
 
   const handleSendRenewalNotice = async () => {
     if (!contract) return;
@@ -608,6 +631,67 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
               </Paper>
             </Grid>
           )}
+
+          {/* Music Zones */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <LocationOnIcon sx={{ color: '#FFA500' }} />
+                  Music Zones
+                </Typography>
+                <Chip
+                  label={`${contract.active_zone_count || 0} active`}
+                  color="success"
+                  size="small"
+                />
+              </Box>
+
+              {loadingZones ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+                  <CircularProgress />
+                </Box>
+              ) : contractZones.length === 0 ? (
+                <Paper sx={{ p: 3, textAlign: 'center', bgcolor: 'grey.50' }}>
+                  <LocationOnIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2 }} />
+                  <Typography variant="body1" color="text.secondary">
+                    No zones configured for this contract
+                  </Typography>
+                </Paper>
+              ) : (
+                <Grid container spacing={2}>
+                  {contractZones.map((cz) => (
+                    <Grid item xs={12} sm={6} md={4} key={cz.id}>
+                      <Card variant="outlined">
+                        <CardContent>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', mb: 2 }}>
+                            <Typography variant="h6" sx={{ fontSize: '1rem' }}>
+                              {cz.zone_name}
+                            </Typography>
+                            <Chip
+                              label={cz.is_active ? 'Active' : 'Ended'}
+                              size="small"
+                              color={cz.is_active ? 'success' : 'default'}
+                            />
+                          </Box>
+                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                            Platform: {cz.zone_platform === 'soundtrack' ? 'Soundtrack Your Brand' : 'Beat Breeze'}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                            Status: {cz.zone_status}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" display="block">
+                            Active: {formatDate(cz.start_date)}
+                            {cz.end_date && ` - ${formatDate(cz.end_date)}`}
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  ))}
+                </Grid>
+              )}
+            </Paper>
+          </Grid>
         </Grid>
       </DialogContent>
 

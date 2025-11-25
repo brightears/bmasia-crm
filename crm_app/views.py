@@ -22,7 +22,7 @@ import os
 
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
-    Opportunity, OpportunityActivity, Contract, Invoice,
+    Opportunity, OpportunityActivity, Contract, Invoice, ContractZone,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailTemplate, EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
     CustomerSegment, EmailCampaign, CampaignRecipient,
@@ -34,7 +34,7 @@ from .models import (
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
     TaskSerializer, OpportunitySerializer, OpportunityActivitySerializer,
-    ContractSerializer, InvoiceSerializer, AuditLogSerializer,
+    ContractSerializer, ContractZoneSerializer, InvoiceSerializer, AuditLogSerializer,
     LoginSerializer, DashboardStatsSerializer, BulkOperationSerializer,
     QuoteSerializer, QuoteLineItemSerializer, QuoteAttachmentSerializer, QuoteActivitySerializer,
     EmailTemplateSerializer, EmailSequenceSerializer, SequenceStepSerializer,
@@ -948,6 +948,176 @@ class ContractViewSet(BaseModelViewSet):
         })
 
         return response
+
+    @action(detail=True, methods=['post'], url_path='add-zones')
+    def add_zones(self, request, pk=None):
+        """
+        Add zones to a contract (create new zones OR link existing zones).
+
+        POST /api/v1/contracts/{id}/add-zones/
+        Body: {
+            "zones": [
+                {"name": "Pool Bar", "platform": "soundtrack"},  # Creates new zone
+                {"id": "existing-zone-uuid"},  # Links existing zone
+            ]
+        }
+
+        Returns: List of created/linked zones
+        """
+        contract = self.get_object()
+        zones_data = request.data.get('zones', [])
+
+        if not zones_data:
+            return Response(
+                {'error': 'No zones provided'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        created_zones = []
+        errors = []
+
+        with transaction.atomic():
+            for i, zone_data in enumerate(zones_data):
+                try:
+                    # Check if linking existing zone (has 'id') or creating new zone
+                    if 'id' in zone_data:
+                        # Link existing zone
+                        try:
+                            zone = Zone.objects.get(id=zone_data['id'])
+                        except Zone.DoesNotExist:
+                            errors.append(f"Zone {i+1}: Zone with id {zone_data['id']} not found")
+                            continue
+                    else:
+                        # Create new zone
+                        if 'name' not in zone_data or 'platform' not in zone_data:
+                            errors.append(f"Zone {i+1}: Missing required fields 'name' or 'platform'")
+                            continue
+
+                        zone = Zone.objects.create(
+                            company=contract.company,
+                            name=zone_data['name'],
+                            platform=zone_data['platform'],
+                            status='pending',  # Default status for new zones
+                            notes=zone_data.get('notes', '')
+                        )
+
+                    # Check if zone already linked to this contract
+                    existing_link = ContractZone.objects.filter(
+                        contract=contract,
+                        zone=zone,
+                        is_active=True
+                    ).exists()
+
+                    if existing_link:
+                        errors.append(f"Zone {i+1}: Zone '{zone.name}' already linked to this contract")
+                        continue
+
+                    # Create ContractZone link
+                    ContractZone.objects.create(
+                        contract=contract,
+                        zone=zone,
+                        start_date=contract.start_date,
+                        is_active=True,
+                        notes=zone_data.get('notes', '')
+                    )
+
+                    created_zones.append(zone)
+
+                except Exception as e:
+                    errors.append(f"Zone {i+1}: {str(e)}")
+
+        # Prepare response
+        if errors:
+            response_data = {
+                'zones': ZoneSerializer(created_zones, many=True).data,
+                'errors': errors,
+                'success_count': len(created_zones),
+                'error_count': len(errors)
+            }
+            return Response(response_data, status=status.HTTP_207_MULTI_STATUS)
+
+        return Response(
+            ZoneSerializer(created_zones, many=True).data,
+            status=status.HTTP_201_CREATED
+        )
+
+    @action(detail=True, methods=['get'], url_path='zones')
+    def get_zones(self, request, pk=None):
+        """
+        Get all zones (active and historical) for this contract.
+
+        GET /api/v1/contracts/{id}/zones/
+        Query params:
+        - active: true/false (filter by is_active)
+        - as_of: YYYY-MM-DD (get zones active on specific date)
+
+        Returns: List of ContractZone relationships
+        """
+        contract = self.get_object()
+
+        # Filter by active status if specified
+        active_filter = request.query_params.get('active')
+        if active_filter is not None:
+            is_active = active_filter.lower() == 'true'
+            queryset = contract.contract_zones.filter(is_active=is_active)
+        else:
+            queryset = contract.contract_zones.all()
+
+        # Filter by date if specified
+        as_of_date = request.query_params.get('as_of')
+        if as_of_date:
+            from datetime import datetime
+            date_obj = datetime.strptime(as_of_date, '%Y-%m-%d').date()
+            queryset = queryset.filter(
+                start_date__lte=date_obj
+            ).filter(
+                Q(end_date__gte=date_obj) | Q(end_date__isnull=True)
+            )
+
+        queryset = queryset.select_related('zone', 'contract').order_by('-start_date')
+        serializer = ContractZoneSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='remove-zone')
+    def remove_zone(self, request, pk=None):
+        """
+        Remove a zone from this contract (set end_date and is_active=False).
+
+        POST /api/v1/contracts/{id}/remove-zone/
+        Body: {"zone_id": "uuid"}
+
+        Returns: Updated ContractZone relationship
+        """
+        contract = self.get_object()
+        zone_id = request.data.get('zone_id')
+
+        if not zone_id:
+            return Response(
+                {'error': 'zone_id is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            contract_zone = ContractZone.objects.get(
+                contract=contract,
+                zone_id=zone_id,
+                is_active=True
+            )
+        except ContractZone.DoesNotExist:
+            return Response(
+                {'error': 'Active zone link not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Close the relationship
+        contract_zone.end_date = timezone.now().date()
+        contract_zone.is_active = False
+        contract_zone.save()
+
+        return Response(
+            ContractZoneSerializer(contract_zone).data,
+            status=status.HTTP_200_OK
+        )
 
 
 class InvoiceViewSet(BaseModelViewSet):
@@ -4342,4 +4512,29 @@ class ZoneViewSet(viewsets.ModelViewSet):
 
         zones = self.queryset.filter(company_id=company_id)
         serializer = self.get_serializer(zones, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'], url_path='contracts')
+    def get_contracts(self, request, pk=None):
+        """
+        Get all contracts (active and historical) for this zone.
+
+        GET /api/v1/zones/{id}/contracts/
+        Query params:
+        - active: true/false (filter by is_active)
+
+        Returns: List of ContractZone relationships
+        """
+        zone = self.get_object()
+
+        # Filter by active status if specified
+        active_filter = request.query_params.get('active')
+        if active_filter is not None:
+            is_active = active_filter.lower() == 'true'
+            queryset = zone.zone_contracts.filter(is_active=is_active)
+        else:
+            queryset = zone.zone_contracts.all()
+
+        queryset = queryset.select_related('contract', 'zone').order_by('-start_date')
+        serializer = ContractZoneSerializer(queryset, many=True)
         return Response(serializer.data)

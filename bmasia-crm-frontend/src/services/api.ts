@@ -2,7 +2,7 @@ import {
   User, Company, Contact, Note, Task, Opportunity, OpportunityActivity,
   Contract, Invoice, Quote, DashboardStats, AuditLog, ApiResponse,
   CustomerSegment, SegmentMemberResponse, SegmentValidationResponse,
-  EnrollInSequenceResponse, SegmentFilterCriteria, Zone
+  EnrollInSequenceResponse, SegmentFilterCriteria, Zone, ContractZone
 } from '../types';
 import { authApi } from './authService';
 import { MockApiService } from './mockData';
@@ -327,6 +327,27 @@ class ApiService {
 
   async sendRenewalNotice(id: string): Promise<any> {
     const response = await authApi.post(`/contracts/${id}/send_renewal_notice/`);
+    return response.data;
+  }
+
+  // Contract-Zone Management
+  async addZonesToContract(contractId: string, zones: {id?: string; name?: string; platform?: string}[]): Promise<Zone[]> {
+    const response = await authApi.post(`/contracts/${contractId}/add-zones/`, { zones });
+    return response.data;
+  }
+
+  async getContractZones(contractId: string, params?: {active?: boolean; as_of?: string}): Promise<ContractZone[]> {
+    const response = await authApi.get(`/contracts/${contractId}/zones/`, { params });
+    return response.data;
+  }
+
+  async removeZoneFromContract(contractId: string, zoneId: string): Promise<ContractZone> {
+    const response = await authApi.post(`/contracts/${contractId}/remove-zone/`, { zone_id: zoneId });
+    return response.data;
+  }
+
+  async getZoneContracts(zoneId: string, params?: {active?: boolean}): Promise<ContractZone[]> {
+    const response = await authApi.get(`/zones/${zoneId}/contracts/`, { params });
     return response.data;
   }
 

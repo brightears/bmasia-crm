@@ -136,6 +136,7 @@ const unifiedNavigation = [
     items: [
       { text: 'Tickets', icon: <SupportIcon />, path: '/tickets' },
       { text: 'Knowledge Base', icon: <MenuBookIcon />, path: '/knowledge-base' },
+      { text: 'Zones', icon: <LocationOn />, path: '/zones' },
       { text: 'Equipment', icon: <DevicesIcon />, path: '/equipment' },
       { text: 'Equipment Types', icon: <Category />, path: '/equipment-types' },
     ],

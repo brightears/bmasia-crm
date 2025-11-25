@@ -50,7 +50,7 @@ import {
   Build,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Company, Contact, Opportunity, Contract } from '../types';
+import { Company, Contact, Opportunity, Contract, Zone } from '../types';
 import ApiService from '../services/api';
 import CompanyForm from '../components/CompanyForm';
 import ContactForm from '../components/ContactForm';
@@ -96,6 +96,7 @@ const CompanyDetail: React.FC = () => {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
+  const [zones, setZones] = useState<Zone[]>([]);
   const [equipment, setEquipment] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -122,16 +123,18 @@ const CompanyDetail: React.FC = () => {
       setCompany(companyData);
 
       // Load related data
-      const [contactsResponse, opportunitiesResponse, contractsResponse, equipmentResponse] = await Promise.all([
+      const [contactsResponse, opportunitiesResponse, contractsResponse, zonesResponse, equipmentResponse] = await Promise.all([
         ApiService.getContacts({ company: id }),
         ApiService.getOpportunities({ company: id }),
         ApiService.getContracts({ company: id }),
+        ApiService.getZonesByCompany(id),
         ApiService.getEquipmentByCompany(id),
       ]);
 
       setContacts(contactsResponse.results);
       setOpportunities(opportunitiesResponse.results);
       setContracts(contractsResponse.results);
+      setZones(zonesResponse);
       setEquipment(equipmentResponse);
     } catch (err: any) {
       console.error('Company detail error:', err);
@@ -418,8 +421,9 @@ const CompanyDetail: React.FC = () => {
           <Tab label={`Contacts (${contacts.length})`} {...a11yProps(0)} />
           <Tab label={`Opportunities (${opportunities.length})`} {...a11yProps(1)} />
           <Tab label={`Contracts (${contracts.length})`} {...a11yProps(2)} />
-          <Tab label="Subscription Plans" {...a11yProps(3)} />
-          <Tab label={`IT Information (${equipment.length})`} {...a11yProps(4)} />
+          <Tab label={`Zones (${zones.length})`} {...a11yProps(3)} />
+          <Tab label="Subscription Plans" {...a11yProps(4)} />
+          <Tab label={`IT Information (${equipment.length})`} {...a11yProps(5)} />
         </Tabs>
 
         <TabPanel value={tabValue} index={0}>
@@ -646,6 +650,179 @@ const CompanyDetail: React.FC = () => {
         </TabPanel>
 
         <TabPanel value={tabValue} index={3}>
+          {zones.length > 0 ? (
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
+                <Typography variant="h6">
+                  <LocationOn sx={{ mr: 1, verticalAlign: 'bottom' }} />
+                  Music Zones
+                </Typography>
+                <Button
+                  variant="contained"
+                  size="small"
+                  startIcon={<Add />}
+                  onClick={() => navigate('/zones/new')}
+                  sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
+                >
+                  Add Zone
+                </Button>
+              </Box>
+
+              {/* Active Zones */}
+              {zones.filter(z => z.status !== 'expired' && z.status !== 'offline').length > 0 && (
+                <Box sx={{ mb: 4 }}>
+                  <Typography variant="subtitle1" fontWeight={600} color="success.main" sx={{ mb: 2 }}>
+                    Active Zones ({zones.filter(z => z.status !== 'expired' && z.status !== 'offline').length})
+                  </Typography>
+                  <Grid container spacing={2}>
+                    {zones
+                      .filter(z => z.status !== 'expired' && z.status !== 'offline')
+                      .map((zone) => (
+                        <Grid item xs={12} sm={6} md={4} key={zone.id}>
+                          <Card
+                            variant="outlined"
+                            sx={{
+                              cursor: 'pointer',
+                              transition: 'all 0.2s',
+                              '&:hover': {
+                                boxShadow: 2,
+                                transform: 'translateY(-2px)',
+                              },
+                            }}
+                            onClick={() => navigate(`/zones/${zone.id}`)}
+                          >
+                            <CardContent>
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                                <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 600 }}>
+                                  {zone.name}
+                                </Typography>
+                                <Chip
+                                  label={zone.status?.replace('_', ' ')}
+                                  size="small"
+                                  color={zone.status === 'online' ? 'success' : 'warning'}
+                                  sx={{ textTransform: 'capitalize' }}
+                                />
+                              </Box>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                                <Chip
+                                  label={zone.platform}
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ textTransform: 'capitalize', fontSize: '0.75rem' }}
+                                />
+                              </Box>
+                              {zone.device_name && (
+                                <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.85rem' }}>
+                                  Device: {zone.device_name}
+                                </Typography>
+                              )}
+                              {zone.current_contract && (
+                                <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+                                  <Typography variant="caption" color="text.secondary" display="block">
+                                    Contract
+                                  </Typography>
+                                  <Typography
+                                    variant="body2"
+                                    sx={{
+                                      color: 'primary.main',
+                                      fontSize: '0.85rem',
+                                      '&:hover': { textDecoration: 'underline' },
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      navigate(`/contracts/${zone.current_contract?.id}`);
+                                    }}
+                                  >
+                                    {zone.current_contract?.contract_number}
+                                  </Typography>
+                                </Box>
+                              )}
+                            </CardContent>
+                          </Card>
+                        </Grid>
+                      ))}
+                  </Grid>
+                </Box>
+              )}
+
+              {/* Inactive/Cancelled Zones */}
+              {zones.filter(z => z.status === 'expired' || z.status === 'offline').length > 0 && (
+                <Box>
+                  <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mb: 2 }}>
+                    Inactive Zones ({zones.filter(z => z.status === 'expired' || z.status === 'offline').length})
+                  </Typography>
+                  <Grid container spacing={2}>
+                    {zones
+                      .filter(z => z.status === 'expired' || z.status === 'offline')
+                      .map((zone) => (
+                        <Grid item xs={12} sm={6} md={4} key={zone.id}>
+                          <Card
+                            variant="outlined"
+                            sx={{
+                              cursor: 'pointer',
+                              bgcolor: 'grey.50',
+                              transition: 'all 0.2s',
+                              '&:hover': {
+                                boxShadow: 1,
+                              },
+                            }}
+                            onClick={() => navigate(`/zones/${zone.id}`)}
+                          >
+                            <CardContent>
+                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                                <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 500, color: 'text.secondary' }}>
+                                  {zone.name}
+                                </Typography>
+                                <Chip
+                                  label={zone.status?.replace('_', ' ')}
+                                  size="small"
+                                  color="error"
+                                  sx={{ textTransform: 'capitalize' }}
+                                />
+                              </Box>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                                <Chip
+                                  label={zone.platform}
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ textTransform: 'capitalize', fontSize: '0.75rem' }}
+                                />
+                              </Box>
+                              {zone.contract_count !== undefined && zone.contract_count > 0 && (
+                                <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.85rem' }}>
+                                  {zone.contract_count} contract{zone.contract_count > 1 ? 's' : ''} (historical)
+                                </Typography>
+                              )}
+                            </CardContent>
+                          </Card>
+                        </Grid>
+                      ))}
+                  </Grid>
+                </Box>
+              )}
+            </Box>
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <LocationOn sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+              <Typography variant="h6" color="text.secondary" gutterBottom>
+                No zones yet
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Add music zones to track locations and their associated contracts
+              </Typography>
+              <Button
+                variant="contained"
+                startIcon={<Add />}
+                onClick={() => navigate('/zones/new')}
+                sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
+              >
+                Add First Zone
+              </Button>
+            </Box>
+          )}
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={4}>
           {company.subscription_plans && company.subscription_plans.length > 0 ? (
             <Grid container spacing={2}>
               {company.subscription_plans.map((plan) => (
@@ -694,7 +871,7 @@ const CompanyDetail: React.FC = () => {
           )}
         </TabPanel>
 
-        <TabPanel value={tabValue} index={4}>
+        <TabPanel value={tabValue} index={5}>
           <Box sx={{ mb: 3 }}>
             <Typography variant="h6" gutterBottom>
               IT Notes

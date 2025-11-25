@@ -589,7 +589,16 @@ class Contract(TimestampedModel):
     # Renewal tracking
     renewal_notice_sent = models.BooleanField(default=False)
     renewal_notice_date = models.DateField(null=True, blank=True)
-    
+
+    # Zone relationship
+    zones = models.ManyToManyField(
+        'Zone',  # Use string reference since Zone is defined later
+        through='ContractZone',
+        related_name='contracts',
+        blank=True,
+        help_text="Music zones covered by this contract"
+    )
+
     class Meta:
         ordering = ['-start_date']
         indexes = [
@@ -620,7 +629,7 @@ class Contract(TimestampedModel):
         """Calculate monthly value of contract"""
         if self.end_date and self.start_date and self.value:
             # Calculate the difference in months more accurately
-            months = ((self.end_date.year - self.start_date.year) * 12 + 
+            months = ((self.end_date.year - self.start_date.year) * 12 +
                      (self.end_date.month - self.start_date.month))
             # Add 1 because we want inclusive months (e.g., Jan to Dec = 12 months, not 11)
             if self.end_date.day >= self.start_date.day:
@@ -628,6 +637,98 @@ class Contract(TimestampedModel):
             if months > 0:
                 return round(float(self.value) / months, 2)
         return 0
+
+    def get_active_zones(self):
+        """Get currently active zones for this contract"""
+        return self.zones.filter(
+            zone_contracts__contract=self,
+            zone_contracts__is_active=True
+        )
+
+    def get_historical_zones(self, as_of_date=None):
+        """
+        Get zones that were active on a specific date.
+        If no date provided, returns all zones ever linked to this contract.
+        """
+        if not as_of_date:
+            # Return all zones ever linked
+            return self.zones.all()
+
+        # Return zones active on specific date
+        from django.db.models import Q
+        return self.zones.filter(
+            Q(zone_contracts__contract=self,
+              zone_contracts__start_date__lte=as_of_date,
+              zone_contracts__end_date__gte=as_of_date) |
+            Q(zone_contracts__contract=self,
+              zone_contracts__start_date__lte=as_of_date,
+              zone_contracts__end_date__isnull=True)
+        ).distinct()
+
+    def get_zone_count(self):
+        """Get count of currently active zones"""
+        return self.get_active_zones().count()
+
+
+class ContractZone(TimestampedModel):
+    """
+    Links zones to contracts with historical tracking.
+    Supports contract renewals and maintains complete audit trail.
+
+    Example:
+    - Contract #001 (Jan-Dec 2024) → 4 zones (lobby, dining, gym, pool)
+    - Contract #002 (Jan 2025+) → same 4 zones (renewal)
+    - Each zone has 2 ContractZone records (one per contract)
+    - Historical queries work: "What zones were on Contract #001?"
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    contract = models.ForeignKey(
+        Contract,
+        on_delete=models.CASCADE,
+        related_name='contract_zones',
+        help_text="Contract covering this zone"
+    )
+
+    zone = models.ForeignKey(
+        'Zone',  # String reference since Zone is defined later
+        on_delete=models.PROTECT,  # Can't delete zone if linked to contract
+        related_name='zone_contracts',
+        help_text="Zone covered by this contract"
+    )
+
+    start_date = models.DateField(
+        help_text="Date when zone was added to this contract (typically contract start_date)"
+    )
+
+    end_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Date when zone was removed from this contract (null = currently active)"
+    )
+
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this zone is currently covered by this contract"
+    )
+
+    notes = models.TextField(
+        blank=True,
+        help_text="Internal notes about this zone-contract relationship"
+    )
+
+    class Meta:
+        ordering = ['-start_date', 'zone__name']
+        unique_together = [['contract', 'zone', 'start_date']]  # Prevent duplicate links
+        indexes = [
+            models.Index(fields=['contract', 'is_active']),
+            models.Index(fields=['zone', 'is_active']),
+            models.Index(fields=['start_date', 'end_date']),
+        ]
+
+    def __str__(self):
+        active_status = "active" if self.is_active else "ended"
+        return f"{self.zone.name} on {self.contract.contract_number} ({active_status})"
 
 
 class Invoice(TimestampedModel):
@@ -774,6 +875,7 @@ class Zone(TimestampedModel):
         ('no_device', 'No Device Paired'),
         ('expired', 'Subscription Expired'),
         ('pending', 'Pending Activation'),
+        ('cancelled', 'Cancelled'),  # For terminated contracts
     ]
     
     PLATFORM_CHOICES = [
@@ -842,8 +944,25 @@ class Zone(TimestampedModel):
         # Update admin email if available
         if api_data.get('admin_email'):
             self.soundtrack_admin_email = api_data['admin_email']
-        
+
         self.save()
+
+    def get_active_contract(self):
+        """Get the currently active contract for this zone"""
+        active_link = self.zone_contracts.filter(is_active=True).first()
+        return active_link.contract if active_link else None
+
+    def mark_as_cancelled(self):
+        """
+        Mark zone as cancelled when contract terminates.
+        Used by signal handler when contract status changes to 'Terminated'.
+        """
+        self.status = 'cancelled'
+        self.save(update_fields=['status'])
+
+    def get_contract_history(self):
+        """Get all contracts this zone has ever been linked to"""
+        return self.zone_contracts.all().order_by('-start_date')
 
 
 # Email System Models

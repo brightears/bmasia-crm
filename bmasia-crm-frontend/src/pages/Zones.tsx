@@ -23,13 +23,14 @@ import {
 } from '@mui/icons-material';
 import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 import { useNavigate } from 'react-router-dom';
-import { Zone, Company } from '../types';
+import { Zone, Company, ContractZone } from '../types';
 import ApiService from '../services/api';
 
 const ZonesPage: React.FC = () => {
   const navigate = useNavigate();
   const [zones, setZones] = useState<Zone[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [zoneContracts, setZoneContracts] = useState<Record<string, ContractZone[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -49,8 +50,24 @@ const ZonesPage: React.FC = () => {
         ApiService.getZones(),
         ApiService.getCompanies({ is_active: true }),
       ]);
-      setZones(zonesResponse.results || []);
+      const zonesData = zonesResponse.results || [];
+      setZones(zonesData);
       setCompanies(companiesResponse.results || companiesResponse);
+
+      // Load contract information for all zones
+      const contractsData: Record<string, ContractZone[]> = {};
+      await Promise.all(
+        zonesData.map(async (zone) => {
+          try {
+            const contracts = await ApiService.getZoneContracts(zone.id);
+            contractsData[zone.id] = contracts;
+          } catch (err) {
+            console.error(`Failed to load contracts for zone ${zone.id}:`, err);
+            contractsData[zone.id] = [];
+          }
+        })
+      );
+      setZoneContracts(contractsData);
     } catch (err: any) {
       console.error('Zones load error:', err);
       setError('Failed to load zones');
@@ -93,7 +110,7 @@ const ZonesPage: React.FC = () => {
     {
       field: 'company_name',
       headerName: 'Company',
-      width: 200,
+      width: 180,
       renderCell: (params: GridRenderCellParams) => (
         <Box
           sx={{
@@ -110,7 +127,7 @@ const ZonesPage: React.FC = () => {
     {
       field: 'name',
       headerName: 'Zone Name',
-      width: 200,
+      width: 180,
       renderCell: (params: GridRenderCellParams) => (
         <Box
           sx={{
@@ -128,7 +145,7 @@ const ZonesPage: React.FC = () => {
     {
       field: 'platform',
       headerName: 'Platform',
-      width: 130,
+      width: 110,
       renderCell: (params: GridRenderCellParams) => (
         <Chip
           label={params.value}
@@ -141,7 +158,7 @@ const ZonesPage: React.FC = () => {
     {
       field: 'status',
       headerName: 'Status',
-      width: 120,
+      width: 110,
       renderCell: (params: GridRenderCellParams) => (
         <Chip
           label={params.value?.replace('_', ' ')}
@@ -152,24 +169,61 @@ const ZonesPage: React.FC = () => {
       ),
     },
     {
-      field: 'soundtrack_zone_id',
-      headerName: 'Soundtrack Zone ID',
-      width: 160,
-      renderCell: (params: GridRenderCellParams) => (
-        <Box>
-          {params.value || <Typography color="text.secondary" fontSize="0.875rem">-</Typography>}
-        </Box>
-      ),
+      field: 'current_contract',
+      headerName: 'Current Contract',
+      width: 200,
+      renderCell: (params: GridRenderCellParams) => {
+        const contracts = zoneContracts[params.row.id] || [];
+        const activeContract = contracts.find(c => c.is_active);
+
+        if (!activeContract) {
+          return <Typography color="text.secondary" fontSize="0.875rem">No active contract</Typography>;
+        }
+
+        return (
+          <Box
+            sx={{
+              cursor: 'pointer',
+              color: 'primary.main',
+              '&:hover': { textDecoration: 'underline' },
+            }}
+            onClick={() => navigate(`/contracts/${activeContract.contract}`)}
+          >
+            <Box>{activeContract.contract_number}</Box>
+            <Typography variant="caption" color="text.secondary">
+              {activeContract.start_date} - {activeContract.end_date || 'Ongoing'}
+            </Typography>
+          </Box>
+        );
+      },
     },
     {
-      field: 'device_name',
-      headerName: 'Device Name',
-      width: 180,
-      renderCell: (params: GridRenderCellParams) => (
-        <Box>
-          {params.value || <Typography color="text.secondary" fontSize="0.875rem">-</Typography>}
-        </Box>
-      ),
+      field: 'contract_count',
+      headerName: 'Total Contracts',
+      width: 130,
+      align: 'center' as const,
+      headerAlign: 'center' as const,
+      renderCell: (params: GridRenderCellParams) => {
+        const contracts = zoneContracts[params.row.id] || [];
+        const activeCount = contracts.filter(c => c.is_active).length;
+        const totalCount = contracts.length;
+
+        return (
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <Typography variant="body2" fontWeight={500}>
+              {totalCount}
+            </Typography>
+            {activeCount > 0 && (
+              <Chip
+                label={`${activeCount} active`}
+                size="small"
+                color="success"
+                sx={{ height: 18, fontSize: '0.7rem' }}
+              />
+            )}
+          </Box>
+        );
+      },
     },
   ];
 
