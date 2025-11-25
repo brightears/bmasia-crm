@@ -27,14 +27,12 @@ import {
   Devices,
   Notes as NotesIcon,
   CalendarMonth,
-  Build,
   Assignment,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Zone, ContractZone } from '../types';
 import ApiService from '../services/api';
 import { format } from 'date-fns';
-import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -61,7 +59,6 @@ const ZoneDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [zone, setZone] = useState<Zone | null>(null);
-  const [equipment, setEquipment] = useState<any[]>([]);
   const [contracts, setContracts] = useState<ContractZone[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -82,15 +79,13 @@ const ZoneDetail: React.FC = () => {
       setLoading(true);
       setError('');
 
-      // Load zone, equipment, and contracts in parallel
-      const [zoneData, equipmentData, contractsData] = await Promise.all([
+      // Load zone and contracts in parallel
+      const [zoneData, contractsData] = await Promise.all([
         ApiService.getZone(id),
-        ApiService.getEquipmentByZone(id),
         ApiService.getZoneContracts(id),
       ]);
 
       setZone(zoneData);
-      setEquipment(equipmentData);
       setContracts(contractsData);
     } catch (err: any) {
       console.error('Zone load error:', err);
@@ -102,15 +97,6 @@ const ZoneDetail: React.FC = () => {
 
   const handleDelete = async () => {
     if (!id) return;
-
-    // Check if zone has equipment
-    if (equipment.length > 0) {
-      setError(
-        `Cannot delete zone with ${equipment.length} equipment item(s) assigned. Please reassign or remove the equipment first.`
-      );
-      setDeleteDialogOpen(false);
-      return;
-    }
 
     try {
       setDeleting(true);
@@ -141,70 +127,6 @@ const ZoneDetail: React.FC = () => {
         return 'default';
     }
   };
-
-  const getEquipmentStatusColor = (status: string) => {
-    switch (status) {
-      case 'active':
-        return 'success';
-      case 'inactive':
-        return 'default';
-      case 'maintenance':
-        return 'warning';
-      case 'retired':
-        return 'error';
-      default:
-        return 'default';
-    }
-  };
-
-  const equipmentColumns: GridColDef[] = [
-    {
-      field: 'equipment_number',
-      headerName: 'Equipment #',
-      width: 150,
-      renderCell: (params: GridRenderCellParams) => (
-        <Box
-          sx={{
-            cursor: 'pointer',
-            color: 'primary.main',
-            fontWeight: 500,
-            '&:hover': { textDecoration: 'underline' },
-          }}
-          onClick={() => navigate(`/equipment/${params.row.id}`)}
-        >
-          {params.value}
-        </Box>
-      ),
-    },
-    {
-      field: 'equipment_type_name',
-      headerName: 'Type',
-      width: 150,
-    },
-    {
-      field: 'model_name',
-      headerName: 'Model',
-      width: 180,
-    },
-    {
-      field: 'manufacturer',
-      headerName: 'Manufacturer',
-      width: 150,
-    },
-    {
-      field: 'status',
-      headerName: 'Status',
-      width: 120,
-      renderCell: (params: GridRenderCellParams) => (
-        <Chip
-          label={params.value}
-          size="small"
-          color={getEquipmentStatusColor(params.value as string) as any}
-          sx={{ textTransform: 'capitalize' }}
-        />
-      ),
-    },
-  ];
 
   if (loading) {
     return (
@@ -302,7 +224,6 @@ const ZoneDetail: React.FC = () => {
         <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)}>
           <Tab label="Overview" />
           <Tab label={`Contract History (${contracts.length})`} />
-          <Tab label={`Equipment (${equipment.length})`} />
         </Tabs>
 
         {/* Overview Tab */}
@@ -384,14 +305,27 @@ const ZoneDetail: React.FC = () => {
                         </Typography>
                       </Box>
                     )}
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">
-                        Device Name
-                      </Typography>
-                      <Typography variant="body1">
-                        {zone.device_name || '-'}
-                      </Typography>
-                    </Box>
+                    {zone.device && zone.device_name ? (
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">
+                          <Devices sx={{ fontSize: 14, mr: 0.5, verticalAlign: 'middle' }} />
+                          Running on Device
+                        </Typography>
+                        <Typography variant="body1" fontWeight="medium">
+                          {zone.device_name}
+                        </Typography>
+                      </Box>
+                    ) : (
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">
+                          <Devices sx={{ fontSize: 14, mr: 0.5, verticalAlign: 'middle' }} />
+                          Device
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {zone.device_name || 'No device assigned'}
+                        </Typography>
+                      </Box>
+                    )}
                   </Box>
                 </CardContent>
               </Card>
@@ -608,50 +542,6 @@ const ZoneDetail: React.FC = () => {
             )}
           </Box>
         </TabPanel>
-
-        {/* Equipment Tab */}
-        <TabPanel value={tabValue} index={2}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
-            <Typography variant="h6">
-              <Build sx={{ mr: 1, verticalAlign: 'bottom' }} />
-              Equipment in this Zone
-            </Typography>
-          </Box>
-          {equipment.length > 0 ? (
-            <DataGrid
-              rows={equipment}
-              columns={equipmentColumns}
-              initialState={{
-                pagination: {
-                  paginationModel: { pageSize: 10, page: 0 },
-                },
-              }}
-              pageSizeOptions={[10, 25, 50]}
-              disableRowSelectionOnClick
-              autoHeight
-              sx={{
-                border: 0,
-                '& .MuiDataGrid-cell:focus': {
-                  outline: 'none',
-                },
-                '& .MuiDataGrid-row:hover': {
-                  backgroundColor: 'action.hover',
-                  cursor: 'pointer',
-                },
-              }}
-            />
-          ) : (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <Devices sx={{ fontSize: 60, color: 'text.disabled', mb: 2 }} />
-              <Typography variant="body1" color="text.secondary">
-                No equipment assigned to this zone
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                Equipment can be assigned when creating or editing equipment items
-              </Typography>
-            </Box>
-          )}
-        </TabPanel>
       </Paper>
 
       {/* Delete Confirmation Dialog */}
@@ -659,17 +549,7 @@ const ZoneDetail: React.FC = () => {
         <DialogTitle>Delete Zone?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Are you sure you want to delete the zone "{zone.name}"?
-            {equipment.length > 0 && (
-              <Box sx={{ mt: 2, p: 2, bgcolor: 'error.light', borderRadius: 1 }}>
-                <Typography variant="body2" color="error.dark" fontWeight="bold">
-                  Warning: This zone has {equipment.length} equipment item(s) assigned.
-                </Typography>
-                <Typography variant="body2" color="error.dark" sx={{ mt: 1 }}>
-                  You must reassign or remove all equipment before deleting this zone.
-                </Typography>
-              </Box>
-            )}
+            Are you sure you want to delete the zone "{zone.name}"? This action cannot be undone.
           </DialogContentText>
         </DialogContent>
         <DialogActions>
@@ -678,7 +558,7 @@ const ZoneDetail: React.FC = () => {
             onClick={handleDelete}
             color="error"
             variant="contained"
-            disabled={deleting || equipment.length > 0}
+            disabled={deleting}
           >
             {deleting ? 'Deleting...' : 'Delete'}
           </Button>

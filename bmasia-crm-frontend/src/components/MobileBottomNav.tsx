@@ -111,8 +111,8 @@ const MobileBottomNav: React.FC = () => {
             roles: ['Tech Support', 'Admin'],
           },
           {
-            label: 'Equipment',
-            value: '/equipment',
+            label: 'Zones',
+            value: '/zones',
             icon: <PeopleIcon />,
             roles: ['Tech Support', 'Admin'],
           },

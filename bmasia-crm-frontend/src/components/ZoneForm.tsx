@@ -14,10 +14,15 @@ import {
   Alert,
   CircularProgress,
   Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Stack,
 } from '@mui/material';
-import { Save, Cancel, ArrowBack } from '@mui/icons-material';
+import { Save, Cancel, ArrowBack, Add } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { Zone, Company } from '../types';
+import { Zone, Company, Device, DEVICE_TYPE_LABELS } from '../types';
 import ApiService from '../services/api';
 
 interface ZoneFormProps {
@@ -31,6 +36,7 @@ interface FormData {
   platform: 'soundtrack' | 'beatbreeze';
   status: 'online' | 'offline' | 'no_device' | 'expired' | 'pending';
   soundtrack_zone_id: string;
+  device?: string;
   device_name: string;
   notes: string;
 }
@@ -43,15 +49,20 @@ const ZoneForm: React.FC<ZoneFormProps> = ({ zone, mode }) => {
     platform: 'soundtrack',
     status: 'pending',
     soundtrack_zone_id: '',
+    device: undefined,
     device_name: '',
     notes: '',
   });
 
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [loadingDevices, setLoadingDevices] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [showNewDeviceDialog, setShowNewDeviceDialog] = useState(false);
+  const [newDevice, setNewDevice] = useState({ name: '', device_type: 'pc' as const, model_info: '', notes: '' });
 
   useEffect(() => {
     loadInitialData();
@@ -65,11 +76,20 @@ const ZoneForm: React.FC<ZoneFormProps> = ({ zone, mode }) => {
         platform: zone.platform || 'soundtrack',
         status: zone.status || 'pending',
         soundtrack_zone_id: zone.soundtrack_zone_id || '',
+        device: zone.device || undefined,
         device_name: zone.device_name || '',
         notes: zone.notes || '',
       });
     }
   }, [zone, mode]);
+
+  useEffect(() => {
+    if (formData.company) {
+      loadDevicesForCompany(formData.company);
+    } else {
+      setDevices([]);
+    }
+  }, [formData.company]);
 
   const loadInitialData = async () => {
     try {
@@ -81,6 +101,35 @@ const ZoneForm: React.FC<ZoneFormProps> = ({ zone, mode }) => {
       setError('Failed to load form data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadDevicesForCompany = async (companyId: string) => {
+    setLoadingDevices(true);
+    try {
+      const data = await ApiService.getDevicesByCompany(companyId);
+      setDevices(data);
+    } catch (error) {
+      console.error('Failed to load devices:', error);
+    } finally {
+      setLoadingDevices(false);
+    }
+  };
+
+  const handleCreateDevice = async () => {
+    if (!formData.company || !newDevice.name) return;
+
+    try {
+      const created = await ApiService.createDevice({
+        company: formData.company,
+        ...newDevice
+      });
+      setDevices([...devices, created]);
+      setFormData({ ...formData, device: created.id });
+      setShowNewDeviceDialog(false);
+      setNewDevice({ name: '', device_type: 'pc', model_info: '', notes: '' });
+    } catch (error) {
+      console.error('Failed to create device:', error);
     }
   };
 
@@ -120,6 +169,7 @@ const ZoneForm: React.FC<ZoneFormProps> = ({ zone, mode }) => {
         platform: formData.platform,
         status: formData.status,
         soundtrack_zone_id: formData.soundtrack_zone_id || '',
+        device: formData.device || undefined,
         device_name: formData.device_name || '',
         notes: formData.notes || '',
       };
@@ -294,12 +344,44 @@ const ZoneForm: React.FC<ZoneFormProps> = ({ zone, mode }) => {
 
           <Grid item xs={12} sm={6}>
             <TextField
+              select
               fullWidth
-              label="Device Name"
+              label="Device (Optional)"
+              value={formData.device || ''}
+              onChange={(e) => handleFieldChange('device', e.target.value || undefined)}
+              disabled={!formData.company || loadingDevices}
+              helperText="Physical device running this zone"
+            >
+              <MenuItem value="">
+                <em>No device assigned</em>
+              </MenuItem>
+              {devices.map((device) => (
+                <MenuItem key={device.id} value={device.id}>
+                  {device.name} ({DEVICE_TYPE_LABELS[device.device_type]})
+                  {device.zone_count ? ` - ${device.zone_count} zone(s)` : ''}
+                </MenuItem>
+              ))}
+              <Divider />
+              <MenuItem
+                onClick={(e) => {
+                  e.preventDefault();
+                  setShowNewDeviceDialog(true);
+                }}
+                sx={{ color: 'primary.main' }}
+              >
+                <Add sx={{ mr: 1 }} /> Create New Device
+              </MenuItem>
+            </TextField>
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <TextField
+              fullWidth
+              label="Device Name (Legacy)"
               value={formData.device_name}
               onChange={(e) => handleFieldChange('device_name', e.target.value)}
               error={!!errors.device_name}
-              helperText={errors.device_name || 'Optional: Name or identifier of the device'}
+              helperText={errors.device_name || 'Optional: Free-form device identifier (legacy field)'}
               placeholder="e.g., iPad 1, Music Player A"
             />
           </Grid>
@@ -350,6 +432,61 @@ const ZoneForm: React.FC<ZoneFormProps> = ({ zone, mode }) => {
           </Button>
         </Box>
       </Paper>
+
+      {/* New Device Dialog */}
+      <Dialog open={showNewDeviceDialog} onClose={() => setShowNewDeviceDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Create New Device</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              fullWidth
+              required
+              label="Device Name"
+              value={newDevice.name}
+              onChange={(e) => setNewDevice({ ...newDevice, name: e.target.value })}
+              placeholder="e.g., Lobby PC, Restaurant Tablet"
+            />
+            <TextField
+              select
+              fullWidth
+              label="Device Type"
+              value={newDevice.device_type}
+              onChange={(e) => setNewDevice({ ...newDevice, device_type: e.target.value as any })}
+            >
+              <MenuItem value="pc">PC / Computer</MenuItem>
+              <MenuItem value="tablet">Tablet</MenuItem>
+              <MenuItem value="music_player">Music Player Box</MenuItem>
+              <MenuItem value="other">Other</MenuItem>
+            </TextField>
+            <TextField
+              fullWidth
+              label="Model Info (Optional)"
+              value={newDevice.model_info}
+              onChange={(e) => setNewDevice({ ...newDevice, model_info: e.target.value })}
+              placeholder="Model name, serial number, etc."
+            />
+            <TextField
+              fullWidth
+              multiline
+              rows={2}
+              label="Notes (Optional)"
+              value={newDevice.notes}
+              onChange={(e) => setNewDevice({ ...newDevice, notes: e.target.value })}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowNewDeviceDialog(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleCreateDevice}
+            disabled={!newDevice.name}
+            sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
+          >
+            Create Device
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

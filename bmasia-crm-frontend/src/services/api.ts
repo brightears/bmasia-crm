@@ -2,7 +2,7 @@ import {
   User, Company, Contact, Note, Task, Opportunity, OpportunityActivity,
   Contract, Invoice, Quote, DashboardStats, AuditLog, ApiResponse,
   CustomerSegment, SegmentMemberResponse, SegmentValidationResponse,
-  EnrollInSequenceResponse, SegmentFilterCriteria, Zone, ContractZone
+  EnrollInSequenceResponse, SegmentFilterCriteria, Zone, ContractZone, Device
 } from '../types';
 import { authApi } from './authService';
 import { MockApiService } from './mockData';
@@ -936,66 +936,6 @@ class ApiService {
     return response.data;
   }
 
-  // Equipment Types API methods
-  async getEquipmentTypes(): Promise<ApiResponse<any>> {
-    const response = await authApi.get('/equipment-types/');
-    return response.data;
-  }
-
-  async getEquipmentType(id: string): Promise<any> {
-    const response = await authApi.get(`/equipment-types/${id}/`);
-    return response.data;
-  }
-
-  async createEquipmentType(data: Partial<any>): Promise<any> {
-    const response = await authApi.post('/equipment-types/', data);
-    return response.data;
-  }
-
-  async updateEquipmentType(id: string, data: Partial<any>): Promise<any> {
-    const response = await authApi.put(`/equipment-types/${id}/`, data);
-    return response.data;
-  }
-
-  async deleteEquipmentType(id: string): Promise<void> {
-    await authApi.delete(`/equipment-types/${id}/`);
-  }
-
-  // Equipment API methods
-  async getEquipment(params?: any): Promise<ApiResponse<any>> {
-    const response = await authApi.get('/equipment/', { params });
-    return response.data;
-  }
-
-  async getEquipmentItem(id: string): Promise<any> {
-    const response = await authApi.get(`/equipment/${id}/`);
-    return response.data;
-  }
-
-  async createEquipment(data: Partial<any>): Promise<any> {
-    const response = await authApi.post('/equipment/', data);
-    return response.data;
-  }
-
-  async updateEquipment(id: string, data: Partial<any>): Promise<any> {
-    const response = await authApi.put(`/equipment/${id}/`, data);
-    return response.data;
-  }
-
-  async deleteEquipment(id: string): Promise<void> {
-    await authApi.delete(`/equipment/${id}/`);
-  }
-
-  async addEquipmentHistory(equipmentId: string, data: { action: string; description: string }): Promise<any> {
-    const response = await authApi.post(`/equipment/${equipmentId}/add_history/`, data);
-    return response.data;
-  }
-
-  async getEquipmentByCompany(companyId: string): Promise<any[]> {
-    const response = await authApi.get('/equipment/by_company/', { params: { company_id: companyId } });
-    return response.data;
-  }
-
   // Zone Management
   async getZones(params?: any): Promise<ApiResponse<Zone>> {
     const response = await authApi.get('/zones/', { params });
@@ -1028,12 +968,36 @@ class ApiService {
     await authApi.delete(`/zones/${id}/`);
   }
 
-  // Get equipment for a zone (for ZoneDetail Equipment tab)
-  async getEquipmentByZone(zoneId: string): Promise<any[]> {
-    const response = await authApi.get('/equipment/', {
-      params: { zone: zoneId }
+  // Device Management
+  async getDevices(params?: Record<string, string>): Promise<Device[]> {
+    const response = await authApi.get<Device[]>('/devices/', { params });
+    return response.data;
+  }
+
+  async getDevice(id: string): Promise<Device> {
+    const response = await authApi.get<Device>(`/devices/${id}/`);
+    return response.data;
+  }
+
+  async createDevice(data: Partial<Device>): Promise<Device> {
+    const response = await authApi.post<Device>('/devices/', data);
+    return response.data;
+  }
+
+  async updateDevice(id: string, data: Partial<Device>): Promise<Device> {
+    const response = await authApi.put<Device>(`/devices/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteDevice(id: string): Promise<void> {
+    await authApi.delete(`/devices/${id}/`);
+  }
+
+  async getDevicesByCompany(companyId: string): Promise<Device[]> {
+    const response = await authApi.get<Device[]>('/devices/by_company/', {
+      params: { company_id: companyId }
     });
-    return response.data.results || [];
+    return response.data;
   }
 }
 

@@ -11,7 +11,7 @@ from .models import (
     CustomerSegment, Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
-    EquipmentType, Equipment, EquipmentHistory
+    Device
 )
 
 
@@ -68,9 +68,30 @@ class ContactSerializer(serializers.ModelSerializer):
         return value
 
 
+class DeviceSerializer(serializers.ModelSerializer):
+    """Serializer for Device model"""
+    company_name = serializers.CharField(source='company.name', read_only=True)
+    zone_count = serializers.IntegerField(read_only=True)
+    zones = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Device
+        fields = [
+            'id', 'company', 'company_name', 'name', 'device_type',
+            'model_info', 'notes', 'zone_count', 'zones',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_zones(self, obj):
+        """Return list of zone names running on this device"""
+        return [{'id': str(z.id), 'name': z.name} for z in obj.zones.all()]
+
+
 class ZoneSerializer(serializers.ModelSerializer):
     """Serializer for Zone model"""
     company_name = serializers.CharField(source='company.name', read_only=True)
+    device_display_name = serializers.CharField(source='device.name', read_only=True, allow_null=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     soundtrack_account_id = serializers.CharField(source='company.soundtrack_account_id', read_only=True)
 
@@ -81,9 +102,9 @@ class ZoneSerializer(serializers.ModelSerializer):
     class Meta:
         model = Zone
         fields = [
-            'id', 'company', 'company_name', 'name', 'platform', 'status', 'status_display',
-            'soundtrack_account_id', 'soundtrack_zone_id', 'soundtrack_admin_email',
-            'device_name', 'last_seen_online', 'notes', 'last_api_sync',
+            'id', 'company', 'company_name', 'device', 'device_display_name', 'name', 'platform',
+            'status', 'status_display', 'soundtrack_account_id', 'soundtrack_zone_id',
+            'soundtrack_admin_email', 'device_name', 'last_seen_online', 'notes', 'last_api_sync',
             'is_online', 'current_contract', 'contract_count',
             'created_at', 'updated_at'
         ]
@@ -1607,43 +1628,5 @@ class TicketKBArticleSerializer(serializers.ModelSerializer):
 
 
 # ============================================================================
-# Equipment Management Serializers
+# Equipment Management Serializers - REMOVED (replaced by simpler Device model)
 # ============================================================================
-
-class EquipmentTypeSerializer(serializers.ModelSerializer):
-    """Serializer for EquipmentType model"""
-    equipment_count = serializers.SerializerMethodField()
-
-    class Meta:
-        model = EquipmentType
-        fields = '__all__'
-
-    def get_equipment_count(self, obj):
-        return obj.equipment_items.count()
-
-
-class EquipmentHistorySerializer(serializers.ModelSerializer):
-    """Serializer for EquipmentHistory model"""
-    performed_by_name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = EquipmentHistory
-        fields = '__all__'
-
-    def get_performed_by_name(self, obj):
-        if obj.performed_by:
-            return obj.performed_by.get_full_name() or obj.performed_by.username
-        return "System"
-
-
-class EquipmentSerializer(serializers.ModelSerializer):
-    """Serializer for Equipment model"""
-    equipment_type_name = serializers.CharField(source='equipment_type.name', read_only=True)
-    company_name = serializers.CharField(source='company.name', read_only=True)
-    zone_name = serializers.CharField(source='zone.name', read_only=True)
-    history = EquipmentHistorySerializer(many=True, read_only=True)
-
-    class Meta:
-        model = Equipment
-        fields = '__all__'
-        read_only_fields = ['equipment_number']

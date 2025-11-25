@@ -36,11 +36,6 @@ import KnowledgeBase from './pages/KnowledgeBase';
 import KnowledgeBaseArticle from './pages/KnowledgeBaseArticle';
 import KBArticleNew from './pages/KBArticleNew';
 import KBArticleEdit from './pages/KBArticleEdit';
-import Equipment from './pages/Equipment';
-import EquipmentDetail from './pages/EquipmentDetail';
-import EquipmentNew from './pages/EquipmentNew';
-import EquipmentEdit from './pages/EquipmentEdit';
-import EquipmentTypes from './pages/EquipmentTypes';
 import Zones from './pages/Zones';
 import ZoneDetail from './pages/ZoneDetail';
 import ZoneNew from './pages/ZoneNew';
@@ -380,46 +375,6 @@ function App() {
           element={
             <ProtectedRoute requiredModule="tickets">
               <KBArticleEdit />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/equipment"
-          element={
-            <ProtectedRoute requiredModule="tickets">
-              <Equipment />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/equipment/new"
-          element={
-            <ProtectedRoute requiredModule="tickets">
-              <EquipmentNew />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/equipment/:id"
-          element={
-            <ProtectedRoute requiredModule="tickets">
-              <EquipmentDetail />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/equipment/:id/edit"
-          element={
-            <ProtectedRoute requiredModule="tickets">
-              <EquipmentEdit />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/equipment-types"
-          element={
-            <ProtectedRoute requiredModule="tickets">
-              <EquipmentTypes />
             </ProtectedRoute>
           }
         />

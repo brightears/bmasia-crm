@@ -1031,16 +1031,28 @@ export interface KBAttachment {
   created_at: string;
 }
 
-// Equipment Management Types
-export interface EquipmentType {
+// Device Management Types (simplified - replaces Equipment)
+export interface Device {
   id: string;
+  company: string;
+  company_name?: string;
   name: string;
-  description: string;
-  icon: string;
-  equipment_count?: number;
+  device_type: 'pc' | 'tablet' | 'music_player' | 'other';
+  model_info: string;
+  notes: string;
+  zone_count?: number;
+  zones?: Array<{ id: string; name: string }>;
   created_at: string;
   updated_at: string;
 }
+
+// Device type display labels
+export const DEVICE_TYPE_LABELS: Record<string, string> = {
+  pc: 'PC / Computer',
+  tablet: 'Tablet',
+  music_player: 'Music Player Box',
+  other: 'Other',
+};
 
 export interface Zone {
   id: string;
@@ -1051,6 +1063,7 @@ export interface Zone {
   status: 'online' | 'offline' | 'no_device' | 'expired' | 'pending';
   status_display?: string;
   soundtrack_zone_id?: string;
+  device?: string; // UUID
   device_name?: string;
   notes?: string;
   current_contract?: {
@@ -1063,40 +1076,4 @@ export interface Zone {
   contract_count?: number;
   created_at: string;
   updated_at: string;
-}
-
-export interface Equipment {
-  id: string;
-  equipment_number: string;
-  equipment_type: string; // UUID
-  equipment_type_name?: string;
-  company: string; // UUID
-  company_name?: string;
-  zone?: string; // UUID
-  zone_name?: string; // Display name
-  serial_number: string;
-  model_name: string;
-  manufacturer: string;
-  status: 'active' | 'inactive' | 'maintenance' | 'retired';
-  remote_username: string;
-  remote_password: string;
-  ip_address: string;
-  mac_address: string;
-  setup_details: string;
-  notes: string;
-  installed_date: string | null;
-  warranty_expiry: string | null;
-  history?: EquipmentHistory[];
-  created_at: string;
-  updated_at: string;
-}
-
-export interface EquipmentHistory {
-  id: string;
-  equipment: string; // UUID
-  action: 'installed' | 'maintenance' | 'repair' | 'upgrade' | 'replaced' | 'retired' | 'note';
-  description: string;
-  performed_by: string | null; // UUID
-  performed_by_name?: string;
-  performed_at: string;
 }

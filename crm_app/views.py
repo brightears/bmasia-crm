@@ -29,7 +29,7 @@ from .models import (
     Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
-    Zone, EquipmentType, Equipment, EquipmentHistory
+    Zone, Device
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
@@ -43,7 +43,7 @@ from .serializers import (
     KBCategorySerializer, KBTagSerializer, KBArticleSerializer, KBArticleListSerializer,
     KBArticleViewSerializer, KBArticleRatingSerializer, KBArticleRelationSerializer,
     KBArticleAttachmentSerializer, TicketKBArticleSerializer,
-    ZoneSerializer, EquipmentTypeSerializer, EquipmentSerializer, EquipmentHistorySerializer
+    ZoneSerializer, DeviceSerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -4431,62 +4431,31 @@ class TicketKBArticleViewSet(viewsets.ModelViewSet):
 
 
 # ============================================================================
-# Equipment Management ViewSets
+# Equipment Management ViewSets - REMOVED (replaced by simpler Device model)
 # ============================================================================
 
-class EquipmentTypeViewSet(viewsets.ModelViewSet):
+
+class DeviceViewSet(viewsets.ModelViewSet):
     """
-    ViewSet for managing equipment types (PC, Tablet, Music Player Box, etc.)
+    ViewSet for Device model - simple device tracking.
     """
-    queryset = EquipmentType.objects.all()
-    serializer_class = EquipmentTypeSerializer
+    queryset = Device.objects.select_related('company').prefetch_related('zones')
+    serializer_class = DeviceSerializer
     permission_classes = [IsAuthenticated]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['name', 'description']
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['company', 'device_type']
+    search_fields = ['name', 'model_info', 'notes']
     ordering_fields = ['name', 'created_at']
     ordering = ['name']
 
-
-class EquipmentViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for managing customer equipment with full CRUD operations
-    """
-    queryset = Equipment.objects.select_related(
-        'equipment_type', 'company'
-    ).prefetch_related('history')
-    serializer_class = EquipmentSerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['status', 'equipment_type', 'company']
-    search_fields = ['equipment_number', 'serial_number', 'model_name', 'manufacturer', 'notes']
-    ordering_fields = ['equipment_number', 'created_at', 'installed_date']
-    ordering = ['-created_at']
-
-    @action(detail=True, methods=['post'])
-    def add_history(self, request, pk=None):
-        """Add a history entry to equipment"""
-        equipment = self.get_object()
-        serializer = EquipmentHistorySerializer(data=request.data)
-        if serializer.is_valid():
-            serializer.save(
-                equipment=equipment,
-                performed_by=request.user
-            )
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
     @action(detail=False, methods=['get'])
     def by_company(self, request):
-        """Get equipment filtered by company"""
+        """Get devices for a specific company"""
         company_id = request.query_params.get('company_id')
         if not company_id:
-            return Response(
-                {'error': 'company_id parameter is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        equipment = self.queryset.filter(company_id=company_id)
-        serializer = self.get_serializer(equipment, many=True)
+            return Response({'error': 'company_id required'}, status=400)
+        devices = self.queryset.filter(company_id=company_id)
+        serializer = self.get_serializer(devices, many=True)
         return Response(serializer.data)
 
 

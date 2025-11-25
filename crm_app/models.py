@@ -5,7 +5,6 @@ from django.utils import timezone
 from django.utils.text import slugify
 from django.contrib.postgres.search import SearchVectorField, SearchVector
 from django.db.models import signals
-from encrypted_model_fields.fields import EncryptedCharField
 import uuid
 
 
@@ -867,6 +866,57 @@ class SubscriptionPlan(TimestampedModel):
 """
 
 
+class Device(TimestampedModel):
+    """
+    Simple device tracking - one device can run multiple zones.
+    Example: One Windows PC running 3 Soundtrack zones.
+    """
+    DEVICE_TYPE_CHOICES = [
+        ('pc', 'PC / Computer'),
+        ('tablet', 'Tablet'),
+        ('music_player', 'Music Player Box'),
+        ('other', 'Other'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        related_name='devices'
+    )
+    name = models.CharField(
+        max_length=100,
+        help_text="Device name (e.g., 'Lobby PC', 'Restaurant Tablet')"
+    )
+    device_type = models.CharField(
+        max_length=20,
+        choices=DEVICE_TYPE_CHOICES,
+        default='pc'
+    )
+    model_info = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Optional: Model name, serial number, or other identifier"
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text="Tech support notes about this device"
+    )
+
+    class Meta:
+        ordering = ['company', 'name']
+        verbose_name = 'Device'
+        verbose_name_plural = 'Devices'
+
+    def __str__(self):
+        return f"{self.name} ({self.get_device_type_display()}) - {self.company.name}"
+
+    @property
+    def zone_count(self):
+        """Number of zones running on this device"""
+        return self.zones.count()
+
+
 class Zone(TimestampedModel):
     """Track individual music zones for companies"""
     STATUS_CHOICES = [
@@ -885,6 +935,14 @@ class Zone(TimestampedModel):
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='zones')
+    device = models.ForeignKey(
+        'Device',
+        on_delete=models.SET_NULL,
+        related_name='zones',
+        null=True,
+        blank=True,
+        help_text="Physical device running this zone (optional)"
+    )
     name = models.CharField(max_length=100)
     platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES, default='soundtrack')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
@@ -2806,162 +2864,8 @@ class TicketKBArticle(TimestampedModel):
 
 
 # ============================================================================
-# Equipment Management System
+# Equipment Management System - REMOVED (replaced by simpler Device model)
 # ============================================================================
-
-class EquipmentType(TimestampedModel):
-    """Types of equipment that can be tracked (PC, Tablet, Music Player Box, etc.)"""
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    name = models.CharField(max_length=100, unique=True)
-    description = models.TextField(blank=True)
-    icon = models.CharField(
-        max_length=50,
-        default='computer',
-        help_text="Material-UI icon name (e.g., computer, tablet, speaker)"
-    )
-
-    class Meta:
-        ordering = ['name']
-        verbose_name = 'Equipment Type'
-        verbose_name_plural = 'Equipment Types'
-
-    def __str__(self):
-        return self.name
-
-
-class Equipment(TimestampedModel):
-    """Customer equipment tracking with encrypted credentials"""
-    STATUS_CHOICES = [
-        ('active', 'Active'),
-        ('inactive', 'Inactive'),
-        ('maintenance', 'Under Maintenance'),
-        ('retired', 'Retired'),
-    ]
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    equipment_number = models.CharField(max_length=50, unique=True, editable=False)
-    equipment_type = models.ForeignKey(
-        EquipmentType,
-        on_delete=models.PROTECT,
-        related_name='equipment_items'
-    )
-    company = models.ForeignKey(
-        Company,
-        on_delete=models.CASCADE,
-        related_name='equipment'
-    )
-    zone = models.ForeignKey(
-        Zone,
-        on_delete=models.PROTECT,
-        related_name='equipment',
-        null=True,
-        blank=True,
-        help_text="Location/zone where this equipment is installed"
-    )
-
-    # Hardware details
-    serial_number = models.CharField(max_length=100, blank=True)
-    model_name = models.CharField(max_length=100, blank=True)
-    manufacturer = models.CharField(max_length=100, blank=True)
-
-    # Status
-    status = models.CharField(
-        max_length=20,
-        choices=STATUS_CHOICES,
-        default='active'
-    )
-
-    # Encrypted remote access credentials
-    remote_username = EncryptedCharField(max_length=100, blank=True)
-    remote_password = EncryptedCharField(max_length=100, blank=True)
-
-    # Network configuration
-    ip_address = models.GenericIPAddressField(blank=True, null=True)
-    mac_address = models.CharField(
-        max_length=17,
-        blank=True,
-        validators=[
-            RegexValidator(
-                regex=r'^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$',
-                message="Enter a valid MAC address (e.g., AA:BB:CC:DD:EE:FF)"
-            )
-        ]
-    )
-
-    # Notes and configuration
-    setup_details = models.TextField(blank=True, help_text="Setup and configuration details")
-    notes = models.TextField(
-        blank=True,
-        help_text="Equipment-specific notes: past issues, troubleshooting history"
-    )
-
-    # Important dates
-    installed_date = models.DateField(null=True, blank=True)
-    warranty_expiry = models.DateField(null=True, blank=True)
-
-    class Meta:
-        ordering = ['-created_at']
-        verbose_name = 'Equipment'
-        verbose_name_plural = 'Equipment'
-
-    def __str__(self):
-        return f"{self.equipment_number} - {self.equipment_type.name} ({self.company.name})"
-
-    def save(self, *args, **kwargs):
-        if not self.equipment_number:
-            # Generate equipment number: EQ-YYYYMMDD-NNNN
-            from django.utils import timezone
-            date_str = timezone.now().strftime('%Y%m%d')
-            last_eq = Equipment.objects.filter(
-                equipment_number__startswith=f'EQ-{date_str}'
-            ).order_by('-equipment_number').first()
-
-            if last_eq:
-                last_num = int(last_eq.equipment_number.split('-')[-1])
-                new_num = last_num + 1
-            else:
-                new_num = 1
-
-            self.equipment_number = f'EQ-{date_str}-{new_num:04d}'
-
-        super().save(*args, **kwargs)
-
-
-class EquipmentHistory(TimestampedModel):
-    """Track equipment maintenance, repairs, and changes"""
-    ACTION_CHOICES = [
-        ('installed', 'Installed'),
-        ('maintenance', 'Maintenance'),
-        ('repair', 'Repair'),
-        ('upgrade', 'Upgrade'),
-        ('replaced', 'Replaced'),
-        ('retired', 'Retired'),
-        ('note', 'Note Added'),
-    ]
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    equipment = models.ForeignKey(
-        Equipment,
-        on_delete=models.CASCADE,
-        related_name='history'
-    )
-    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
-    description = models.TextField()
-    performed_by = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name='equipment_actions'
-    )
-    performed_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['-performed_at']
-        verbose_name = 'Equipment History'
-        verbose_name_plural = 'Equipment History'
-
-    def __str__(self):
-        return f"{self.equipment.equipment_number} - {self.action} ({self.performed_at.strftime('%Y-%m-%d')})"
 
 
 # Signal handlers for KB system

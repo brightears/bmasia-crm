@@ -56,8 +56,6 @@ import {
   CheckCircle as CheckCircleIcon,
   Support as SupportIcon,
   MenuBook as MenuBookIcon,
-  Devices as DevicesIcon,
-  Category,
   LocationOn,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -138,8 +136,6 @@ const unifiedNavigation = [
       { text: 'Tickets', icon: <SupportIcon />, path: '/tickets' },
       { text: 'Knowledge Base', icon: <MenuBookIcon />, path: '/knowledge-base' },
       { text: 'Zones', icon: <LocationOn />, path: '/zones' },
-      { text: 'Equipment', icon: <DevicesIcon />, path: '/equipment' },
-      { text: 'Equipment Types', icon: <Category />, path: '/equipment-types' },
     ],
   },
   {

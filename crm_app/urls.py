@@ -44,9 +44,8 @@ router.register(r'kb/article-relations', views.KBArticleRelationViewSet, basenam
 router.register(r'kb/article-attachments', views.KBArticleAttachmentViewSet, basename='kb-article-attachment')
 router.register(r'kb/ticket-articles', views.TicketKBArticleViewSet, basename='kb-ticket-article')
 
-# Equipment Management routes
-router.register(r'equipment-types', views.EquipmentTypeViewSet, basename='equipment-type')
-router.register(r'equipment', views.EquipmentViewSet, basename='equipment')
+# Equipment Management routes - Equipment types removed, replaced by Device model
+router.register(r'devices', views.DeviceViewSet, basename='device')
 router.register(r'zones', views.ZoneViewSet, basename='zone')
 
 # The API URLs are now determined automatically by the router.

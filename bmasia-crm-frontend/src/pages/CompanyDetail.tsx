@@ -97,7 +97,6 @@ const CompanyDetail: React.FC = () => {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
-  const [equipment, setEquipment] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tabValue, setTabValue] = useState(0);
@@ -123,19 +122,17 @@ const CompanyDetail: React.FC = () => {
       setCompany(companyData);
 
       // Load related data
-      const [contactsResponse, opportunitiesResponse, contractsResponse, zonesResponse, equipmentResponse] = await Promise.all([
+      const [contactsResponse, opportunitiesResponse, contractsResponse, zonesResponse] = await Promise.all([
         ApiService.getContacts({ company: id }),
         ApiService.getOpportunities({ company: id }),
         ApiService.getContracts({ company: id }),
         ApiService.getZonesByCompany(id),
-        ApiService.getEquipmentByCompany(id),
       ]);
 
       setContacts(contactsResponse.results);
       setOpportunities(opportunitiesResponse.results);
       setContracts(contractsResponse.results);
       setZones(zonesResponse);
-      setEquipment(equipmentResponse);
     } catch (err: any) {
       console.error('Company detail error:', err);
       setError('Failed to load company details');
@@ -423,7 +420,6 @@ const CompanyDetail: React.FC = () => {
           <Tab label={`Contracts (${contracts.length})`} {...a11yProps(2)} />
           <Tab label={`Zones (${zones.length})`} {...a11yProps(3)} />
           <Tab label="Subscription Plans" {...a11yProps(4)} />
-          <Tab label={`IT Information (${equipment.length})`} {...a11yProps(5)} />
         </Tabs>
 
         <TabPanel value={tabValue} index={0}>
@@ -869,107 +865,6 @@ const CompanyDetail: React.FC = () => {
               </Typography>
             </Box>
           )}
-        </TabPanel>
-
-        <TabPanel value={tabValue} index={5}>
-          <Box sx={{ mb: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              IT Notes
-            </Typography>
-            {company.it_notes ? (
-              <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
-                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                  {company.it_notes}
-                </Typography>
-              </Paper>
-            ) : (
-              <Typography variant="body2" color="text.secondary">
-                No IT notes available
-              </Typography>
-            )}
-          </Box>
-
-          <Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6">Equipment</Typography>
-              <Button
-                variant="contained"
-                size="small"
-                startIcon={<Add />}
-                onClick={() => navigate('/equipment/new')}
-                sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
-              >
-                Add Equipment
-              </Button>
-            </Box>
-
-            {equipment.length > 0 ? (
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Equipment #</TableCell>
-                      <TableCell>Type</TableCell>
-                      <TableCell>Model</TableCell>
-                      <TableCell>Status</TableCell>
-                      <TableCell>Installed</TableCell>
-                      <TableCell>Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {equipment.map((item) => (
-                      <TableRow key={item.id} hover>
-                        <TableCell>{item.equipment_number}</TableCell>
-                        <TableCell>{item.equipment_type_name}</TableCell>
-                        <TableCell>{item.model_name}</TableCell>
-                        <TableCell>
-                          <Chip
-                            label={item.status}
-                            size="small"
-                            color={getStatusColor(item.status) as any}
-                            sx={{ textTransform: 'capitalize' }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {item.installed_date
-                            ? new Date(item.installed_date).toLocaleDateString()
-                            : '-'}
-                        </TableCell>
-                        <TableCell>
-                          <Tooltip title="View Equipment">
-                            <IconButton
-                              size="small"
-                              onClick={() => navigate(`/equipment/${item.id}`)}
-                            >
-                              <Build />
-                            </IconButton>
-                          </Tooltip>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            ) : (
-              <Box sx={{ textAlign: 'center', py: 4 }}>
-                <Build sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                <Typography variant="h6" color="text.secondary" gutterBottom>
-                  No equipment yet
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Add equipment to track devices and installations for this company
-                </Typography>
-                <Button
-                  variant="contained"
-                  startIcon={<Add />}
-                  onClick={() => navigate('/equipment/new')}
-                  sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
-                >
-                  Add First Equipment
-                </Button>
-              </Box>
-            )}
-          </Box>
         </TabPanel>
       </Paper>
 

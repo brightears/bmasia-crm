@@ -230,7 +230,7 @@ export const canAccessModule = (user: User | null, module: string): boolean => {
     analytics: 'view_analytics',
     tickets: 'view_tickets',
     'knowledge-base': 'manage_technical_settings',
-    equipment: 'manage_technical_settings',
+    zones: 'manage_technical_settings',
     users: 'manage_users',
     settings: 'manage_system_settings',
     'audit-logs': 'view_audit_logs',

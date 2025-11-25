@@ -22,7 +22,7 @@ from .models import (
     CustomerSegment, Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
-    EquipmentType, Equipment, EquipmentHistory
+    Device
 )
 
 
@@ -1308,6 +1308,32 @@ class AuditLogAdmin(admin.ModelAdmin):
 # DEPRECATED: SubscriptionPlan removed - use Contract model with service_type instead
 # See admin_backup_subscription.py for the old code
 
+
+@admin.register(Device)
+class DeviceAdmin(admin.ModelAdmin):
+    list_display = ['name', 'device_type', 'company', 'zone_count', 'created_at']
+    list_filter = ['device_type', 'company']
+    search_fields = ['name', 'model_info', 'notes', 'company__name']
+    readonly_fields = ['id', 'created_at', 'updated_at', 'zone_count']
+    autocomplete_fields = ['company']
+
+    fieldsets = (
+        (None, {
+            'fields': ('company', 'name', 'device_type')
+        }),
+        ('Details', {
+            'fields': ('model_info', 'notes'),
+            'classes': ('collapse',)
+        }),
+        ('Metadata', {
+            'fields': ('id', 'zone_count', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def zone_count(self, obj):
+        return obj.zones.count()
+    zone_count.short_description = 'Zones'
 
 
 @admin.register(Zone)
@@ -3321,67 +3347,4 @@ class TicketKBArticleAdmin(admin.ModelAdmin):
 # Equipment Management Admin
 # -----------------------------------------------------------------------------
 
-@admin.register(EquipmentType)
-class EquipmentTypeAdmin(admin.ModelAdmin):
-    """Admin interface for equipment types"""
-    list_display = ('name', 'icon', 'equipment_count', 'created_at')
-    search_fields = ('name', 'description')
-    readonly_fields = ('created_at', 'updated_at')
-
-    def equipment_count(self, obj):
-        """Display count of equipment items of this type"""
-        return obj.equipment_items.count()
-    equipment_count.short_description = 'Equipment Count'
-
-
-@admin.register(Equipment)
-class EquipmentAdmin(admin.ModelAdmin):
-    """Admin interface for customer equipment"""
-    list_display = (
-        'equipment_number', 'equipment_type', 'company',
-        'status', 'installed_date', 'created_at'
-    )
-    list_filter = ('status', 'equipment_type', 'created_at')
-    search_fields = (
-        'equipment_number', 'serial_number', 'model_name',
-        'company__name', 'notes'
-    )
-    readonly_fields = ('equipment_number', 'created_at', 'updated_at')
-    autocomplete_fields = ['company', 'equipment_type']
-
-    fieldsets = (
-        ('Basic Information', {
-            'fields': ('equipment_number', 'equipment_type', 'company', 'status')
-        }),
-        ('Hardware Details', {
-            'fields': ('serial_number', 'model_name', 'manufacturer')
-        }),
-        ('Network Configuration', {
-            'fields': ('ip_address', 'mac_address')
-        }),
-        ('Remote Access (Encrypted)', {
-            'fields': ('remote_username', 'remote_password'),
-            'classes': ('collapse',)
-        }),
-        ('Notes & Configuration', {
-            'fields': ('setup_details', 'notes')
-        }),
-        ('Important Dates', {
-            'fields': ('installed_date', 'warranty_expiry')
-        }),
-        ('Metadata', {
-            'fields': ('created_at', 'updated_at'),
-            'classes': ('collapse',)
-        }),
-    )
-
-
-@admin.register(EquipmentHistory)
-class EquipmentHistoryAdmin(admin.ModelAdmin):
-    """Admin interface for equipment history"""
-    list_display = ('equipment', 'action', 'performed_by', 'performed_at')
-    list_filter = ('action', 'performed_at')
-    search_fields = ('equipment__equipment_number', 'description')
-    readonly_fields = ('performed_at',)
-    autocomplete_fields = ['equipment']
-    date_hierarchy = 'performed_at'
+# Equipment admin classes removed - replaced by simpler Device model
