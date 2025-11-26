@@ -8,6 +8,16 @@ def create_default_automations(apps, schema_editor):
     EmailSequence = apps.get_model('crm_app', 'EmailSequence')
     SequenceStep = apps.get_model('crm_app', 'SequenceStep')
     EmailTemplate = apps.get_model('crm_app', 'EmailTemplate')
+    User = apps.get_model('crm_app', 'User')
+
+    # Get the first admin user or any user to be the creator
+    system_user = User.objects.filter(is_superuser=True).first()
+    if not system_user:
+        system_user = User.objects.first()
+
+    # If no users exist, skip creating automations (will be created later)
+    if not system_user:
+        return
 
     # Helper to get template by type (gracefully handles missing templates)
     def get_template(template_type):
@@ -30,6 +40,7 @@ def create_default_automations(apps, schema_editor):
         sequence_type='auto_renewal',
         status='active',
         is_system_default=True,
+        created_by=system_user,
     )
 
     # Renewal sequence steps - delay_days represents days BEFORE the trigger
@@ -61,6 +72,7 @@ def create_default_automations(apps, schema_editor):
         sequence_type='auto_payment',
         status='active',
         is_system_default=True,
+        created_by=system_user,
     )
 
     payment_steps = [
@@ -88,6 +100,7 @@ def create_default_automations(apps, schema_editor):
         sequence_type='auto_quarterly',
         status='active',
         is_system_default=True,
+        created_by=system_user,
     )
 
     quarterly_template = get_template('quarterly_checkin') or default_template
