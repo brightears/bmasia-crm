@@ -219,13 +219,13 @@ Use this agent when:
   - `CompanyForm.tsx` - Modal dialog for create/edit (with legal_entity_name, billing_entity)
   - `QuoteForm.tsx` - Quote creation with line items (discount %, tax %)
   - Company pages: `CompanyNew.tsx`, `CompanyEdit.tsx`, `Companies.tsx`
-  - **Email Campaign Components**:
-    - `EmailSequences.tsx` - List all sequences with create/edit/view actions
+  - **Email Automation Components** (Unified Nov 26, 2025):
+    - `EmailAutomations.tsx` - Unified list with filter tabs (All/Automatic/Manual)
     - `EmailSequenceForm.tsx` - Create/edit sequences with step management
     - `EmailSequenceStepForm.tsx` - Configure individual sequence steps with conditions
     - `SequenceEnrollments.tsx` - View/manage enrollments for a sequence
     - `EnrollSequenceDialog.tsx` - Enroll companies/contacts in sequences
-    - `EmailTemplateForm.tsx` - Create/edit templates with variable guide (enhanced Nov 2025)
+    - `EmailTemplateForm.tsx` - Create/edit templates with variable guide
 - **Services**:
   - `api.ts` - API service layer with Axios (includes sequence methods)
   - `authService.ts` - JWT authentication
@@ -236,9 +236,9 @@ Use this agent when:
 - **Development**: SQLite (`db.sqlite3`)
 - **Production**: PostgreSQL on Render (dpg-d3cbikd6ubrc73el0ke0-a)
 - **Migrations**: `crm_app/migrations/`
-  - Latest: `0025_user_smtp_email_user_smtp_password.py` (Added per-user SMTP fields for email authentication)
-  - `0024_sequenceenrollment_company_name.py` (Email sequences company name field)
-  - `0023_remove_emailsequence_department_and_more.py` (Email sequences cleanup)
+  - Latest: `0039_create_default_automations.py` (Creates default system automations)
+  - `0038_add_sequence_types_and_enrollment_source.py` (Email automation consolidation)
+  - `0025_user_smtp_email_user_smtp_password.py` (Per-user SMTP fields)
   - `0022_emailsequence_emailsequencestep_sequenceenrollment_sequenceemail.py` (Email sequences models)
 
 ## Environment Variables (.env)
@@ -360,25 +360,25 @@ npm run build  # Production build
 - ✅ **Email Template Variable Guide** - Interactive variable insertion with tooltips
 
 ### Recent Improvements (November 2025)
+- ✅ **Email Automations Consolidation** - Unified system (Nov 26, 2025)
+  - Merged "Email Automation" (Settings) with "Email Sequences" (Marketing)
+  - Single "Email Automations" page with filter tabs (All/Automatic/Manual)
+  - New sequence_type field: manual, auto_renewal, auto_payment, auto_quarterly
+  - AutoEnrollmentService for automatic contact enrollment
+  - 3 pre-built system automations (Renewal, Payment, Quarterly)
+  - Backward-compatible redirects from old URLs
+  - Settings page now shows redirect notice
 - ✅ **Email Sequences (Drip Campaigns)** - Complete 4-phase implementation (Nov 19, 2025)
   - Multi-step automation with conditional logic
   - Time-based delays and send scheduling
   - Enrollment tracking with full lifecycle management
   - Email history and status tracking
   - Cron job processing every 20 minutes
-  - 5 new React components for UI
-  - 4 new Django models (EmailSequence, EmailSequenceStep, SequenceEnrollment, SequenceEmail)
 - ✅ **Automatic Renewal Reminders** - Zero-configuration automation (Nov 19, 2025)
   - Template type matching (renewal_30_days, renewal_14_days, renewal_7_days, renewal_urgent)
   - Daily cron at 9 AM Bangkok time
   - Smart recipient selection and duplicate prevention
   - Full variable substitution support
-- ✅ **Email Template Variable Guide Enhancement** - Improved UX (Nov 19, 2025)
-  - Rich variable display with descriptions in tooltips
-  - One-click insertion at cursor position
-  - Copy to clipboard functionality
-  - Template-specific variable filtering
-  - Backend/frontend structure alignment
 
 ### Previous Improvements (October 2025)
 - ✅ PDF design overhaul - modern 2025 professional layouts

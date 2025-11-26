@@ -236,7 +236,6 @@ export const canAccessModule = (user: User | null, module: string): boolean => {
     'knowledge-base': 'manage_technical_settings',
     zones: 'manage_technical_settings',
     users: 'view_users',
-    settings: 'manage_system_settings',
     'audit-logs': 'view_audit_logs',
   };
 
@@ -282,7 +281,6 @@ export const getAccessibleMenuItems = (user: User | null) => {
     { id: 'invoices', label: 'Invoices', path: '/invoices' },
     { id: 'analytics', label: 'Analytics', path: '/analytics' },
     { id: 'users', label: 'Users', path: '/users' },
-    { id: 'settings', label: 'Settings', path: '/settings' },
     { id: 'audit', label: 'Audit Logs', path: '/audit' },
   ];
 

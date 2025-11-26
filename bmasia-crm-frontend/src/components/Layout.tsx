@@ -37,7 +37,6 @@ import {
   Logout,
   Search as SearchIcon,
   Notifications as NotificationsIcon,
-  Settings as SettingsIcon,
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
   ExpandLess,
@@ -170,7 +169,6 @@ const unifiedNavigation = [
     title: 'Administration',
     items: [
       { text: 'Users', icon: <PeopleIcon />, path: '/users' },
-      { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
       { text: 'Audit Logs', icon: <HistoryIcon />, path: '/audit-logs' },
     ],
   },
@@ -709,10 +707,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         <MenuItem onClick={() => { handleNavigate('/profile'); handleUserMenuClose(); }}>
           <PersonIcon sx={{ mr: 1 }} />
           Profile
-        </MenuItem>
-        <MenuItem onClick={() => { handleNavigate('/settings'); handleUserMenuClose(); }}>
-          <SettingsIcon sx={{ mr: 1 }} />
-          Settings
         </MenuItem>
         <Divider />
         <MenuItem onClick={handleLogout}>

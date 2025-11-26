@@ -55,7 +55,6 @@ export const usePermissions = () => {
     canAccessInvoices: () => canAccessModule(user, 'invoices'),
     canAccessAnalytics: () => canAccessModule(user, 'analytics'),
     canAccessUsers: () => canAccessModule(user, 'users'),
-    canAccessSettings: () => canAccessModule(user, 'settings'),
     canAccessAudit: () => canAccessModule(user, 'audit'),
 
     // Entity-specific CRUD operations

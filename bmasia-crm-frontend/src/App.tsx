@@ -20,7 +20,6 @@ import Contacts from './pages/Contacts';
 import Quotes from './pages/Quotes';
 import QuoteDetail from './pages/QuoteDetail';
 import SalesTargets from './pages/SalesTargets';
-import Settings from './pages/Settings';
 import Campaigns from './pages/Campaigns';
 import CampaignCreate from './pages/CampaignCreate';
 import CampaignDetail from './pages/CampaignDetail';
@@ -432,7 +431,6 @@ function App() {
             </ProtectedRoute>
           }
         />
-        <Route path="/settings" element={<Settings />} />
 
         {/* Profile route - accessible to all authenticated users */}
         <Route path="/profile" element={<MyProfile />} />
