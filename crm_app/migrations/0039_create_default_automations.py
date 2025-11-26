@@ -6,7 +6,7 @@ from django.db import migrations
 def create_default_automations(apps, schema_editor):
     """Create default system automation sequences."""
     EmailSequence = apps.get_model('crm_app', 'EmailSequence')
-    EmailSequenceStep = apps.get_model('crm_app', 'EmailSequenceStep')
+    SequenceStep = apps.get_model('crm_app', 'SequenceStep')
     EmailTemplate = apps.get_model('crm_app', 'EmailTemplate')
 
     # Helper to get template by type (gracefully handles missing templates)
@@ -16,8 +16,12 @@ def create_default_automations(apps, schema_editor):
                 template_type=template_type,
                 is_active=True
             ).first()
-        except EmailTemplate.DoesNotExist:
+        except:
             return None
+
+    # Get a default template to use if specific one doesn't exist
+    def get_default_template():
+        return EmailTemplate.objects.first()
 
     # 1. Contract Renewal Reminders Automation
     renewal_seq = EmailSequence.objects.create(
@@ -28,48 +32,27 @@ def create_default_automations(apps, schema_editor):
         is_system_default=True,
     )
 
-    # Renewal sequence steps
+    # Renewal sequence steps - delay_days represents days BEFORE the trigger
+    # Step 1 fires first (30 days before), then step 2 (14 days before), etc.
     renewal_steps = [
-        {
-            'step_order': 1,
-            'days_delay': -30,  # 30 days before
-            'send_time': '09:00:00',
-            'template_type': 'renewal_30_days',
-            'subject': 'Contract Renewal - 30 Days Notice',
-        },
-        {
-            'step_order': 2,
-            'days_delay': -14,  # 14 days before
-            'send_time': '09:00:00',
-            'template_type': 'renewal_14_days',
-            'subject': 'Contract Renewal - 14 Days Notice',
-        },
-        {
-            'step_order': 3,
-            'days_delay': -7,  # 7 days before
-            'send_time': '09:00:00',
-            'template_type': 'renewal_7_days',
-            'subject': 'Contract Renewal - 7 Days Notice',
-        },
-        {
-            'step_order': 4,
-            'days_delay': -2,  # 2 days before
-            'send_time': '09:00:00',
-            'template_type': 'renewal_urgent',
-            'subject': 'Urgent: Contract Expiring in 2 Days',
-        },
+        {'step_number': 1, 'delay_days': 30, 'name': '30-Day Reminder', 'template_type': 'renewal_30_days'},
+        {'step_number': 2, 'delay_days': 14, 'name': '14-Day Reminder', 'template_type': 'renewal_14_days'},
+        {'step_number': 3, 'delay_days': 7, 'name': '7-Day Reminder', 'template_type': 'renewal_7_days'},
+        {'step_number': 4, 'delay_days': 2, 'name': 'Urgent Reminder', 'template_type': 'renewal_urgent'},
     ]
 
+    default_template = get_default_template()
     for step_data in renewal_steps:
-        template = get_template(step_data['template_type'])
-        EmailSequenceStep.objects.create(
-            sequence=renewal_seq,
-            step_order=step_data['step_order'],
-            days_delay=step_data['days_delay'],
-            send_time=step_data['send_time'],
-            email_template=template,
-            subject=step_data['subject'],
-        )
+        template = get_template(step_data['template_type']) or default_template
+        if template:
+            SequenceStep.objects.create(
+                sequence=renewal_seq,
+                step_number=step_data['step_number'],
+                name=step_data['name'],
+                delay_days=step_data['delay_days'],
+                email_template=template,
+                is_active=True,
+            )
 
     # 2. Payment Reminders Automation
     payment_seq = EmailSequence.objects.create(
@@ -81,39 +64,22 @@ def create_default_automations(apps, schema_editor):
     )
 
     payment_steps = [
-        {
-            'step_order': 1,
-            'days_delay': 7,  # 7 days after due date
-            'send_time': '10:00:00',
-            'template_type': 'payment_reminder_7_days',
-            'subject': 'Payment Reminder - 7 Days Overdue',
-        },
-        {
-            'step_order': 2,
-            'days_delay': 14,  # 14 days after due date
-            'send_time': '10:00:00',
-            'template_type': 'payment_reminder_14_days',
-            'subject': 'Payment Reminder - 14 Days Overdue',
-        },
-        {
-            'step_order': 3,
-            'days_delay': 21,  # 21 days after due date
-            'send_time': '10:00:00',
-            'template_type': 'payment_overdue',
-            'subject': 'Urgent: Payment 21+ Days Overdue',
-        },
+        {'step_number': 1, 'delay_days': 7, 'name': '7 Days Overdue', 'template_type': 'payment_reminder_7_days'},
+        {'step_number': 2, 'delay_days': 14, 'name': '14 Days Overdue', 'template_type': 'payment_reminder_14_days'},
+        {'step_number': 3, 'delay_days': 21, 'name': '21+ Days Overdue', 'template_type': 'payment_overdue'},
     ]
 
     for step_data in payment_steps:
-        template = get_template(step_data['template_type'])
-        EmailSequenceStep.objects.create(
-            sequence=payment_seq,
-            step_order=step_data['step_order'],
-            days_delay=step_data['days_delay'],
-            send_time=step_data['send_time'],
-            email_template=template,
-            subject=step_data['subject'],
-        )
+        template = get_template(step_data['template_type']) or default_template
+        if template:
+            SequenceStep.objects.create(
+                sequence=payment_seq,
+                step_number=step_data['step_number'],
+                name=step_data['name'],
+                delay_days=step_data['delay_days'],
+                email_template=template,
+                is_active=True,
+            )
 
     # 3. Quarterly Check-ins Automation
     quarterly_seq = EmailSequence.objects.create(
@@ -124,15 +90,16 @@ def create_default_automations(apps, schema_editor):
         is_system_default=True,
     )
 
-    quarterly_template = get_template('quarterly_checkin')
-    EmailSequenceStep.objects.create(
-        sequence=quarterly_seq,
-        step_order=1,
-        days_delay=0,
-        send_time='14:00:00',  # 2 PM
-        email_template=quarterly_template,
-        subject='Quarterly Check-in - How Are We Doing?',
-    )
+    quarterly_template = get_template('quarterly_checkin') or default_template
+    if quarterly_template:
+        SequenceStep.objects.create(
+            sequence=quarterly_seq,
+            step_number=1,
+            name='Quarterly Check-in',
+            delay_days=0,
+            email_template=quarterly_template,
+            is_active=True,
+        )
 
 
 def remove_default_automations(apps, schema_editor):
