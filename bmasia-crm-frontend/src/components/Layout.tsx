@@ -66,14 +66,47 @@ import MobileBottomNav from './MobileBottomNav';
 const drawerWidth = 280;
 const miniDrawerWidth = 64;
 
-// Department color scheme
-const departmentColors = {
+// Department color scheme - Supports both new and legacy roles
+// Default color for unknown roles
+const defaultDepartmentColor = {
+  primary: '#616161',
+  light: '#9e9e9e',
+  dark: '#424242',
+  background: alpha('#616161', 0.08),
+};
+
+const departmentColors: Record<string, { primary: string; light: string; dark: string; background: string }> = {
   Sales: {
     primary: '#1976d2',
     light: '#42a5f5',
     dark: '#1565c0',
     background: alpha('#1976d2', 0.08),
   },
+  Finance: {
+    primary: '#0288d1',
+    light: '#03a9f4',
+    dark: '#01579b',
+    background: alpha('#0288d1', 0.08),
+  },
+  Tech: {
+    primary: '#388e3c',
+    light: '#66bb6a',
+    dark: '#2e7d32',
+    background: alpha('#388e3c', 0.08),
+  },
+  Music: {
+    primary: '#7b1fa2',
+    light: '#ba68c8',
+    dark: '#6a1b9a',
+    background: alpha('#7b1fa2', 0.08),
+  },
+  Admin: {
+    primary: '#616161',
+    light: '#9e9e9e',
+    dark: '#424242',
+    background: alpha('#616161', 0.08),
+  },
+  // Legacy role support
   Marketing: {
     primary: '#7b1fa2',
     light: '#ba68c8',
@@ -85,12 +118,6 @@ const departmentColors = {
     light: '#66bb6a',
     dark: '#2e7d32',
     background: alpha('#388e3c', 0.08),
-  },
-  Admin: {
-    primary: '#616161',
-    light: '#9e9e9e',
-    dark: '#424242',
-    background: alpha('#616161', 0.08),
   },
 };
 
@@ -330,7 +357,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   // Get unified navigation and default color
   const userRole = user?.role || 'Admin';
   const navigation = unifiedNavigation;
-  const departmentColor = departmentColors[userRole];
+  const departmentColor = departmentColors[userRole] || defaultDepartmentColor;
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
