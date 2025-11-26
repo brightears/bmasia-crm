@@ -39,6 +39,7 @@ export const ROLE_PERMISSIONS = {
     'view_tickets',
     'create_tickets',
     'edit_own_tickets',
+    'view_users',
   ],
   Marketing: [
     'view_companies',
@@ -73,6 +74,7 @@ export const ROLE_PERMISSIONS = {
     'view_tickets',
     'create_tickets',
     'edit_own_tickets',
+    'view_users',
   ],
   'Tech Support': [
     'view_companies',
@@ -97,6 +99,7 @@ export const ROLE_PERMISSIONS = {
     'edit_tickets',
     'delete_tickets',
     'assign_tickets',
+    'view_users',
   ],
   Admin: [
     // Admins have all permissions
@@ -151,6 +154,7 @@ export const ROLE_PERMISSIONS = {
     'edit_tickets',
     'delete_tickets',
     'assign_tickets',
+    'view_users',
   ],
 } as const;
 
@@ -231,7 +235,7 @@ export const canAccessModule = (user: User | null, module: string): boolean => {
     tickets: 'view_tickets',
     'knowledge-base': 'manage_technical_settings',
     zones: 'manage_technical_settings',
-    users: 'manage_users',
+    users: 'view_users',
     settings: 'manage_system_settings',
     'audit-logs': 'view_audit_logs',
   };
