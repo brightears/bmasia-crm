@@ -836,6 +836,9 @@ export interface EmailSequence {
   name: string;
   description: string;
   status: 'active' | 'paused' | 'archived';
+  sequence_type: 'manual' | 'auto_renewal' | 'auto_payment' | 'auto_quarterly';
+  trigger_days_before?: number;
+  is_system_default: boolean;
   steps: SequenceStep[];
   total_steps: number;
   active_enrollments: number;
@@ -870,6 +873,9 @@ export interface SequenceEnrollment {
   contact_email: string;
   company: string | null;
   company_name: string | null;
+  enrollment_source: 'manual' | 'auto_trigger';
+  trigger_entity_type?: string;
+  trigger_entity_id?: string;
   enrolled_at: string;
   started_at: string | null;
   completed_at: string | null;

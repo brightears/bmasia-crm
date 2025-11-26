@@ -29,6 +29,8 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
+  Tabs,
+  Tab,
 } from '@mui/material';
 import {
   Add,
@@ -37,17 +39,16 @@ import {
   Edit,
   Delete,
   Visibility,
-  ContentCopy,
+  FileCopy,
   Timeline,
   Archive,
-  FileCopy,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { EmailSequence, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import SequenceForm from '../components/SequenceForm';
 
-const EmailSequences: React.FC = () => {
+const EmailAutomations: React.FC = () => {
   const navigate = useNavigate();
   const [sequences, setSequences] = useState<EmailSequence[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,6 +56,7 @@ const EmailSequences: React.FC = () => {
   const [success, setSuccess] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState<string>('all');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [totalCount, setTotalCount] = useState(0);
@@ -83,21 +85,28 @@ const EmailSequences: React.FC = () => {
       if (search) params.search = search;
       if (statusFilter) params.status = statusFilter;
 
-      console.log('Loading email sequences with params:', params);
+      // Add type filter
+      if (typeFilter === 'auto') {
+        params.sequence_type__startswith = 'auto_';
+      } else if (typeFilter === 'manual') {
+        params.sequence_type = 'manual';
+      }
+
+      console.log('Loading email automations with params:', params);
       const response: ApiResponse<EmailSequence> = await ApiService.getEmailSequences(params);
-      console.log('Email Sequences API response:', response);
+      console.log('Email Automations API response:', response);
 
       setSequences(response.results || []);
       setTotalCount(response.count || 0);
     } catch (err: any) {
-      console.error('Email sequences error:', err);
-      setError(`Failed to load email sequences: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
+      console.error('Email automations error:', err);
+      setError(`Failed to load email automations: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
       setSequences([]);
       setTotalCount(0);
     } finally {
       setLoading(false);
     }
-  }, [page, rowsPerPage, search, statusFilter]);
+  }, [page, rowsPerPage, search, statusFilter, typeFilter]);
 
   useEffect(() => {
     loadSequences();
@@ -105,6 +114,11 @@ const EmailSequences: React.FC = () => {
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(event.target.value);
+    setPage(0);
+  };
+
+  const handleTypeFilterChange = (event: React.SyntheticEvent, newValue: string) => {
+    setTypeFilter(newValue);
     setPage(0);
   };
 
@@ -133,7 +147,7 @@ const EmailSequences: React.FC = () => {
   };
 
   const handleViewDetails = (sequence: EmailSequence) => {
-    navigate(`/email-sequences/${sequence.id}`);
+    navigate(`/email-automations/${sequence.id}`);
     handleMenuClose();
   };
 
@@ -147,11 +161,11 @@ const EmailSequences: React.FC = () => {
     try {
       setError('');
       await ApiService.duplicateEmailSequence(sequence.id);
-      setSuccess('Sequence duplicated successfully');
+      setSuccess('Automation duplicated successfully');
       loadSequences();
     } catch (err: any) {
-      console.error('Duplicate sequence error:', err);
-      setError(`Failed to duplicate sequence: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
+      console.error('Duplicate automation error:', err);
+      setError(`Failed to duplicate automation: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     }
     handleMenuClose();
   };
@@ -160,7 +174,7 @@ const EmailSequences: React.FC = () => {
     // Warn if there are active enrollments
     if (sequence.active_enrollments > 0) {
       const confirmed = window.confirm(
-        `This sequence has ${sequence.active_enrollments} active enrollment(s). ` +
+        `This automation has ${sequence.active_enrollments} active enrollment(s). ` +
         'Archiving will not affect existing enrollments. Continue?'
       );
       if (!confirmed) {
@@ -172,11 +186,11 @@ const EmailSequences: React.FC = () => {
     try {
       setError('');
       await ApiService.updateEmailSequence(sequence.id, { status: 'archived' });
-      setSuccess('Sequence archived successfully');
+      setSuccess('Automation archived successfully');
       loadSequences();
     } catch (err: any) {
-      console.error('Archive sequence error:', err);
-      setError(`Failed to archive sequence: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
+      console.error('Archive automation error:', err);
+      setError(`Failed to archive automation: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     }
     handleMenuClose();
   };
@@ -193,13 +207,13 @@ const EmailSequences: React.FC = () => {
     try {
       setError('');
       await ApiService.deleteEmailSequence(deletingSequence.id);
-      setSuccess('Sequence deleted successfully');
+      setSuccess('Automation deleted successfully');
       loadSequences();
       setDeleteDialogOpen(false);
       setDeletingSequence(null);
     } catch (err: any) {
-      console.error('Delete sequence error:', err);
-      setError(`Failed to delete sequence: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
+      console.error('Delete automation error:', err);
+      setError(`Failed to delete automation: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     }
   };
 
@@ -211,7 +225,7 @@ const EmailSequences: React.FC = () => {
   const handleFormSave = () => {
     setFormOpen(false);
     setEditingSequence(null);
-    setSuccess(editingSequence ? 'Sequence updated successfully' : 'Sequence created successfully');
+    setSuccess(editingSequence ? 'Automation updated successfully' : 'Automation created successfully');
     loadSequences();
   };
 
@@ -233,6 +247,27 @@ const EmailSequences: React.FC = () => {
     }
   };
 
+  const getTypeLabel = (type: string): string => {
+    switch (type) {
+      case 'auto_renewal':
+        return 'Auto: Renewal';
+      case 'auto_payment':
+        return 'Auto: Payment';
+      case 'auto_quarterly':
+        return 'Auto: Quarterly';
+      case 'manual':
+      default:
+        return 'Manual';
+    }
+  };
+
+  const getTypeColor = (type: string): 'primary' | 'default' => {
+    if (type && type.startsWith('auto_')) {
+      return 'primary';
+    }
+    return 'default';
+  };
+
   const formatDate = (dateString: string): string => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
@@ -246,7 +281,7 @@ const EmailSequences: React.FC = () => {
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4" component="h1">
-          Email Sequences
+          Email Automations
         </Typography>
         <Button
           variant="contained"
@@ -254,7 +289,7 @@ const EmailSequences: React.FC = () => {
           onClick={handleCreateSequence}
           sx={{ backgroundColor: '#FFA500', '&:hover': { backgroundColor: '#FF8C00' } }}
         >
-          New Email Sequence
+          New Email Automation
         </Button>
       </Box>
 
@@ -270,43 +305,59 @@ const EmailSequences: React.FC = () => {
         </Alert>
       )}
 
-      <Paper sx={{ mb: 2, p: 2 }}>
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={8}>
-            <TextField
-              fullWidth
-              size="small"
-              placeholder="Search sequences by name or description..."
-              value={search}
-              onChange={handleSearchChange}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search />
-                  </InputAdornment>
-                ),
-              }}
-            />
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Status</InputLabel>
-              <Select
-                value={statusFilter}
-                label="Status"
-                onChange={(e) => {
-                  setStatusFilter(e.target.value);
-                  setPage(0);
+      <Paper sx={{ mb: 2 }}>
+        {/* Filter Tabs */}
+        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+          <Tabs
+            value={typeFilter}
+            onChange={handleTypeFilterChange}
+            sx={{ px: 2 }}
+          >
+            <Tab label="All" value="all" />
+            <Tab label="Automatic" value="auto" />
+            <Tab label="Manual" value="manual" />
+          </Tabs>
+        </Box>
+
+        {/* Search and Status Filters */}
+        <Box sx={{ p: 2 }}>
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={8}>
+              <TextField
+                fullWidth
+                size="small"
+                placeholder="Search automations by name or description..."
+                value={search}
+                onChange={handleSearchChange}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Search />
+                    </InputAdornment>
+                  ),
                 }}
-              >
-                <MenuItem value="">All</MenuItem>
-                <MenuItem value="active">Active</MenuItem>
-                <MenuItem value="paused">Paused</MenuItem>
-                <MenuItem value="archived">Archived</MenuItem>
-              </Select>
-            </FormControl>
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Status</InputLabel>
+                <Select
+                  value={statusFilter}
+                  label="Status"
+                  onChange={(e) => {
+                    setStatusFilter(e.target.value);
+                    setPage(0);
+                  }}
+                >
+                  <MenuItem value="">All</MenuItem>
+                  <MenuItem value="active">Active</MenuItem>
+                  <MenuItem value="paused">Paused</MenuItem>
+                  <MenuItem value="archived">Archived</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
           </Grid>
-        </Grid>
+        </Box>
       </Paper>
 
       <TableContainer component={Paper}>
@@ -314,6 +365,7 @@ const EmailSequences: React.FC = () => {
           <TableHead>
             <TableRow>
               <TableCell>Name</TableCell>
+              <TableCell>Type</TableCell>
               <TableCell>Description</TableCell>
               <TableCell>Status</TableCell>
               <TableCell align="center">Total Steps</TableCell>
@@ -326,33 +378,33 @@ const EmailSequences: React.FC = () => {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={8} align="center">
+                <TableCell colSpan={9} align="center">
                   <CircularProgress />
                 </TableCell>
               </TableRow>
             ) : sequences.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} align="center">
+                <TableCell colSpan={9} align="center">
                   <Box sx={{ py: 8 }}>
                     <Timeline sx={{ fontSize: 80, color: '#FFA500', mb: 2 }} />
                     <Typography variant="h6" color="text.secondary" gutterBottom>
-                      {search || statusFilter
-                        ? 'No Email Sequences Found'
-                        : 'No Email Sequences Yet'}
+                      {search || statusFilter || typeFilter !== 'all'
+                        ? 'No Email Automations Found'
+                        : 'No Email Automations Yet'}
                     </Typography>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                      {search || statusFilter
-                        ? 'Try adjusting your filters to find sequences.'
+                      {search || statusFilter || typeFilter !== 'all'
+                        ? 'Try adjusting your filters to find automations.'
                         : 'Create automated email sequences to nurture your contacts over time.'}
                     </Typography>
-                    {!search && !statusFilter && (
+                    {!search && !statusFilter && typeFilter === 'all' && (
                       <Button
                         variant="contained"
                         startIcon={<Add />}
                         onClick={handleCreateSequence}
                         sx={{ backgroundColor: '#FFA500', '&:hover': { backgroundColor: '#FF8C00' } }}
                       >
-                        Create Your First Sequence
+                        Create Your First Automation
                       </Button>
                     )}
                   </Box>
@@ -370,6 +422,13 @@ const EmailSequences: React.FC = () => {
                     <Typography variant="body2" fontWeight="medium">
                       {sequence.name}
                     </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={getTypeLabel(sequence.sequence_type || 'manual')}
+                      size="small"
+                      color={getTypeColor(sequence.sequence_type || 'manual')}
+                    />
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2" color="text.secondary" noWrap sx={{ maxWidth: 300 }}>
@@ -464,10 +523,10 @@ const EmailSequences: React.FC = () => {
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onClose={handleDeleteCancel}>
-        <DialogTitle>Delete Sequence?</DialogTitle>
+        <DialogTitle>Delete Automation?</DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete the sequence "{deletingSequence?.name}"? This action cannot be undone.
+            Are you sure you want to delete the automation "{deletingSequence?.name}"? This action cannot be undone.
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -489,4 +548,4 @@ const EmailSequences: React.FC = () => {
   );
 };
 
-export default EmailSequences;
+export default EmailAutomations;

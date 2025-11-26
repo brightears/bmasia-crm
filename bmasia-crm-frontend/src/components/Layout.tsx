@@ -57,6 +57,7 @@ import {
   Support as SupportIcon,
   MenuBook as MenuBookIcon,
   LocationOn,
+  AutoMode as AutoModeIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -153,7 +154,7 @@ const unifiedNavigation = [
     items: [
       { text: 'Campaigns', icon: <CampaignIcon />, path: '/campaigns' },
       { text: 'Email Templates', icon: <EmailIcon />, path: '/email-templates' },
-      { text: 'Email Sequences', icon: <HistoryIcon />, path: '/email-sequences' },
+      { text: 'Email Automations', icon: <AutoModeIcon />, path: '/email-automations' },
       { text: 'Segments', icon: <GroupIcon />, path: '/segments' },
     ],
   },

@@ -25,7 +25,7 @@ import Campaigns from './pages/Campaigns';
 import CampaignCreate from './pages/CampaignCreate';
 import CampaignDetail from './pages/CampaignDetail';
 import EmailTemplates from './pages/EmailTemplates';
-import EmailSequences from './pages/EmailSequences';
+import EmailAutomations from './pages/EmailAutomations';
 import SequenceDetail from './pages/SequenceDetail';
 import Segments from './pages/Segments';
 import SegmentForm from './pages/SegmentForm';
@@ -274,20 +274,29 @@ function App() {
           }
         />
         <Route
-          path="/email-sequences"
+          path="/email-automations"
           element={
             <ProtectedRoute requiredModule="campaigns">
-              <EmailSequences />
+              <EmailAutomations />
             </ProtectedRoute>
           }
         />
         <Route
-          path="/email-sequences/:id"
+          path="/email-automations/:id"
           element={
             <ProtectedRoute requiredModule="campaigns">
               <SequenceDetail />
             </ProtectedRoute>
           }
+        />
+        {/* Backward compatibility redirect */}
+        <Route
+          path="/email-sequences"
+          element={<Navigate to="/email-automations" replace />}
+        />
+        <Route
+          path="/email-sequences/:id"
+          element={<Navigate to="/email-automations" replace />}
         />
         <Route path="/analytics" element={<PlaceholderPage title="Marketing Analytics" />} />
         <Route

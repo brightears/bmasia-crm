@@ -1654,11 +1654,35 @@ class EmailSequence(TimestampedModel):
         ('archived', 'Archived'),
     ]
 
+    SEQUENCE_TYPE_CHOICES = [
+        ('manual', 'Manual Enrollment'),
+        ('auto_renewal', 'Auto: Contract Renewal'),
+        ('auto_payment', 'Auto: Payment Reminders'),
+        ('auto_quarterly', 'Auto: Quarterly Check-ins'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200, help_text="e.g., 'New Customer Onboarding'")
     description = models.TextField(blank=True, help_text="What this sequence does")
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_sequences')
+
+    # Unified automation fields
+    sequence_type = models.CharField(
+        max_length=20,
+        choices=SEQUENCE_TYPE_CHOICES,
+        default='manual',
+        help_text="Type of automation - manual requires enrollment, auto types trigger automatically"
+    )
+    trigger_days_before = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="For auto types: days before/after event to trigger (e.g., 30 for 30 days before contract expiry)"
+    )
+    is_system_default = models.BooleanField(
+        default=False,
+        help_text="System default automations created during setup"
+    )
 
     class Meta:
         ordering = ['-created_at']
@@ -1712,6 +1736,11 @@ class SequenceEnrollment(TimestampedModel):
         ('unsubscribed', 'Unsubscribed'),
     ]
 
+    ENROLLMENT_SOURCE_CHOICES = [
+        ('manual', 'Manual'),
+        ('auto_trigger', 'Auto Trigger'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     sequence = models.ForeignKey(EmailSequence, on_delete=models.CASCADE, related_name='enrollments')
     contact = models.ForeignKey(Contact, on_delete=models.CASCADE, related_name='sequence_enrollments')
@@ -1722,6 +1751,25 @@ class SequenceEnrollment(TimestampedModel):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
     current_step_number = models.PositiveIntegerField(default=1, help_text="Which step is next")
     notes = models.TextField(blank=True)
+
+    # Unified automation fields
+    enrollment_source = models.CharField(
+        max_length=20,
+        choices=ENROLLMENT_SOURCE_CHOICES,
+        default='manual',
+        help_text="How this enrollment was created"
+    )
+    trigger_entity_type = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        help_text="Type of entity that triggered enrollment: contract, invoice, company"
+    )
+    trigger_entity_id = models.UUIDField(
+        null=True,
+        blank=True,
+        help_text="ID of the triggering entity for deduplication"
+    )
 
     class Meta:
         ordering = ['-enrolled_at']

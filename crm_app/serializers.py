@@ -996,6 +996,7 @@ class EmailSequenceSerializer(serializers.ModelSerializer):
         model = EmailSequence
         fields = [
             'id', 'name', 'description', 'status',
+            'sequence_type', 'trigger_days_before', 'is_system_default',
             'steps', 'total_steps', 'active_enrollments',
             'created_by', 'created_by_name',
             'created_at', 'updated_at'
@@ -1036,6 +1037,7 @@ class SequenceEnrollmentSerializer(serializers.ModelSerializer):
             'company', 'company_name',
             'enrolled_at', 'started_at', 'completed_at',
             'status', 'current_step_number', 'progress',
+            'enrollment_source', 'trigger_entity_type', 'trigger_entity_id',
             'notes', 'step_executions',
             'created_at', 'updated_at'
         ]

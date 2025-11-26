@@ -194,7 +194,7 @@ const SequenceDetail: React.FC = () => {
   }, [enrollmentStatusFilter]);
 
   const handleBack = () => {
-    navigate('/email-sequences');
+    navigate('/email-automations');
   };
 
   const handleEdit = () => {

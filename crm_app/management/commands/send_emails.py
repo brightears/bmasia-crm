@@ -8,6 +8,7 @@ from django.utils import timezone
 import logging
 
 from crm_app.services.email_service import email_service
+from crm_app.services.auto_enrollment_service import AutoEnrollmentService
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,47 @@ class Command(BaseCommand):
                 self.stdout.write(
                     f"Quarterly check-ins: {results['sent']} sent, "
                     f"{results['failed']} failed"
+                )
+
+        # Process auto-enrollments (this creates new enrollments based on triggers)
+        # Must run before sequence processing so newly enrolled contacts can be included
+        if email_type in ['all', 'renewal', 'payment', 'quarterly', 'sequences']:
+            self.stdout.write("Processing auto-enrollments...")
+
+            if not dry_run:
+                auto_service = AutoEnrollmentService()
+
+                # Process renewal triggers
+                if email_type in ['all', 'renewal', 'sequences']:
+                    renewal_enrolled = auto_service.process_renewal_triggers()
+                    self.stdout.write(
+                        self.style.SUCCESS(
+                            f"Auto-enrolled {renewal_enrolled} contacts for renewal reminders"
+                        )
+                    )
+
+                # Process payment triggers
+                if email_type in ['all', 'payment', 'sequences']:
+                    payment_enrolled = auto_service.process_payment_triggers()
+                    self.stdout.write(
+                        self.style.SUCCESS(
+                            f"Auto-enrolled {payment_enrolled} contacts for payment reminders"
+                        )
+                    )
+
+                # Process quarterly triggers
+                if email_type in ['all', 'quarterly', 'sequences']:
+                    quarterly_enrolled = auto_service.process_quarterly_triggers()
+                    self.stdout.write(
+                        self.style.SUCCESS(
+                            f"Auto-enrolled {quarterly_enrolled} contacts for quarterly check-ins"
+                        )
+                    )
+            else:
+                self.stdout.write(
+                    self.style.WARNING(
+                        "DRY RUN: Would process auto-enrollments for renewal, payment, and quarterly triggers"
+                    )
                 )
 
         # Process email sequences
