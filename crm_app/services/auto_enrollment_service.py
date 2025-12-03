@@ -71,9 +71,10 @@ class AutoEnrollmentService:
             target_date = date.today() + timedelta(days=trigger_days)
 
             # Find contracts expiring on the target date
+            # Note: Contract model uses 'Active' (capital A) for status
             contracts = Contract.objects.filter(
                 end_date=target_date,
-                status='active'
+                status='Active'
             ).select_related('company')
 
             logger.info(f"Found {contracts.count()} contracts expiring on {target_date} for sequence {sequence.name}")
@@ -231,8 +232,9 @@ class AutoEnrollmentService:
 
         for sequence in sequences:
             # Find companies with active contracts
+            # Note: Contract model uses 'Active' (capital A) for status
             companies_with_contracts = Company.objects.filter(
-                contracts__status='active'
+                contracts__status='Active'
             ).distinct()
 
             ninety_days_ago = timezone.now() - timedelta(days=90)
