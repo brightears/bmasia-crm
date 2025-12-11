@@ -85,12 +85,6 @@ const PermissionExamples: React.FC = () => {
             Manage Users
           </Button>
         </PermissionWrapper>
-
-        <PermissionWrapper module="audit">
-          <Button variant="outlined">
-            Audit Logs
-          </Button>
-        </PermissionWrapper>
       </Box>
 
       {/* Complex Permission Logic */}

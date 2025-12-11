@@ -1,7 +1,7 @@
 import {
   User, UserCreateData, UserUpdateData, PasswordChangeData, SmtpSettingsData,
   Company, Contact, Note, Task, Opportunity, OpportunityActivity,
-  Contract, Invoice, Quote, DashboardStats, AuditLog, ApiResponse,
+  Contract, Invoice, Quote, DashboardStats, ApiResponse,
   CustomerSegment, SegmentMemberResponse, SegmentValidationResponse,
   EnrollInSequenceResponse, SegmentFilterCriteria, Zone, ContractZone, Device
 } from '../types';
@@ -554,12 +554,6 @@ class ApiService {
 
   async clearSmtpSettings(): Promise<{ message: string; smtp_configured: boolean }> {
     const response = await authApi.post('/users/update_smtp/', { smtp_email: '', smtp_password: '' });
-    return response.data;
-  }
-
-  // Audit Logs
-  async getAuditLogs(params?: any): Promise<ApiResponse<AuditLog>> {
-    const response = await authApi.get<ApiResponse<AuditLog>>('/audit-logs/', { params });
     return response.data;
   }
 

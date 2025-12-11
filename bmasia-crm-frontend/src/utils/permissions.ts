@@ -143,7 +143,6 @@ export const ROLE_PERMISSIONS = {
     'export_data',
     'manage_users',
     'manage_system_settings',
-    'view_audit_logs',
     'manage_technical_settings',
     'view_campaigns',
     'create_campaigns',
@@ -236,7 +235,6 @@ export const canAccessModule = (user: User | null, module: string): boolean => {
     'knowledge-base': 'manage_technical_settings',
     zones: 'manage_technical_settings',
     users: 'view_users',
-    'audit-logs': 'view_audit_logs',
   };
 
   const requiredPermission = modulePermissions[module as keyof typeof modulePermissions];
@@ -281,7 +279,6 @@ export const getAccessibleMenuItems = (user: User | null) => {
     { id: 'invoices', label: 'Invoices', path: '/invoices' },
     { id: 'analytics', label: 'Analytics', path: '/analytics' },
     { id: 'users', label: 'Users', path: '/users' },
-    { id: 'audit', label: 'Audit Logs', path: '/audit' },
   ];
 
   return allMenuItems.filter(item => canAccessModule(user, item.id));

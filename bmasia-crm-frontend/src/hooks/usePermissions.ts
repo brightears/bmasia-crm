@@ -55,7 +55,6 @@ export const usePermissions = () => {
     canAccessInvoices: () => canAccessModule(user, 'invoices'),
     canAccessAnalytics: () => canAccessModule(user, 'analytics'),
     canAccessUsers: () => canAccessModule(user, 'users'),
-    canAccessAudit: () => canAccessModule(user, 'audit'),
 
     // Entity-specific CRUD operations
     companies: {
@@ -153,7 +152,6 @@ export const useBusinessPermissions = () => {
     // Administrative operations
     canManageUsers: () => hasPermission(user, 'manage_users'),
     canManageSystemSettings: () => hasPermission(user, 'manage_system_settings'),
-    canViewAuditLogs: () => hasPermission(user, 'view_audit_logs'),
 
     // Data operations
     canExportAllData: () => canExportData(user),

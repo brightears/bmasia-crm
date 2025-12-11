@@ -44,7 +44,6 @@ import {
   Campaign as CampaignIcon,
   Email as EmailIcon,
   Group as GroupIcon,
-  History as HistoryIcon,
   LightMode as LightModeIcon,
   DarkMode as DarkModeIcon,
   Person as PersonIcon,
@@ -169,7 +168,6 @@ const unifiedNavigation = [
     title: 'Administration',
     items: [
       { text: 'Users', icon: <PeopleIcon />, path: '/users' },
-      { text: 'Audit Logs', icon: <HistoryIcon />, path: '/audit-logs' },
     ],
   },
 ];

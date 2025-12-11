@@ -428,20 +428,6 @@ export interface DashboardStats {
   invoice_collection_rate: number;
 }
 
-export interface AuditLog {
-  id: string;
-  user: string;
-  user_name: string;
-  action: 'CREATE' | 'UPDATE' | 'DELETE' | 'VIEW' | 'EXPORT' | 'LOGIN' | 'LOGOUT';
-  model_name: string;
-  record_id: string;
-  timestamp: string;
-  ip_address?: string;
-  user_agent?: string;
-  changes?: any;
-  additional_data?: any;
-}
-
 export interface ApiResponse<T> {
   count: number;
   next?: string;

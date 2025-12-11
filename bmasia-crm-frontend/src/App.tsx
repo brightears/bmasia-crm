@@ -434,7 +434,6 @@ function App() {
 
         {/* Profile route - accessible to all authenticated users */}
         <Route path="/profile" element={<MyProfile />} />
-        <Route path="/audit-logs" element={<PlaceholderPage title="Audit Logs" />} />
         <Route path="/system-status" element={<PlaceholderPage title="System Status" />} />
 
         {/* Mobile more page */}
