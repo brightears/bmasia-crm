@@ -22,7 +22,7 @@ from .models import (
     CustomerSegment, Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
-    Device
+    Device, StaticDocument
 )
 
 
@@ -146,11 +146,12 @@ class BeatBreezeZoneInline(admin.TabularInline):
 
 @admin.register(Company)
 class CompanyAdmin(admin.ModelAdmin):
-    list_display = ['name', 'country', 'industry', 'location_count', 'music_zone_count', 'soundtrack_status', 'billing_entity']
-    list_filter = ['country', 'industry', 'is_active', 'billing_entity', 'created_at']
-    list_select_related = []  # Company has no ForeignKey fields to select_related on
+    list_display = ['name', 'country', 'industry', 'location_count', 'music_zone_count', 'soundtrack_status', 'billing_entity', 'corporate_parent_badge', 'parent_company_link', 'child_count']
+    list_filter = ['country', 'industry', 'is_active', 'billing_entity', 'is_corporate_parent', 'parent_company', 'created_at']
+    list_select_related = ['parent_company']
     search_fields = ['name', 'legal_entity_name', 'website', 'notes', 'it_notes', 'soundtrack_account_id']
-    readonly_fields = ['created_at', 'updated_at', 'current_subscription_summary', 'zones_status_summary']
+    readonly_fields = ['created_at', 'updated_at', 'current_subscription_summary', 'zones_status_summary', 'child_count']
+    autocomplete_fields = ['parent_company']
     actions = ['sync_soundtrack_zones', 'preview_email_to_contacts', 'send_email_to_contacts', 'bulk_send_email_to_contacts', 'bulk_sync_soundtrack_zones', 'export_companies_csv', 'export_companies_excel']
     
     def get_inlines(self, request, obj):
@@ -165,7 +166,39 @@ class CompanyAdmin(admin.ModelAdmin):
             return format_html('<span style="color: green;">✓ Connected</span>')
         return format_html('<span style="color: gray;">Not connected</span>')
     soundtrack_status.short_description = "Soundtrack"
-    
+
+    def corporate_parent_badge(self, obj):
+        """Display badge if company is a corporate parent"""
+        if obj.is_corporate_parent:
+            return format_html(
+                '<span style="background-color: #FFA500; color: white; padding: 3px 8px; '
+                'border-radius: 3px; font-size: 11px; font-weight: bold;">CORPORATE HQ</span>'
+            )
+        return ''
+    corporate_parent_badge.short_description = "Corporate Status"
+
+    def parent_company_link(self, obj):
+        """Display link to parent company if exists"""
+        if obj.parent_company:
+            url = reverse('admin:crm_app_company_change', args=[obj.parent_company.pk])
+            return format_html('<a href="{}">{}</a>', url, obj.parent_company.name)
+        return format_html('<span style="color: #999;">-</span>')
+    parent_company_link.short_description = "Parent Company"
+
+    def child_count(self, obj):
+        """Display count of child companies for corporate parents"""
+        if obj.is_corporate_parent:
+            count = obj.child_companies.count()
+            if count > 0:
+                return format_html(
+                    '<span style="background-color: #4CAF50; color: white; padding: 2px 6px; '
+                    'border-radius: 3px; font-size: 11px; font-weight: bold;">{} venues</span>',
+                    count
+                )
+            return format_html('<span style="color: #999;">0 venues</span>')
+        return format_html('<span style="color: #999;">-</span>')
+    child_count.short_description = "Child Companies"
+
     def zones_status_summary(self, obj):
         """Display summary of zone statuses from Soundtrack API"""
         if not obj.soundtrack_account_id:
@@ -501,6 +534,10 @@ class CompanyAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Basic Information', {
             'fields': ('name', 'legal_entity_name', 'country', 'industry', 'website', 'location_count', 'music_zone_count'),
+        }),
+        ('Corporate Structure', {
+            'fields': ('is_corporate_parent', 'parent_company', 'child_count'),
+            'description': 'Configure corporate parent-child relationships for multi-venue organizations'
         }),
         ('Billing', {
             'fields': ('billing_entity',),
@@ -871,18 +908,60 @@ class ContractAdminForm(forms.ModelForm):
 @admin.register(Contract)
 class ContractAdmin(admin.ModelAdmin):
     form = ContractAdminForm
-    list_display = ['contract_number', 'company', 'service_type', 'contract_type', 'status', 'start_date', 'end_date', 'value', 'is_expiring_soon']
-    list_filter = ['service_type', 'contract_type', 'status', 'auto_renew', 'is_active']
-    list_select_related = ['company', 'opportunity']
+    list_display = ['contract_number', 'company', 'service_type', 'contract_type', 'contract_category_badge', 'status', 'start_date', 'end_date', 'value', 'is_expiring_soon', 'participation_count']
+    list_filter = ['service_type', 'contract_type', 'contract_category', 'status', 'auto_renew', 'is_active']
+    list_select_related = ['company', 'opportunity', 'master_contract', 'master_contract__company']
     search_fields = ['contract_number', 'company__name']
-    readonly_fields = ['created_at', 'updated_at', 'days_until_expiry', 'formatted_monthly_value']
+    readonly_fields = ['created_at', 'updated_at', 'days_until_expiry', 'formatted_monthly_value', 'participation_count']
+    autocomplete_fields = ['master_contract']
     inlines = [InvoiceInline, ContractZoneInline]
     actions = ['bulk_update_status_active', 'bulk_update_status_inactive', 'export_contracts_csv', 'export_contracts_excel']
     
     def is_expiring_soon(self, obj):
         return obj.is_expiring_soon
     is_expiring_soon.boolean = True
-    
+
+    def contract_category_badge(self, obj):
+        """Display colored badge for contract category"""
+        color_map = {
+            'standard': '#2196F3',  # Blue
+            'corporate_master': '#FFA500',  # Orange
+            'participation': '#4CAF50',  # Green
+        }
+        label_map = {
+            'standard': 'STANDARD',
+            'corporate_master': 'MASTER',
+            'participation': 'PARTICIPATION',
+        }
+        color = color_map.get(obj.contract_category, '#999')
+        label = label_map.get(obj.contract_category, obj.get_contract_category_display())
+
+        # Add master contract reference for participation agreements
+        extra_info = ''
+        if obj.contract_category == 'participation' and obj.master_contract:
+            extra_info = f'<br><small style="color: #666;">→ {obj.master_contract.contract_number}</small>'
+
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 8px; '
+            'border-radius: 3px; font-size: 11px; font-weight: bold;">{}</span>{}',
+            color, label, extra_info
+        )
+    contract_category_badge.short_description = "Category"
+
+    def participation_count(self, obj):
+        """Display count of participation agreements for master contracts"""
+        if obj.contract_category == 'corporate_master':
+            count = obj.participation_agreements.count()
+            if count > 0:
+                return format_html(
+                    '<span style="background-color: #4CAF50; color: white; padding: 2px 6px; '
+                    'border-radius: 3px; font-size: 11px; font-weight: bold;">{} agreements</span>',
+                    count
+                )
+            return format_html('<span style="color: #999;">0 agreements</span>')
+        return format_html('<span style="color: #999;">-</span>')
+    participation_count.short_description = "Participation Agreements"
+
     def formatted_monthly_value(self, obj):
         """Display monthly value with proper currency formatting"""
         try:
@@ -923,6 +1002,10 @@ class ContractAdmin(admin.ModelAdmin):
         ('Basic Information', {
             'fields': ('company', 'opportunity', 'contract_number', 'contract_type', 'service_type', 'status')
         }),
+        ('Contract Category', {
+            'fields': ('contract_category', 'master_contract', 'participation_count'),
+            'description': 'Configure contract category and master agreement relationships for corporate contracts'
+        }),
         ('Dates', {
             'fields': ('start_date', 'end_date', 'days_until_expiry')
         }),
@@ -931,6 +1014,16 @@ class ContractAdmin(admin.ModelAdmin):
         }),
         ('Terms', {
             'fields': ('payment_terms', 'billing_frequency', 'auto_renew', 'renewal_period_months')
+        }),
+        ('Signatories', {
+            'fields': ('customer_signatory_name', 'customer_signatory_title', 'bmasia_signatory_name', 'bmasia_signatory_title'),
+            'classes': ('collapse',),
+            'description': 'Authorized signatories for this contract'
+        }),
+        ('Custom Terms', {
+            'fields': ('custom_terms',),
+            'classes': ('collapse',),
+            'description': 'Custom terms and conditions specific to this master agreement'
         }),
         ('Renewal Tracking', {
             'fields': ('renewal_notice_sent', 'renewal_notice_date'),
@@ -944,6 +1037,19 @@ class ContractAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+    def get_form(self, request, obj=None, **kwargs):
+        """Conditionally show master_contract field based on contract_category"""
+        form = super().get_form(request, obj, **kwargs)
+
+        # If this is a participation agreement, master_contract is required
+        # For other categories, hide the field with help text
+        if obj and obj.contract_category != 'participation':
+            if 'master_contract' in form.base_fields:
+                form.base_fields['master_contract'].widget = forms.HiddenInput()
+                form.base_fields['master_contract'].required = False
+
+        return form
 
     def bulk_update_status_active(self, request, queryset):
         """Mark selected contracts as active"""
@@ -3348,3 +3454,101 @@ class TicketKBArticleAdmin(admin.ModelAdmin):
 # -----------------------------------------------------------------------------
 
 # Equipment admin classes removed - replaced by simpler Device model
+
+
+# -----------------------------------------------------------------------------
+# Static Documents Admin (Terms & Conditions, etc.)
+# -----------------------------------------------------------------------------
+
+@admin.register(StaticDocument)
+class StaticDocumentAdmin(admin.ModelAdmin):
+    """Admin interface for managing static legal documents"""
+    list_display = ['name', 'document_type_badge', 'version', 'effective_date', 'is_active_badge', 'file_link', 'updated_at']
+    list_filter = ['document_type', 'is_active', 'effective_date']
+    search_fields = ['name', 'description', 'version']
+    readonly_fields = ['created_at', 'updated_at', 'file_size_display']
+    list_per_page = 25
+    date_hierarchy = 'effective_date'
+
+    fieldsets = (
+        ('Document Information', {
+            'fields': ('name', 'document_type', 'version', 'effective_date', 'is_active')
+        }),
+        ('File', {
+            'fields': ('file', 'file_size_display'),
+            'description': 'Upload PDF document. Recommended: Use clear naming and keep file sizes under 5MB.'
+        }),
+        ('Description', {
+            'fields': ('description',),
+            'classes': ('collapse',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def document_type_badge(self, obj):
+        """Display document type with colored badge"""
+        color_map = {
+            'standard_terms_th': '#FFA500',  # Orange for Thailand/HK
+            'standard_terms_intl': '#2196F3',  # Blue for International
+        }
+        label_map = {
+            'standard_terms_th': 'TH/HK',
+            'standard_terms_intl': 'INTL',
+        }
+        color = color_map.get(obj.document_type, '#999')
+        label = label_map.get(obj.document_type, obj.get_document_type_display())
+
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 3px 8px; '
+            'border-radius: 3px; font-size: 11px; font-weight: bold;">{}</span><br>'
+            '<small style="color: #666;">{}</small>',
+            color, label, obj.get_document_type_display()
+        )
+    document_type_badge.short_description = "Type"
+
+    def is_active_badge(self, obj):
+        """Display active status with colored badge"""
+        if obj.is_active:
+            return format_html(
+                '<span style="background-color: #4CAF50; color: white; padding: 3px 8px; '
+                'border-radius: 3px; font-size: 11px; font-weight: bold;">ACTIVE</span>'
+            )
+        return format_html(
+            '<span style="background-color: #999; color: white; padding: 3px 8px; '
+            'border-radius: 3px; font-size: 11px;">INACTIVE</span>'
+        )
+    is_active_badge.short_description = "Status"
+
+    def file_link(self, obj):
+        """Display link to download the file"""
+        if obj.file:
+            return format_html(
+                '<a href="{}" target="_blank" style="color: #2196F3; text-decoration: none;">'
+                '📄 View PDF</a>',
+                obj.file.url
+            )
+        return format_html('<span style="color: #999;">No file</span>')
+    file_link.short_description = "File"
+
+    def file_size_display(self, obj):
+        """Display file size in human-readable format"""
+        if obj.file:
+            try:
+                size = obj.file.size
+                if size < 1024:
+                    return f"{size} bytes"
+                elif size < 1024 * 1024:
+                    return f"{size / 1024:.2f} KB"
+                else:
+                    return f"{size / (1024 * 1024):.2f} MB"
+            except Exception:
+                return "Unknown size"
+        return "No file"
+    file_size_display.short_description = "File Size"
+
+    def get_queryset(self, request):
+        """Optimize queryset"""
+        return super().get_queryset(request).order_by('-is_active', '-effective_date')

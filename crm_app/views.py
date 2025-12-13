@@ -30,7 +30,7 @@ from .models import (
     Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
-    Zone, Device
+    Zone, Device, StaticDocument
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
@@ -44,7 +44,7 @@ from .serializers import (
     KBCategorySerializer, KBTagSerializer, KBArticleSerializer, KBArticleListSerializer,
     KBArticleViewSerializer, KBArticleRatingSerializer, KBArticleRelationSerializer,
     KBArticleAttachmentSerializer, TicketKBArticleSerializer,
-    ZoneSerializer, DeviceSerializer
+    ZoneSerializer, DeviceSerializer, StaticDocumentSerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -326,7 +326,7 @@ class CompanyViewSet(BaseModelViewSet):
     ordering_fields = ['name', 'created_at', 'industry', 'country']
     ordering = ['name']
     # Inherits permission_classes = [AllowAny] from BaseModelViewSet for development
-    filterset_fields = ['industry', 'is_active', 'country']
+    filterset_fields = ['industry', 'is_active', 'country', 'is_corporate_parent', 'parent_company']
 
     def get_queryset(self):
         """Override to dynamically optimize queryset based on action"""
@@ -335,22 +335,24 @@ class CompanyViewSet(BaseModelViewSet):
         # For list action, optimize for serialization
         if self.action == 'list':
             # Prefetch related objects that are used in the serializer
-            queryset = queryset.prefetch_related(
+            queryset = queryset.select_related('parent_company').prefetch_related(
                 'contacts',
                 'zones',
                 'opportunities',
-                'contracts'
+                'contracts',
+                'child_companies'
             )
         elif self.action == 'retrieve':
             # For detail view, include even more related data
-            queryset = queryset.prefetch_related(
+            queryset = queryset.select_related('parent_company').prefetch_related(
                 'contacts',
                 'zones',
                 'opportunities',
                 'opportunities__activities',
                 'contracts',
                 'contracts__invoices',
-                'tasks'
+                'tasks',
+                'child_companies'
             )
 
         return queryset
@@ -619,7 +621,7 @@ class ContractViewSet(BaseModelViewSet):
     search_fields = ['contract_number', 'company__name']
     ordering_fields = ['created_at', 'start_date', 'end_date', 'value']
     ordering = ['-start_date']
-    filterset_fields = ['company', 'contract_type', 'status', 'auto_renew', 'is_active']
+    filterset_fields = ['company', 'contract_type', 'status', 'auto_renew', 'is_active', 'contract_category']
     
     @action(detail=False, methods=['get'])
     def expiring_soon(self, request):
@@ -687,7 +689,78 @@ class ContractViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
-        """Generate and download PDF for contract"""
+        """Generate and download PDF for contract based on contract_category"""
+        contract = self.get_object()
+
+        # Route to appropriate PDF generator based on contract category
+        if contract.contract_category == 'corporate_master':
+            return self._generate_master_agreement_pdf(contract)
+        elif contract.contract_category == 'participation':
+            return self._generate_participation_agreement_pdf(contract)
+        else:  # standard
+            return self._generate_principal_terms_pdf(contract)
+
+    @action(detail=True, methods=['get'])
+    def standard_terms(self, request, pk=None):
+        """
+        Get the appropriate Standard Terms and Conditions PDF based on billing entity.
+
+        Returns the StaticDocument PDF for:
+        - 'standard_terms_th' for Thailand/Hong Kong entities
+        - 'standard_terms_intl' for international entities
+        """
+        from django.http import FileResponse, Http404
+        from .models import StaticDocument
+
+        contract = self.get_object()
+        company = contract.company
+
+        # Determine which standard terms to use based on billing entity
+        if company.billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+            document_type = 'standard_terms_th'
+        else:
+            document_type = 'standard_terms_intl'
+
+        # Get the active static document
+        try:
+            static_doc = StaticDocument.objects.filter(
+                document_type=document_type,
+                is_active=True
+            ).latest('created_at')
+        except StaticDocument.DoesNotExist:
+            return Response(
+                {
+                    'error': f'No active Standard Terms document found for type: {document_type}',
+                    'detail': 'Please upload the Standard Terms PDF in the Django admin under Static Documents.'
+                },
+                status=404
+            )
+
+        # Return the file
+        try:
+            response = FileResponse(static_doc.file.open('rb'), content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="Standard_Terms_{contract.contract_number}.pdf"'
+
+            # Log activity
+            self.log_action('VIEW', contract, {
+                'action': 'Standard Terms PDF downloaded',
+                'contract_number': contract.contract_number,
+                'document_type': document_type,
+                'document_version': static_doc.version
+            })
+
+            return response
+        except Exception as e:
+            return Response(
+                {
+                    'error': 'Failed to retrieve Standard Terms document',
+                    'detail': str(e)
+                },
+                status=500
+            )
+
+    def _generate_principal_terms_pdf(self, contract):
+        """Generate Principal Terms PDF for standard contracts"""
         from reportlab.lib.pagesizes import letter, A4
         from reportlab.lib import colors
         from reportlab.lib.units import inch
@@ -698,7 +771,6 @@ class ContractViewSet(BaseModelViewSet):
         from django.conf import settings
         import os
 
-        contract = self.get_object()
         company = contract.company
 
         # Get entity-specific details based on billing_entity
@@ -795,7 +867,7 @@ class ContractViewSet(BaseModelViewSet):
             alignment=TA_CENTER,
             fontName='Helvetica-Bold'
         )
-        elements.append(Paragraph("CONTRACT AGREEMENT", contract_title_style))
+        elements.append(Paragraph("PRINCIPAL TERMS", contract_title_style))
 
         # Document metadata table (modern grid layout)
         metadata_data = [
@@ -1013,12 +1085,18 @@ class ContractViewSet(BaseModelViewSet):
         elements.append(Paragraph("SIGNATURES", heading_style))
         elements.append(Spacer(1, 0.2*inch))
 
-        # Create signature table
+        # Create signature table with signatory names and titles
+        bmasia_signatory = contract.bmasia_signatory_name or 'Authorized Representative'
+        bmasia_title = contract.bmasia_signatory_title or 'Authorized Representative'
+        customer_signatory = contract.customer_signatory_name or 'Authorized Representative'
+        customer_title = contract.customer_signatory_title or 'Authorized Representative'
+
         signature_data = [
             ['', ''],
             ['_' * 40, '_' * 40],
-            [entity_name, company.name],
-            ['Authorized Representative', 'Authorized Representative'],
+            [bmasia_signatory, customer_signatory],
+            [bmasia_title, customer_title],
+            [entity_name, company.legal_entity_name or company.name],
             ['', ''],
             ['Date: _________________', 'Date: _________________'],
         ]
@@ -1026,8 +1104,10 @@ class ContractViewSet(BaseModelViewSet):
         signature_table = Table(signature_data, colWidths=[3.45*inch, 3.45*inch])
         signature_table.setStyle(TableStyle([
             ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
-            ('FONT', (0, 2), (-1, 3), 'Helvetica-Bold', 10),
-            ('FONT', (0, 5), (-1, 5), 'Helvetica', 9),
+            ('FONT', (0, 2), (-1, 2), 'Helvetica-Bold', 11),
+            ('FONT', (0, 3), (-1, 3), 'Helvetica', 10),
+            ('FONT', (0, 4), (-1, 4), 'Helvetica-Bold', 10),
+            ('FONT', (0, 6), (-1, 6), 'Helvetica', 9),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -1062,6 +1142,574 @@ class ContractViewSet(BaseModelViewSet):
             'action': 'PDF generated and downloaded',
             'contract_number': contract.contract_number,
             'status': contract.status
+        })
+
+        return response
+
+    def _generate_master_agreement_pdf(self, contract):
+        """Generate Master Agreement PDF for corporate_master contracts"""
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_LEFT, TA_CENTER
+        from io import BytesIO
+        from django.conf import settings
+        import os
+
+        company = contract.company
+
+        # Get entity-specific details based on billing_entity
+        billing_entity = company.billing_entity
+        if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+            entity_name = 'BMAsia (Thailand) Co., Ltd.'
+            entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
+            entity_phone = '+66 2153 3520'
+            entity_tax = '0105548025073'
+        else:  # BMAsia Limited (Hong Kong)
+            entity_name = 'BMAsia Limited'
+            entity_address = '22nd Floor, Tai Yau Building, 181 Johnston Road, Wanchai, Hong Kong'
+            entity_phone = '+66 2153 3520'
+            entity_tax = None
+
+        # Create PDF buffer
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.4*inch)
+
+        # Container for PDF elements
+        elements = []
+        styles = getSampleStyleSheet()
+
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#424242'),
+            spaceAfter=12,
+            fontName='Helvetica-Bold'
+        )
+
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=12,
+            textColor=colors.HexColor('#424242'),
+            spaceAfter=8,
+            spaceBefore=8,
+            fontName='Helvetica-Bold'
+        )
+
+        body_style = ParagraphStyle(
+            'CustomBody',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#424242'),
+            leading=14
+        )
+
+        small_style = ParagraphStyle(
+            'SmallText',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#757575'),
+            leading=11
+        )
+
+        # Header - BMAsia Logo
+        logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
+        try:
+            if os.path.exists(logo_path):
+                logo = Image(logo_path, width=160, height=64, kind='proportional')
+                logo.hAlign = 'LEFT'
+                elements.append(logo)
+            else:
+                elements.append(Paragraph("BM ASIA", title_style))
+        except Exception:
+            elements.append(Paragraph("BM ASIA", title_style))
+
+        # Orange accent line
+        elements.append(Spacer(1, 0.1*inch))
+        elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#FFA500'), spaceBefore=0, spaceAfter=0))
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Master Agreement title
+        master_title_style = ParagraphStyle(
+            'MasterTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#FFA500'),
+            spaceAfter=20,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        elements.append(Paragraph("MASTER SERVICE AGREEMENT", master_title_style))
+
+        # Document metadata
+        metadata_data = [
+            ['Agreement Number', 'Date', 'Status', 'Validity'],
+            [contract.contract_number,
+             contract.start_date.strftime('%b %d, %Y'),
+             contract.status,
+             f"{contract.start_date.strftime('%b %d, %Y')} - {contract.end_date.strftime('%b %d, %Y')}"]
+        ]
+
+        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.7*inch, 1.7*inch, 1.8*inch])
+        metadata_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('TOPPADDING', (0, 0), (-1, 0), 10),
+            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
+            ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#424242')),
+            ('ALIGN', (0, 1), (-1, 1), 'CENTER'),
+            ('TOPPADDING', (0, 1), (-1, 1), 10),
+            ('BOTTOMPADDING', (0, 1), (-1, 1), 10),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+        ]))
+        elements.append(metadata_table)
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Parties Section
+        elements.append(Paragraph("PARTIES TO THIS AGREEMENT", heading_style))
+
+        parties_data = [
+            [Paragraph('<b>Service Provider:</b>', heading_style), Paragraph('<b>Corporate Client:</b>', heading_style)],
+            [
+                Paragraph(f"""
+                <b>{entity_name}</b><br/>
+                {entity_address.replace(', ', '<br/>')}<br/>
+                Phone: {entity_phone}
+                {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
+                """, body_style),
+                Paragraph(f"""
+                <b>{company.legal_entity_name or company.name}</b><br/>
+                {company.full_address.replace(', ', '<br/>') if company.full_address else (company.country or '')}
+                """, body_style)
+            ]
+        ]
+
+        parties_table = Table(parties_data, colWidths=[3.45*inch, 3.45*inch])
+        parties_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, 0), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+            ('TOPPADDING', (0, 1), (-1, 1), 6),
+        ]))
+        elements.append(parties_table)
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Agreement Overview
+        elements.append(Paragraph("AGREEMENT OVERVIEW", heading_style))
+
+        overview_text = f"<b>Service Type:</b> {contract.get_service_type_display() if contract.service_type else 'Professional Services'}<br/>"
+        overview_text += f"<b>Contract Period:</b> {contract.start_date.strftime('%B %d, %Y')} to {contract.end_date.strftime('%B %d, %Y')}<br/>"
+        if contract.billing_frequency:
+            overview_text += f"<b>Billing Frequency:</b> {contract.billing_frequency}<br/>"
+        overview_text += f"<b>Auto-Renewal:</b> {'Yes' if contract.auto_renew else 'No'}"
+
+        elements.append(Paragraph(overview_text, body_style))
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Custom Terms (if specified)
+        if contract.custom_terms:
+            elements.append(Paragraph("CUSTOM TERMS AND CONDITIONS", heading_style))
+            custom_terms_text = contract.custom_terms.replace('\n', '<br/>')
+            elements.append(Paragraph(custom_terms_text, body_style))
+            elements.append(Spacer(1, 0.3*inch))
+
+        # List of Participation Agreements
+        participation_agreements = contract.participation_agreements.all()
+        if participation_agreements.exists():
+            elements.append(Paragraph("PARTICIPATION AGREEMENTS UNDER THIS MASTER", heading_style))
+
+            pa_data = [['Agreement Number', 'Venue', 'Status', 'Period']]
+            for pa in participation_agreements:
+                pa_data.append([
+                    pa.contract_number,
+                    pa.company.name,
+                    pa.status,
+                    f"{pa.start_date.strftime('%b %Y')} - {pa.end_date.strftime('%b %Y')}"
+                ])
+
+            pa_table = Table(pa_data, colWidths=[1.7*inch, 2.2*inch, 1.2*inch, 1.8*inch])
+            pa_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f5f5f5')),
+                ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+                ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+            ]))
+            elements.append(pa_table)
+            elements.append(Spacer(1, 0.3*inch))
+
+        # Signatures Section
+        elements.append(Paragraph("SIGNATURES", heading_style))
+        elements.append(Spacer(1, 0.2*inch))
+
+        bmasia_signatory = contract.bmasia_signatory_name or 'Authorized Representative'
+        bmasia_title = contract.bmasia_signatory_title or 'Authorized Representative'
+        customer_signatory = contract.customer_signatory_name or 'Authorized Representative'
+        customer_title = contract.customer_signatory_title or 'Authorized Representative'
+
+        signature_data = [
+            ['', ''],
+            ['_' * 40, '_' * 40],
+            [bmasia_signatory, customer_signatory],
+            [bmasia_title, customer_title],
+            [entity_name, company.legal_entity_name or company.name],
+            ['', ''],
+            ['Date: _________________', 'Date: _________________'],
+        ]
+
+        signature_table = Table(signature_data, colWidths=[3.45*inch, 3.45*inch])
+        signature_table.setStyle(TableStyle([
+            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
+            ('FONT', (0, 2), (-1, 2), 'Helvetica-Bold', 11),
+            ('FONT', (0, 3), (-1, 3), 'Helvetica', 10),
+            ('FONT', (0, 4), (-1, 4), 'Helvetica-Bold', 10),
+            ('FONT', (0, 6), (-1, 6), 'Helvetica', 9),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(signature_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Footer
+        elements.append(Spacer(1, 0.15*inch))
+        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
+
+        footer_text = f"""
+        <b>{entity_name}</b> | {entity_address.replace(', ', ' | ')} | Phone: {entity_phone}
+        """
+        elements.append(Paragraph(footer_text, small_style))
+
+        # Build PDF
+        doc.build(elements)
+
+        # Get PDF data
+        pdf_data = buffer.getvalue()
+        buffer.close()
+
+        # Create response
+        response = HttpResponse(pdf_data, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Master_Agreement_{contract.contract_number}.pdf"'
+
+        # Log activity
+        self.log_action('VIEW', contract, {
+            'action': 'Master Agreement PDF generated',
+            'contract_number': contract.contract_number,
+            'status': contract.status
+        })
+
+        return response
+
+    def _generate_participation_agreement_pdf(self, contract):
+        """Generate Participation Agreement PDF for participation contracts"""
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_LEFT, TA_CENTER
+        from io import BytesIO
+        from django.conf import settings
+        import os
+
+        company = contract.company
+        master_contract = contract.master_contract
+
+        # Get entity-specific details based on billing_entity
+        billing_entity = company.billing_entity
+        if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+            entity_name = 'BMAsia (Thailand) Co., Ltd.'
+            entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
+            entity_phone = '+66 2153 3520'
+            entity_tax = '0105548025073'
+        else:  # BMAsia Limited (Hong Kong)
+            entity_name = 'BMAsia Limited'
+            entity_address = '22nd Floor, Tai Yau Building, 181 Johnston Road, Wanchai, Hong Kong'
+            entity_phone = '+66 2153 3520'
+            entity_tax = None
+
+        # Create PDF buffer
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.4*inch)
+
+        # Container for PDF elements
+        elements = []
+        styles = getSampleStyleSheet()
+
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#424242'),
+            spaceAfter=12,
+            fontName='Helvetica-Bold'
+        )
+
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=12,
+            textColor=colors.HexColor('#424242'),
+            spaceAfter=8,
+            spaceBefore=8,
+            fontName='Helvetica-Bold'
+        )
+
+        body_style = ParagraphStyle(
+            'CustomBody',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.HexColor('#424242'),
+            leading=14
+        )
+
+        small_style = ParagraphStyle(
+            'SmallText',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#757575'),
+            leading=11
+        )
+
+        # Header - BMAsia Logo
+        logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
+        try:
+            if os.path.exists(logo_path):
+                logo = Image(logo_path, width=160, height=64, kind='proportional')
+                logo.hAlign = 'LEFT'
+                elements.append(logo)
+            else:
+                elements.append(Paragraph("BM ASIA", title_style))
+        except Exception:
+            elements.append(Paragraph("BM ASIA", title_style))
+
+        # Orange accent line
+        elements.append(Spacer(1, 0.1*inch))
+        elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#FFA500'), spaceBefore=0, spaceAfter=0))
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Participation Agreement title
+        participation_title_style = ParagraphStyle(
+            'ParticipationTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#FFA500'),
+            spaceAfter=20,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        elements.append(Paragraph("PARTICIPATION AGREEMENT", participation_title_style))
+
+        # Document metadata
+        metadata_data = [
+            ['Agreement Number', 'Date', 'Status', 'Validity'],
+            [contract.contract_number,
+             contract.start_date.strftime('%b %d, %Y'),
+             contract.status,
+             f"{contract.start_date.strftime('%b %d, %Y')} - {contract.end_date.strftime('%b %d, %Y')}"]
+        ]
+
+        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.7*inch, 1.7*inch, 1.8*inch])
+        metadata_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+            ('TOPPADDING', (0, 0), (-1, 0), 10),
+            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
+            ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#424242')),
+            ('ALIGN', (0, 1), (-1, 1), 'CENTER'),
+            ('TOPPADDING', (0, 1), (-1, 1), 10),
+            ('BOTTOMPADDING', (0, 1), (-1, 1), 10),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+        ]))
+        elements.append(metadata_table)
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Reference to Master Agreement
+        if master_contract:
+            elements.append(Paragraph("MASTER AGREEMENT REFERENCE", heading_style))
+
+            master_ref_text = f"""
+            <b>Master Agreement Number:</b> {master_contract.contract_number}<br/>
+            <b>Master Agreement Date:</b> {master_contract.start_date.strftime('%B %d, %Y')}<br/>
+            <b>Corporate Parent:</b> {master_contract.company.legal_entity_name or master_contract.company.name}<br/>
+            <b>Master Agreement Status:</b> {master_contract.status}
+            """
+            elements.append(Paragraph(master_ref_text, body_style))
+            elements.append(Spacer(1, 0.2*inch))
+
+        # Venue Details
+        elements.append(Paragraph("VENUE DETAILS", heading_style))
+
+        venue_data = [
+            [Paragraph('<b>Service Provider:</b>', heading_style), Paragraph('<b>Venue:</b>', heading_style)],
+            [
+                Paragraph(f"""
+                <b>{entity_name}</b><br/>
+                {entity_address.replace(', ', '<br/>')}<br/>
+                Phone: {entity_phone}
+                {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
+                """, body_style),
+                Paragraph(f"""
+                <b>{company.legal_entity_name or company.name}</b><br/>
+                {company.full_address.replace(', ', '<br/>') if company.full_address else (company.country or '')}
+                """, body_style)
+            ]
+        ]
+
+        venue_table = Table(venue_data, colWidths=[3.45*inch, 3.45*inch])
+        venue_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, 0), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+            ('TOPPADDING', (0, 1), (-1, 1), 6),
+        ]))
+        elements.append(venue_table)
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Zones Covered
+        zones = contract.get_active_zones()
+        if zones.exists():
+            elements.append(Paragraph("ZONES COVERED BY THIS AGREEMENT", heading_style))
+
+            zone_data = [['Zone Name', 'Platform', 'Status']]
+            for zone in zones:
+                zone_data.append([
+                    zone.name,
+                    zone.platform.upper() if zone.platform else 'N/A',
+                    'Active' if zone.is_active else 'Inactive'
+                ])
+
+            zone_table = Table(zone_data, colWidths=[3*inch, 2*inch, 1.9*inch])
+            zone_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f5f5f5')),
+                ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+                ('FONT', (0, 1), (-1, -1), 'Helvetica', 10),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('TOPPADDING', (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+            ]))
+            elements.append(zone_table)
+            elements.append(Spacer(1, 0.3*inch))
+
+        # Contract Details
+        elements.append(Paragraph("AGREEMENT DETAILS", heading_style))
+
+        # Currency symbol
+        currency_symbol = {'USD': '$', 'THB': 'THB ', 'EUR': 'EUR ', 'GBP': 'GBP '}.get(contract.currency, contract.currency + ' ')
+
+        details_data = [
+            ['Service Type', contract.get_service_type_display() if contract.service_type else 'Professional Services'],
+            ['Contract Period', f"{contract.start_date.strftime('%B %d, %Y')} to {contract.end_date.strftime('%B %d, %Y')}"],
+            ['Total Value', f"{currency_symbol}{contract.value:,.2f} {contract.currency}"],
+        ]
+
+        if contract.monthly_value > 0:
+            details_data.append(['Monthly Value', f"{currency_symbol}{contract.monthly_value:,.2f}"])
+
+        if contract.billing_frequency:
+            details_data.append(['Billing Frequency', contract.billing_frequency])
+
+        details_table = Table(details_data, colWidths=[3.45*inch, 3.45*inch])
+        details_table.setStyle(TableStyle([
+            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 10),
+            ('FONT', (1, 0), (1, -1), 'Helvetica', 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e0e0e0')),
+        ]))
+        elements.append(details_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Additional Notes (if any)
+        if contract.notes:
+            elements.append(Paragraph("ADDITIONAL TERMS", heading_style))
+            notes_text = contract.notes.replace('\n', '<br/>')
+            elements.append(Paragraph(notes_text, body_style))
+            elements.append(Spacer(1, 0.3*inch))
+
+        # Signatures Section
+        elements.append(Paragraph("SIGNATURES", heading_style))
+        elements.append(Spacer(1, 0.2*inch))
+
+        bmasia_signatory = contract.bmasia_signatory_name or 'Authorized Representative'
+        bmasia_title = contract.bmasia_signatory_title or 'Authorized Representative'
+        customer_signatory = contract.customer_signatory_name or 'Authorized Representative'
+        customer_title = contract.customer_signatory_title or 'Authorized Representative'
+
+        signature_data = [
+            ['', ''],
+            ['_' * 40, '_' * 40],
+            [bmasia_signatory, customer_signatory],
+            [bmasia_title, customer_title],
+            [entity_name, company.legal_entity_name or company.name],
+            ['', ''],
+            ['Date: _________________', 'Date: _________________'],
+        ]
+
+        signature_table = Table(signature_data, colWidths=[3.45*inch, 3.45*inch])
+        signature_table.setStyle(TableStyle([
+            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
+            ('FONT', (0, 2), (-1, 2), 'Helvetica-Bold', 11),
+            ('FONT', (0, 3), (-1, 3), 'Helvetica', 10),
+            ('FONT', (0, 4), (-1, 4), 'Helvetica-Bold', 10),
+            ('FONT', (0, 6), (-1, 6), 'Helvetica', 9),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ]))
+        elements.append(signature_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Footer
+        elements.append(Spacer(1, 0.15*inch))
+        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
+
+        footer_text = f"""
+        <b>{entity_name}</b> | {entity_address.replace(', ', ' | ')} | Phone: {entity_phone}
+        """
+        elements.append(Paragraph(footer_text, small_style))
+
+        # Build PDF
+        doc.build(elements)
+
+        # Get PDF data
+        pdf_data = buffer.getvalue()
+        buffer.close()
+
+        # Create response
+        response = HttpResponse(pdf_data, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Participation_Agreement_{contract.contract_number}.pdf"'
+
+        # Log activity
+        self.log_action('VIEW', contract, {
+            'action': 'Participation Agreement PDF generated',
+            'contract_number': contract.contract_number,
+            'status': contract.status,
+            'master_contract': master_contract.contract_number if master_contract else None
         })
 
         return response
@@ -1235,6 +1883,33 @@ class ContractViewSet(BaseModelViewSet):
             ContractZoneSerializer(contract_zone).data,
             status=status.HTTP_200_OK
         )
+
+    @action(detail=False, methods=['get'])
+    def master_agreements(self, request):
+        """List all active corporate master agreements (for dropdown selection)"""
+        master_contracts = self.get_queryset().filter(
+            contract_category='corporate_master',
+            is_active=True
+        ).order_by('-created_at')
+
+        serializer = self.get_serializer(master_contracts, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def participation_agreements(self, request, pk=None):
+        """List participation agreements under this master contract"""
+        master_contract = self.get_object()
+
+        # Verify this is a master contract
+        if master_contract.contract_category != 'corporate_master':
+            return Response(
+                {'error': 'This endpoint only works for corporate master agreements'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        participation_agreements = master_contract.participation_agreements.all().order_by('-created_at')
+        serializer = self.get_serializer(participation_agreements, many=True)
+        return Response(serializer.data)
 
 
 class InvoiceViewSet(BaseModelViewSet):
@@ -4624,3 +5299,46 @@ class ZoneViewSet(viewsets.ModelViewSet):
         queryset = queryset.select_related('contract', 'zone').order_by('-start_date')
         serializer = ContractZoneSerializer(queryset, many=True)
         return Response(serializer.data)
+
+
+class StaticDocumentViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing static documents (standard T&Cs, etc.)
+    """
+    queryset = StaticDocument.objects.all()
+    serializer_class = StaticDocumentSerializer
+    permission_classes = [AllowAny]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['document_type', 'is_active']
+    search_fields = ['name', 'description']
+    ordering_fields = ['name', 'version', 'effective_date', 'created_at']
+    ordering = ['-created_at']
+
+    @action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        """Download the PDF file"""
+        document = self.get_object()
+
+        if not document.file:
+            return Response(
+                {'error': 'No file attached to this document'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Return the file as an attachment
+        from django.http import FileResponse
+        import os
+
+        file_path = document.file.path
+        if not os.path.exists(file_path):
+            return Response(
+                {'error': 'File not found on server'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        response = FileResponse(
+            open(file_path, 'rb'),
+            content_type='application/pdf'
+        )
+        response['Content-Disposition'] = f'attachment; filename="{document.name}_v{document.version}.pdf"'
+        return response

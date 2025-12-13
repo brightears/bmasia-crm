@@ -11,7 +11,7 @@ from .models import (
     CustomerSegment, Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
-    Device
+    Device, StaticDocument
 )
 
 
@@ -180,6 +180,11 @@ class CompanySerializer(serializers.ModelSerializer):
     opportunities_count = serializers.SerializerMethodField()
     active_contracts_count = serializers.SerializerMethodField()
 
+    # Corporate structure fields
+    parent_company_name = serializers.CharField(source='parent_company.name', read_only=True, allow_null=True)
+    is_subsidiary = serializers.SerializerMethodField()
+    child_companies_count = serializers.SerializerMethodField()
+
     class Meta:
         model = Company
         fields = [
@@ -189,7 +194,11 @@ class CompanySerializer(serializers.ModelSerializer):
             'address_line1', 'address_line2', 'city', 'state', 'postal_code',
             'billing_entity', 'full_address', 'total_contract_value', 'contacts', 'zones', 'zones_summary',
             'subscription_summary', 'primary_contact', 'opportunities_count',
-            'active_contracts_count', 'created_at', 'updated_at'
+            'active_contracts_count',
+            # Corporate structure
+            'parent_company', 'parent_company_name', 'is_corporate_parent',
+            'is_subsidiary', 'child_companies_count',
+            'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
@@ -307,6 +316,16 @@ class CompanySerializer(serializers.ModelSerializer):
             return ", ".join(summary_parts)
         except Exception:
             return "Error loading zones"
+
+    def get_is_subsidiary(self, obj):
+        """Check if company is a subsidiary (has a parent)"""
+        return obj.parent_company is not None
+
+    def get_child_companies_count(self, obj):
+        """Count of child companies (only for corporate parents)"""
+        if obj.is_corporate_parent:
+            return obj.child_companies.count()
+        return 0
 
 
 class NoteSerializer(serializers.ModelSerializer):
@@ -455,7 +474,11 @@ class ContractSerializer(serializers.ModelSerializer):
     contract_zones = ContractZoneSerializer(many=True, read_only=True)
     active_zone_count = serializers.SerializerMethodField()
     total_zone_count = serializers.SerializerMethodField()
-    
+
+    # Corporate contract fields
+    master_contract_number = serializers.CharField(source='master_contract.contract_number', read_only=True, allow_null=True)
+    participation_agreements_count = serializers.SerializerMethodField()
+
     class Meta:
         model = Contract
         fields = [
@@ -466,6 +489,11 @@ class ContractSerializer(serializers.ModelSerializer):
             'renewal_notice_sent', 'renewal_notice_date', 'days_until_expiry',
             'is_expiring_soon', 'monthly_value', 'invoices', 'paid_invoices_count',
             'outstanding_amount', 'contract_zones', 'active_zone_count', 'total_zone_count',
+            # Corporate contract fields
+            'contract_category', 'master_contract', 'master_contract_number',
+            'customer_signatory_name', 'customer_signatory_title',
+            'bmasia_signatory_name', 'bmasia_signatory_title', 'custom_terms',
+            'participation_agreements_count',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'contract_number', 'created_at', 'updated_at']
@@ -489,6 +517,12 @@ class ContractSerializer(serializers.ModelSerializer):
     def get_total_zone_count(self, obj):
         """Total count of all zones (active + historical)"""
         return obj.contract_zones.count()
+
+    def get_participation_agreements_count(self, obj):
+        """Count of participation agreements under this master contract"""
+        if obj.contract_category == 'corporate_master':
+            return obj.participation_agreements.count()
+        return 0
 
     def create(self, validated_data):
         """Create contract with auto-generated contract number"""
@@ -1663,6 +1697,30 @@ class TicketKBArticleSerializer(serializers.ModelSerializer):
         if request and request.user.is_authenticated and not validated_data.get('linked_by'):
             validated_data['linked_by'] = request.user
         return super().create(validated_data)
+
+
+class StaticDocumentSerializer(serializers.ModelSerializer):
+    """Serializer for StaticDocument model (standard T&Cs, etc.)"""
+    document_type_display = serializers.CharField(source='get_document_type_display', read_only=True)
+    file_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StaticDocument
+        fields = [
+            'id', 'name', 'document_type', 'document_type_display',
+            'file', 'file_url', 'version', 'effective_date', 'description',
+            'is_active', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_file_url(self, obj):
+        """Return the file URL if file exists"""
+        if obj.file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.file.url)
+            return obj.file.url
+        return None
 
 
 # ============================================================================

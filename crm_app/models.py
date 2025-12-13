@@ -163,6 +163,21 @@ class Company(TimestampedModel):
         help_text="General IT notes: remote access details, contact preferences, configurations"
     )
 
+    # Corporate structure
+    parent_company = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='child_companies',
+        help_text="Corporate parent company (e.g., Hilton Corporate)"
+    )
+
+    is_corporate_parent = models.BooleanField(
+        default=False,
+        help_text="True if this is a corporate HQ that manages multiple venues"
+    )
+
     class Meta:
         verbose_name_plural = 'Companies'
         ordering = ['name']
@@ -193,7 +208,17 @@ class Company(TimestampedModel):
         if self.location_count > 0:
             return round(self.music_zone_count / self.location_count, 1)
         return 0
-    
+
+    @property
+    def is_subsidiary(self):
+        """Check if this company is a subsidiary of a parent company"""
+        return self.parent_company is not None
+
+    @property
+    def has_subsidiaries(self):
+        """Check if this company has child companies"""
+        return self.child_companies.exists()
+
     def sync_soundtrack_zones(self):
         """Sync zones from Soundtrack API"""
         if not self.soundtrack_account_id:
@@ -589,6 +614,34 @@ class Contract(TimestampedModel):
     renewal_notice_sent = models.BooleanField(default=False)
     renewal_notice_date = models.DateField(null=True, blank=True)
 
+    # Corporate contract fields
+    CONTRACT_CATEGORY_CHOICES = [
+        ('standard', 'Standard Contract'),
+        ('corporate_master', 'Corporate Master Agreement'),
+        ('participation', 'Participation Agreement'),
+    ]
+
+    contract_category = models.CharField(
+        max_length=20,
+        choices=CONTRACT_CATEGORY_CHOICES,
+        default='standard',
+    )
+
+    master_contract = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='participation_agreements',
+        help_text="Reference to master agreement (for participation agreements)"
+    )
+
+    customer_signatory_name = models.CharField(max_length=255, blank=True)
+    customer_signatory_title = models.CharField(max_length=255, blank=True)
+    bmasia_signatory_name = models.CharField(max_length=255, blank=True)
+    bmasia_signatory_title = models.CharField(max_length=255, blank=True)
+    custom_terms = models.TextField(blank=True, help_text="Custom terms for master agreements")
+
     # Zone relationship
     zones = models.ManyToManyField(
         'Zone',  # Use string reference since Zone is defined later
@@ -636,6 +689,28 @@ class Contract(TimestampedModel):
             if months > 0:
                 return round(float(self.value) / months, 2)
         return 0
+
+    def clean(self):
+        """Validate corporate contract relationships"""
+        from django.core.exceptions import ValidationError
+
+        # Participation agreements must have a master contract
+        if self.contract_category == 'participation' and not self.master_contract:
+            raise ValidationError({
+                'master_contract': 'Participation agreements must reference a master contract.'
+            })
+
+        # Master contract must be a corporate_master type
+        if self.master_contract and self.master_contract.contract_category != 'corporate_master':
+            raise ValidationError({
+                'master_contract': 'Master contract must be of type "Corporate Master Agreement".'
+            })
+
+        # Corporate master agreements should not have a master contract
+        if self.contract_category == 'corporate_master' and self.master_contract:
+            raise ValidationError({
+                'master_contract': 'Corporate Master Agreements cannot reference another master contract.'
+            })
 
     def get_active_zones(self):
         """Get currently active zones for this contract"""
@@ -2914,6 +2989,37 @@ class TicketKBArticle(TimestampedModel):
 # ============================================================================
 # Equipment Management System - REMOVED (replaced by simpler Device model)
 # ============================================================================
+
+
+# ============================================================================
+# Static Document Management
+# ============================================================================
+
+class StaticDocument(models.Model):
+    """Static document templates like Standard Terms and Conditions"""
+    DOCUMENT_TYPE_CHOICES = [
+        ('standard_terms_th', 'Standard Terms - Thailand/Hong Kong'),
+        ('standard_terms_intl', 'Standard Terms - International'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255)
+    document_type = models.CharField(max_length=50, choices=DOCUMENT_TYPE_CHOICES, unique=True)
+    file = models.FileField(upload_to='static_documents/')
+    version = models.CharField(max_length=20, default='1.0')
+    effective_date = models.DateField(null=True, blank=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Static Document'
+        verbose_name_plural = 'Static Documents'
+
+    def __str__(self):
+        return f"{self.name} (v{self.version})"
 
 
 # Signal handlers for KB system
