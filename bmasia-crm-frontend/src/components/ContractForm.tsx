@@ -117,7 +117,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
     company: '',
     contract_number: '',
     contract_type: 'Annual' as 'Annual' | 'Monthly' | 'One-time' | 'Custom',
-    contract_category: 'standard' as 'standard' | 'corporate_master' | 'participation',
     status: 'Draft' as 'Draft' | 'Sent' | 'Signed' | 'Active' | 'Expired' | 'Terminated' | 'Renewed',
     start_date: null as Date | null,
     end_date: null as Date | null,
@@ -129,24 +128,16 @@ const ContractForm: React.FC<ContractFormProps> = ({
     billing_frequency: 'Monthly',
     discount_percentage: '',
     notes: '',
-    master_contract: '',
-    customer_signatory_name: '',
-    customer_signatory_title: '',
-    bmasia_signatory_name: '',
-    bmasia_signatory_title: '',
-    custom_terms: '',
   });
 
   const [zones, setZones] = useState<ZoneFormData[]>([
     { name: '', platform: 'soundtrack', tempId: generateTempId() }
   ]);
   const [attachments, setAttachments] = useState<File[]>([]);
-  const [masterContracts, setMasterContracts] = useState<Contract[]>([]);
 
   useEffect(() => {
     if (open) {
       loadCompanies();
-      loadMasterContracts();
       if (mode === 'edit' && contract) {
         populateForm(contract);
       } else {
@@ -166,22 +157,12 @@ const ContractForm: React.FC<ContractFormProps> = ({
     }
   };
 
-  const loadMasterContracts = async () => {
-    try {
-      const contracts = await ApiService.getMasterAgreements();
-      setMasterContracts(contracts);
-    } catch (err) {
-      console.error('Failed to load master contracts:', err);
-    }
-  };
-
 
   const populateForm = (contract: Contract) => {
     setFormData({
       company: contract.company,
       contract_number: contract.contract_number,
       contract_type: contract.contract_type,
-      contract_category: contract.contract_category || 'standard',
       status: contract.status,
       start_date: contract.start_date ? new Date(contract.start_date) : null,
       end_date: contract.end_date ? new Date(contract.end_date) : null,
@@ -193,12 +174,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
       billing_frequency: contract.billing_frequency,
       discount_percentage: contract.discount_percentage.toString(),
       notes: contract.notes || '',
-      master_contract: contract.master_contract || '',
-      customer_signatory_name: contract.customer_signatory_name || '',
-      customer_signatory_title: contract.customer_signatory_title || '',
-      bmasia_signatory_name: contract.bmasia_signatory_name || '',
-      bmasia_signatory_title: contract.bmasia_signatory_title || '',
-      custom_terms: contract.custom_terms || '',
     });
 
     // For edit mode, zones will be managed separately (not in this form for now)
@@ -210,7 +185,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
       company: '',
       contract_number: '',
       contract_type: 'Annual' as 'Annual' | 'Monthly' | 'One-time' | 'Custom',
-      contract_category: 'standard' as 'standard' | 'corporate_master' | 'participation',
       status: 'Draft' as 'Draft' | 'Sent' | 'Signed' | 'Active' | 'Expired' | 'Terminated' | 'Renewed',
       start_date: null,
       end_date: null,
@@ -222,12 +196,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
       billing_frequency: 'Monthly',
       discount_percentage: '',
       notes: '',
-      master_contract: '',
-      customer_signatory_name: '',
-      customer_signatory_title: '',
-      bmasia_signatory_name: '',
-      bmasia_signatory_title: '',
-      custom_terms: '',
     });
     setZones([{ name: '', platform: 'soundtrack', tempId: generateTempId() }]);
     setAttachments([]);
@@ -308,11 +276,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
         return;
       }
 
-      if (formData.contract_category === 'participation' && !formData.master_contract) {
-        setError('Please select a master contract for participation agreements');
-        return;
-      }
-
       if (!formData.start_date || !formData.end_date) {
         setError('Please select start and end dates');
         return;
@@ -366,11 +329,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
   const selectedCompany = companies.find(c => c.id === formData.company);
 
-  // Filter companies based on contract category
-  const filteredCompanies = formData.contract_category === 'corporate_master'
-    ? companies.filter(c => c.is_corporate_parent)
-    : companies;
-
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Dialog
@@ -409,7 +367,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
                 <Box sx={{ display: 'flex', gap: 2 }}>
                   <Autocomplete
                     fullWidth
-                    options={filteredCompanies}
+                    options={companies}
                     getOptionLabel={(option) => option.name}
                     value={selectedCompany || null}
                     onChange={(_, value) => handleCompanyChange(value)}
@@ -418,7 +376,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
                         {...params}
                         label="Company *"
                         placeholder="Select a company"
-                        helperText={formData.contract_category === 'corporate_master' ? 'Only corporate HQ companies shown' : ''}
                       />
                     )}
                   />
@@ -468,102 +425,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
                       ))}
                     </Select>
                   </FormControl>
-                </Box>
-
-                <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-                  <FormControl fullWidth>
-                    <InputLabel>Contract Category</InputLabel>
-                    <Select
-                      value={formData.contract_category}
-                      onChange={(e) => setFormData(prev => ({ ...prev, contract_category: e.target.value as any }))}
-                      label="Contract Category"
-                    >
-                      <MenuItem value="standard">Standard Contract</MenuItem>
-                      <MenuItem value="corporate_master">Corporate Master Agreement</MenuItem>
-                      <MenuItem value="participation">Participation Agreement</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Box>
-
-                {formData.contract_category === 'participation' && (
-                  <Box sx={{ mt: 2 }}>
-                    <Autocomplete
-                      fullWidth
-                      options={masterContracts}
-                      getOptionLabel={(option) => `${option.contract_number} - ${option.company_name}`}
-                      value={masterContracts.find(c => c.id === formData.master_contract) || null}
-                      onChange={(_, value) => setFormData(prev => ({ ...prev, master_contract: value?.id || '' }))}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          label="Master Contract *"
-                          placeholder="Select master agreement"
-                          error={showErrors && !formData.master_contract}
-                          helperText={showErrors && !formData.master_contract ? 'Required for participation agreements' : ''}
-                        />
-                      )}
-                    />
-                  </Box>
-                )}
-
-                {formData.contract_category === 'corporate_master' && (
-                  <Box sx={{ mt: 2 }}>
-                    <TextField
-                      fullWidth
-                      label="Custom Terms"
-                      multiline
-                      rows={4}
-                      value={formData.custom_terms}
-                      onChange={(e) => setFormData(prev => ({ ...prev, custom_terms: e.target.value }))}
-                      placeholder="Enter custom contract terms for this master agreement..."
-                      helperText="Specific terms that apply to all participation agreements under this master contract"
-                    />
-                  </Box>
-                )}
-              </Box>
-            </Box>
-
-            <Divider />
-
-            {/* Signatories */}
-            <Box>
-              <Typography variant="h6" gutterBottom>
-                Signatories
-              </Typography>
-
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  <TextField
-                    fullWidth
-                    label="Customer Signatory Name"
-                    value={formData.customer_signatory_name}
-                    onChange={(e) => setFormData(prev => ({ ...prev, customer_signatory_name: e.target.value }))}
-                    placeholder="e.g., John Smith"
-                  />
-                  <TextField
-                    fullWidth
-                    label="Customer Signatory Title"
-                    value={formData.customer_signatory_title}
-                    onChange={(e) => setFormData(prev => ({ ...prev, customer_signatory_title: e.target.value }))}
-                    placeholder="e.g., General Manager"
-                  />
-                </Box>
-
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  <TextField
-                    fullWidth
-                    label="BMAsia Signatory Name"
-                    value={formData.bmasia_signatory_name}
-                    onChange={(e) => setFormData(prev => ({ ...prev, bmasia_signatory_name: e.target.value }))}
-                    placeholder="e.g., Norbert Platzer"
-                  />
-                  <TextField
-                    fullWidth
-                    label="BMAsia Signatory Title"
-                    value={formData.bmasia_signatory_title}
-                    onChange={(e) => setFormData(prev => ({ ...prev, bmasia_signatory_title: e.target.value }))}
-                    placeholder="e.g., Managing Director"
-                  />
                 </Box>
               </Box>
             </Box>

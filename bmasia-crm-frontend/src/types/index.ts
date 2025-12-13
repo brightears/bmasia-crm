@@ -126,11 +126,6 @@ export interface Company {
   primary_contact?: Contact;
   opportunities_count: number;
   active_contracts_count: number;
-  parent_company?: string;
-  parent_company_name?: string;
-  is_corporate_parent: boolean;
-  is_subsidiary?: boolean;
-  child_companies_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -328,15 +323,6 @@ export interface Contract {
   contract_zones?: ContractZone[];
   active_zone_count?: number;
   total_zone_count?: number;
-  contract_category: 'standard' | 'corporate_master' | 'participation';
-  master_contract?: string;
-  master_contract_number?: string;
-  customer_signatory_name?: string;
-  customer_signatory_title?: string;
-  bmasia_signatory_name?: string;
-  bmasia_signatory_title?: string;
-  custom_terms?: string;
-  participation_agreements_count?: number;
   created_at: string;
   updated_at: string;
 }

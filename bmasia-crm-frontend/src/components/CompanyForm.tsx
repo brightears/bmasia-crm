@@ -18,7 +18,6 @@ import {
   Alert,
   CircularProgress,
   Divider,
-  Autocomplete,
 } from '@mui/material';
 import { Save, Cancel } from '@mui/icons-material';
 import { Company } from '../types';
@@ -49,8 +48,6 @@ interface CompanyFormData {
   it_notes: string;
   is_active: boolean;
   soundtrack_account_id: string;
-  is_corporate_parent: boolean;
-  parent_company: string;
 }
 
 // BMAsia's target industries - must match backend Company.INDUSTRY_CHOICES exactly
@@ -128,19 +125,13 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
     it_notes: '',
     is_active: true,
     soundtrack_account_id: '',
-    is_corporate_parent: false,
-    parent_company: '',
   });
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [corporateParents, setCorporateParents] = useState<Company[]>([]);
 
   useEffect(() => {
-    if (open) {
-      loadCorporateParents();
-    }
     if (company) {
       setFormData({
         name: company.name || '',
@@ -150,8 +141,8 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
         billing_entity: company.billing_entity || 'BMAsia Limited',
         city: company.city || '',
         website: company.website || '',
-        phone: company.phone || '',
-        email: company.email || '',
+        phone: '', // Phone not in Company type, will need to be added
+        email: '', // Email not in Company type, will need to be added
         address_line1: company.address_line1 || '',
         address_line2: company.address_line2 || '',
         state: company.state || '',
@@ -159,9 +150,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
         notes: company.notes || '',
         it_notes: company.it_notes || '',
         is_active: company.is_active !== undefined ? company.is_active : true,
-        soundtrack_account_id: company.soundtrack_account_id || '',
-        is_corporate_parent: company.is_corporate_parent || false,
-        parent_company: company.parent_company || '',
+        soundtrack_account_id: '', // Will need to be added to Company type
       });
     } else {
       // Reset form for new company
@@ -183,25 +172,11 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
         it_notes: '',
         is_active: true,
         soundtrack_account_id: '',
-        is_corporate_parent: false,
-        parent_company: '',
       });
     }
     setError('');
     setErrors({});
   }, [company, open]);
-
-  const loadCorporateParents = async () => {
-    try {
-      const response = await ApiService.getCompanies({
-        is_corporate_parent: true,
-        page_size: 1000,
-      });
-      setCorporateParents(response.results);
-    } catch (err) {
-      console.error('Failed to load corporate parents:', err);
-    }
-  };
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -473,50 +448,6 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
               placeholder="https://www.company.com"
             />
           </Grid>
-
-          <Divider sx={{ width: '100%', my: 2 }} />
-
-          {/* Corporate Structure */}
-          <Grid item xs={12}>
-            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-              Corporate Structure
-            </Typography>
-          </Grid>
-
-          <Grid item xs={12}>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={formData.is_corporate_parent}
-                  onChange={(e) => handleFieldChange('is_corporate_parent', e.target.checked)}
-                />
-              }
-              label="This is a Corporate HQ"
-            />
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-              Enable if this company is a corporate headquarters with subsidiary locations
-            </Typography>
-          </Grid>
-
-          {!formData.is_corporate_parent && (
-            <Grid item xs={12}>
-              <Autocomplete
-                fullWidth
-                options={corporateParents}
-                getOptionLabel={(option) => option.name}
-                value={corporateParents.find(c => c.id === formData.parent_company) || null}
-                onChange={(_, value) => handleFieldChange('parent_company', value?.id || '')}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Parent Company"
-                    placeholder="Select parent company (optional)"
-                    helperText="Link this subsidiary to its corporate headquarters"
-                  />
-                )}
-              />
-            </Grid>
-          )}
 
           <Divider sx={{ width: '100%', my: 2 }} />
 

@@ -600,24 +600,6 @@ class ApiService {
     return response.data;
   }
 
-  // Corporate Contracts
-  async getMasterAgreements(): Promise<Contract[]> {
-    const response = await authApi.get<Contract[]>('/contracts/master-agreements/');
-    return response.data;
-  }
-
-  async getParticipationAgreements(masterId: string): Promise<Contract[]> {
-    const response = await authApi.get<Contract[]>(`/contracts/${masterId}/participation-agreements/`);
-    return response.data;
-  }
-
-  async downloadStandardTerms(contractId: string): Promise<Blob> {
-    const response = await authApi.get(`/contracts/${contractId}/standard-terms/`, {
-      responseType: 'blob'
-    });
-    return response.data;
-  }
-
   // Automation endpoints
   async getAutomationStatus(): Promise<AutomationStatus> {
     const response = await authApi.get<AutomationStatus>('/automation/status/');
