@@ -1086,8 +1086,10 @@ class ApiService {
   }
 
   async getServicePackageItems(): Promise<any[]> {
-    const response = await authApi.get('/service-package-items/');
-    return response.data;
+    const response = await authApi.get('/service-package-items/', {
+      params: { page_size: 1000 }
+    });
+    return response.data.results || [];
   }
 
   async getCorporatePdfTemplates(params?: any): Promise<ApiResponse<any>> {
