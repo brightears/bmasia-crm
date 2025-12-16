@@ -51,6 +51,12 @@ router.register(r'zones', views.ZoneViewSet, basename='zone')
 # Static Documents routes
 router.register(r'static-documents', views.StaticDocumentViewSet, basename='static-document')
 
+# Contract Content Management routes
+router.register(r'contract-templates', views.ContractTemplateViewSet, basename='contract-template')
+router.register(r'service-package-items', views.ServicePackageItemViewSet, basename='service-package-item')
+router.register(r'corporate-pdf-templates', views.CorporatePdfTemplateViewSet, basename='corporate-pdf-template')
+router.register(r'contract-documents', views.ContractDocumentViewSet, basename='contract-document')
+
 # The API URLs are now determined automatically by the router.
 urlpatterns = [
     path('v1/', include(router.urls)),

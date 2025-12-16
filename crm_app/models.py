@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import EmailValidator, RegexValidator
 from django.utils import timezone
@@ -651,6 +652,69 @@ class Contract(TimestampedModel):
         help_text="Music zones covered by this contract"
     )
 
+    # Contract Content Management - Template selections
+    preamble_template = models.ForeignKey(
+        'ContractTemplate',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='contracts_preamble',
+        limit_choices_to={'template_type': 'preamble'}
+    )
+    preamble_custom = models.TextField(blank=True, help_text="Custom preamble text (overrides template)")
+
+    payment_template = models.ForeignKey(
+        'ContractTemplate',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='contracts_payment'
+    )
+    payment_custom = models.TextField(blank=True, help_text="Custom payment terms (overrides template)")
+
+    activation_template = models.ForeignKey(
+        'ContractTemplate',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='contracts_activation',
+        limit_choices_to={'template_type': 'activation'}
+    )
+    activation_custom = models.TextField(blank=True, help_text="Custom activation terms (overrides template)")
+
+    # Service package (Many-to-Many + custom items)
+    service_items = models.ManyToManyField(
+        'ServicePackageItem',
+        blank=True,
+        related_name='contracts'
+    )
+    custom_service_items = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='Custom service items: [{"name": "...", "description": "..."}]'
+    )
+
+    # Zone pricing configuration
+    show_zone_pricing_detail = models.BooleanField(
+        default=True,
+        help_text="Show per-zone pricing in PDF"
+    )
+    price_per_zone = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Price per zone per year"
+    )
+
+    # Contact information
+    bmasia_contact_name = models.CharField(max_length=255, blank=True)
+    bmasia_contact_email = models.EmailField(blank=True)
+    bmasia_contact_title = models.CharField(max_length=255, blank=True)
+    customer_contact_name = models.CharField(max_length=255, blank=True)
+    customer_contact_email = models.EmailField(blank=True)
+    customer_contact_title = models.CharField(max_length=255, blank=True)
+
     class Meta:
         ordering = ['-start_date']
         indexes = [
@@ -803,6 +867,127 @@ class ContractZone(TimestampedModel):
     def __str__(self):
         active_status = "active" if self.is_active else "ended"
         return f"{self.zone.name} on {self.contract.contract_number} ({active_status})"
+
+
+# ============================================================================
+# Contract Content Management System
+# ============================================================================
+
+class CorporatePdfTemplate(models.Model):
+    """PDF layout template for corporate parent companies"""
+
+    TEMPLATE_FORMAT_CHOICES = [
+        ('standard', 'Standard BMAsia Format'),
+        ('hilton_hpa', 'Hilton HPA Format'),
+        ('marriott', 'Marriott Format'),
+        ('ihg', 'IHG Format'),
+        ('accor', 'Accor Format'),
+        ('custom', 'Custom Format'),
+    ]
+
+    name = models.CharField(max_length=100)
+    template_format = models.CharField(max_length=30, choices=TEMPLATE_FORMAT_CHOICES, default='standard')
+    include_exhibit_d = models.BooleanField(default=False, help_text="Generate legal terms exhibit")
+    include_attachment_a = models.BooleanField(default=True, help_text="Generate scope of work")
+    header_text = models.TextField(blank=True, help_text="Custom header/preamble for this corporate")
+    legal_terms = models.TextField(blank=True, help_text="Corporate-specific legal clauses")
+    warranty_text = models.TextField(blank=True, help_text="Warranty section text")
+    company = models.OneToOneField('Company', on_delete=models.CASCADE, related_name='pdf_template', limit_choices_to={'is_corporate_parent': True})
+    use_corporate_branding = models.BooleanField(default=False)
+    corporate_logo = models.ImageField(upload_to='corporate_logos/', blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Corporate PDF Template"
+        verbose_name_plural = "Corporate PDF Templates"
+
+    def __str__(self):
+        return f"{self.name} ({self.get_template_format_display()})"
+
+
+class ContractTemplate(models.Model):
+    """Pre-approved contract templates with standard language"""
+
+    TEMPLATE_TYPE_CHOICES = [
+        ('preamble', 'Preamble/Introduction'),
+        ('service_standard', 'Service Package - Standard'),
+        ('service_managed', 'Service Package - Managed'),
+        ('service_custom', 'Service Package - Custom'),
+        ('payment_thailand', 'Payment Terms - Thailand'),
+        ('payment_international', 'Payment Terms - International'),
+        ('activation', 'Activation Terms'),
+    ]
+
+    name = models.CharField(max_length=100)
+    template_type = models.CharField(max_length=30, choices=TEMPLATE_TYPE_CHOICES)
+    content = models.TextField(help_text="Template text with {{variables}} for substitution")
+    is_default = models.BooleanField(default=False, help_text="Auto-select for new contracts")
+    is_active = models.BooleanField(default=True)
+    version = models.CharField(max_length=20, default='1.0')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['template_type', 'name']
+        verbose_name = "Contract Template"
+        verbose_name_plural = "Contract Templates"
+
+    def __str__(self):
+        return f"{self.name} ({self.get_template_type_display()})"
+
+
+class ServicePackageItem(models.Model):
+    """Pre-defined service package items"""
+
+    name = models.CharField(max_length=100)
+    description = models.TextField(help_text="Full description of this service item")
+    is_standard = models.BooleanField(default=True, help_text="Show in selector for new contracts")
+    display_order = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['display_order', 'name']
+        verbose_name = "Service Package Item"
+        verbose_name_plural = "Service Package Items"
+
+    def __str__(self):
+        return self.name
+
+
+class ContractDocument(models.Model):
+    """Attached documents for contracts"""
+
+    DOCUMENT_TYPE_CHOICES = [
+        ('generated', 'System Generated PDF'),
+        ('principal_terms', 'Principal Terms'),
+        ('attachment_a', 'Attachment A - Scope of Work'),
+        ('exhibit_d', 'Exhibit D - Legal Terms'),
+        ('master_agreement', 'Master Agreement'),
+        ('participation_agreement', 'Participation Agreement'),
+        ('standard_terms', 'Standard Terms & Conditions'),
+        ('insurance', 'Insurance Certificate'),
+        ('other', 'Other'),
+    ]
+
+    contract = models.ForeignKey('Contract', on_delete=models.CASCADE, related_name='contract_documents')
+    document_type = models.CharField(max_length=30, choices=DOCUMENT_TYPE_CHOICES)
+    title = models.CharField(max_length=255)
+    file = models.FileField(upload_to='contract_documents/%Y/%m/')
+    is_official = models.BooleanField(default=False, help_text="Mark as official signing version")
+    is_signed = models.BooleanField(default=False)
+    signed_date = models.DateField(null=True, blank=True)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-is_official', 'document_type', '-uploaded_at']
+        verbose_name = "Contract Document"
+        verbose_name_plural = "Contract Documents"
+
+    def __str__(self):
+        return f"{self.title} ({self.get_document_type_display()})"
 
 
 class Invoice(TimestampedModel):

@@ -3,7 +3,8 @@ import {
   Company, Contact, Note, Task, Opportunity, OpportunityActivity,
   Contract, Invoice, Quote, DashboardStats, ApiResponse,
   CustomerSegment, SegmentMemberResponse, SegmentValidationResponse,
-  EnrollInSequenceResponse, SegmentFilterCriteria, Zone, ContractZone, Device
+  EnrollInSequenceResponse, SegmentFilterCriteria, Zone, ContractZone, Device,
+  ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument
 } from '../types';
 import { authApi } from './authService';
 import { MockApiService } from './mockData';
@@ -1071,6 +1072,45 @@ class ApiService {
       params: { company_id: companyId }
     });
     return response.data;
+  }
+
+  // Contract Content Management
+  async getContractTemplates(params?: any): Promise<ApiResponse<any>> {
+    const response = await authApi.get('/contract-templates/', { params });
+    return response.data;
+  }
+
+  async getContractTemplate(id: string): Promise<any> {
+    const response = await authApi.get(`/contract-templates/${id}/`);
+    return response.data;
+  }
+
+  async getServicePackageItems(): Promise<any[]> {
+    const response = await authApi.get('/service-package-items/');
+    return response.data;
+  }
+
+  async getCorporatePdfTemplates(params?: any): Promise<ApiResponse<any>> {
+    const response = await authApi.get('/corporate-pdf-templates/', { params });
+    return response.data;
+  }
+
+  async getContractDocuments(contractId: string): Promise<ContractDocument[]> {
+    const response = await authApi.get('/contract-documents/', {
+      params: { contract: contractId }
+    });
+    return response.data;
+  }
+
+  async uploadContractDocument(contractId: string, data: FormData): Promise<ContractDocument> {
+    const response = await authApi.post('/contract-documents/', data, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return response.data;
+  }
+
+  async deleteContractDocument(id: string): Promise<void> {
+    await authApi.delete(`/contract-documents/${id}/`);
   }
 }
 

@@ -11,7 +11,8 @@ from .models import (
     CustomerSegment, Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
-    Device, StaticDocument
+    Device, StaticDocument,
+    ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument
 )
 
 
@@ -459,6 +460,29 @@ class ContractZoneSerializer(serializers.ModelSerializer):
         read_only_fields = ['created_at', 'updated_at']
 
 
+# Contract Content Management Serializers (defined before ContractSerializer which uses them)
+# ============================================================================
+
+class ServicePackageItemSerializer(serializers.ModelSerializer):
+    """Serializer for ServicePackageItem model"""
+    class Meta:
+        model = ServicePackageItem
+        fields = ['id', 'name', 'description', 'is_standard', 'display_order']
+
+
+class ContractDocumentSerializer(serializers.ModelSerializer):
+    """Serializer for ContractDocument model"""
+    uploaded_by_name = serializers.CharField(source='uploaded_by.get_full_name', read_only=True, default='')
+    contract_number = serializers.CharField(source='contract.contract_number', read_only=True)
+
+    class Meta:
+        model = ContractDocument
+        fields = ['id', 'contract', 'contract_number', 'document_type', 'title',
+                  'file', 'is_official', 'is_signed', 'signed_date',
+                  'uploaded_by', 'uploaded_by_name', 'uploaded_at', 'notes']
+        read_only_fields = ['uploaded_at', 'uploaded_by']
+
+
 class ContractSerializer(serializers.ModelSerializer):
     """Serializer for Contract model with renewal tracking"""
     company_name = serializers.CharField(source='company.name', read_only=True)
@@ -479,6 +503,14 @@ class ContractSerializer(serializers.ModelSerializer):
     master_contract_number = serializers.CharField(source='master_contract.contract_number', read_only=True, allow_null=True)
     participation_agreements_count = serializers.SerializerMethodField()
 
+    # Contract Content Management fields
+    preamble_template_name = serializers.CharField(source='preamble_template.name', read_only=True, allow_null=True)
+    payment_template_name = serializers.CharField(source='payment_template.name', read_only=True, allow_null=True)
+    activation_template_name = serializers.CharField(source='activation_template.name', read_only=True, allow_null=True)
+    service_items = serializers.PrimaryKeyRelatedField(many=True, queryset=ServicePackageItem.objects.all(), required=False)
+    service_items_detail = ServicePackageItemSerializer(source='service_items', many=True, read_only=True)
+    contract_documents = ContractDocumentSerializer(many=True, read_only=True)
+
     class Meta:
         model = Contract
         fields = [
@@ -494,6 +526,15 @@ class ContractSerializer(serializers.ModelSerializer):
             'customer_signatory_name', 'customer_signatory_title',
             'bmasia_signatory_name', 'bmasia_signatory_title', 'custom_terms',
             'participation_agreements_count',
+            # Contract Content Management fields
+            'preamble_template', 'preamble_template_name', 'preamble_custom',
+            'payment_template', 'payment_template_name', 'payment_custom',
+            'activation_template', 'activation_template_name', 'activation_custom',
+            'service_items', 'service_items_detail', 'custom_service_items',
+            'show_zone_pricing_detail', 'price_per_zone',
+            'bmasia_contact_name', 'bmasia_contact_email', 'bmasia_contact_title',
+            'customer_contact_name', 'customer_contact_email', 'customer_contact_title',
+            'contract_documents',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'contract_number', 'created_at', 'updated_at']
@@ -1721,6 +1762,31 @@ class StaticDocumentSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.file.url)
             return obj.file.url
         return None
+
+
+# ============================================================================
+# Contract Content Management Serializers (Part 2 - remaining serializers)
+# ============================================================================
+
+class ContractTemplateSerializer(serializers.ModelSerializer):
+    """Serializer for ContractTemplate model"""
+    class Meta:
+        model = ContractTemplate
+        fields = ['id', 'name', 'template_type', 'content', 'is_default', 'is_active', 'version', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
+
+
+class CorporatePdfTemplateSerializer(serializers.ModelSerializer):
+    """Serializer for CorporatePdfTemplate model"""
+    company_name = serializers.CharField(source='company.name', read_only=True)
+
+    class Meta:
+        model = CorporatePdfTemplate
+        fields = ['id', 'name', 'company', 'company_name', 'template_format',
+                  'include_exhibit_d', 'include_attachment_a', 'header_text',
+                  'legal_terms', 'warranty_text', 'use_corporate_branding',
+                  'corporate_logo', 'created_at', 'updated_at']
+        read_only_fields = ['created_at', 'updated_at']
 
 
 # ============================================================================

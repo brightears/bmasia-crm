@@ -337,6 +337,23 @@ export interface Contract {
   bmasia_signatory_title?: string;
   custom_terms?: string;
   participation_agreements_count?: number;
+  // Contract Content Management fields
+  preamble_template?: string;
+  preamble_custom?: string;
+  payment_template?: string;
+  payment_custom?: string;
+  activation_template?: string;
+  activation_custom?: string;
+  service_items?: string[]; // Array of ServicePackageItem IDs
+  custom_service_items?: Array<{ name: string; description: string }>;
+  show_zone_pricing_detail?: boolean;
+  price_per_zone?: number;
+  bmasia_contact_name?: string;
+  bmasia_contact_email?: string;
+  bmasia_contact_title?: string;
+  customer_contact_name?: string;
+  customer_contact_email?: string;
+  customer_contact_title?: string;
   created_at: string;
   updated_at: string;
 }
@@ -1142,4 +1159,58 @@ export interface Zone {
   contract_count?: number;
   created_at: string;
   updated_at: string;
+}
+
+// Contract Content Management Types
+export interface ContractTemplate {
+  id: string;
+  name: string;
+  template_type: 'preamble' | 'service_standard' | 'service_managed' | 'service_custom' |
+                 'payment_thailand' | 'payment_international' | 'activation';
+  content: string;
+  is_default: boolean;
+  is_active: boolean;
+  version: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ServicePackageItem {
+  id: string;
+  name: string;
+  description: string;
+  is_standard: boolean;
+  display_order: number;
+  created_at: string;
+}
+
+export interface CorporatePdfTemplate {
+  id: string;
+  name: string;
+  template_format: string;
+  include_exhibit_d: boolean;
+  include_attachment_a: boolean;
+  header_text: string;
+  legal_terms: string;
+  warranty_text: string;
+  use_corporate_branding: boolean;
+  company: string; // FK to corporate parent company
+  company_name?: string;
+}
+
+export interface ContractDocument {
+  id: string;
+  contract: string;
+  document_type: 'generated' | 'principal_terms' | 'attachment_a' | 'exhibit_d' |
+                 'master_agreement' | 'participation_agreement' | 'standard_terms' |
+                 'insurance' | 'other';
+  title: string;
+  file: string;
+  is_official: boolean;
+  is_signed: boolean;
+  signed_date?: string;
+  uploaded_by?: string;
+  uploaded_by_name?: string;
+  uploaded_at: string;
+  notes?: string;
 }

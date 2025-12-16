@@ -56,6 +56,7 @@ import {
 } from '@mui/icons-material';
 import { Contract, Invoice, ContractZone } from '../types';
 import ApiService from '../services/api';
+import ContractDocuments from './ContractDocuments';
 
 interface ContractDetailProps {
   open: boolean;
@@ -691,6 +692,11 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
                 </Grid>
               )}
             </Paper>
+          </Grid>
+
+          {/* Contract Documents */}
+          <Grid item xs={12}>
+            <ContractDocuments contractId={contract.id} />
           </Grid>
         </Grid>
       </DialogContent>

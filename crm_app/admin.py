@@ -22,7 +22,8 @@ from .models import (
     CustomerSegment, Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
-    Device, StaticDocument
+    Device, StaticDocument,
+    CorporatePdfTemplate, ContractTemplate, ServicePackageItem, ContractDocument
 )
 
 
@@ -897,6 +898,18 @@ class ContractZoneInline(admin.TabularInline):
         return False
 
 
+class ContractDocumentInline(admin.TabularInline):
+    """Inline admin for contract documents"""
+    model = ContractDocument
+    extra = 0
+    readonly_fields = ['uploaded_at', 'uploaded_by']
+    fields = ['document_type', 'title', 'file', 'is_official', 'is_signed', 'signed_date', 'uploaded_at']
+
+    def get_queryset(self, request):
+        """Optimize inline queries"""
+        return super().get_queryset(request).select_related('contract', 'uploaded_by')
+
+
 class ContractAdminForm(forms.ModelForm):
     """Custom form for Contract admin with better number formatting"""
     class Meta:
@@ -914,7 +927,7 @@ class ContractAdmin(admin.ModelAdmin):
     search_fields = ['contract_number', 'company__name']
     readonly_fields = ['created_at', 'updated_at', 'days_until_expiry', 'formatted_monthly_value', 'participation_count']
     autocomplete_fields = ['master_contract']
-    inlines = [InvoiceInline, ContractZoneInline]
+    inlines = [InvoiceInline, ContractZoneInline, ContractDocumentInline]
     actions = ['bulk_update_status_active', 'bulk_update_status_inactive', 'export_contracts_csv', 'export_contracts_excel']
     
     def is_expiring_soon(self, obj):
@@ -3552,3 +3565,103 @@ class StaticDocumentAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         """Optimize queryset"""
         return super().get_queryset(request).order_by('-is_active', '-effective_date')
+
+
+# ============================================================================
+# CONTRACT CONTENT MANAGEMENT ADMIN INTERFACES
+# ============================================================================
+
+
+@admin.register(ContractTemplate)
+class ContractTemplateAdmin(admin.ModelAdmin):
+    """Admin interface for contract templates with variable substitution"""
+    list_display = ['name', 'template_type', 'version', 'is_default', 'is_active', 'updated_at']
+    list_filter = ['template_type', 'is_default', 'is_active']
+    search_fields = ['name', 'content']
+    ordering = ['template_type', 'name']
+    readonly_fields = ['created_at', 'updated_at']
+
+    fieldsets = (
+        (None, {
+            'fields': ('name', 'template_type', 'version')
+        }),
+        ('Content', {
+            'fields': ('content',),
+            'description': 'Use {{variables}} for substitution: {{company_name}}, {{contract_number}}, {{start_date}}, {{end_date}}, {{value}}, {{currency}}, {{billing_frequency}}, {{payment_terms}}'
+        }),
+        ('Settings', {
+            'fields': ('is_default', 'is_active')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+
+@admin.register(ServicePackageItem)
+class ServicePackageItemAdmin(admin.ModelAdmin):
+    """Admin interface for service package items"""
+    list_display = ['name', 'display_order', 'is_standard', 'created_at']
+    list_filter = ['is_standard']
+    list_editable = ['display_order', 'is_standard']
+    search_fields = ['name', 'description']
+    ordering = ['display_order', 'name']
+
+
+@admin.register(CorporatePdfTemplate)
+class CorporatePdfTemplateAdmin(admin.ModelAdmin):
+    """Admin interface for corporate PDF templates"""
+    list_display = ['name', 'company', 'template_format', 'include_attachment_a', 'include_exhibit_d', 'updated_at']
+    list_filter = ['template_format']
+    search_fields = ['name', 'company__name']
+    autocomplete_fields = ['company']
+    readonly_fields = ['created_at', 'updated_at']
+
+    fieldsets = (
+        (None, {
+            'fields': ('name', 'company', 'template_format')
+        }),
+        ('Document Options', {
+            'fields': ('include_attachment_a', 'include_exhibit_d')
+        }),
+        ('Custom Content', {
+            'fields': ('header_text', 'legal_terms', 'warranty_text'),
+            'classes': ('collapse',)
+        }),
+        ('Branding', {
+            'fields': ('use_corporate_branding', 'corporate_logo'),
+            'classes': ('collapse',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+
+@admin.register(ContractDocument)
+class ContractDocumentAdmin(admin.ModelAdmin):
+    """Admin interface for contract documents"""
+    list_display = ['title', 'contract', 'document_type', 'is_official', 'is_signed', 'uploaded_at']
+    list_filter = ['document_type', 'is_official', 'is_signed']
+    search_fields = ['title', 'contract__contract_number', 'notes']
+    autocomplete_fields = ['contract']
+    readonly_fields = ['uploaded_at', 'uploaded_by']
+    date_hierarchy = 'uploaded_at'
+
+    fieldsets = (
+        (None, {
+            'fields': ('contract', 'document_type', 'title')
+        }),
+        ('File', {
+            'fields': ('file',)
+        }),
+        ('Status', {
+            'fields': ('is_official', 'is_signed', 'signed_date')
+        }),
+        ('Additional Information', {
+            'fields': ('notes', 'uploaded_at', 'uploaded_by'),
+            'classes': ('collapse',)
+        }),
+    )
