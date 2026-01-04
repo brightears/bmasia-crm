@@ -515,7 +515,9 @@ const EmailTemplates: React.FC = () => {
                   key={template.id}
                   hover
                   selected={selected.includes(template.id)}
+                  onClick={() => handleEditTemplate(template)}
                   sx={{
+                    cursor: 'pointer',
                     '&.Mui-selected': {
                       backgroundColor: 'rgba(255, 165, 0, 0.08)',
                       '&:hover': {
@@ -524,7 +526,7 @@ const EmailTemplates: React.FC = () => {
                     }
                   }}
                 >
-                  <TableCell padding="checkbox">
+                  <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
                     <Checkbox
                       checked={selected.includes(template.id)}
                       onChange={() => handleSelectOne(template.id)}
@@ -579,7 +581,7 @@ const EmailTemplates: React.FC = () => {
                       color={template.is_active ? 'success' : 'default'}
                     />
                   </TableCell>
-                  <TableCell align="right">
+                  <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                     <IconButton
                       size="small"
                       onClick={(e) => handleMenuOpen(e, template)}
