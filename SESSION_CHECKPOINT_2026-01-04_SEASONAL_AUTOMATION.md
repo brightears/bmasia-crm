@@ -220,3 +220,69 @@ SEASONAL_TRIGGER_DATES = {
 - Eid al-Fitr 2026 (`ed3d7ea6-12aa-4660-a266-7fc3ee49527c`)
 - Ramadan 2026 (`2e911be9-cfd1-476c-9d24-258e4836d3a7`)
 - Loy Krathong 2026 (`f09cbe3e-4dba-4589-92f1-79d64cbad056`)
+
+---
+
+## Session 3: Email Sequences Created (January 4, 2026 - Final)
+
+### 10 Seasonal Email Sequences Created
+
+All sequences are **active** with 1 step each, linked to corresponding email templates.
+
+| Sequence Type | Name | Template Linked |
+|---------------|------|-----------------|
+| `auto_seasonal_christmas` | Christmas Season Campaign | Christmas Season Music Campaign |
+| `auto_seasonal_cny` | Chinese New Year Campaign | Chinese New Year Music Campaign |
+| `auto_seasonal_valentines` | Valentine's Day Campaign | Valentine's Day Music Campaign |
+| `auto_seasonal_songkran` | Songkran Festival Campaign | Songkran Festival Music Campaign |
+| `auto_seasonal_ramadan` | Ramadan Campaign | Ramadan Music Campaign |
+| `auto_seasonal_loy_krathong` | Loy Krathong Campaign | Loy Krathong Festival Music Campaign |
+| `auto_seasonal_singapore_nd` | Singapore National Day Campaign | Singapore National Day Music Campaign |
+| `auto_seasonal_diwali` | Diwali Festival Campaign | Diwali Festival Greetings |
+| `auto_seasonal_mid_autumn` | Mid-Autumn Festival Campaign | Mid-Autumn Festival Greetings |
+| `auto_seasonal_eid_fitr` | Eid al-Fitr Campaign | Eid al-Fitr Festival Greetings |
+
+### System Status: FULLY OPERATIONAL
+
+**Complete Automation Flow:**
+1. Cron job runs daily at 9 AM Bangkok time
+2. `AutoEnrollmentService.process_seasonal_triggers()` checks trigger dates
+3. For matching dates, finds companies in target countries with active contracts
+4. Enrolls primary contact into corresponding EmailSequence
+5. Sends seasonal greeting email
+
+**What User Needs to Load:**
+- Companies with correct `country` field (e.g., "Thailand", "Singapore", "India")
+- Contacts linked to companies (`receives_notifications=True`, `unsubscribed=False`)
+- Contracts with `status='Active'` linked to companies
+
+### Final Git Commit
+```
+50d42640 Docs: Update CLAUDE.md and session checkpoint with seasonal automation
+```
+
+---
+
+## Quick Reference for Future Sessions
+
+### Key Files
+| File | Purpose |
+|------|---------|
+| `crm_app/models.py` | SeasonalTriggerDate model, EmailSequence.SEQUENCE_TYPE_CHOICES |
+| `crm_app/services/auto_enrollment_service.py` | SEASONAL_COUNTRY_MAP, SEASONAL_TRIGGER_DATES, process_seasonal_triggers() |
+| `crm_app/views.py` | SeasonalTriggerDateViewSet |
+| `bmasia-crm-frontend/src/pages/Settings.tsx` | Holiday date management UI |
+
+### API Endpoints
+| Endpoint | Purpose |
+|----------|---------|
+| `/api/v1/seasonal-trigger-dates/` | CRUD for variable holiday dates |
+| `/api/v1/email-sequences/` | List/manage sequences |
+| `/api/v1/sequence-steps/` | Manage sequence steps |
+| `/api/v1/email-templates/` | List/manage templates |
+
+### Country Names (must match exactly)
+- Thailand, Singapore, Malaysia, Hong Kong, China, Taiwan, Vietnam
+- Japan, South Korea, Philippines, Indonesia, Myanmar, Cambodia, Laos, Brunei
+- India, Nepal, Sri Lanka, Mauritius, Fiji
+- UAE, Saudi Arabia, Qatar, Kuwait, Bahrain, Oman, Jordan, Lebanon, Egypt, Iraq, Iran, Turkey, Pakistan, Bangladesh
