@@ -1,0 +1,98 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [[ \"$CLAUDE_FILE_PATH\" == *.py ]]; then cd \"$(dirname \"$CLAUDE_FILE_PATH\")\" && black \"$CLAUDE_FILE_PATH\" --quiet 2>/dev/null || true; fi"
+          },
+          {
+            "type": "command",
+            "command": "if [[ \"$CLAUDE_FILE_PATH\" == *.ts ]] || [[ \"$CLAUDE_FILE_PATH\" == *.tsx ]]; then npx prettier --write \"$CLAUDE_FILE_PATH\" 2>/dev/null || true; fi"
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "RENDER_API_KEY": "rnd_QAJKR0jggzsxSLOCx3HfovreCzOd",
+    "RENDER_BACKEND_ID": "srv-d13ukt8gjchc73fjat0g",
+    "RENDER_FRONTEND_ID": "srv-d3clctt6ubrc73etb580",
+    "RENDER_CRON_ID": "crn-d4b9g875r7bs7391al2g",
+    "BMASIA_API_URL": "https://bmasia-crm.onrender.com",
+    "BMASIA_FRONTEND_URL": "https://bmasia-crm-frontend.onrender.com"
+  },
+  "model": "claude-opus-4-5-20251101",
+  "permissions": {
+    "allow": [
+      "Read(//**)",
+      "Bash(git:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(pip:*)",
+      "Bash(pip3:*)",
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(node:*)",
+      "Bash(curl:*)",
+      "Bash(env/bin/*:*)",
+      "Bash(./env/bin/*:*)",
+      "Bash(venv/bin/*:*)",
+      "Bash(source:*)",
+      "Bash(export:*)",
+      "Bash(echo:*)",
+      "Bash(cat:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(rm:*)",
+      "Bash(mv:*)",
+      "Bash(cp:*)",
+      "Bash(chmod:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(awk:*)",
+      "Bash(sed:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(sort:*)",
+      "Bash(uniq:*)",
+      "Bash(wc:*)",
+      "Bash(timeout:*)",
+      "Bash(sleep:*)",
+      "Bash(date:*)",
+      "Bash(black:*)",
+      "Bash(prettier:*)",
+      "Bash(eslint:*)",
+      "Bash(pytest:*)",
+      "Bash(for:*)",
+      "Bash(while:*)",
+      "Bash(if:*)",
+      "Bash(do:*)",
+      "Bash(done:*)",
+      "Bash(then:*)",
+      "Bash(fi:*)",
+      "Bash([*)",
+      "Bash(break)",
+      "Bash(pkill:*)",
+      "Bash(xargs:*)",
+      "Bash(rsync:*)",
+      "Bash(TZ=*)",
+      "Bash(CI=*)",
+      "Bash(TOKEN=*)",
+      "WebFetch(domain:bmasia-crm.onrender.com)",
+      "WebFetch(domain:bmasia-crm-frontend.onrender.com)",
+      "WebFetch(domain:render.com)",
+      "WebFetch(domain:api.render.com)",
+      "WebFetch(domain:dashboard.render.com)",
+      "WebFetch(domain:docs.render.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:bmasiamusic.com)",
+      "WebSearch"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

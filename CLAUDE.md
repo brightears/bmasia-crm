@@ -37,6 +37,75 @@
 
 ---
 
+## Workflow Best Practices (Boris Cherny Method)
+
+These practices are based on the Claude Code creator's workflow and adapted for BMAsia CRM.
+
+### 1. Start Complex Tasks in Plan Mode
+For any non-trivial feature or change:
+1. Press `shift+tab` twice to enter Plan mode
+2. Explore the codebase and design the approach
+3. Iterate on the plan until it's solid
+4. Exit plan mode and execute with auto-accept edits
+5. A good plan = Claude can usually 1-shot the implementation
+
+**When to use Plan mode:**
+- New features (email campaigns, PDF changes, API endpoints)
+- Multi-file changes
+- Architectural decisions
+- Anything touching more than 2-3 files
+
+### 2. Use Slash Commands for Repetitive Tasks
+Available commands in `.claude/commands/`:
+
+| Command | Purpose |
+|---------|---------|
+| `/deploy-backend` | Deploy Django to Render and wait |
+| `/deploy-frontend` | Deploy React to Render and wait |
+| `/deploy-all` | Deploy both services in parallel |
+| `/test-api` | Test API endpoints with auth |
+| `/check-templates` | Verify all 17 email templates |
+| `/verify-deployment` | Full deployment health check |
+| `/commit-push` | Git commit and push with proper message |
+| `/check-logs` | View Render service logs |
+| `/save-checkpoint` | Create session checkpoint doc |
+| `/send-test-email` | Test email sending |
+
+### 3. Always Verify After Changes
+After every significant change:
+1. Deploy to Render (not local testing)
+2. Test the specific feature changed
+3. Check for regressions in related features
+4. Verify with actual API calls, not assumptions
+
+**Verification = 2-3x quality improvement**
+
+### 4. Use Subagents for Specialized Tasks
+Always use the appropriate subagent (see "Available Sub-Agents" below):
+- `django-admin-expert` - Admin interfaces
+- `email-automation-specialist` - Email templates/campaigns
+- `react-dashboard-builder` - Frontend components
+- `api-integration-specialist` - External APIs
+- `database-optimizer` - Query optimization
+
+### 5. Keep CLAUDE.md Updated
+When Claude does something incorrectly:
+1. Note what went wrong
+2. Add a correction to CLAUDE.md
+3. Future sessions will avoid the same mistake
+
+**This is "Compounding Engineering" - the system gets smarter over time.**
+
+### 6. Save Checkpoints Before Context Limit
+Use `/save-checkpoint [topic]` to create documentation before auto-compact.
+Checkpoints preserve:
+- What was accomplished
+- Files modified
+- Technical decisions made
+- Next steps
+
+---
+
 ## Project Overview
 BMAsia CRM is a comprehensive Customer Relationship Management system built with Django (backend) and React (frontend), designed specifically for BMAsia, a music technology company. The system integrates with Soundtrack Your Brand API and manages customers, zones, contracts, and automated email communications.
 
@@ -462,6 +531,48 @@ npm run build  # Production build
 - ✅ PDF download functionality (downloadContractPDF in api.ts)
 - ✅ "Download PDF" menu option (renamed from "Export")
 
+### Contract Content Management System (December 2025) ✅ COMPLETE
+
+**Template Library System:**
+- ✅ ContractTemplate model - Reusable preamble, payment terms, activation text
+- ✅ ServicePackageItem model - Predefined service items (10 default items)
+- ✅ 5 default templates seeded (2 preambles, 2 payment terms, 1 activation)
+- ✅ Variable substitution: `{{company_name}}`, `{{start_date}}`, `{{contract_number}}`, etc.
+
+**Contract Form Enhancements** (`ContractForm.tsx` line ~816):
+- ✅ Template selectors for Preamble, Payment Terms, Activation Terms
+- ✅ "Customize" toggle to override template text
+- ✅ Service Package multi-select (choose from predefined items)
+- ✅ Custom service items (add your own)
+- ✅ Zone Pricing options (show detail toggle, price per zone)
+- ✅ Contact information fields (BMAsia + Customer contacts)
+
+**Document Attachment System:**
+- ✅ ContractDocument model for file attachments
+- ✅ ContractDocuments.tsx component (upload, download, delete)
+- ✅ Document types: principal_terms, attachment_a, exhibit_d, master_agreement, etc.
+- ✅ Official/Signed status tracking with dates
+- ✅ Integrated into ContractDetail dialog
+
+**Corporate PDF Formats:**
+- ✅ CorporatePdfTemplate model - Per-corporate PDF configuration
+- ✅ Hilton HPA format: Attachment A (Scope of Work) + Exhibit D (Legal Terms)
+- ✅ Extensible for Marriott, IHG, Accor formats
+- ✅ PDF routing based on corporate parent's template_format
+
+**API Endpoints:**
+- `GET /api/v1/contract-templates/` - List templates
+- `GET /api/v1/service-package-items/` - List service items
+- `GET /api/v1/corporate-pdf-templates/` - List corporate PDF templates
+- `GET/POST/DELETE /api/v1/contract-documents/` - Document management
+
+**Where to Find Things:**
+- **Contract Form**: Scroll down past zones to "Contract Content" section
+- **Template Management**: Django Admin → Contract templates
+- **Service Items**: Django Admin → Service package items
+- **Corporate Templates**: Django Admin → Corporate PDF templates
+- **Document Attachments**: Contract detail dialog → Documents section
+
 ### Areas for Future Development
 - 🚧 Test coverage needs improvement
 - 🚧 Invoice management UI expansion
@@ -480,7 +591,8 @@ npm run build  # Production build
 - **Soundtrack API**: `SOUNDTRACK_API_SETUP.md`
 - **Zone Tracking**: `ZONE_TRACKING_GUIDE.md`
 - **Session Checkpoints**: `SESSION_CHECKPOINT_2025-*.md` (detailed session histories)
-  - `SESSION_CHECKPOINT_2025-11-19.md` - Email Sequences, Renewal Reminders, Variable Guide (latest)
+  - `SESSION_CHECKPOINT_2025-12-16_CONTRACT_CONTENT.md` - Contract Content Management System (latest)
+  - `SESSION_CHECKPOINT_2025-11-19.md` - Email Sequences, Renewal Reminders, Variable Guide
 
 ## Render Platform Access
 
