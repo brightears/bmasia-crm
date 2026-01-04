@@ -1314,6 +1314,9 @@ class EmailTemplate(TimestampedModel):
         ('seasonal_loy_krathong', 'Loy Krathong Preparation'),
         ('seasonal_ramadan', 'Ramadan Preparation'),
         ('seasonal_singapore_national_day', 'Singapore National Day Preparation'),
+        ('seasonal_diwali', 'Diwali Preparation'),
+        ('seasonal_mid_autumn', 'Mid-Autumn Festival Preparation'),
+        ('seasonal_eid_fitr', 'Eid al-Fitr Preparation'),
         
         # Technical Support templates
         ('zone_offline_48h', 'Zone Offline 48 Hours'),
