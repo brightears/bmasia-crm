@@ -12,7 +12,8 @@ from .models import (
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
     Device, StaticDocument,
-    ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument
+    ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
+    SeasonalTriggerDate
 )
 
 
@@ -1792,3 +1793,22 @@ class CorporatePdfTemplateSerializer(serializers.ModelSerializer):
 # ============================================================================
 # Equipment Management Serializers - REMOVED (replaced by simpler Device model)
 # ============================================================================
+
+
+# ============================================================================
+# Settings Serializers
+# ============================================================================
+
+class SeasonalTriggerDateSerializer(serializers.ModelSerializer):
+    """Serializer for SeasonalTriggerDate model - Variable holiday dates"""
+    holiday_type_display = serializers.CharField(source='get_holiday_type_display', read_only=True)
+    updated_by_name = serializers.CharField(source='updated_by.get_full_name', read_only=True, default='')
+
+    class Meta:
+        model = SeasonalTriggerDate
+        fields = [
+            'id', 'holiday_type', 'holiday_type_display', 'year',
+            'trigger_date', 'holiday_date', 'notes',
+            'updated_by', 'updated_by_name', 'updated_at', 'created_at'
+        ]
+        read_only_fields = ['id', 'updated_by', 'updated_at', 'created_at']

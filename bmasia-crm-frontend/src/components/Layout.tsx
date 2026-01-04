@@ -56,6 +56,7 @@ import {
   MenuBook as MenuBookIcon,
   LocationOn,
   AutoMode as AutoModeIcon,
+  Settings as SettingsIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -168,6 +169,7 @@ const unifiedNavigation = [
     title: 'Administration',
     items: [
       { text: 'Users', icon: <PeopleIcon />, path: '/users' },
+      { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
     ],
   },
 ];

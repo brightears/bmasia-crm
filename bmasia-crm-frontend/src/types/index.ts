@@ -1215,3 +1215,18 @@ export interface ContractDocument {
   uploaded_at: string;
   notes?: string;
 }
+
+// Settings Types
+export interface SeasonalTriggerDate {
+  id: string;
+  holiday_type: 'auto_seasonal_cny' | 'auto_seasonal_ramadan' | 'auto_seasonal_loy_krathong';
+  holiday_type_display?: string;
+  year: number;
+  trigger_date: string;  // Date when email campaign is sent (2 weeks before holiday)
+  holiday_date: string;  // Actual holiday date
+  notes?: string;
+  updated_by?: string;
+  updated_by_name?: string;
+  updated_at?: string;
+  created_at?: string;
+}

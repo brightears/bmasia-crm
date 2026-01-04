@@ -41,6 +41,7 @@ import ZoneNew from './pages/ZoneNew';
 import ZoneEdit from './pages/ZoneEdit';
 import Users from './pages/Users';
 import MyProfile from './pages/MyProfile';
+import Settings from './pages/Settings';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -434,6 +435,7 @@ function App() {
 
         {/* Profile route - accessible to all authenticated users */}
         <Route path="/profile" element={<MyProfile />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="/system-status" element={<PlaceholderPage title="System Status" />} />
 
         {/* Mobile more page */}

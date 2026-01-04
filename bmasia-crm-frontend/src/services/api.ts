@@ -4,7 +4,8 @@ import {
   Contract, Invoice, Quote, DashboardStats, ApiResponse,
   CustomerSegment, SegmentMemberResponse, SegmentValidationResponse,
   EnrollInSequenceResponse, SegmentFilterCriteria, Zone, ContractZone, Device,
-  ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument
+  ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
+  SeasonalTriggerDate
 } from '../types';
 import { authApi } from './authService';
 import { MockApiService } from './mockData';
@@ -1113,6 +1114,31 @@ class ApiService {
 
   async deleteContractDocument(id: string): Promise<void> {
     await authApi.delete(`/contract-documents/${id}/`);
+  }
+
+  // Seasonal Trigger Dates (Settings)
+  async getSeasonalTriggerDates(params?: { year?: number }): Promise<SeasonalTriggerDate[]> {
+    const response = await authApi.get('/seasonal-trigger-dates/', { params });
+    return response.data;
+  }
+
+  async getSeasonalTriggerDate(id: string): Promise<SeasonalTriggerDate> {
+    const response = await authApi.get(`/seasonal-trigger-dates/${id}/`);
+    return response.data;
+  }
+
+  async createSeasonalTriggerDate(data: Partial<SeasonalTriggerDate>): Promise<SeasonalTriggerDate> {
+    const response = await authApi.post('/seasonal-trigger-dates/', data);
+    return response.data;
+  }
+
+  async updateSeasonalTriggerDate(id: string, data: Partial<SeasonalTriggerDate>): Promise<SeasonalTriggerDate> {
+    const response = await authApi.put(`/seasonal-trigger-dates/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteSeasonalTriggerDate(id: string): Promise<void> {
+    await authApi.delete(`/seasonal-trigger-dates/${id}/`);
   }
 }
 

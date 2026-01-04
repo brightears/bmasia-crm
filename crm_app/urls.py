@@ -57,6 +57,9 @@ router.register(r'service-package-items', views.ServicePackageItemViewSet, basen
 router.register(r'corporate-pdf-templates', views.CorporatePdfTemplateViewSet, basename='corporate-pdf-template')
 router.register(r'contract-documents', views.ContractDocumentViewSet, basename='contract-document')
 
+# Settings routes
+router.register(r'seasonal-trigger-dates', views.SeasonalTriggerDateViewSet, basename='seasonal-trigger-date')
+
 # The API URLs are now determined automatically by the router.
 urlpatterns = [
     path('v1/', include(router.urls)),

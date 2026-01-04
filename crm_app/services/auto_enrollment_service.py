@@ -14,13 +14,24 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Country mapping for seasonal campaigns
+# Note: Use exact country names as stored in Company.country field
 SEASONAL_COUNTRY_MAP = {
     'auto_seasonal_christmas': ['ALL'],
     'auto_seasonal_valentines': ['ALL'],
-    'auto_seasonal_cny': ['Thailand', 'Singapore', 'Malaysia', 'Hong Kong', 'China', 'Taiwan', 'Vietnam'],
+    # CNY: ALL Asian countries (major CNY celebrations across Asia)
+    'auto_seasonal_cny': [
+        'Thailand', 'Singapore', 'Malaysia', 'Hong Kong', 'China', 'Taiwan', 'Vietnam',
+        'Japan', 'South Korea', 'Philippines', 'Indonesia', 'Myanmar', 'Cambodia',
+        'Laos', 'Brunei', 'Macau', 'Mongolia', 'North Korea'
+    ],
     'auto_seasonal_songkran': ['Thailand'],
-    'auto_seasonal_loy_krathong': ['Thailand'],
-    'auto_seasonal_ramadan': ['UAE', 'Saudi Arabia', 'Qatar', 'Kuwait', 'Bahrain', 'Oman', 'Malaysia', 'Indonesia'],
+    'auto_seasonal_loy_krathong': ['Thailand'],  # Thailand only
+    # Ramadan: Middle Eastern countries + Muslim-majority SE Asian countries
+    'auto_seasonal_ramadan': [
+        'UAE', 'Saudi Arabia', 'Qatar', 'Kuwait', 'Bahrain', 'Oman',
+        'Malaysia', 'Indonesia', 'Brunei',  # SE Asian Muslim-majority
+        'Jordan', 'Lebanon', 'Egypt', 'Iraq', 'Iran', 'Turkey', 'Pakistan', 'Bangladesh'
+    ],
     'auto_seasonal_singapore_nd': ['Singapore'],
 }
 

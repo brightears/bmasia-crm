@@ -31,7 +31,8 @@ from .models import (
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
     Zone, Device, StaticDocument,
-    ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument
+    ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
+    SeasonalTriggerDate
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
@@ -46,7 +47,8 @@ from .serializers import (
     KBArticleViewSerializer, KBArticleRatingSerializer, KBArticleRelationSerializer,
     KBArticleAttachmentSerializer, TicketKBArticleSerializer,
     ZoneSerializer, DeviceSerializer, StaticDocumentSerializer,
-    ContractTemplateSerializer, ServicePackageItemSerializer, CorporatePdfTemplateSerializer, ContractDocumentSerializer
+    ContractTemplateSerializer, ServicePackageItemSerializer, CorporatePdfTemplateSerializer, ContractDocumentSerializer,
+    SeasonalTriggerDateSerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -6235,3 +6237,30 @@ class ContractDocumentViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Auto-set uploaded_by from request user"""
         serializer.save(uploaded_by=self.request.user)
+
+
+# ============================================================================
+# Settings ViewSets
+# ============================================================================
+
+class SeasonalTriggerDateViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for SeasonalTriggerDate model.
+    Manages variable holiday trigger dates for seasonal email campaigns.
+    Frontend settings page can use this to configure CNY, Ramadan, Loy Krathong dates.
+    """
+    queryset = SeasonalTriggerDate.objects.select_related('updated_by').order_by('-year', 'holiday_type')
+    serializer_class = SeasonalTriggerDateSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['holiday_type', 'year']
+    ordering_fields = ['year', 'trigger_date', 'holiday_type']
+    ordering = ['-year', 'trigger_date']
+
+    def perform_create(self, serializer):
+        """Auto-set updated_by from request user"""
+        serializer.save(updated_by=self.request.user)
+
+    def perform_update(self, serializer):
+        """Auto-set updated_by from request user on update"""
+        serializer.save(updated_by=self.request.user)
