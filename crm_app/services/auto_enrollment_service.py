@@ -33,6 +33,20 @@ SEASONAL_COUNTRY_MAP = {
         'Jordan', 'Lebanon', 'Egypt', 'Iraq', 'Iran', 'Turkey', 'Pakistan', 'Bangladesh'
     ],
     'auto_seasonal_singapore_nd': ['Singapore'],
+    # Diwali: Hindu-majority and significant Hindu populations
+    'auto_seasonal_diwali': [
+        'India', 'Nepal', 'Singapore', 'Malaysia', 'Sri Lanka', 'Mauritius', 'Fiji'
+    ],
+    # Mid-Autumn Festival: Chinese/Vietnamese communities
+    'auto_seasonal_mid_autumn': [
+        'China', 'Vietnam', 'Taiwan', 'Hong Kong', 'Macau', 'Singapore', 'Malaysia'
+    ],
+    # Eid al-Fitr: End of Ramadan celebration (Indonesia's biggest holiday)
+    'auto_seasonal_eid_fitr': [
+        'Indonesia', 'Malaysia', 'Brunei', 'Singapore',
+        'UAE', 'Saudi Arabia', 'Qatar', 'Kuwait', 'Bahrain', 'Oman',
+        'Jordan', 'Lebanon', 'Egypt', 'Iraq', 'Iran', 'Turkey', 'Pakistan', 'Bangladesh'
+    ],
 }
 
 # Fixed trigger dates (month, day) - sent 2 weeks before holiday
@@ -41,10 +55,13 @@ SEASONAL_TRIGGER_DATES = {
     'auto_seasonal_valentines': (1, 31),    # Jan 31 (2 weeks before Feb 14)
     'auto_seasonal_songkran': (3, 29),      # Mar 29 (2 weeks before Apr 13)
     'auto_seasonal_singapore_nd': (7, 26),  # Jul 26 (2 weeks before Aug 9)
-    # Variable dates - loaded from SeasonalTriggerDate model
+    # Variable dates - loaded from SeasonalTriggerDate model (Settings page)
     'auto_seasonal_cny': 'variable',
     'auto_seasonal_loy_krathong': 'variable',
     'auto_seasonal_ramadan': 'variable',
+    'auto_seasonal_diwali': 'variable',
+    'auto_seasonal_mid_autumn': 'variable',
+    'auto_seasonal_eid_fitr': 'variable',
 }
 
 

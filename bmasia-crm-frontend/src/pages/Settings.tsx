@@ -38,7 +38,10 @@ import api from '../services/api';
 const HOLIDAY_TYPES = [
   { value: 'auto_seasonal_cny', label: 'Chinese New Year', countries: 'Asia' },
   { value: 'auto_seasonal_ramadan', label: 'Ramadan', countries: 'Middle East' },
-  { value: 'auto_seasonal_loy_krathong', label: 'Loy Krathong', countries: 'Thailand' }
+  { value: 'auto_seasonal_loy_krathong', label: 'Loy Krathong', countries: 'Thailand' },
+  { value: 'auto_seasonal_diwali', label: 'Diwali', countries: 'India/SE Asia' },
+  { value: 'auto_seasonal_mid_autumn', label: 'Mid-Autumn Festival', countries: 'China/Vietnam' },
+  { value: 'auto_seasonal_eid_fitr', label: 'Eid al-Fitr', countries: 'Indonesia/Malaysia' }
 ];
 
 const Settings: React.FC = () => {

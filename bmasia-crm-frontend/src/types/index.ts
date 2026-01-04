@@ -1219,7 +1219,8 @@ export interface ContractDocument {
 // Settings Types
 export interface SeasonalTriggerDate {
   id: string;
-  holiday_type: 'auto_seasonal_cny' | 'auto_seasonal_ramadan' | 'auto_seasonal_loy_krathong';
+  holiday_type: 'auto_seasonal_cny' | 'auto_seasonal_ramadan' | 'auto_seasonal_loy_krathong' |
+                'auto_seasonal_diwali' | 'auto_seasonal_mid_autumn' | 'auto_seasonal_eid_fitr';
   holiday_type_display?: string;
   year: number;
   trigger_date: string;  // Date when email campaign is sent (2 weeks before holiday)

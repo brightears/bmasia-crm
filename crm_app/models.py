@@ -1737,6 +1737,9 @@ class SeasonalTriggerDate(models.Model):
         ('auto_seasonal_cny', 'Chinese New Year'),
         ('auto_seasonal_ramadan', 'Ramadan'),
         ('auto_seasonal_loy_krathong', 'Loy Krathong'),
+        ('auto_seasonal_diwali', 'Diwali'),
+        ('auto_seasonal_mid_autumn', 'Mid-Autumn Festival'),
+        ('auto_seasonal_eid_fitr', 'Eid al-Fitr'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -1987,13 +1990,18 @@ class EmailSequence(TimestampedModel):
         ('auto_renewal', 'Auto: Contract Renewal'),
         ('auto_payment', 'Auto: Payment Reminders'),
         ('auto_quarterly', 'Auto: Quarterly Check-ins'),
+        # Fixed date holidays
         ('auto_seasonal_christmas', 'Auto: Christmas (All)'),
-        ('auto_seasonal_cny', 'Auto: Chinese New Year (Asia)'),
-        ('auto_seasonal_songkran', 'Auto: Songkran (Thailand)'),
-        ('auto_seasonal_loy_krathong', 'Auto: Loy Krathong (Thailand)'),
         ('auto_seasonal_valentines', 'Auto: Valentines Day (All)'),
-        ('auto_seasonal_ramadan', 'Auto: Ramadan (Middle East)'),
+        ('auto_seasonal_songkran', 'Auto: Songkran (Thailand)'),
         ('auto_seasonal_singapore_nd', 'Auto: Singapore National Day'),
+        # Variable date holidays (configured in Settings)
+        ('auto_seasonal_cny', 'Auto: Chinese New Year (Asia)'),
+        ('auto_seasonal_loy_krathong', 'Auto: Loy Krathong (Thailand)'),
+        ('auto_seasonal_ramadan', 'Auto: Ramadan (Middle East)'),
+        ('auto_seasonal_diwali', 'Auto: Diwali (India/SE Asia)'),
+        ('auto_seasonal_mid_autumn', 'Auto: Mid-Autumn Festival (Asia)'),
+        ('auto_seasonal_eid_fitr', 'Auto: Eid al-Fitr (Indonesia/Malaysia)'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
