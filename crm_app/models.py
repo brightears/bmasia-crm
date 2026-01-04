@@ -1303,8 +1303,11 @@ class EmailTemplate(TimestampedModel):
         ('quarterly_checkin', 'Quarterly Check-in'),
         ('seasonal_christmas', 'Christmas Season Preparation'),
         ('seasonal_newyear', 'Chinese New Year Preparation'),
+        ('seasonal_valentines', "Valentine's Day Preparation"),
         ('seasonal_songkran', 'Songkran Preparation'),
+        ('seasonal_loy_krathong', 'Loy Krathong Preparation'),
         ('seasonal_ramadan', 'Ramadan Preparation'),
+        ('seasonal_singapore_national_day', 'Singapore National Day Preparation'),
         
         # Technical Support templates
         ('zone_offline_48h', 'Zone Offline 48 Hours'),

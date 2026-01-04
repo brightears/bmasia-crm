@@ -45,14 +45,23 @@ class EmailService:
         return self.business_hours_start <= now.hour < self.business_hours_end
     
     def get_from_email(self, department: str = None) -> str:
-        """Get appropriate from email based on department"""
+        """Get appropriate from email based on department
+
+        Routing:
+        - Sales (Contracts, Quotations) → nikki.h@bmasiamusic.com
+        - Finance (Invoices, Payment reminders) → pom@bmasiamusic.com
+        - Tech Support → keith@bmasiamusic.com
+        - Music Design (Seasonal campaigns) → production@bmasiamusic.com
+        - Admin (Quarterly follow-ups, Renewals) → norbert@bmasiamusic.com
+        """
         department_emails = {
             'Sales': settings.SALES_EMAIL,
             'Finance': settings.FINANCE_EMAIL,
-            'Tech Support': settings.SUPPORT_EMAIL,
-            'Music Design': settings.MUSIC_DESIGN_EMAIL,
+            'Tech': settings.SUPPORT_EMAIL,
+            'Music': settings.MUSIC_DESIGN_EMAIL,
+            'Admin': settings.ADMIN_EMAIL,
         }
-        
+
         return department_emails.get(department, settings.DEFAULT_FROM_EMAIL)
     
     def send_email(

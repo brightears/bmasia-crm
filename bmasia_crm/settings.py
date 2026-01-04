@@ -311,10 +311,16 @@ DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='notifications@bmasiam
 SERVER_EMAIL = config('SERVER_EMAIL', default='server@bmasiamusic.com')
 
 # Email settings for different departments
-SALES_EMAIL = config('SALES_EMAIL', default='sales@bmasiamusic.com')
-FINANCE_EMAIL = config('FINANCE_EMAIL', default='finance@bmasiamusic.com')
-SUPPORT_EMAIL = config('SUPPORT_EMAIL', default='support@bmasiamusic.com')
-MUSIC_DESIGN_EMAIL = config('MUSIC_DESIGN_EMAIL', default='music@bmasiamusic.com')
+# Contracts, Quotations → Nikki
+SALES_EMAIL = config('SALES_EMAIL', default='nikki.h@bmasiamusic.com')
+# Invoices, Finance → Pom
+FINANCE_EMAIL = config('FINANCE_EMAIL', default='pom@bmasiamusic.com')
+# Technical Support → Keith
+SUPPORT_EMAIL = config('SUPPORT_EMAIL', default='keith@bmasiamusic.com')
+# Festival/Music reminders, Seasonal campaigns → Production
+MUSIC_DESIGN_EMAIL = config('MUSIC_DESIGN_EMAIL', default='production@bmasiamusic.com')
+# Quarterly follow-ups → Norbert
+ADMIN_EMAIL = config('ADMIN_EMAIL', default='norbert@bmasiamusic.com')
 
 # Business hours for email sending (Bangkok timezone)
 BUSINESS_HOURS_START = 9  # 9 AM
