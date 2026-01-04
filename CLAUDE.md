@@ -263,6 +263,64 @@ Use this agent when:
 - **Backend Sync**: Frontend matches backend TemplateVariable structure exactly
 - **File**: `EmailTemplateForm.tsx` lines 94-616, `types/index.ts` lines 714-736
 
+### Seasonal Email Automation (January 2026) ✅ COMPLETE
+
+#### Overview
+Automatic country-based seasonal email campaigns that send festival greetings to companies based on their country. Uses variable trigger dates (configured in Settings) for holidays that change each year.
+
+#### 10 Seasonal Email Templates
+| Template | Type | Target Countries | Trigger |
+|----------|------|------------------|---------|
+| Christmas | `seasonal_christmas` | ALL | Fixed: Oct 15 |
+| Valentine's Day | `seasonal_valentines` | ALL | Fixed: Jan 31 |
+| Chinese New Year | `seasonal_newyear` | All Asia (18 countries) | Variable |
+| Songkran | `seasonal_songkran` | Thailand | Fixed: Mar 29 |
+| Ramadan | `seasonal_ramadan` | Middle East + Malaysia/Indonesia | Variable |
+| Eid al-Fitr | `seasonal_eid_fitr` | Indonesia, Malaysia, ME (18 countries) | Variable |
+| Loy Krathong | `seasonal_loy_krathong` | Thailand | Variable |
+| Singapore National Day | `seasonal_singapore_national_day` | Singapore | Fixed: Jul 26 |
+| Diwali | `seasonal_diwali` | India, Nepal, Singapore, Malaysia, etc. | Variable |
+| Mid-Autumn Festival | `seasonal_mid_autumn` | China, Vietnam, Taiwan, HK, etc. | Variable |
+
+#### Variable Holiday Date Management
+- **Model**: `SeasonalTriggerDate` in `crm_app/models.py`
+- **API**: `/api/v1/seasonal-trigger-dates/` (CRUD endpoints)
+- **Frontend**: Settings page (`/settings`) with holiday date management
+- **Fields**: holiday_type, year, trigger_date, holiday_date, notes
+
+#### Country Mappings (in `auto_enrollment_service.py`)
+```python
+SEASONAL_COUNTRY_MAP = {
+    'auto_seasonal_cny': ['Thailand', 'Singapore', 'Malaysia', 'Hong Kong', 'China', 'Taiwan',
+                          'Vietnam', 'Japan', 'South Korea', 'Philippines', 'Indonesia',
+                          'Myanmar', 'Cambodia', 'Laos', 'Brunei', 'Macau', 'Mongolia', 'North Korea'],
+    'auto_seasonal_diwali': ['India', 'Nepal', 'Singapore', 'Malaysia', 'Sri Lanka', 'Mauritius', 'Fiji'],
+    'auto_seasonal_mid_autumn': ['China', 'Vietnam', 'Taiwan', 'Hong Kong', 'Macau', 'Singapore', 'Malaysia'],
+    'auto_seasonal_eid_fitr': ['Indonesia', 'Malaysia', 'Brunei', 'Singapore', 'UAE', 'Saudi Arabia',
+                               'Qatar', 'Kuwait', 'Bahrain', 'Oman', 'Jordan', 'Lebanon', 'Egypt',
+                               'Iraq', 'Iran', 'Turkey', 'Pakistan', 'Bangladesh'],
+    # ... more mappings
+}
+```
+
+#### 2026 Variable Holiday Schedule (Pre-configured)
+| Holiday | Trigger Date | Holiday Date |
+|---------|--------------|--------------|
+| Chinese New Year | Jan 15 | Jan 29 |
+| Ramadan | Feb 3 | Feb 17 |
+| Eid al-Fitr | Mar 6 | Mar 20 |
+| Mid-Autumn Festival | Sep 19 | Oct 3 |
+| Diwali | Oct 25 | Nov 8 |
+| Loy Krathong | Oct 31 | Nov 14 |
+
+#### Key Files
+- **Models**: `crm_app/models.py` - SeasonalTriggerDate, EmailSequence.SEQUENCE_TYPE_CHOICES
+- **Service**: `crm_app/services/auto_enrollment_service.py` - SEASONAL_COUNTRY_MAP, SEASONAL_TRIGGER_DATES
+- **Views**: `crm_app/views.py` - SeasonalTriggerDateViewSet
+- **Serializers**: `crm_app/serializers.py` - SeasonalTriggerDateSerializer
+- **Frontend**: `bmasia-crm-frontend/src/pages/Settings.tsx` - Holiday date management UI
+- **Types**: `bmasia-crm-frontend/src/types/index.ts` - SeasonalTriggerDate interface
+
 ## Key Project Files and Locations
 
 ### Backend (Django)
@@ -295,6 +353,8 @@ Use this agent when:
     - `SequenceEnrollments.tsx` - View/manage enrollments for a sequence
     - `EnrollSequenceDialog.tsx` - Enroll companies/contacts in sequences
     - `EmailTemplateForm.tsx` - Create/edit templates with variable guide
+  - **Settings** (Jan 2026):
+    - `Settings.tsx` - Variable holiday date management for seasonal campaigns
 - **Services**:
   - `api.ts` - API service layer with Axios (includes sequence methods)
   - `authService.ts` - JWT authentication
@@ -400,7 +460,7 @@ npm run build  # Production build
 6. **Test locally** before pushing to production
 7. **Use environment variables** for sensitive data, never hardcode
 
-## Current Status (November 2025)
+## Current Status (January 2026)
 
 ### Backend (Django)
 - ✅ Core CRM functionality (Companies, Contacts, Contracts, Quotes, Invoices)
@@ -414,6 +474,8 @@ npm run build  # Production build
 - ✅ **Email Sequences (Drip Campaigns)** - Complete with conditional logic and cron automation
 - ✅ **Automatic Renewal Reminders** - Daily processing with 30/14/7-day advance notices
 - ✅ **Email Template Variable System** - Rich variable guide with descriptions
+- ✅ **Seasonal Email Automation** - 10 templates with country-based targeting (Jan 2026)
+- ✅ **SeasonalTriggerDate Model** - Admin-configurable variable holiday dates
 
 ### Frontend (React + TypeScript)
 - ✅ Authentication with JWT tokens (AuthContext)
@@ -427,8 +489,19 @@ npm run build  # Production build
 - ✅ Email sending UI (EmailSendDialog component integrated in Contracts/Quotes)
 - ✅ **Email Sequences UI** - Full CRUD with step configuration and enrollment management
 - ✅ **Email Template Variable Guide** - Interactive variable insertion with tooltips
+- ✅ **Settings Page** - Variable holiday date management (`/settings`)
 
-### Recent Improvements (November 2025)
+### Recent Improvements (January 2026)
+- ✅ **Seasonal Email Automation System** (Jan 4, 2026)
+  - 10 seasonal email templates (Christmas, CNY, Diwali, Ramadan, Eid, Mid-Autumn, Loy Krathong, Songkran, Valentine's, Singapore ND)
+  - Country-based targeting via SEASONAL_COUNTRY_MAP
+  - Variable holiday dates managed via Settings page
+  - SeasonalTriggerDate model with API endpoints
+  - 2026 trigger dates pre-configured for all variable holidays
+  - New festivals added: Diwali, Mid-Autumn Festival, Eid al-Fitr
+  - CNY expanded to all 18 Asian countries
+
+### Previous Improvements (November 2025)
 - ✅ **Email Automations Consolidation** - Unified system (Nov 26, 2025)
   - Merged "Email Automation" (Settings) with "Email Sequences" (Marketing)
   - Single "Email Automations" page with filter tabs (All/Automatic/Manual)

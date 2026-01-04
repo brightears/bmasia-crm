@@ -102,13 +102,37 @@ SEASONAL_TRIGGER_DATES = {
 
 ## Known Issues / Next Steps
 
-1. **SeasonalTriggerDate not visible in admin** - User can't see it, need to scroll down OR it wasn't registered properly. Check admin.py registration.
+✅ **RESOLVED** - All issues from previous session have been addressed:
 
-2. **User wants frontend date setting** - Instead of Django admin, add a Settings page in React frontend to set variable holiday dates.
+1. ~~SeasonalTriggerDate not visible in admin~~ → **RESOLVED**: It's registered at line 2090 in admin.py, user just needs to scroll down under "CRM_APP" section
 
-3. **Update country mapping for CNY** - Should include more Asian countries:
-   - Current: Thailand, Singapore, Malaysia, Hong Kong, China, Taiwan, Vietnam
-   - Add: Japan, South Korea, Philippines, Indonesia, Myanmar, Cambodia, Laos, Brunei
+2. ~~User wants frontend date setting~~ → **IMPLEMENTED**: Created Settings.tsx page with full CRUD for holiday dates
+   - Navigate to: https://bmasia-crm-frontend.onrender.com/settings
+   - Or use sidebar: Administration → Settings
+
+3. ~~Update country mapping for CNY~~ → **UPDATED**: CNY now includes ALL Asian countries:
+   - Thailand, Singapore, Malaysia, Hong Kong, China, Taiwan, Vietnam
+   - Japan, South Korea, Philippines, Indonesia, Myanmar, Cambodia
+   - Laos, Brunei, Macau, Mongolia, North Korea
+
+---
+
+## Latest Deployment (January 4, 2026)
+
+**Commit**: `05ec5657` - Feature: Frontend Settings page for variable holiday dates
+
+### New Files
+- `bmasia-crm-frontend/src/pages/Settings.tsx` - Holiday date management UI
+
+### Modified Files
+- `crm_app/services/auto_enrollment_service.py` - Updated country mapping for CNY and Ramadan
+- `crm_app/serializers.py` - Added SeasonalTriggerDateSerializer
+- `crm_app/views.py` - Added SeasonalTriggerDateViewSet
+- `crm_app/urls.py` - Added seasonal-trigger-dates route
+- `bmasia-crm-frontend/src/types/index.ts` - Added SeasonalTriggerDate interface
+- `bmasia-crm-frontend/src/services/api.ts` - Added CRUD methods for seasonal dates
+- `bmasia-crm-frontend/src/App.tsx` - Added /settings route
+- `bmasia-crm-frontend/src/components/Layout.tsx` - Added Settings link in sidebar
 
 ---
 
@@ -133,11 +157,66 @@ SEASONAL_TRIGGER_DATES = {
 
 ---
 
-## Email Templates (17 total in production)
+## Email Templates (20 total in production)
 
-- 7 seasonal (Christmas, CNY, Valentine's, Songkran, Loy Krathong, Ramadan, Singapore ND)
+- **10 seasonal** (Christmas, CNY, Valentine's, Songkran, Loy Krathong, Ramadan, Singapore ND, **Diwali**, **Mid-Autumn**, **Eid al-Fitr**)
 - 4 renewal (30, 14, 7 days, urgent)
 - 3 payment (7, 14 days overdue, overdue)
 - 1 quarterly check-in
 - 1 welcome
 - 1 contract signed
+
+---
+
+## Session 2: New Festivals Added (January 4, 2026 - Later)
+
+### New Festivals Implemented
+
+| Festival | Template Type | Holiday Type | Target Countries |
+|----------|---------------|--------------|------------------|
+| **Diwali** | `seasonal_diwali` | `auto_seasonal_diwali` | India, Nepal, Singapore, Malaysia, Sri Lanka, Mauritius, Fiji |
+| **Mid-Autumn Festival** | `seasonal_mid_autumn` | `auto_seasonal_mid_autumn` | China, Vietnam, Taiwan, Hong Kong, Macau, Singapore, Malaysia |
+| **Eid al-Fitr** | `seasonal_eid_fitr` | `auto_seasonal_eid_fitr` | Indonesia, Malaysia, Brunei, Singapore, UAE, Saudi Arabia, Qatar, Kuwait, Bahrain, Oman, Jordan, Lebanon, Egypt, Iraq, Iran, Turkey, Pakistan, Bangladesh |
+
+### 2026 Variable Holiday Schedule (All Pre-configured)
+
+| Holiday | Trigger Date | Holiday Date |
+|---------|--------------|--------------|
+| Chinese New Year | Jan 15 | Jan 29 |
+| Ramadan | Feb 3 | Feb 17 |
+| Eid al-Fitr | Mar 6 | Mar 20 |
+| Mid-Autumn Festival | Sep 19 | Oct 3 |
+| Diwali | Oct 25 | Nov 8 |
+| Loy Krathong | Oct 31 | Nov 14 |
+
+### Git Commits (Session 2)
+
+```
+8875c788 Add email template types for new festivals
+82581e74 Feature: Add Diwali, Mid-Autumn Festival, Eid al-Fitr seasonal campaigns
+48d01005 Fix: Handle paginated API response in Settings page
+05ec5657 Feature: Frontend Settings page for variable holiday dates
+```
+
+### Files Modified (Session 2)
+
+| File | Changes |
+|------|---------|
+| `crm_app/models.py` | Added 3 holiday types to SeasonalTriggerDate, 3 sequence types to EmailSequence, 3 template types to EmailTemplate |
+| `crm_app/services/auto_enrollment_service.py` | Added country mappings for Diwali, Mid-Autumn, Eid al-Fitr |
+| `bmasia-crm-frontend/src/pages/Settings.tsx` | Added 3 new festivals to HOLIDAY_TYPES dropdown |
+| `bmasia-crm-frontend/src/types/index.ts` | Updated SeasonalTriggerDate interface with new holiday types |
+
+### API Data Created (via production API)
+
+**Email Templates Created:**
+- Diwali Festival Greetings (`2b4f64ab-f0b7-4d39-9eaa-e62ddd14a48d`)
+- Mid-Autumn Festival Greetings (`90d1db1d-57d3-4cff-b045-7de0513cb125`)
+- Eid al-Fitr Festival Greetings (`c68d25fb-7f95-456f-8a5d-613f7db83564`)
+
+**Trigger Dates Created:**
+- Diwali 2026 (`09410cfd-ba59-49b4-a875-a1e728a94cf4`)
+- Mid-Autumn 2026 (`115117f6-5f11-410e-a120-6340e6625e58`)
+- Eid al-Fitr 2026 (`ed3d7ea6-12aa-4660-a266-7fc3ee49527c`)
+- Ramadan 2026 (`2e911be9-cfd1-476c-9d24-258e4836d3a7`)
+- Loy Krathong 2026 (`f09cbe3e-4dba-4589-92f1-79d64cbad056`)
