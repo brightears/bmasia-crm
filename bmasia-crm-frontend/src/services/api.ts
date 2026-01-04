@@ -1119,7 +1119,8 @@ class ApiService {
   // Seasonal Trigger Dates (Settings)
   async getSeasonalTriggerDates(params?: { year?: number }): Promise<SeasonalTriggerDate[]> {
     const response = await authApi.get('/seasonal-trigger-dates/', { params });
-    return response.data;
+    // API returns paginated response {count, results}, extract results array
+    return response.data.results || response.data;
   }
 
   async getSeasonalTriggerDate(id: string): Promise<SeasonalTriggerDate> {
