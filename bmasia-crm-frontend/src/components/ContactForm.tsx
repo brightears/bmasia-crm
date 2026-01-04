@@ -46,6 +46,11 @@ interface ContactFormData {
   linkedin_url: string;
   notes: string;
   preferred_contact_method: 'Email' | 'Phone' | 'Mobile' | 'LinkedIn' | '';
+  // Granular email preferences
+  receives_renewal_emails: boolean;
+  receives_seasonal_emails: boolean;
+  receives_payment_emails: boolean;
+  receives_quarterly_emails: boolean;
 }
 
 const ContactForm: React.FC<ContactFormProps> = ({
@@ -69,6 +74,11 @@ const ContactForm: React.FC<ContactFormProps> = ({
     linkedin_url: '',
     notes: '',
     preferred_contact_method: '',
+    // Email preferences default to true
+    receives_renewal_emails: true,
+    receives_seasonal_emails: true,
+    receives_payment_emails: true,
+    receives_quarterly_emails: true,
   });
 
   const [loading, setLoading] = useState(false);
@@ -96,6 +106,11 @@ const ContactForm: React.FC<ContactFormProps> = ({
         linkedin_url: contact.linkedin_url || '',
         notes: contact.notes || '',
         preferred_contact_method: '', // Not in backend yet
+        // Email preferences (default to true if undefined)
+        receives_renewal_emails: contact.receives_renewal_emails ?? true,
+        receives_seasonal_emails: contact.receives_seasonal_emails ?? true,
+        receives_payment_emails: contact.receives_payment_emails ?? true,
+        receives_quarterly_emails: contact.receives_quarterly_emails ?? true,
       });
     } else {
       // Reset form for new contact
@@ -113,6 +128,11 @@ const ContactForm: React.FC<ContactFormProps> = ({
         linkedin_url: '',
         notes: '',
         preferred_contact_method: '',
+        // Email preferences default to true for new contacts
+        receives_renewal_emails: true,
+        receives_seasonal_emails: true,
+        receives_payment_emails: true,
+        receives_quarterly_emails: true,
       });
     }
     setError('');
@@ -192,6 +212,11 @@ const ContactForm: React.FC<ContactFormProps> = ({
         is_active: formData.status === 'Active',
         linkedin_url: formData.linkedin_url || '',
         notes: formData.notes || '',
+        // Granular email preferences
+        receives_renewal_emails: formData.receives_renewal_emails,
+        receives_seasonal_emails: formData.receives_seasonal_emails,
+        receives_payment_emails: formData.receives_payment_emails,
+        receives_quarterly_emails: formData.receives_quarterly_emails,
       };
 
       console.log('=== Contact Form Submit ===');
@@ -471,6 +496,75 @@ const ContactForm: React.FC<ContactFormProps> = ({
                 label="Decision Maker"
               />
             </Box>
+          </Grid>
+
+          <Divider sx={{ width: '100%', my: 2 }} />
+
+          {/* Email Preferences */}
+          <Grid item xs={12}>
+            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
+              Email Preferences
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              Control which automated emails this contact receives
+            </Typography>
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={formData.receives_renewal_emails}
+                  onChange={(e) => handleFieldChange('receives_renewal_emails', e.target.checked)}
+                />
+              }
+              label="Contract Renewal Reminders"
+            />
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={formData.receives_payment_emails}
+                  onChange={(e) => handleFieldChange('receives_payment_emails', e.target.checked)}
+                />
+              }
+              label="Payment Reminders"
+            />
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={formData.receives_quarterly_emails}
+                  onChange={(e) => handleFieldChange('receives_quarterly_emails', e.target.checked)}
+                />
+              }
+              label="Quarterly Check-ins"
+            />
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={formData.receives_seasonal_emails}
+                  onChange={(e) => handleFieldChange('receives_seasonal_emails', e.target.checked)}
+                />
+              }
+              label="Seasonal Campaigns"
+            />
+          </Grid>
+
+          <Divider sx={{ width: '100%', my: 2 }} />
+
+          {/* Notes */}
+          <Grid item xs={12}>
+            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
+              Notes
+            </Typography>
           </Grid>
 
           <Grid item xs={12}>

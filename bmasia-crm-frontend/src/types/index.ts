@@ -154,6 +154,12 @@ export interface Contact {
   created_at: string;
   updated_at: string;
 
+  // Granular email preferences (all default to true)
+  receives_renewal_emails?: boolean;
+  receives_seasonal_emails?: boolean;
+  receives_payment_emails?: boolean;
+  receives_quarterly_emails?: boolean;
+
   // These fields are not in the backend yet but used in frontend for convenience
   first_name?: string; // Computed from name
   last_name?: string; // Computed from name

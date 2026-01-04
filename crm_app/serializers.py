@@ -86,7 +86,10 @@ class ContactSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'company', 'company_name', 'name', 'email', 'phone',
             'title', 'department', 'contact_type', 'is_primary', 'is_active',
-            'linkedin_url', 'notes', 'last_contacted', 'created_at', 'updated_at'
+            'linkedin_url', 'notes', 'last_contacted', 'created_at', 'updated_at',
+            # Granular email preferences
+            'receives_renewal_emails', 'receives_seasonal_emails',
+            'receives_payment_emails', 'receives_quarterly_emails'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
     

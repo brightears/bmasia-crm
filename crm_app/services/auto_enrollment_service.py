@@ -145,10 +145,11 @@ class AutoEnrollmentService:
                     continue
 
                 # Get primary contact from company
-                # Exclude contacts who have opted out of emails
+                # Exclude contacts who have opted out of emails or renewal emails specifically
                 contact = contract.company.contacts.filter(
                     is_active=True,
                     receives_notifications=True,
+                    receives_renewal_emails=True,
                     unsubscribed=False
                 ).order_by('-is_primary_contact').first()
 
@@ -230,21 +231,23 @@ class AutoEnrollmentService:
                     continue
 
                 # Get billing contact or primary contact
-                # Exclude contacts who have opted out of emails
+                # Exclude contacts who have opted out of emails or payment emails specifically
                 company = invoice.contract.company
                 contact = company.contacts.filter(
                     is_active=True,
                     receives_notifications=True,
+                    receives_payment_emails=True,
                     unsubscribed=False
                 ).filter(
                     Q(is_billing_contact=True) | Q(is_primary_contact=True)
                 ).first()
 
                 if not contact:
-                    # Fallback to any active contact who hasn't opted out
+                    # Fallback to any active contact who hasn't opted out of payment emails
                     contact = company.contacts.filter(
                         is_active=True,
                         receives_notifications=True,
+                        receives_payment_emails=True,
                         unsubscribed=False
                     ).first()
 
@@ -332,10 +335,11 @@ class AutoEnrollmentService:
                     logger.debug(f"Contract {contract.contract_number} Q{quarter_number} already enrolled, skipping")
                     continue
 
-                # Get primary contact (respecting opt-out)
+                # Get primary contact (respecting opt-out and quarterly email preference)
                 contact = contract.company.contacts.filter(
                     is_active=True,
                     receives_notifications=True,
+                    receives_quarterly_emails=True,
                     unsubscribed=False
                 ).order_by('-is_primary_contact', '-is_decision_maker').first()
 
@@ -435,10 +439,11 @@ class AutoEnrollmentService:
             logger.info(f"Found {companies.count()} eligible companies for {sequence_type}")
 
             for company in companies:
-                # Get eligible contact (respecting opt-out)
+                # Get eligible contact (respecting opt-out and seasonal email preference)
                 contact = company.contacts.filter(
                     is_active=True,
                     receives_notifications=True,
+                    receives_seasonal_emails=True,
                     unsubscribed=False
                 ).order_by('-is_primary_contact', '-is_decision_maker').first()
 

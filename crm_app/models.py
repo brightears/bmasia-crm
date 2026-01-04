@@ -262,12 +262,18 @@ class Contact(TimestampedModel):
     last_contacted = models.DateTimeField(null=True, blank=True)
     
     # Email notification preferences
-    receives_notifications = models.BooleanField(default=True, help_text="Whether this contact receives automated emails")
+    receives_notifications = models.BooleanField(default=True, help_text="Master switch: receives any automated emails")
     notification_types = models.JSONField(default=list, blank=True, help_text="List of notification types this contact should receive")
     preferred_language = models.CharField(max_length=2, choices=[('en', 'English'), ('th', 'Thai')], default='en')
     unsubscribed = models.BooleanField(default=False, help_text="Has unsubscribed from all emails")
     unsubscribe_token = models.CharField(max_length=64, blank=True, help_text="Token for unsubscribe links")
-    
+
+    # Granular email preferences (only apply if receives_notifications=True)
+    receives_renewal_emails = models.BooleanField(default=True, help_text="Receives contract renewal reminders")
+    receives_seasonal_emails = models.BooleanField(default=True, help_text="Receives seasonal/holiday campaign emails")
+    receives_payment_emails = models.BooleanField(default=True, help_text="Receives payment reminder emails")
+    receives_quarterly_emails = models.BooleanField(default=True, help_text="Receives quarterly check-in emails")
+
     class Meta:
         unique_together = ['company', 'email']
         ordering = ['name']
