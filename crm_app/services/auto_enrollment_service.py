@@ -13,6 +13,29 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Country mapping for seasonal campaigns
+SEASONAL_COUNTRY_MAP = {
+    'auto_seasonal_christmas': ['ALL'],
+    'auto_seasonal_valentines': ['ALL'],
+    'auto_seasonal_cny': ['Thailand', 'Singapore', 'Malaysia', 'Hong Kong', 'China', 'Taiwan', 'Vietnam'],
+    'auto_seasonal_songkran': ['Thailand'],
+    'auto_seasonal_loy_krathong': ['Thailand'],
+    'auto_seasonal_ramadan': ['UAE', 'Saudi Arabia', 'Qatar', 'Kuwait', 'Bahrain', 'Oman', 'Malaysia', 'Indonesia'],
+    'auto_seasonal_singapore_nd': ['Singapore'],
+}
+
+# Fixed trigger dates (month, day) - sent 2 weeks before holiday
+SEASONAL_TRIGGER_DATES = {
+    'auto_seasonal_christmas': (10, 15),    # Oct 15 (2 months before Dec 25)
+    'auto_seasonal_valentines': (1, 31),    # Jan 31 (2 weeks before Feb 14)
+    'auto_seasonal_songkran': (3, 29),      # Mar 29 (2 weeks before Apr 13)
+    'auto_seasonal_singapore_nd': (7, 26),  # Jul 26 (2 weeks before Aug 9)
+    # Variable dates - loaded from SeasonalTriggerDate model
+    'auto_seasonal_cny': 'variable',
+    'auto_seasonal_loy_krathong': 'variable',
+    'auto_seasonal_ramadan': 'variable',
+}
+
 
 class AutoEnrollmentService:
     """Service for processing automatic sequence enrollments."""
@@ -28,6 +51,7 @@ class AutoEnrollmentService:
             'renewal': self.process_renewal_triggers(),
             'payment': self.process_payment_triggers(),
             'quarterly': self.process_quarterly_triggers(),
+            'seasonal': self.process_seasonal_triggers(),
         }
 
         total_enrolled = sum(results.values())
@@ -93,8 +117,11 @@ class AutoEnrollmentService:
                     continue
 
                 # Get primary contact from company
+                # Exclude contacts who have opted out of emails
                 contact = contract.company.contacts.filter(
-                    is_active=True
+                    is_active=True,
+                    receives_notifications=True,
+                    unsubscribed=False
                 ).order_by('-is_primary_contact').first()
 
                 if not contact:
@@ -175,15 +202,23 @@ class AutoEnrollmentService:
                     continue
 
                 # Get billing contact or primary contact
+                # Exclude contacts who have opted out of emails
                 company = invoice.contract.company
                 contact = company.contacts.filter(
-                    is_active=True
+                    is_active=True,
+                    receives_notifications=True,
+                    unsubscribed=False
                 ).filter(
                     Q(is_billing_contact=True) | Q(is_primary_contact=True)
                 ).first()
 
                 if not contact:
-                    contact = company.contacts.filter(is_active=True).first()
+                    # Fallback to any active contact who hasn't opted out
+                    contact = company.contacts.filter(
+                        is_active=True,
+                        receives_notifications=True,
+                        unsubscribed=False
+                    ).first()
 
                 if not contact:
                     logger.warning(f"No active contact for invoice {invoice.invoice_number} (company: {company.name})")
@@ -213,53 +248,185 @@ class AutoEnrollmentService:
 
     def process_quarterly_triggers(self):
         """
-        Auto-enroll companies for quarterly check-ins.
+        Auto-enroll contacts for quarterly check-ins based on contract start date.
 
-        Enrolls companies with active contracts that haven't been checked
-        in the last 90 days.
+        Enrolls contacts on the 90/180/270/360 day anniversaries of their
+        contract start date (and every subsequent 90-day milestone).
 
         Returns:
             int: Number of enrollments created
         """
-        from crm_app.models import EmailSequence, SequenceEnrollment, Company, Contract
+        from crm_app.models import EmailSequence, SequenceEnrollment, Contract
 
+        today = date.today()
         enrolled_count = 0
 
-        sequences = EmailSequence.objects.filter(
-            sequence_type='auto_quarterly',
-            status='active'
-        )
+        # Get all active contracts
+        contracts = Contract.objects.filter(
+            status='Active'
+        ).select_related('company')
 
-        for sequence in sequences:
-            # Find companies with active contracts
-            # Note: Contract model uses 'Active' (capital A) for status
-            companies_with_contracts = Company.objects.filter(
-                contracts__status='Active'
-            ).distinct()
+        logger.info(f"Processing {contracts.count()} active contracts for quarterly triggers")
 
-            ninety_days_ago = timezone.now() - timedelta(days=90)
+        for contract in contracts:
+            if not contract.start_date:
+                logger.debug(f"Contract {contract.contract_number} has no start_date, skipping")
+                continue
 
-            logger.info(f"Processing {companies_with_contracts.count()} companies for quarterly check-in sequence {sequence.name}")
+            days_since_start = (today - contract.start_date).days
 
-            for company in companies_with_contracts:
-                # Check if enrolled in last 90 days
-                recent_enrollment = SequenceEnrollment.objects.filter(
-                    sequence=sequence,
-                    company=company,
-                    enrolled_at__gte=ninety_days_ago
-                ).exists()
+            # Check if today is a quarterly milestone (90, 180, 270, 360, etc.)
+            # Only process if > 0 days (not on start date itself)
+            if days_since_start > 0 and days_since_start % 90 == 0:
+                quarter_number = days_since_start // 90
 
-                if recent_enrollment:
-                    logger.debug(f"Company {company.name} enrolled in last 90 days, skipping")
+                logger.info(f"Contract {contract.contract_number} reached Q{quarter_number} milestone ({days_since_start} days since start)")
+
+                # Get active quarterly sequence
+                sequence = EmailSequence.objects.filter(
+                    sequence_type='auto_quarterly',
+                    status='active'
+                ).first()
+
+                if not sequence:
+                    logger.debug("No active auto_quarterly sequence found")
                     continue
 
-                # Get primary contact
-                contact = company.contacts.filter(
-                    is_active=True
+                # Check if already enrolled for this specific quarter
+                # Use trigger_entity_id to track which quarters have been processed
+                already_enrolled = SequenceEnrollment.objects.filter(
+                    sequence=sequence,
+                    trigger_entity_type='contract_quarter',
+                    trigger_entity_id=f"{contract.id}_Q{quarter_number}"
+                ).exists()
+
+                if already_enrolled:
+                    logger.debug(f"Contract {contract.contract_number} Q{quarter_number} already enrolled, skipping")
+                    continue
+
+                # Get primary contact (respecting opt-out)
+                contact = contract.company.contacts.filter(
+                    is_active=True,
+                    receives_notifications=True,
+                    unsubscribed=False
                 ).order_by('-is_primary_contact', '-is_decision_maker').first()
 
                 if not contact:
-                    logger.warning(f"No active contact for company {company.name}")
+                    logger.warning(f"No active contact for contract {contract.contract_number} (company: {contract.company.name})")
+                    continue
+
+                # Create enrollment
+                try:
+                    enrollment = SequenceEnrollment.objects.create(
+                        sequence=sequence,
+                        contact=contact,
+                        company=contract.company,
+                        status='active',
+                        enrollment_source='auto_trigger',
+                        trigger_entity_type='contract_quarter',
+                        trigger_entity_id=f"{contract.id}_Q{quarter_number}",
+                        current_step_number=1
+                    )
+
+                    # Schedule first step
+                    self._schedule_next_step(enrollment)
+                    enrolled_count += 1
+
+                    logger.info(f"Auto-enrolled {contact.email} in {sequence.name} for Q{quarter_number} check-in (contract: {contract.contract_number})")
+
+                except Exception as e:
+                    logger.error(f"Failed to enroll contact {contact.email} in {sequence.name}: {str(e)}")
+
+        return enrolled_count
+
+    def process_seasonal_triggers(self):
+        """
+        Auto-enroll contacts for seasonal campaigns based on:
+        - Company country
+        - Active contract status
+        - seasonal_emails_enabled flag (if False, skip)
+        """
+        from crm_app.models import EmailSequence, SequenceEnrollment, Company
+
+        today = date.today()
+        enrolled_count = 0
+
+        for sequence_type, countries in SEASONAL_COUNTRY_MAP.items():
+            trigger_config = SEASONAL_TRIGGER_DATES.get(sequence_type)
+
+            # Handle variable dates (CNY, Ramadan, Loy Krathong)
+            if trigger_config == 'variable':
+                # Try to load from SeasonalTriggerDate model
+                try:
+                    from crm_app.models import SeasonalTriggerDate
+                    trigger_date_obj = SeasonalTriggerDate.objects.filter(
+                        holiday_type=sequence_type,
+                        year=today.year
+                    ).first()
+                    if not trigger_date_obj:
+                        logger.debug(f"No trigger date set for {sequence_type} in {today.year}")
+                        continue
+                    if today != trigger_date_obj.trigger_date:
+                        continue
+                except Exception as e:
+                    logger.debug(f"SeasonalTriggerDate not available: {e}")
+                    continue
+            else:
+                # Fixed date - check if today matches (month, day)
+                trigger_month, trigger_day = trigger_config
+                if today.month != trigger_month or today.day != trigger_day:
+                    continue
+
+            logger.info(f"Processing seasonal trigger: {sequence_type}")
+
+            # Get active sequence for this type
+            sequence = EmailSequence.objects.filter(
+                sequence_type=sequence_type,
+                status='active'
+            ).first()
+
+            if not sequence:
+                logger.debug(f"No active sequence for {sequence_type}")
+                continue
+
+            # Build company filter
+            company_filter = Q(
+                contracts__status='Active',
+                is_active=True
+            )
+
+            # Check seasonal opt-out if field exists
+            if hasattr(Company, 'seasonal_emails_enabled'):
+                company_filter &= Q(seasonal_emails_enabled=True)
+
+            # Filter by country (unless 'ALL')
+            if 'ALL' not in countries:
+                company_filter &= Q(country__in=countries)
+
+            companies = Company.objects.filter(company_filter).distinct()
+            logger.info(f"Found {companies.count()} eligible companies for {sequence_type}")
+
+            for company in companies:
+                # Get eligible contact (respecting opt-out)
+                contact = company.contacts.filter(
+                    is_active=True,
+                    receives_notifications=True,
+                    unsubscribed=False
+                ).order_by('-is_primary_contact', '-is_decision_maker').first()
+
+                if not contact:
+                    continue
+
+                # Deduplicate: Check not already enrolled this year
+                year_key = f"{sequence_type}_{today.year}"
+                already_enrolled = SequenceEnrollment.objects.filter(
+                    sequence=sequence,
+                    company=company,
+                    trigger_entity_type='seasonal',
+                    trigger_entity_id=year_key
+                ).exists()
+
+                if already_enrolled:
                     continue
 
                 try:
@@ -269,18 +436,15 @@ class AutoEnrollmentService:
                         company=company,
                         status='active',
                         enrollment_source='auto_trigger',
-                        trigger_entity_type='company',
-                        trigger_entity_id=str(company.id),
+                        trigger_entity_type='seasonal',
+                        trigger_entity_id=year_key,
                         current_step_number=1
                     )
-                    enrolled_count += 1
-                    logger.info(f"Auto-enrolled {contact.email} in {sequence.name} for quarterly check-in (company: {company.name})")
-
-                    # Schedule first step execution
                     self._schedule_next_step(enrollment)
-
+                    enrolled_count += 1
+                    logger.info(f"Enrolled {contact.email} for {sequence_type}")
                 except Exception as e:
-                    logger.error(f"Failed to enroll contact {contact.email} in {sequence.name}: {str(e)}")
+                    logger.error(f"Failed to enroll {contact.email} for {sequence_type}: {e}")
 
         return enrolled_count
 
@@ -379,7 +543,12 @@ class AutoEnrollmentService:
 
         for contact_id in contact_ids:
             try:
-                contact = Contact.objects.get(id=contact_id, is_active=True)
+                contact = Contact.objects.get(
+                    id=contact_id,
+                    is_active=True,
+                    receives_notifications=True,
+                    unsubscribed=False
+                )
 
                 # Check if already enrolled
                 existing = SequenceEnrollment.objects.filter(
@@ -408,7 +577,7 @@ class AutoEnrollmentService:
                 logger.info(f"Manually enrolled {contact.email} in {sequence.name}")
 
             except Contact.DoesNotExist:
-                errors.append(f"Contact {contact_id} not found")
+                errors.append(f"Contact {contact_id} not found or has opted out of emails")
             except Exception as e:
                 errors.append(f"Error enrolling {contact_id}: {str(e)}")
 

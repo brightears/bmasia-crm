@@ -12,6 +12,7 @@ import {
   MenuItem,
   FormControlLabel,
   Switch,
+  Checkbox,
   Alert,
   CircularProgress,
   Divider,
@@ -39,6 +40,7 @@ interface CompanyFormData {
   postal_code: string;
   notes: string;
   is_active: boolean;
+  seasonal_emails_enabled: boolean;
   soundtrack_account_id: string;
 }
 
@@ -117,6 +119,7 @@ const CompanyEdit: React.FC = () => {
     postal_code: '',
     notes: '',
     is_active: true,
+    seasonal_emails_enabled: true,
     soundtrack_account_id: '',
   });
 
@@ -150,6 +153,7 @@ const CompanyEdit: React.FC = () => {
         postal_code: companyData.postal_code || '',
         notes: companyData.notes || '',
         is_active: companyData.is_active !== undefined ? companyData.is_active : true,
+        seasonal_emails_enabled: companyData.seasonal_emails_enabled !== undefined ? companyData.seasonal_emails_enabled : true,
         soundtrack_account_id: companyData.soundtrack_account_id || '',
       });
     } catch (err: any) {
@@ -594,6 +598,37 @@ const CompanyEdit: React.FC = () => {
                 label="Active Company"
               />
             </Box>
+          </Grid>
+
+          <Divider sx={{ width: '100%', my: 2 }} />
+
+          {/* Communication Preferences */}
+          <Grid item xs={12}>
+            <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+              Communication Preferences
+            </Typography>
+          </Grid>
+
+          <Grid item xs={12}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={formData.seasonal_emails_enabled ?? true}
+                  onChange={(e) => handleFieldChange('seasonal_emails_enabled', e.target.checked)}
+                  color="primary"
+                />
+              }
+              label="Receive seasonal email campaigns (Christmas, CNY, Songkran, etc.)"
+            />
+          </Grid>
+
+          <Divider sx={{ width: '100%', my: 2 }} />
+
+          {/* Additional Notes */}
+          <Grid item xs={12}>
+            <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+              Additional Notes
+            </Typography>
           </Grid>
 
           <Grid item xs={12}>

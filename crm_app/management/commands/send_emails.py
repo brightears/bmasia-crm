@@ -20,7 +20,7 @@ class Command(BaseCommand):
         parser.add_argument(
             '--type',
             type=str,
-            choices=['all', 'renewal', 'payment', 'quarterly', 'zone-alerts', 'sequences'],
+            choices=['all', 'renewal', 'payment', 'quarterly', 'seasonal', 'zone-alerts', 'sequences'],
             default='all',
             help='Type of emails to send'
         )
@@ -93,7 +93,7 @@ class Command(BaseCommand):
 
         # Process auto-enrollments (this creates new enrollments based on triggers)
         # Must run before sequence processing so newly enrolled contacts can be included
-        if email_type in ['all', 'renewal', 'payment', 'quarterly', 'sequences']:
+        if email_type in ['all', 'renewal', 'payment', 'quarterly', 'seasonal', 'sequences']:
             self.stdout.write("Processing auto-enrollments...")
 
             if not dry_run:
@@ -125,10 +125,19 @@ class Command(BaseCommand):
                             f"Auto-enrolled {quarterly_enrolled} contacts for quarterly check-ins"
                         )
                     )
+
+                # Process seasonal triggers
+                if email_type in ['all', 'seasonal', 'sequences']:
+                    seasonal_enrolled = auto_service.process_seasonal_triggers()
+                    self.stdout.write(
+                        self.style.SUCCESS(
+                            f"Auto-enrolled {seasonal_enrolled} contacts for seasonal campaigns"
+                        )
+                    )
             else:
                 self.stdout.write(
                     self.style.WARNING(
-                        "DRY RUN: Would process auto-enrollments for renewal, payment, and quarterly triggers"
+                        "DRY RUN: Would process auto-enrollments for renewal, payment, quarterly, and seasonal triggers"
                     )
                 )
 

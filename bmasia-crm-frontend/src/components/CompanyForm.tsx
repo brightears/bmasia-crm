@@ -13,6 +13,7 @@ import {
   MenuItem,
   FormControlLabel,
   Switch,
+  Checkbox,
   Box,
   Typography,
   Alert,
@@ -48,6 +49,7 @@ interface CompanyFormData {
   notes: string;
   it_notes: string;
   is_active: boolean;
+  seasonal_emails_enabled: boolean;
   soundtrack_account_id: string;
   is_corporate_parent: boolean;
   parent_company: string;
@@ -127,6 +129,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
     notes: '',
     it_notes: '',
     is_active: true,
+    seasonal_emails_enabled: true,
     soundtrack_account_id: '',
     is_corporate_parent: false,
     parent_company: '',
@@ -159,6 +162,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
         notes: company.notes || '',
         it_notes: company.it_notes || '',
         is_active: company.is_active !== undefined ? company.is_active : true,
+        seasonal_emails_enabled: company.seasonal_emails_enabled !== undefined ? company.seasonal_emails_enabled : true,
         soundtrack_account_id: company.soundtrack_account_id || '',
         is_corporate_parent: company.is_corporate_parent || false,
         parent_company: company.parent_company || '',
@@ -182,6 +186,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
         notes: '',
         it_notes: '',
         is_active: true,
+        seasonal_emails_enabled: true,
         soundtrack_account_id: '',
         is_corporate_parent: false,
         parent_company: '',
@@ -633,6 +638,37 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
                 label="Active"
               />
             </Box>
+          </Grid>
+
+          <Divider sx={{ width: '100%', my: 2 }} />
+
+          {/* Communication Preferences */}
+          <Grid item xs={12}>
+            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
+              Communication Preferences
+            </Typography>
+          </Grid>
+
+          <Grid item xs={12}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={formData.seasonal_emails_enabled ?? true}
+                  onChange={(e) => handleFieldChange('seasonal_emails_enabled', e.target.checked)}
+                  color="primary"
+                />
+              }
+              label="Receive seasonal email campaigns (Christmas, CNY, Songkran, etc.)"
+            />
+          </Grid>
+
+          <Divider sx={{ width: '100%', my: 2 }} />
+
+          {/* Additional Notes */}
+          <Grid item xs={12}>
+            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
+              Additional Notes
+            </Typography>
           </Grid>
 
           <Grid item xs={12}>

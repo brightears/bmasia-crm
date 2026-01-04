@@ -135,7 +135,13 @@ class Company(TimestampedModel):
     
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
-    
+
+    # Email preferences
+    seasonal_emails_enabled = models.BooleanField(
+        default=True,
+        help_text="Receive seasonal/holiday email campaigns (Christmas, CNY, Songkran, etc.)"
+    )
+
     # Address fields
     address_line1 = models.CharField(max_length=255, blank=True)
     address_line2 = models.CharField(max_length=255, blank=True)
@@ -1722,6 +1728,65 @@ class CampaignRecipient(TimestampedModel):
         self.save()
 
 
+class SeasonalTriggerDate(models.Model):
+    """
+    Admin-configurable trigger dates for holidays with variable dates.
+    Each year, admin sets when to send seasonal campaign emails.
+    """
+    HOLIDAY_TYPE_CHOICES = [
+        ('auto_seasonal_cny', 'Chinese New Year'),
+        ('auto_seasonal_ramadan', 'Ramadan'),
+        ('auto_seasonal_loy_krathong', 'Loy Krathong'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    holiday_type = models.CharField(
+        max_length=50,
+        choices=HOLIDAY_TYPE_CHOICES,
+        help_text="Which holiday this trigger date is for"
+    )
+    trigger_date = models.DateField(
+        help_text="Date to send campaign emails (typically 2 weeks before the holiday)"
+    )
+    year = models.IntegerField(
+        help_text="Year this trigger date applies to"
+    )
+    holiday_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Actual holiday date (for reference)"
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text="Any notes about this year's campaign"
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='seasonal_trigger_updates'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['holiday_type', 'year']
+        ordering = ['-year', 'trigger_date']
+        verbose_name = 'Seasonal Trigger Date'
+        verbose_name_plural = 'Seasonal Trigger Dates'
+
+    def __str__(self):
+        return f"{self.get_holiday_type_display()} {self.year} - Send: {self.trigger_date}"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        # Validate trigger_date is before holiday_date if both set
+        if self.trigger_date and self.holiday_date:
+            if self.trigger_date >= self.holiday_date:
+                raise ValidationError("Trigger date must be before the holiday date")
+
+
 class DocumentAttachment(TimestampedModel):
     """Store documents that can be attached to emails"""
     DOCUMENT_TYPE_CHOICES = [
@@ -1922,6 +1987,13 @@ class EmailSequence(TimestampedModel):
         ('auto_renewal', 'Auto: Contract Renewal'),
         ('auto_payment', 'Auto: Payment Reminders'),
         ('auto_quarterly', 'Auto: Quarterly Check-ins'),
+        ('auto_seasonal_christmas', 'Auto: Christmas (All)'),
+        ('auto_seasonal_cny', 'Auto: Chinese New Year (Asia)'),
+        ('auto_seasonal_songkran', 'Auto: Songkran (Thailand)'),
+        ('auto_seasonal_loy_krathong', 'Auto: Loy Krathong (Thailand)'),
+        ('auto_seasonal_valentines', 'Auto: Valentines Day (All)'),
+        ('auto_seasonal_ramadan', 'Auto: Ramadan (Middle East)'),
+        ('auto_seasonal_singapore_nd', 'Auto: Singapore National Day'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -1932,7 +2004,7 @@ class EmailSequence(TimestampedModel):
 
     # Unified automation fields
     sequence_type = models.CharField(
-        max_length=20,
+        max_length=30,
         choices=SEQUENCE_TYPE_CHOICES,
         default='manual',
         help_text="Type of automation - manual requires enrollment, auto types trigger automatically"

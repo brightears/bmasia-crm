@@ -107,6 +107,7 @@ export interface Company {
   avg_zones_per_location: number;
   annual_revenue?: number;
   is_active: boolean;
+  seasonal_emails_enabled?: boolean;
   notes?: string;
   it_notes?: string;
   address_line1?: string;

@@ -23,7 +23,8 @@ from .models import (
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
     Device, StaticDocument,
-    CorporatePdfTemplate, ContractTemplate, ServicePackageItem, ContractDocument
+    CorporatePdfTemplate, ContractTemplate, ServicePackageItem, ContractDocument,
+    SeasonalTriggerDate
 )
 
 
@@ -2084,6 +2085,36 @@ class CampaignRecipientAdmin(admin.ModelAdmin):
         return super().get_queryset(request).select_related(
             'campaign', 'contact', 'contact__company', 'email_log'
         )
+
+
+@admin.register(SeasonalTriggerDate)
+class SeasonalTriggerDateAdmin(admin.ModelAdmin):
+    list_display = ['holiday_type', 'year', 'trigger_date', 'holiday_date', 'updated_at', 'updated_by']
+    list_filter = ['holiday_type', 'year']
+    search_fields = ['notes']
+    ordering = ['-year', 'trigger_date']
+    readonly_fields = ['id', 'created_at', 'updated_at', 'updated_by']
+
+    fieldsets = (
+        ('Holiday Information', {
+            'fields': ('holiday_type', 'year', 'holiday_date')
+        }),
+        ('Trigger Configuration', {
+            'fields': ('trigger_date', 'notes'),
+            'description': 'Set the date when campaign emails should be sent (typically 2 weeks before the holiday)'
+        }),
+        ('Metadata', {
+            'fields': ('id', 'created_at', 'updated_at', 'updated_by'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def save_model(self, request, obj, form, change):
+        obj.updated_by = request.user
+        super().save_model(request, obj, form, change)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('updated_by')
 
 
 @admin.register(DocumentAttachment)
