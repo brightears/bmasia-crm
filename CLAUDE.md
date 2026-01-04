@@ -328,6 +328,34 @@ SEASONAL_COUNTRY_MAP = {
 - ✅ Cron job configured to run daily
 - **Ready for use**: Just load Companies, Contacts, and Contracts with correct country values
 
+### Granular Contact Email Preferences (January 4, 2026) ✅ COMPLETE
+
+Per-contact, per-email-type opt-out controls. Each contact can selectively opt out of specific email types.
+
+#### New Contact Fields
+
+| Field | Default | Controls |
+|-------|---------|----------|
+| `receives_renewal_emails` | `True` | Contract renewal reminders |
+| `receives_seasonal_emails` | `True` | Seasonal/holiday campaigns |
+| `receives_payment_emails` | `True` | Payment reminder emails |
+| `receives_quarterly_emails` | `True` | Quarterly check-in emails |
+
+#### How It Works
+1. **Master switch**: `receives_notifications` must be `True` for ANY emails
+2. **Granular control**: Each preference field controls a specific email type
+3. **AutoEnrollmentService** checks both master switch AND specific preference
+
+#### Frontend UI
+- Edit any contact → "Email Preferences" section with 4 toggle switches
+- All toggles ON by default
+- Turn OFF specific toggles to exclude contact from that email type
+
+#### Files
+- **Migration**: `crm_app/migrations/0044_contact_email_preferences.py`
+- **Service**: `crm_app/services/auto_enrollment_service.py` (updated all trigger methods)
+- **Frontend**: `bmasia-crm-frontend/src/components/ContactForm.tsx` (new Email Preferences section)
+
 ## Key Project Files and Locations
 
 ### Backend (Django)

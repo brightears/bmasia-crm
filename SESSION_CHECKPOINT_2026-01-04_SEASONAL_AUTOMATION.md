@@ -1,6 +1,7 @@
 # Session Checkpoint: Extended Email Automation System
 **Date**: January 4, 2026
 **Status**: COMPLETE - Deployed to Production
+**Latest Commit**: `94d72678`
 
 ---
 
@@ -9,9 +10,10 @@
 Implemented extended email automation with:
 1. Opt-out enforcement in AutoEnrollmentService
 2. Quarterly check-ins based on contract START date (90/180/270/360 days)
-3. Seasonal campaigns by country
+3. Seasonal campaigns by country (10 festivals, 18+ countries)
 4. SeasonalTriggerDate model for variable holiday dates
 5. Company-level seasonal opt-out checkbox
+6. **NEW**: Granular contact email preferences (per-contact, per-email-type opt-out)
 
 ---
 
@@ -286,3 +288,65 @@ All sequences are **active** with 1 step each, linked to corresponding email tem
 - Japan, South Korea, Philippines, Indonesia, Myanmar, Cambodia, Laos, Brunei
 - India, Nepal, Sri Lanka, Mauritius, Fiji
 - UAE, Saudi Arabia, Qatar, Kuwait, Bahrain, Oman, Jordan, Lebanon, Egypt, Iraq, Iran, Turkey, Pakistan, Bangladesh
+
+---
+
+## Session 4: Granular Contact Email Preferences (January 4, 2026)
+
+### Feature Overview
+
+Added per-contact, per-email-type opt-out controls. Previously, contacts could only opt out of ALL emails (`receives_notifications=False`). Now they can selectively opt out of specific email types while still receiving others.
+
+### New Contact Fields
+
+| Field | Default | Controls |
+|-------|---------|----------|
+| `receives_renewal_emails` | `True` | Contract renewal reminders (30/14/7 days) |
+| `receives_seasonal_emails` | `True` | Seasonal/holiday campaign emails |
+| `receives_payment_emails` | `True` | Payment reminder emails |
+| `receives_quarterly_emails` | `True` | Quarterly check-in emails |
+
+### How It Works
+
+1. **Master switch**: `receives_notifications` must be `True` for ANY emails
+2. **Granular control**: Each preference field controls a specific email type
+3. **AutoEnrollmentService** checks both the master switch AND the specific preference before enrolling
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `crm_app/models.py` | Added 4 boolean fields to Contact model |
+| `crm_app/migrations/0044_contact_email_preferences.py` | Migration for new fields |
+| `crm_app/serializers.py` | Added fields to ContactSerializer |
+| `crm_app/services/auto_enrollment_service.py` | Updated all 4 trigger methods to check specific preferences |
+| `bmasia-crm-frontend/src/types/index.ts` | Added fields to Contact interface |
+| `bmasia-crm-frontend/src/components/ContactForm.tsx` | Added "Email Preferences" section with 4 toggles |
+
+### Frontend UI
+
+New "Email Preferences" section in ContactForm with 4 toggle switches:
+- Contract Renewal Reminders
+- Payment Reminders
+- Quarterly Check-ins
+- Seasonal Campaigns
+
+### Git Commit
+
+```
+94d72678 Feature: Granular email preferences for contacts
+```
+
+### Use Case Example
+
+**Scenario**: Hotel has 3 contacts:
+- GM (receives all emails)
+- Finance Manager (only payment emails)
+- Marketing Manager (only seasonal campaigns)
+
+**Solution**:
+1. Edit Finance Manager contact → turn OFF renewal, seasonal, quarterly toggles
+2. Edit Marketing Manager contact → turn OFF renewal, payment, quarterly toggles
+3. GM keeps all toggles ON
+
+Now the automation system automatically routes the right emails to the right contacts.
