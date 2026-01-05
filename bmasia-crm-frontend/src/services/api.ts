@@ -1102,7 +1102,8 @@ class ApiService {
     const response = await authApi.get('/contract-documents/', {
       params: { contract: contractId }
     });
-    return response.data;
+    // Handle both paginated (results array) and non-paginated responses
+    return response.data.results || response.data || [];
   }
 
   async uploadContractDocument(contractId: string, data: FormData): Promise<ContractDocument> {
