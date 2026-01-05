@@ -528,6 +528,17 @@ npm run build  # Production build
 - ✅ **Settings Page** - Variable holiday date management (`/settings`)
 
 ### Recent Improvements (January 2026)
+- ✅ **Dashboard Quick Actions Linked** (Jan 5, 2026)
+  - All Quick Action cards now navigate to correct pages with create dialogs
+  - Uses query params (`?new=true`) to trigger create dialogs on list pages
+  - Added Call/Event task types for Quick Call and Schedule Event actions
+  - Added New Quote action for Admin/Sales users
+  - Files: QuickActions.tsx, TaskForm.tsx, Contacts/Opportunities/Contracts/Quotes/EmailTemplates/Tasks pages
+- ✅ **Per-User SMTP API Support** (Jan 5, 2026)
+  - Added `smtp_password` as write-only field to UserSerializer
+  - Allows setting SMTP credentials via API (secure: password never returned in responses)
+  - Keith Clifton SMTP configured: keith@bmasiamusic.com ✅
+  - Pending: nikki, pom, kuk (need Gmail App Passwords)
 - ✅ **Multi-Year Contract Support** (Jan 5, 2026)
   - `send_renewal_reminders` toggle on Contract model (default: true)
   - Checkbox in ContractForm under "Contract Period" section
@@ -543,7 +554,7 @@ npm run build  # Production build
   - Fix: Added upload logic in handleSubmit after contract save
 - ✅ **BMAsia Team User Accounts** (Jan 5, 2026)
   - Created accounts: nikki, pom, kuk, keith (all Admin access)
-  - SMTP setup pending Gmail App Passwords from team
+  - Keith SMTP configured ✅, others pending Gmail App Passwords
 - ✅ **Seasonal Email Automation System** (Jan 4, 2026)
   - 10 seasonal email templates (Christmas, CNY, Diwali, Ramadan, Eid, Mid-Autumn, Loy Krathong, Songkran, Valentine's, Singapore ND)
   - Country-based targeting via SEASONAL_COUNTRY_MAP
