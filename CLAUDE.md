@@ -511,6 +511,7 @@ npm run build  # Production build
 - ✅ **Email Template Variable System** - Rich variable guide with descriptions
 - ✅ **Seasonal Email Automation** - 10 templates with country-based targeting (Jan 2026)
 - ✅ **SeasonalTriggerDate Model** - Admin-configurable variable holiday dates
+- ✅ **Multi-Year Contract Support** - `send_renewal_reminders` toggle to skip renewal emails
 
 ### Frontend (React + TypeScript)
 - ✅ Authentication with JWT tokens (AuthContext)
@@ -527,6 +528,22 @@ npm run build  # Production build
 - ✅ **Settings Page** - Variable holiday date management (`/settings`)
 
 ### Recent Improvements (January 2026)
+- ✅ **Multi-Year Contract Support** (Jan 5, 2026)
+  - `send_renewal_reminders` toggle on Contract model (default: true)
+  - Checkbox in ContractForm under "Contract Period" section
+  - AutoEnrollmentService skips contracts with send_renewal_reminders=False
+  - Useful for 36-month contracts like Jetts Fitness to prevent premature renewal emails
+- ✅ **Contract View Details Bug Fix** (Jan 5, 2026)
+  - Fixed blank page when clicking "View Details" on contracts
+  - Issue: getContractDocuments API expected array but received paginated response
+  - Fix: Handle both `response.data.results` and `response.data` formats
+- ✅ **Contract Document Upload Fix** (Jan 5, 2026)
+  - Fixed document upload in Contract Create/Edit form
+  - Issue: Attachments were stored in state but never uploaded to API
+  - Fix: Added upload logic in handleSubmit after contract save
+- ✅ **BMAsia Team User Accounts** (Jan 5, 2026)
+  - Created accounts: nikki, pom, kuk, keith (all Admin access)
+  - SMTP setup pending Gmail App Passwords from team
 - ✅ **Seasonal Email Automation System** (Jan 4, 2026)
   - 10 seasonal email templates (Christmas, CNY, Diwali, Ramadan, Eid, Mid-Autumn, Loy Krathong, Songkran, Valentine's, Singapore ND)
   - Country-based targeting via SEASONAL_COUNTRY_MAP
