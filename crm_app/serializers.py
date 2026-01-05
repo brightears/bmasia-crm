@@ -20,6 +20,7 @@ from .models import (
 class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model with role-based field access"""
     password = serializers.CharField(write_only=True, required=False, min_length=8)
+    smtp_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
     smtp_configured = serializers.SerializerMethodField()
     full_name = serializers.SerializerMethodField()
 
@@ -28,12 +29,13 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
             'role', 'phone', 'department', 'is_active',
-            'smtp_email', 'smtp_configured',  # Never expose smtp_password
+            'smtp_email', 'smtp_password', 'smtp_configured',
             'last_login', 'date_joined', 'password'
         ]
         read_only_fields = ['id', 'last_login', 'date_joined']
         extra_kwargs = {
             'smtp_email': {'required': False},
+            'smtp_password': {'required': False, 'write_only': True},
         }
 
     def get_smtp_configured(self, obj):
