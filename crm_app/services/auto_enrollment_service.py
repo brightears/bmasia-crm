@@ -124,9 +124,11 @@ class AutoEnrollmentService:
 
             # Find contracts expiring on the target date
             # Note: Contract model uses 'Active' (capital A) for status
+            # Only include contracts that have renewal reminders enabled
             contracts = Contract.objects.filter(
                 end_date=target_date,
-                status='Active'
+                status='Active',
+                send_renewal_reminders=True
             ).select_related('company')
 
             logger.info(f"Found {contracts.count()} contracts expiring on {target_date} for sequence {sequence.name}")

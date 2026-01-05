@@ -326,6 +326,7 @@ export interface Contract {
   notes?: string;
   renewal_notice_sent: boolean;
   renewal_notice_date?: string;
+  send_renewal_reminders?: boolean;
   days_until_expiry: number;
   is_expiring_soon: boolean;
   monthly_value: number;

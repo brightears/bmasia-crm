@@ -626,6 +626,10 @@ class Contract(TimestampedModel):
     # Renewal tracking
     renewal_notice_sent = models.BooleanField(default=False)
     renewal_notice_date = models.DateField(null=True, blank=True)
+    send_renewal_reminders = models.BooleanField(
+        default=True,
+        help_text="Send automatic renewal reminder emails for this contract"
+    )
 
     # Corporate contract fields
     CONTRACT_CATEGORY_CHOICES = [

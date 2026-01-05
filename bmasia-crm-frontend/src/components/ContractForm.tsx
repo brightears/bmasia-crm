@@ -125,6 +125,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
     currency: 'USD',
     auto_renew: false,
     renewal_period_months: 12,
+    send_renewal_reminders: true,
     payment_terms: 'Net 30',
     billing_frequency: 'Monthly',
     discount_percentage: '',
@@ -233,6 +234,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
       currency: contract.currency,
       auto_renew: contract.auto_renew,
       renewal_period_months: contract.renewal_period_months,
+      send_renewal_reminders: contract.send_renewal_reminders ?? true,
       payment_terms: contract.payment_terms || 'Net 30',
       billing_frequency: contract.billing_frequency,
       discount_percentage: contract.discount_percentage.toString(),
@@ -295,6 +297,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
       currency: 'USD',
       auto_renew: false,
       renewal_period_months: 12,
+      send_renewal_reminders: true,
       payment_terms: 'Net 30',
       billing_frequency: 'Monthly',
       discount_percentage: '',
@@ -737,6 +740,21 @@ const ContractForm: React.FC<ContractFormProps> = ({
                     sx={{ ml: 2, width: 200 }}
                   />
                 )}
+              </Box>
+
+              <Box sx={{ mt: 2 }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={formData.send_renewal_reminders !== false}
+                      onChange={(e) => setFormData(prev => ({ ...prev, send_renewal_reminders: e.target.checked }))}
+                    />
+                  }
+                  label="Send automatic renewal reminders"
+                />
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', ml: 6 }}>
+                  Uncheck for multi-year contracts to prevent premature renewal emails
+                </Typography>
               </Box>
             </Box>
 

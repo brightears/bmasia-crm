@@ -522,7 +522,7 @@ class ContractSerializer(serializers.ModelSerializer):
             'contract_number', 'contract_type', 'status', 'start_date', 'end_date',
             'value', 'currency', 'auto_renew', 'renewal_period_months', 'is_active',
             'payment_terms', 'billing_frequency', 'discount_percentage', 'notes',
-            'renewal_notice_sent', 'renewal_notice_date', 'days_until_expiry',
+            'renewal_notice_sent', 'renewal_notice_date', 'send_renewal_reminders', 'days_until_expiry',
             'is_expiring_soon', 'monthly_value', 'invoices', 'paid_invoices_count',
             'outstanding_amount', 'contract_zones', 'active_zone_count', 'total_zone_count',
             # Corporate contract fields
