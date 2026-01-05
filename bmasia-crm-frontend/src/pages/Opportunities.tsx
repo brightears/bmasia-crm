@@ -51,6 +51,7 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { useSearchParams } from 'react-router-dom';
 import { Opportunity, ApiResponse, User } from '../types';
 import ApiService from '../services/api';
 import OpportunityForm from '../components/OpportunityForm';
@@ -94,6 +95,7 @@ const stageOptions = [
 const Opportunities: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -120,6 +122,18 @@ const Opportunities: React.FC = () => {
   // Action menu
   const [actionMenuAnchor, setActionMenuAnchor] = useState<null | HTMLElement>(null);
   const [actionMenuOpportunity, setActionMenuOpportunity] = useState<Opportunity | null>(null);
+
+  // Handle query param for opening create dialog from dashboard
+  useEffect(() => {
+    if (searchParams.get('new') === 'true') {
+      setSelectedOpportunity(null);
+      setFormMode('create');
+      setFormOpen(true);
+      // Clear the query param to avoid re-opening on refresh
+      searchParams.delete('new');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     loadOpportunities();

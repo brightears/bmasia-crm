@@ -46,12 +46,14 @@ import {
   IndeterminateCheckBox,
   Close,
 } from '@mui/icons-material';
+import { useSearchParams } from 'react-router-dom';
 import { EmailTemplate, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import EmailTemplateForm from '../components/EmailTemplateForm';
 import EmailTemplatePreview from '../components/EmailTemplatePreview';
 
 const EmailTemplates: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -119,6 +121,18 @@ const EmailTemplates: React.FC = () => {
       setLoading(false);
     }
   }, [page, rowsPerPage, search, templateTypeFilter, languageFilter, activeFilter, usageFilter]);
+
+  // Handle query param for opening create dialog from dashboard
+  useEffect(() => {
+    if (searchParams.get('new') === 'true') {
+      setEditingTemplate(null);
+      setDuplicateData(null);
+      setFormOpen(true);
+      // Clear the query param to avoid re-opening on refresh
+      searchParams.delete('new');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     loadTemplates();

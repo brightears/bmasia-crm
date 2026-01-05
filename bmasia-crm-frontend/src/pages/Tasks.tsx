@@ -32,6 +32,7 @@ import {
   Refresh,
   Close,
 } from '@mui/icons-material';
+import { useSearchParams } from 'react-router-dom';
 import { Task, User, Company, Opportunity, Contract, Contact } from '../types';
 import ApiService from '../services/api';
 import TaskKanbanBoard from '../components/TaskKanbanBoard';
@@ -52,8 +53,10 @@ interface TaskFilters {
 const Tasks: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [initialTaskType, setInitialTaskType] = useState<string | null>(null);
   const [filteredTasks, setFilteredTasks] = useState<Task[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -123,6 +126,28 @@ const Tasks: React.FC = () => {
       console.error('Error fetching supporting data:', error);
     }
   }, []);
+
+  // Handle query param for opening create dialog from dashboard
+  useEffect(() => {
+    if (searchParams.get('new') === 'true') {
+      const taskType = searchParams.get('type');
+      setSelectedTask(null);
+      setFormMode('create');
+      // Set initial task type if specified (call or event)
+      if (taskType === 'call') {
+        setInitialTaskType('Call');
+      } else if (taskType === 'event') {
+        setInitialTaskType('Event');
+      } else {
+        setInitialTaskType(null);
+      }
+      setTaskFormOpen(true);
+      // Clear the query params to avoid re-opening on refresh
+      searchParams.delete('new');
+      searchParams.delete('type');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     fetchTasks();
@@ -510,7 +535,10 @@ const Tasks: React.FC = () => {
       {/* Task Form Dialog */}
       <TaskForm
         open={taskFormOpen}
-        onClose={() => setTaskFormOpen(false)}
+        onClose={() => {
+          setTaskFormOpen(false);
+          setInitialTaskType(null);
+        }}
         onSave={handleTaskSave}
         task={selectedTask}
         mode={formMode}
@@ -519,6 +547,7 @@ const Tasks: React.FC = () => {
         opportunities={opportunities}
         contracts={contracts}
         contacts={contacts}
+        initialTaskType={initialTaskType}
       />
 
       {/* Task Detail Dialog */}

@@ -231,7 +231,7 @@ export interface Task {
   description: string;
   priority: 'Low' | 'Medium' | 'High' | 'Urgent';
   status: 'To Do' | 'In Progress' | 'Review' | 'Done' | 'Cancelled' | 'On Hold';
-  task_type?: 'Follow-up' | 'Meeting' | 'Delivery' | 'Support' | 'Research' | 'Development' | 'Other';
+  task_type?: 'Call' | 'Event' | 'Follow-up' | 'Meeting' | 'Delivery' | 'Support' | 'Research' | 'Development' | 'Other';
   due_date?: string;
   reminder_date?: string;
   completed_at?: string;

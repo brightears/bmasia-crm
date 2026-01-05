@@ -56,6 +56,7 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { useSearchParams } from 'react-router-dom';
 import { Quote, ApiResponse, Company, Contact, Opportunity } from '../types';
 import ApiService, { EmailSendData } from '../services/api';
 import QuoteForm from '../components/QuoteForm';
@@ -74,6 +75,7 @@ const statusOptions = [
 const Quotes: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -111,6 +113,18 @@ const Quotes: React.FC = () => {
   const [emailDialogOpen, setEmailDialogOpen] = useState(false);
   const [emailQuote, setEmailQuote] = useState<Quote | null>(null);
   const [emailContacts, setEmailContacts] = useState<Contact[]>([]);
+
+  // Handle query param for opening create dialog from dashboard
+  useEffect(() => {
+    if (searchParams.get('new') === 'true') {
+      setSelectedQuote(null);
+      setFormMode('create');
+      setFormOpen(true);
+      // Clear the query param to avoid re-opening on refresh
+      searchParams.delete('new');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     loadQuotes();

@@ -64,6 +64,7 @@ interface TaskFormProps {
   opportunities: Opportunity[];
   contracts: Contract[];
   contacts: Contact[];
+  initialTaskType?: string | null;
 }
 
 const priorityOptions = [
@@ -83,6 +84,8 @@ const statusOptions = [
 ];
 
 const taskTypeOptions = [
+  { value: 'Call', label: 'Call' },
+  { value: 'Event', label: 'Event' },
   { value: 'Follow-up', label: 'Follow-up' },
   { value: 'Meeting', label: 'Meeting' },
   { value: 'Delivery', label: 'Delivery' },
@@ -103,6 +106,7 @@ const TaskForm: React.FC<TaskFormProps> = ({
   opportunities,
   contracts,
   contacts,
+  initialTaskType,
 }) => {
   const [formData, setFormData] = useState<Partial<Task>>({
     title: '',
@@ -145,12 +149,14 @@ const TaskForm: React.FC<TaskFormProps> = ({
         task.tags
       ));
     } else {
+      // Use initialTaskType if provided, otherwise default to 'Other'
+      const taskType = (initialTaskType || 'Other') as Task['task_type'];
       setFormData({
         title: '',
         description: '',
         priority: 'Medium',
         status: 'To Do',
-        task_type: 'Other',
+        task_type: taskType,
         due_date: undefined,
         reminder_date: undefined,
         estimated_hours: undefined,
@@ -163,9 +169,13 @@ const TaskForm: React.FC<TaskFormProps> = ({
         tags: '',
         subtasks: [],
       });
+      // Auto-expand advanced options if task type is set from quick action
+      if (initialTaskType) {
+        setShowAdvanced(true);
+      }
     }
     setError(null);
-  }, [task, open]);
+  }, [task, open, initialTaskType]);
 
   const handleChange = (field: keyof Task, value: any) => {
     setFormData(prev => ({

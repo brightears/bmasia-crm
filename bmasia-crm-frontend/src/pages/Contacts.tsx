@@ -43,12 +43,15 @@ import {
   FilterList,
   Clear,
 } from '@mui/icons-material';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Contact, Company, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import ContactForm from '../components/ContactForm';
 import ContactDetail from '../components/ContactDetail';
 
 const Contacts: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,6 +76,18 @@ const Contacts: React.FC = () => {
   // Menu
   const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
   const [menuContact, setMenuContact] = useState<Contact | null>(null);
+
+  // Handle query param for opening create dialog from dashboard
+  useEffect(() => {
+    if (searchParams.get('new') === 'true') {
+      setSelectedContact(null);
+      setEditMode(false);
+      setFormOpen(true);
+      // Clear the query param to avoid re-opening on refresh
+      searchParams.delete('new');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     loadContacts();
