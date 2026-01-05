@@ -458,6 +458,25 @@ const ContractForm: React.FC<ContractFormProps> = ({
         }
       }
 
+      // Upload attachments
+      if (attachments.length > 0 && savedContract.id) {
+        for (const file of attachments) {
+          try {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('contract', savedContract.id);
+            formData.append('title', file.name.replace(/\.[^/.]+$/, '')); // Remove extension for title
+            formData.append('document_type', 'other');
+            formData.append('is_official', 'false');
+            formData.append('is_signed', 'false');
+            await ApiService.uploadContractDocument(savedContract.id, formData);
+          } catch (uploadErr) {
+            console.error('Failed to upload document:', uploadErr);
+            // Don't fail the entire operation if document upload fails
+          }
+        }
+      }
+
       onSave(savedContract);
       onClose();
     } catch (err: any) {
