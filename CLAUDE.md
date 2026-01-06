@@ -29,6 +29,7 @@
 - Backend (Django): `srv-d13ukt8gjchc73fjat0g`
 - Frontend (React): `srv-d3clctt6ubrc73etb580`
 - Email Automation Cron: `crn-d4b9g875r7bs7391al2g`
+- Soundtrack Sync Cron: `crn-d5ea7j2li9vc73dccnb0`
 - PostgreSQL Database: `dpg-d3cbikd6ubrc73el0ke0-a`
 
 ### Render API Key
@@ -526,8 +527,24 @@ npm run build  # Production build
 - ✅ **Email Sequences UI** - Full CRUD with step configuration and enrollment management
 - ✅ **Email Template Variable Guide** - Interactive variable insertion with tooltips
 - ✅ **Settings Page** - Variable holiday date management (`/settings`)
+- ✅ **Zone Status Dashboard** - Real-time Soundtrack zone monitoring (`/zones`)
 
 ### Recent Improvements (January 2026)
+- ✅ **Zone Picker for Contract Forms** (Jan 6, 2026)
+  - New `ZonePicker` component replaces manual zone text entry
+  - Multi-select dropdown showing synced zones with status indicators (Online/Offline/Pending)
+  - Zones must be synced from Soundtrack first before they can be selected
+  - Fixed sync deduplication: uses `soundtrack_zone_id` as primary match key
+  - New endpoint: `PUT /api/v1/contracts/{id}/update-zones/`
+  - Workflow: Sync zones → Select company → Pick zones from dropdown
+  - Files: ZonePicker.tsx, ContractForm.tsx, soundtrack_api.py, views.py
+- ✅ **Soundtrack Zone Status Dashboard** (Jan 6, 2026)
+  - Real-time zone monitoring for Soundtrack Your Brand integration
+  - 60 zones synced from Jetts Thailand (Account ID: QWNjb3VudCwsMWF6NGZkYWcycmsv)
+  - Hourly cron job (`crn-d5ea7j2li9vc73dccnb0`) for automatic sync
+  - Offline alert system with 4hr initial / 24hr cooldown notifications
+  - Files: ZoneStatus.tsx, sync_soundtrack.py, offline_alert_service.py
+  - Model: ZoneOfflineAlert with notification tracking
 - ✅ **Dashboard Quick Actions Linked** (Jan 5, 2026)
   - All Quick Action cards now navigate to correct pages with create dialogs
   - Uses query params (`?new=true`) to trigger create dialogs on list pages
