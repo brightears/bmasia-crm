@@ -305,45 +305,65 @@ class SoundtrackAPIService:
         }
     
     def sync_company_zones(self, company):
-        """Sync all zones for a company with Soundtrack"""
+        """Sync all zones for a company with Soundtrack
+
+        Deduplication logic:
+        1. PRIMARY: Match by soundtrack_zone_id (unique API identifier)
+        2. FALLBACK: Match by name + platform (for manually created zones)
+        3. CREATE: Only if no match found
+        """
+        from crm_app.models import Zone
+
         if not company.soundtrack_account_id:
             return 0, 0
-        
+
         # Get all zones from the API
         api_zones = self.get_account_zones(company.soundtrack_account_id)
-        
+
         if not api_zones:
             logger.warning(f"No zones found for company {company.name}")
             return 0, 0
-        
+
         # Create or update zones based on API data
         synced_count = 0
         for api_zone in api_zones:
             zone_name = api_zone.get('name', 'Unknown Zone')
             zone_id = api_zone.get('id', '')
-            
-            # Get or create zone
-            zone, created = company.zones.get_or_create(
-                name=zone_name,
-                platform='soundtrack',
-                defaults={
-                    'soundtrack_zone_id': zone_id,
-                    'status': 'pending'
-                }
-            )
-            
-            # Update zone with latest data
-            zone.soundtrack_zone_id = zone_id
+
+            # PRIMARY: Match by soundtrack_zone_id (most reliable)
+            zone = company.zones.filter(soundtrack_zone_id=zone_id).first() if zone_id else None
+
+            if not zone:
+                # FALLBACK: Match by name + platform (catches manually created zones)
+                zone = company.zones.filter(
+                    name=zone_name,
+                    platform='soundtrack'
+                ).first()
+
+            if not zone:
+                # CREATE: Only if no match found
+                zone = Zone.objects.create(
+                    company=company,
+                    name=zone_name,
+                    platform='soundtrack',
+                    soundtrack_zone_id=zone_id,
+                    status='pending'
+                )
+                logger.info(f"Created new zone: {zone_name} for {company.name}")
+
+            # Update zone with latest data from API
+            zone.soundtrack_zone_id = zone_id  # Ensure ID is set (links manual zones)
+            zone.name = zone_name  # Update name in case it changed in Soundtrack
             zone.status = api_zone.get('status', 'offline')
-            zone.device_name = api_zone.get('device_name', '')  # Store actual device name
+            zone.device_name = api_zone.get('device_name', '')
             if api_zone.get('is_online'):
                 zone.last_seen_online = timezone.now()
             zone.api_raw_data = api_zone
             zone.last_api_sync = timezone.now()
             zone.save()
-            
+
             synced_count += 1
-        
+
         logger.info(f"Synced {synced_count} zones for {company.name}")
         return synced_count, 0
     

@@ -349,6 +349,11 @@ class ApiService {
     return response.data;
   }
 
+  async updateContractZones(contractId: string, zoneIds: string[]): Promise<ContractZone[]> {
+    const response = await authApi.put(`/contracts/${contractId}/update-zones/`, { zone_ids: zoneIds });
+    return response.data;
+  }
+
   async getZoneContracts(zoneId: string, params?: {active?: boolean}): Promise<ContractZone[]> {
     const response = await authApi.get(`/zones/${zoneId}/contracts/`, { params });
     return response.data;

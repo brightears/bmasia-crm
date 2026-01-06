@@ -24,6 +24,7 @@ export { default as ContractForm } from './ContractForm';
 export { default as ContractDetail } from './ContractDetail';
 export { default as ContractWidgets } from './ContractWidgets';
 export { default as ContractDocuments } from './ContractDocuments';
+export { default as ZonePicker } from './ZonePicker';
 export { default as QuickActions } from './QuickActions';
 export { default as SalesActivityFeed } from './SalesActivityFeed';
 export { default as SalesDashboard } from './SalesDashboard';

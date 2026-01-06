@@ -2737,6 +2737,56 @@ and<br/><br/>
         serializer = self.get_serializer(participation_agreements, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['put'], url_path='update-zones')
+    def update_zones(self, request, pk=None):
+        """
+        Replace all zones for a contract with provided zone IDs.
+
+        This is used by the ZonePicker component to update contract zones.
+        Deactivates existing zone links and creates/activates new ones.
+        """
+        contract = self.get_object()
+        zone_ids = request.data.get('zone_ids', [])
+
+        with transaction.atomic():
+            # Deactivate all current zone links
+            ContractZone.objects.filter(
+                contract=contract,
+                is_active=True
+            ).update(
+                is_active=False,
+                end_date=timezone.now().date()
+            )
+
+            # Create or reactivate zone links for provided zone IDs
+            for zone_id in zone_ids:
+                try:
+                    zone = Zone.objects.get(id=zone_id)
+
+                    # Check if link already exists (reactivate if so)
+                    contract_zone, created = ContractZone.objects.update_or_create(
+                        contract=contract,
+                        zone=zone,
+                        defaults={
+                            'is_active': True,
+                            'end_date': None,
+                            'start_date': contract.start_date or timezone.now().date()
+                        }
+                    )
+                except Zone.DoesNotExist:
+                    continue  # Skip invalid zone IDs
+
+        # Log the action
+        self.log_action('UPDATE', contract, {
+            'action': 'Zones updated',
+            'zone_count': len(zone_ids)
+        })
+
+        # Return updated zone links
+        active_zones = ContractZone.objects.filter(contract=contract, is_active=True)
+        serializer = ContractZoneSerializer(active_zones, many=True)
+        return Response(serializer.data)
+
 
 class InvoiceViewSet(BaseModelViewSet):
     """ViewSet for Invoice management"""

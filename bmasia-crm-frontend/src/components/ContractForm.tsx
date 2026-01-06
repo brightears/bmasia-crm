@@ -36,8 +36,9 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { Contract, Company, ApiResponse } from '../types';
+import { Contract, Company, ApiResponse, Zone } from '../types';
 import ApiService from '../services/api';
+import ZonePicker from './ZonePicker';
 
 interface ContractFormProps {
   open: boolean;
@@ -153,9 +154,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
     customer_contact_title: '',
   });
 
-  const [zones, setZones] = useState<ZoneFormData[]>([
-    { name: '', platform: 'soundtrack', tempId: generateTempId() }
-  ]);
+  const [selectedZones, setSelectedZones] = useState<Zone[]>([]);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [masterContracts, setMasterContracts] = useState<Contract[]>([]);
 
@@ -280,8 +279,30 @@ const ContractForm: React.FC<ContractFormProps> = ({
       setCustomServiceItems(contract.custom_service_items);
     }
 
-    // For edit mode, zones will be managed separately (not in this form for now)
-    setZones([{ name: '', platform: 'soundtrack', tempId: generateTempId() }]);
+    // Load existing contract zones in edit mode
+    if (contract.id) {
+      loadContractZones(contract.id, contract.company);
+    }
+  };
+
+  const loadContractZones = async (contractId: string, companyId: string) => {
+    try {
+      // Get all zones for the company
+      const companyZones = await ApiService.getZonesByCompany(companyId);
+
+      // Get contract's linked zones
+      const contractZones = await ApiService.getContractZones(contractId);
+      const activeZoneIds = contractZones
+        .filter((cz: any) => cz.is_active)
+        .map((cz: any) => cz.zone);
+
+      // Filter to get the Zone objects that are linked to this contract
+      const linkedZones = companyZones.filter((z: Zone) => activeZoneIds.includes(z.id));
+      setSelectedZones(linkedZones);
+    } catch (err) {
+      console.error('Failed to load contract zones:', err);
+      setSelectedZones([]);
+    }
   };
 
   const resetForm = () => {
@@ -324,7 +345,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
       customer_contact_email: '',
       customer_contact_title: '',
     });
-    setZones([{ name: '', platform: 'soundtrack', tempId: generateTempId() }]);
+    setSelectedZones([]);
     setAttachments([]);
     setSelectedServiceItems([]);
     setCustomServiceItems([]);
@@ -340,22 +361,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
       ...prev,
       company: company?.id || '',
     }));
-  };
-
-  const handleZoneChange = (index: number, field: keyof ZoneFormData, value: any) => {
-    const newZones = [...zones];
-    newZones[index] = { ...newZones[index], [field]: value };
-    setZones(newZones);
-  };
-
-  const addZone = () => {
-    setZones([...zones, { name: '', platform: 'soundtrack', tempId: generateTempId() }]);
-  };
-
-  const removeZone = (index: number) => {
-    if (zones.length > 1) {
-      setZones(zones.filter((_, i) => i !== index));
-    }
+    // Clear selected zones when company changes (zones are company-specific)
+    setSelectedZones([]);
   };
 
   const handleStartDateChange = (date: Date | null) => {
@@ -441,19 +448,13 @@ const ContractForm: React.FC<ContractFormProps> = ({
         savedContract = await ApiService.updateContract(contract!.id, contractData);
       }
 
-      // Add zones to contract (only if zones have names)
-      const validZones = zones.filter(z => z.name.trim());
-      if (validZones.length > 0 && savedContract.id) {
+      // Update contract zones (link selected existing zones by ID)
+      if (savedContract.id) {
         try {
-          await ApiService.addZonesToContract(
-            savedContract.id,
-            validZones.map(z => ({
-              name: z.name.trim(),
-              platform: z.platform
-            }))
-          );
+          const zoneIds = selectedZones.map(z => z.id);
+          await ApiService.updateContractZones(savedContract.id, zoneIds);
         } catch (zoneErr) {
-          console.error('Failed to add zones:', zoneErr);
+          console.error('Failed to update zones:', zoneErr);
           // Don't fail the entire operation if zones fail
         }
       }
@@ -1183,7 +1184,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
                   Music Zones
                 </Typography>
                 <Chip
-                  label={`${zones.length} zone${zones.length !== 1 ? 's' : ''}`}
+                  label={`${selectedZones.length} zone${selectedZones.length !== 1 ? 's' : ''} selected`}
                   color="primary"
                   size="small"
                   sx={{ bgcolor: '#FFA500' }}
@@ -1191,88 +1192,15 @@ const ContractForm: React.FC<ContractFormProps> = ({
               </Box>
 
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                Specify the music zones covered by this contract. Tech Support will add technical details later.
+                Select zones from the company's synced Soundtrack zones. Zones must be synced from Soundtrack API before they appear here.
               </Typography>
 
-              {zones.map((zone, index) => (
-                <Paper
-                  key={zone.tempId || zone.id || index}
-                  elevation={2}
-                  sx={{ p: 2, mb: 2, border: '1px solid #e0e0e0' }}
-                >
-                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                    <Box sx={{ flex: 1 }}>
-                      <TextField
-                        fullWidth
-                        size="small"
-                        label="Zone Name"
-                        value={zone.name}
-                        onChange={(e) => handleZoneChange(index, 'name', e.target.value)}
-                        placeholder="e.g., Pool Bar, Lobby, All Day Dining"
-                        required
-                        error={!zone.name && showErrors}
-                        helperText={!zone.name && showErrors ? 'Zone name required' : ''}
-                      />
-                    </Box>
-
-                    <Box sx={{ minWidth: 200 }}>
-                      <FormControl fullWidth size="small" required>
-                        <InputLabel>Platform</InputLabel>
-                        <Select
-                          value={zone.platform}
-                          onChange={(e) => handleZoneChange(index, 'platform', e.target.value)}
-                          label="Platform"
-                        >
-                          <MenuItem value="soundtrack">
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <MusicNoteIcon fontSize="small" />
-                              Soundtrack Your Brand
-                            </Box>
-                          </MenuItem>
-                          <MenuItem value="beatbreeze">
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <MusicNoteIcon fontSize="small" />
-                              Beat Breeze
-                            </Box>
-                          </MenuItem>
-                        </Select>
-                      </FormControl>
-                    </Box>
-
-                    <Box sx={{ minWidth: 100 }}>
-                      <Chip
-                        label="Pending"
-                        size="small"
-                        color="warning"
-                        sx={{ width: '100%' }}
-                      />
-                    </Box>
-
-                    <IconButton
-                      onClick={() => removeZone(index)}
-                      color="error"
-                      disabled={zones.length === 1}
-                      size="small"
-                    >
-                      <Delete />
-                    </IconButton>
-                  </Box>
-                </Paper>
-              ))}
-
-              <Button
-                startIcon={<AddIcon />}
-                onClick={addZone}
-                variant="outlined"
-                sx={{
-                  mt: 1,
-                  borderColor: '#FFA500',
-                  color: '#FFA500',
-                  '&:hover': { borderColor: '#FF8C00', bgcolor: 'rgba(255, 165, 0, 0.04)' }
-                }}
-              >
-                Add Another Zone
-              </Button>
+              <ZonePicker
+                companyId={formData.company || null}
+                selectedZones={selectedZones}
+                onChange={setSelectedZones}
+                disabled={!formData.company}
+              />
             </Box>
 
             <Divider />
