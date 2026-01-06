@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-set -e
+# Temporarily disable set -e to see what's failing
+# set -e
 
+echo "======================================================"
 echo "Starting BMAsia CRM..."
+echo "Python version: $(python --version)"
+echo "Date: $(date)"
+echo "======================================================"
 
 # Try to run reset_db.py if RESET_DB is set
 if [ "$RESET_DB" = "true" ]; then
@@ -14,8 +19,15 @@ echo "Creating campaign tables via direct SQL..."
 python create_campaign_table_direct.py || echo "Direct table creation failed, continuing anyway..."
 
 # Run database migrations first
+echo "======================================================"
 echo "Running database migrations..."
-python manage.py migrate --noinput
+echo "======================================================"
+python manage.py migrate --noinput || {
+    echo "!!! MIGRATION FAILED !!!"
+    echo "Showing migration status..."
+    python manage.py showmigrations crm_app 2>&1 | tail -20
+    echo "Trying to continue anyway..."
+}
 
 # Apply migration 0025 manually if needed (fixes production issue)
 echo "Applying migration 0025 if needed..."
@@ -45,8 +57,13 @@ except Exception as e:
 
 # Collect static files
 echo "Collecting static files..."
-python manage.py collectstatic --noinput
+python manage.py collectstatic --noinput || echo "collectstatic failed, continuing..."
+
+# Re-enable strict mode for the actual server start
+set -e
 
 # Start the web server
-echo "Starting Gunicorn..."
+echo "======================================================"
+echo "Starting Gunicorn on port $PORT..."
+echo "======================================================"
 exec gunicorn bmasia_crm.wsgi:application --bind 0.0.0.0:$PORT
