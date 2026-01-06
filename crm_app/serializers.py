@@ -150,9 +150,10 @@ class ZoneSerializer(serializers.ModelSerializer):
             'status', 'status_display', 'soundtrack_account_id', 'soundtrack_zone_id',
             'soundtrack_admin_email', 'device_name', 'last_seen_online', 'notes', 'last_api_sync',
             'is_online', 'current_contract', 'contract_count',
+            'is_orphaned', 'orphaned_at',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'soundtrack_account_id', 'last_api_sync', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'soundtrack_account_id', 'last_api_sync', 'is_orphaned', 'orphaned_at', 'created_at', 'updated_at']
 
     def get_current_contract(self, obj):
         """Get the currently active contract for this zone"""
@@ -507,6 +508,10 @@ class ContractSerializer(serializers.ModelSerializer):
     active_zone_count = serializers.SerializerMethodField()
     total_zone_count = serializers.SerializerMethodField()
 
+    # Soundtrack account ID fields
+    soundtrack_account_id = serializers.CharField(required=False, allow_blank=True)
+    effective_soundtrack_account_id = serializers.SerializerMethodField()
+
     # Corporate contract fields
     master_contract_number = serializers.CharField(source='master_contract.contract_number', read_only=True, allow_null=True)
     participation_agreements_count = serializers.SerializerMethodField()
@@ -529,6 +534,8 @@ class ContractSerializer(serializers.ModelSerializer):
             'renewal_notice_sent', 'renewal_notice_date', 'send_renewal_reminders', 'days_until_expiry',
             'is_expiring_soon', 'monthly_value', 'invoices', 'paid_invoices_count',
             'outstanding_amount', 'contract_zones', 'active_zone_count', 'total_zone_count',
+            # Soundtrack account ID fields
+            'soundtrack_account_id', 'effective_soundtrack_account_id',
             # Corporate contract fields
             'contract_category', 'master_contract', 'master_contract_number',
             'customer_signatory_name', 'customer_signatory_title',
@@ -545,7 +552,7 @@ class ContractSerializer(serializers.ModelSerializer):
             'contract_documents',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'contract_number', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'contract_number', 'effective_soundtrack_account_id', 'created_at', 'updated_at']
         extra_kwargs = {
             'contract_number': {'required': False}
         }
@@ -572,6 +579,10 @@ class ContractSerializer(serializers.ModelSerializer):
         if obj.contract_category == 'corporate_master':
             return obj.participation_agreements.count()
         return 0
+
+    def get_effective_soundtrack_account_id(self, obj):
+        """Get the effective Soundtrack account ID (contract override or company default)"""
+        return obj.soundtrack_account_id or obj.company.soundtrack_account_id
 
     def create(self, validated_data):
         """Create contract with auto-generated contract number"""

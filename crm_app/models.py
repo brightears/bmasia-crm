@@ -629,7 +629,14 @@ class Contract(TimestampedModel):
     billing_frequency = models.CharField(max_length=20, default='Annual')
     discount_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     notes = models.TextField(blank=True)
-    
+
+    # Soundtrack account override
+    soundtrack_account_id = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Soundtrack account ID for this contract (overrides company's)"
+    )
+
     # Renewal tracking
     renewal_notice_sent = models.BooleanField(default=False)
     renewal_notice_date = models.DateField(null=True, blank=True)
@@ -776,6 +783,11 @@ class Contract(TimestampedModel):
             if months > 0:
                 return round(float(self.value) / months, 2)
         return 0
+
+    @property
+    def effective_soundtrack_account_id(self):
+        """Get Soundtrack account ID (contract-level or company-level)"""
+        return self.soundtrack_account_id or self.company.soundtrack_account_id
 
     def clean(self):
         """Validate corporate contract relationships"""
@@ -1238,7 +1250,14 @@ class Zone(TimestampedModel):
     device_name = models.CharField(max_length=100, blank=True)
     last_seen_online = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True)
-    
+
+    # Orphaned zone tracking
+    is_orphaned = models.BooleanField(
+        default=False,
+        help_text="Zone exists in CRM but not found in Soundtrack API"
+    )
+    orphaned_at = models.DateTimeField(null=True, blank=True)
+
     # Auto-update from API
     last_api_sync = models.DateTimeField(null=True, blank=True)
     api_raw_data = models.JSONField(null=True, blank=True)

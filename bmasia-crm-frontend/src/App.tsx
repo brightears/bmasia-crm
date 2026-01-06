@@ -35,11 +35,10 @@ import KnowledgeBase from './pages/KnowledgeBase';
 import KnowledgeBaseArticle from './pages/KnowledgeBaseArticle';
 import KBArticleNew from './pages/KBArticleNew';
 import KBArticleEdit from './pages/KBArticleEdit';
-import Zones from './pages/Zones';
+import ZonesUnified from './pages/ZonesUnified';
 import ZoneDetail from './pages/ZoneDetail';
 import ZoneNew from './pages/ZoneNew';
 import ZoneEdit from './pages/ZoneEdit';
-import ZoneStatus from './pages/ZoneStatus';
 import Users from './pages/Users';
 import MyProfile from './pages/MyProfile';
 import Settings from './pages/Settings';
@@ -394,7 +393,7 @@ function App() {
           path="/zones"
           element={
             <ProtectedRoute requiredModule="tickets">
-              <Zones />
+              <ZonesUnified />
             </ProtectedRoute>
           }
         />
@@ -422,13 +421,10 @@ function App() {
             </ProtectedRoute>
           }
         />
+        {/* Redirect old zone-status route to zones */}
         <Route
           path="/zone-status"
-          element={
-            <ProtectedRoute requiredModule="tickets">
-              <ZoneStatus />
-            </ProtectedRoute>
-          }
+          element={<Navigate to="/zones" replace />}
         />
         <Route path="/slas" element={<PlaceholderPage title="Service Level Agreements" />} />
 

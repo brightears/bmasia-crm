@@ -347,6 +347,8 @@ export interface Contract {
   bmasia_signatory_title?: string;
   custom_terms?: string;
   participation_agreements_count?: number;
+  soundtrack_account_id?: string;
+  effective_soundtrack_account_id?: string;
   // Contract Content Management fields
   preamble_template?: string;
   preamble_custom?: string;
@@ -1173,8 +1175,21 @@ export interface Zone {
     device_name?: string;
     is_online?: boolean;
   } | null;
+  is_orphaned?: boolean;
+  orphaned_at?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface PreviewZone {
+  id: string;
+  name: string;
+  location_name?: string;
+  account_name?: string;
+  status: 'online' | 'offline' | 'no_device' | 'pending';
+  device_name?: string;
+  is_paired?: boolean;
+  is_online?: boolean;
 }
 
 // Contract Content Management Types

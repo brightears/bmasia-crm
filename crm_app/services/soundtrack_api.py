@@ -303,6 +303,19 @@ class SoundtrackAPIService:
             'is_online': zone_data.get('is_online', False),
             'raw_data': zone_data
         }
+
+    def preview_zones(self, account_id: str) -> List[Dict]:
+        """
+        Preview zones from Soundtrack API without saving to database.
+        Used to preview what zones would be synced before committing.
+
+        Args:
+            account_id: Soundtrack account ID
+
+        Returns:
+            List of zone dictionaries from the API
+        """
+        return self.get_account_zones(account_id)
     
     def sync_company_zones(self, company):
         """Sync all zones for a company with Soundtrack
@@ -311,6 +324,7 @@ class SoundtrackAPIService:
         1. PRIMARY: Match by soundtrack_zone_id (unique API identifier)
         2. FALLBACK: Match by name + platform (for manually created zones)
         3. CREATE: Only if no match found
+        4. ORPHAN DETECTION: Mark zones not in API as orphaned
         """
         from crm_app.models import Zone
 
@@ -324,11 +338,17 @@ class SoundtrackAPIService:
             logger.warning(f"No zones found for company {company.name}")
             return 0, 0
 
+        # Track API zone IDs for orphan detection
+        api_zone_ids = set()
+
         # Create or update zones based on API data
         synced_count = 0
         for api_zone in api_zones:
             zone_name = api_zone.get('name', 'Unknown Zone')
             zone_id = api_zone.get('id', '')
+
+            if zone_id:
+                api_zone_ids.add(zone_id)
 
             # PRIMARY: Match by soundtrack_zone_id (most reliable)
             zone = company.zones.filter(soundtrack_zone_id=zone_id).first() if zone_id else None
@@ -360,9 +380,26 @@ class SoundtrackAPIService:
                 zone.last_seen_online = timezone.now()
             zone.api_raw_data = api_zone
             zone.last_api_sync = timezone.now()
+
+            # Unmark as orphaned if it was previously orphaned
+            if zone.is_orphaned:
+                zone.is_orphaned = False
+                zone.orphaned_at = None
+                logger.info(f"Zone {zone_name} found in API again - unmarking as orphaned")
+
             zone.save()
 
             synced_count += 1
+
+        # Detect orphaned zones (zones in DB but not in API)
+        db_zones = company.zones.filter(platform='soundtrack').exclude(soundtrack_zone_id='')
+        for db_zone in db_zones:
+            if db_zone.soundtrack_zone_id and db_zone.soundtrack_zone_id not in api_zone_ids:
+                if not db_zone.is_orphaned:
+                    db_zone.is_orphaned = True
+                    db_zone.orphaned_at = timezone.now()
+                    db_zone.save(update_fields=['is_orphaned', 'orphaned_at'])
+                    logger.warning(f"Zone {db_zone.name} not found in API - marked as orphaned")
 
         logger.info(f"Synced {synced_count} zones for {company.name}")
         return synced_count, 0

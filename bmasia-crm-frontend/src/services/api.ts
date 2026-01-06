@@ -3,7 +3,7 @@ import {
   Company, Contact, Note, Task, Opportunity, OpportunityActivity,
   Contract, Invoice, Quote, DashboardStats, ApiResponse,
   CustomerSegment, SegmentMemberResponse, SegmentValidationResponse,
-  EnrollInSequenceResponse, SegmentFilterCriteria, Zone, ContractZone, Device,
+  EnrollInSequenceResponse, SegmentFilterCriteria, Zone, PreviewZone, ContractZone, Device,
   ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
   SeasonalTriggerDate
 } from '../types';
@@ -1051,6 +1051,22 @@ class ApiService {
   async syncAllZones(): Promise<{ synced: number; errors: number; message: string }> {
     const response = await authApi.post('/zones/sync-all/');
     return response.data;
+  }
+
+  async previewSoundtrackZones(accountId: string): Promise<PreviewZone[]> {
+    const response = await authApi.get('/zones/preview-zones/', {
+      params: { account_id: accountId }
+    });
+    return response.data.zones;
+  }
+
+  async getOrphanedZones(): Promise<Zone[]> {
+    const response = await authApi.get('/zones/orphaned/');
+    return response.data;
+  }
+
+  async hardDeleteZone(id: string): Promise<void> {
+    await authApi.delete(`/zones/${id}/hard-delete/`);
   }
 
   // Device Management

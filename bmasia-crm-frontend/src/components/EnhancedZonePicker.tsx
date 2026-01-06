@@ -25,11 +25,13 @@ import {
   Deselect,
   Add,
 } from '@mui/icons-material';
-import { Zone } from '../types';
+import { Zone, PreviewZone } from '../types';
 import ApiService from '../services/api';
 
 interface EnhancedZonePickerProps {
   companyId: string | null;
+  soundtrackAccountId?: string;
+  previewZones?: PreviewZone[];
   selectedZones: Zone[];
   onChange: (zones: Zone[]) => void;
   disabled?: boolean;
@@ -38,6 +40,8 @@ interface EnhancedZonePickerProps {
 
 const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
   companyId,
+  soundtrackAccountId,
+  previewZones = [],
   selectedZones,
   onChange,
   disabled = false,
@@ -58,16 +62,45 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
     setLoading(true);
     setLoadError(null);
     try {
-      const zones = await ApiService.getZonesByCompany(compId);
-      const stZones = zones.filter(z => z.platform === 'soundtrack');
-      const bbZones = zones.filter(z => z.platform === 'beatbreeze');
+      // If we have preview zones, convert them to Zone format for Soundtrack section
+      if (previewZones.length > 0) {
+        // Convert PreviewZone to Zone format (temporary zones, not yet in database)
+        const convertedPreviewZones: Zone[] = previewZones.map(pz => ({
+          id: pz.id, // Use preview zone ID temporarily
+          company: compId,
+          name: pz.name,
+          platform: 'soundtrack' as const,
+          status: pz.status,
+          device_name: pz.device_name,
+          soundtrack_zone_id: pz.id,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }));
 
-      setSoundtrackZones(stZones);
-      setBeatbreezeZones(bbZones);
+        // Still load Beat Breeze zones from database
+        const zones = await ApiService.getZonesByCompany(compId);
+        const bbZones = zones.filter(z => z.platform === 'beatbreeze');
 
-      // Auto-select all Soundtrack zones for NEW contracts only
-      if (mode === 'create' && stZones.length > 0 && selectedZones.length === 0) {
-        onChange(stZones);
+        setSoundtrackZones(convertedPreviewZones);
+        setBeatbreezeZones(bbZones);
+
+        // Auto-select all preview Soundtrack zones for NEW contracts only
+        if (mode === 'create' && convertedPreviewZones.length > 0 && selectedZones.length === 0) {
+          onChange(convertedPreviewZones);
+        }
+      } else {
+        // Fallback to loading zones from database (original behavior)
+        const zones = await ApiService.getZonesByCompany(compId);
+        const stZones = zones.filter(z => z.platform === 'soundtrack');
+        const bbZones = zones.filter(z => z.platform === 'beatbreeze');
+
+        setSoundtrackZones(stZones);
+        setBeatbreezeZones(bbZones);
+
+        // Auto-select all Soundtrack zones for NEW contracts only
+        if (mode === 'create' && stZones.length > 0 && selectedZones.length === 0) {
+          onChange(stZones);
+        }
       }
     } catch (err) {
       setLoadError('Failed to load zones. Please sync with Soundtrack first.');
@@ -76,7 +109,7 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [mode, onChange, selectedZones.length]);
+  }, [mode, onChange, selectedZones.length, previewZones]);
 
   useEffect(() => {
     if (companyId) {
@@ -222,6 +255,14 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
             <Typography variant="subtitle1" fontWeight={600} color="primary">
               Soundtrack Zones
             </Typography>
+            {previewZones.length > 0 && (
+              <Chip
+                size="small"
+                label="Live Preview"
+                color="success"
+                variant="outlined"
+              />
+            )}
             {hasSoundtrackZones && (
               <Chip
                 size="small"
@@ -311,7 +352,10 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
           />
         ) : (
           <Alert severity="info" variant="outlined">
-            No Soundtrack zones found. Sync zones from the Zone Status page or the company&apos;s Soundtrack Account ID is not set.
+            {previewZones.length > 0
+              ? 'Enter a Soundtrack Account ID above to preview available zones.'
+              : 'No Soundtrack zones found. Sync zones from the Zone Status page or the company\'s Soundtrack Account ID is not set.'
+            }
           </Alert>
         )}
       </Paper>

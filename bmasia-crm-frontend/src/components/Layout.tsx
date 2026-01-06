@@ -164,7 +164,6 @@ const unifiedNavigation = [
       { text: 'Tickets', icon: <SupportIcon />, path: '/tickets' },
       { text: 'Knowledge Base', icon: <MenuBookIcon />, path: '/knowledge-base' },
       { text: 'Zones', icon: <LocationOn />, path: '/zones' },
-      { text: 'Zone Status', icon: <WifiIcon />, path: '/zone-status' },
     ],
   },
   {

@@ -6217,6 +6217,93 @@ class ZoneViewSet(viewsets.ModelViewSet):
             'message': f'Synced {synced} zones for {company.name} with {errors} errors'
         })
 
+    @action(detail=False, methods=['get'], url_path='preview-zones')
+    def preview_zones(self, request):
+        """
+        Preview zones from Soundtrack API without saving to database.
+
+        GET /api/v1/zones/preview-zones/?account_id=<soundtrack_account_id>
+
+        Query params:
+        - account_id: Soundtrack account ID (required)
+
+        Returns: List of zones from API (not saved to database)
+        """
+        account_id = request.query_params.get('account_id')
+        if not account_id:
+            return Response(
+                {'error': 'account_id query parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        from crm_app.services.soundtrack_api import soundtrack_api
+        try:
+            zones = soundtrack_api.preview_zones(account_id)
+            return Response({
+                'zones': zones,
+                'count': len(zones),
+                'message': f'Found {len(zones)} zones for account {account_id}'
+            })
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to fetch zones: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['get'], url_path='orphaned')
+    def orphaned(self, request):
+        """
+        List all orphaned zones (zones in database but not in Soundtrack API).
+
+        GET /api/v1/zones/orphaned/
+
+        Returns: List of orphaned zones
+        """
+        orphaned_zones = self.queryset.filter(is_orphaned=True)
+        serializer = self.get_serializer(orphaned_zones, many=True)
+        return Response({
+            'zones': serializer.data,
+            'count': orphaned_zones.count(),
+            'message': f'Found {orphaned_zones.count()} orphaned zones'
+        })
+
+    @action(detail=True, methods=['delete'], url_path='hard-delete')
+    def hard_delete(self, request, pk=None):
+        """
+        Permanently delete an orphaned zone.
+        Only allows deleting zones marked as orphaned and with no active contracts.
+
+        DELETE /api/v1/zones/{zone_id}/hard-delete/
+
+        Returns: Success message or error
+        """
+        zone = self.get_object()
+
+        # Check if zone is orphaned
+        if not zone.is_orphaned:
+            return Response(
+                {'error': 'Can only hard delete orphaned zones. This zone is not marked as orphaned.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Check if zone has active contracts
+        active_contracts = zone.zone_contracts.filter(is_active=True).count()
+        if active_contracts > 0:
+            return Response(
+                {'error': f'Cannot delete zone with {active_contracts} active contract(s). Please terminate contracts first.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Safe to delete
+        zone_name = zone.name
+        zone_id = str(zone.id)
+        zone.delete()
+
+        return Response({
+            'message': f'Successfully deleted orphaned zone: {zone_name}',
+            'zone_id': zone_id
+        })
+
 
 class StaticDocumentViewSet(viewsets.ModelViewSet):
     """

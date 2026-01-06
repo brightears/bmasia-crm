@@ -36,7 +36,7 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { Contract, Company, ApiResponse, Zone } from '../types';
+import { Contract, Company, ApiResponse, Zone, PreviewZone } from '../types';
 import ApiService from '../services/api';
 import EnhancedZonePicker from './EnhancedZonePicker';
 
@@ -157,6 +157,12 @@ const ContractForm: React.FC<ContractFormProps> = ({
   const [selectedZones, setSelectedZones] = useState<Zone[]>([]);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [masterContracts, setMasterContracts] = useState<Contract[]>([]);
+
+  // Soundtrack Account ID preview state
+  const [soundtrackAccountId, setSoundtrackAccountId] = useState('');
+  const [previewZones, setPreviewZones] = useState<PreviewZone[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
 
   // Contract Content Management state
   const [contractTemplates, setContractTemplates] = useState<any[]>([]);
@@ -363,6 +369,44 @@ const ContractForm: React.FC<ContractFormProps> = ({
     }));
     // Clear selected zones when company changes (zones are company-specific)
     setSelectedZones([]);
+    // Load company's Soundtrack Account ID
+    setSoundtrackAccountId(company?.soundtrack_account_id || '');
+    setPreviewZones([]);
+    setPreviewError('');
+  };
+
+  // Load Soundtrack zones preview when account ID changes
+  useEffect(() => {
+    const loadPreviewZones = async () => {
+      if (!soundtrackAccountId || soundtrackAccountId.length < 5) {
+        setPreviewZones([]);
+        return;
+      }
+
+      setPreviewLoading(true);
+      setPreviewError('');
+      try {
+        const zones = await ApiService.previewSoundtrackZones(soundtrackAccountId);
+        setPreviewZones(zones);
+      } catch (err: any) {
+        setPreviewError(err.message || 'Failed to fetch zones. Check Account ID.');
+        setPreviewZones([]);
+      } finally {
+        setPreviewLoading(false);
+      }
+    };
+
+    // Debounce the API call
+    const timer = setTimeout(() => {
+      loadPreviewZones();
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [soundtrackAccountId]);
+
+  const handleAccountIdChange = (accountId: string) => {
+    setSoundtrackAccountId(accountId);
+    setFormData(prev => ({ ...prev, soundtrack_account_id: accountId }));
   };
 
   const handleStartDateChange = (date: Date | null) => {
@@ -1174,6 +1218,37 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
             <Divider />
 
+            {/* Soundtrack Account Configuration */}
+            <Box>
+              <Typography variant="h6" gutterBottom>
+                Soundtrack Account Configuration
+              </Typography>
+              <TextField
+                fullWidth
+                size="small"
+                label="Soundtrack Account ID"
+                value={soundtrackAccountId}
+                onChange={(e) => handleAccountIdChange(e.target.value)}
+                helperText="Enter Soundtrack account ID to fetch available zones"
+                InputProps={{
+                  endAdornment: previewLoading ? (
+                    <InputAdornment position="end">
+                      <CircularProgress size={20} />
+                    </InputAdornment>
+                  ) : previewZones.length > 0 ? (
+                    <InputAdornment position="end">
+                      <Chip size="small" label={`${previewZones.length} zones`} color="success" />
+                    </InputAdornment>
+                  ) : null
+                }}
+              />
+              {previewError && (
+                <Alert severity="error" sx={{ mt: 1 }}>{previewError}</Alert>
+              )}
+            </Box>
+
+            <Divider />
+
             {/* Zone Management Section */}
             <Box sx={{ mt: 4, mb: 3 }}>
               <Divider sx={{ mb: 3 }} />
@@ -1197,6 +1272,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
               <EnhancedZonePicker
                 companyId={formData.company || null}
+                soundtrackAccountId={soundtrackAccountId}
+                previewZones={previewZones}
                 selectedZones={selectedZones}
                 onChange={setSelectedZones}
                 disabled={!formData.company}
