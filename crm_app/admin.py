@@ -24,7 +24,7 @@ from .models import (
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
     Device, StaticDocument,
     CorporatePdfTemplate, ContractTemplate, ServicePackageItem, ContractDocument,
-    SeasonalTriggerDate
+    SeasonalTriggerDate, ZoneOfflineAlert
 )
 
 
@@ -1541,6 +1541,43 @@ class ZoneAdmin(admin.ModelAdmin):
         if total_synced > 0:
             self.message_user(request, f"Successfully synced {total_synced} zones total")
     sync_with_soundtrack_api.short_description = "Sync with Soundtrack API"
+
+
+@admin.register(ZoneOfflineAlert)
+class ZoneOfflineAlertAdmin(admin.ModelAdmin):
+    list_display = ['zone_name', 'company_name', 'status_badge', 'hours_offline_display', 'notification_count', 'detected_at']
+    list_filter = ['is_resolved', 'zone__company']
+    list_select_related = ['zone', 'zone__company']
+    search_fields = ['zone__name', 'zone__company__name']
+    readonly_fields = ['detected_at', 'resolved_at', 'first_notification_at', 'last_notification_at', 'hours_offline_display']
+    ordering = ['-detected_at']
+
+    def zone_name(self, obj):
+        return obj.zone.name
+    zone_name.short_description = "Zone"
+    zone_name.admin_order_field = "zone__name"
+
+    def company_name(self, obj):
+        return obj.zone.company.name
+    company_name.short_description = "Company"
+    company_name.admin_order_field = "zone__company__name"
+
+    def status_badge(self, obj):
+        if obj.is_resolved:
+            return format_html('<span style="padding: 3px 10px; border-radius: 3px; color: white; background-color: green;">Resolved</span>')
+        return format_html('<span style="padding: 3px 10px; border-radius: 3px; color: white; background-color: red;">Active</span>')
+    status_badge.short_description = "Status"
+
+    def hours_offline_display(self, obj):
+        hours = obj.hours_offline
+        if hours < 1:
+            return f"{int(hours * 60)} minutes"
+        elif hours < 24:
+            return f"{hours:.1f} hours"
+        else:
+            days = hours / 24
+            return f"{days:.1f} days"
+    hours_offline_display.short_description = "Duration"
 
 
 # Email System Admin

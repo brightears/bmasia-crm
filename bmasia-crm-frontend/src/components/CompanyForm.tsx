@@ -50,6 +50,7 @@ interface CompanyFormData {
   it_notes: string;
   is_active: boolean;
   seasonal_emails_enabled: boolean;
+  soundtrack_offline_alerts_enabled: boolean;
   soundtrack_account_id: string;
   is_corporate_parent: boolean;
   parent_company: string;
@@ -130,6 +131,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
     it_notes: '',
     is_active: true,
     seasonal_emails_enabled: true,
+    soundtrack_offline_alerts_enabled: true,
     soundtrack_account_id: '',
     is_corporate_parent: false,
     parent_company: '',
@@ -163,6 +165,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
         it_notes: company.it_notes || '',
         is_active: company.is_active !== undefined ? company.is_active : true,
         seasonal_emails_enabled: company.seasonal_emails_enabled !== undefined ? company.seasonal_emails_enabled : true,
+        soundtrack_offline_alerts_enabled: company.soundtrack_offline_alerts_enabled !== undefined ? company.soundtrack_offline_alerts_enabled : true,
         soundtrack_account_id: company.soundtrack_account_id || '',
         is_corporate_parent: company.is_corporate_parent || false,
         parent_company: company.parent_company || '',
@@ -187,6 +190,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
         it_notes: '',
         is_active: true,
         seasonal_emails_enabled: true,
+        soundtrack_offline_alerts_enabled: true,
         soundtrack_account_id: '',
         is_corporate_parent: false,
         parent_company: '',
@@ -660,6 +664,22 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
               }
               label="Receive seasonal email campaigns (Christmas, CNY, Songkran, etc.)"
             />
+          </Grid>
+
+          <Grid item xs={12}>
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={formData.soundtrack_offline_alerts_enabled ?? true}
+                  onChange={(e) => handleFieldChange('soundtrack_offline_alerts_enabled', e.target.checked)}
+                  color="primary"
+                />
+              }
+              label="Soundtrack Offline Alerts"
+            />
+            <Typography variant="caption" color="text.secondary" sx={{ ml: 4, mb: 2, display: 'block' }}>
+              Send email alerts to opted-in contacts when music zones go offline
+            </Typography>
           </Grid>
 
           <Divider sx={{ width: '100%', my: 2 }} />

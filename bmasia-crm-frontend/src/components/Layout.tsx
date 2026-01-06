@@ -57,6 +57,7 @@ import {
   LocationOn,
   AutoMode as AutoModeIcon,
   Settings as SettingsIcon,
+  Wifi as WifiIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -163,6 +164,7 @@ const unifiedNavigation = [
       { text: 'Tickets', icon: <SupportIcon />, path: '/tickets' },
       { text: 'Knowledge Base', icon: <MenuBookIcon />, path: '/knowledge-base' },
       { text: 'Zones', icon: <LocationOn />, path: '/zones' },
+      { text: 'Zone Status', icon: <WifiIcon />, path: '/zone-status' },
     ],
   },
   {

@@ -1043,6 +1043,11 @@ class ApiService {
     await authApi.delete(`/zones/${id}/`);
   }
 
+  async syncAllZones(): Promise<{ synced: number; errors: number; message: string }> {
+    const response = await authApi.post('/zones/sync-all/');
+    return response.data;
+  }
+
   // Device Management
   async getDevices(params?: Record<string, string>): Promise<Device[]> {
     const response = await authApi.get<Device[]>('/devices/', { params });

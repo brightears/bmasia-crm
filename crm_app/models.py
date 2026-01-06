@@ -142,6 +142,12 @@ class Company(TimestampedModel):
         help_text="Receive seasonal/holiday email campaigns (Christmas, CNY, Songkran, etc.)"
     )
 
+    # Soundtrack alert preferences
+    soundtrack_offline_alerts_enabled = models.BooleanField(
+        default=True,
+        help_text="Send email alerts when music zones go offline"
+    )
+
     # Address fields
     address_line1 = models.CharField(max_length=255, blank=True)
     address_line2 = models.CharField(max_length=255, blank=True)
@@ -273,6 +279,7 @@ class Contact(TimestampedModel):
     receives_seasonal_emails = models.BooleanField(default=True, help_text="Receives seasonal/holiday campaign emails")
     receives_payment_emails = models.BooleanField(default=True, help_text="Receives payment reminder emails")
     receives_quarterly_emails = models.BooleanField(default=True, help_text="Receives quarterly check-in emails")
+    receives_soundtrack_alerts = models.BooleanField(default=False, help_text="Receives alerts when music zones go offline")
 
     class Meta:
         unique_together = ['company', 'email']
@@ -1299,6 +1306,56 @@ class Zone(TimestampedModel):
         return self.zone_contracts.all().order_by('-start_date')
 
 
+class ZoneOfflineAlert(TimestampedModel):
+    """Track offline events and notifications with smart cooldown"""
+    zone = models.ForeignKey(Zone, on_delete=models.CASCADE, related_name='offline_alerts')
+    detected_at = models.DateTimeField(help_text="When zone first went offline")
+    resolved_at = models.DateTimeField(null=True, blank=True, help_text="When zone came back online")
+    is_resolved = models.BooleanField(default=False)
+
+    # Notification tracking
+    first_notification_sent = models.BooleanField(default=False)
+    first_notification_at = models.DateTimeField(null=True, blank=True)
+    last_notification_at = models.DateTimeField(null=True, blank=True)
+    notification_count = models.IntegerField(default=0)
+    notified_contacts = models.ManyToManyField('Contact', blank=True, related_name='offline_alert_notifications')
+
+    class Meta:
+        ordering = ['-detected_at']
+        verbose_name = 'Zone Offline Alert'
+        verbose_name_plural = 'Zone Offline Alerts'
+
+    def __str__(self):
+        status = "Resolved" if self.is_resolved else "Active"
+        return f"{self.zone.name} - {status} ({self.detected_at.strftime('%Y-%m-%d %H:%M')})"
+
+    def should_send_notification(self):
+        """Smart notification logic: 4hr first, then every 24hr"""
+        now = timezone.now()
+        hours_offline = (now - self.detected_at).total_seconds() / 3600
+
+        # Not offline long enough for first alert (4 hours)
+        if hours_offline < 4:
+            return False
+
+        # First notification
+        if not self.first_notification_sent:
+            return True
+
+        # Subsequent notifications: 24-hour cooldown
+        if self.last_notification_at:
+            hours_since_last = (now - self.last_notification_at).total_seconds() / 3600
+            return hours_since_last >= 24
+
+        return False
+
+    @property
+    def hours_offline(self):
+        """Calculate hours since zone went offline"""
+        end_time = self.resolved_at if self.is_resolved else timezone.now()
+        return (end_time - self.detected_at).total_seconds() / 3600
+
+
 # Email System Models
 class EmailTemplate(TimestampedModel):
     """Store reusable email templates for different communication types"""
@@ -1329,6 +1386,7 @@ class EmailTemplate(TimestampedModel):
         ('seasonal_eid_fitr', 'Eid al-Fitr Preparation'),
         
         # Technical Support templates
+        ('zone_offline_alert', 'Zone Offline Alert (Auto)'),
         ('zone_offline_48h', 'Zone Offline 48 Hours'),
         ('zone_offline_7d', 'Zone Offline 7 Days'),
         

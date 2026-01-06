@@ -51,6 +51,7 @@ interface ContactFormData {
   receives_seasonal_emails: boolean;
   receives_payment_emails: boolean;
   receives_quarterly_emails: boolean;
+  receives_soundtrack_alerts: boolean;
 }
 
 const ContactForm: React.FC<ContactFormProps> = ({
@@ -79,6 +80,7 @@ const ContactForm: React.FC<ContactFormProps> = ({
     receives_seasonal_emails: true,
     receives_payment_emails: true,
     receives_quarterly_emails: true,
+    receives_soundtrack_alerts: false,
   });
 
   const [loading, setLoading] = useState(false);
@@ -111,6 +113,7 @@ const ContactForm: React.FC<ContactFormProps> = ({
         receives_seasonal_emails: contact.receives_seasonal_emails ?? true,
         receives_payment_emails: contact.receives_payment_emails ?? true,
         receives_quarterly_emails: contact.receives_quarterly_emails ?? true,
+        receives_soundtrack_alerts: contact.receives_soundtrack_alerts ?? false,
       });
     } else {
       // Reset form for new contact
@@ -133,6 +136,7 @@ const ContactForm: React.FC<ContactFormProps> = ({
         receives_seasonal_emails: true,
         receives_payment_emails: true,
         receives_quarterly_emails: true,
+        receives_soundtrack_alerts: false,
       });
     }
     setError('');
@@ -217,6 +221,7 @@ const ContactForm: React.FC<ContactFormProps> = ({
         receives_seasonal_emails: formData.receives_seasonal_emails,
         receives_payment_emails: formData.receives_payment_emails,
         receives_quarterly_emails: formData.receives_quarterly_emails,
+        receives_soundtrack_alerts: formData.receives_soundtrack_alerts,
       };
 
       console.log('=== Contact Form Submit ===');
@@ -556,6 +561,21 @@ const ContactForm: React.FC<ContactFormProps> = ({
               }
               label="Seasonal Campaigns"
             />
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={formData.receives_soundtrack_alerts}
+                  onChange={(e) => handleFieldChange('receives_soundtrack_alerts', e.target.checked)}
+                />
+              }
+              label="Soundtrack Offline Alerts"
+            />
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: -0.5 }}>
+              Receive alerts when music zones go offline (for IT/Technical contacts)
+            </Typography>
           </Grid>
 
           <Divider sx={{ width: '100%', my: 2 }} />

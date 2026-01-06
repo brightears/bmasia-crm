@@ -91,7 +91,8 @@ class ContactSerializer(serializers.ModelSerializer):
             'linkedin_url', 'notes', 'last_contacted', 'created_at', 'updated_at',
             # Granular email preferences
             'receives_renewal_emails', 'receives_seasonal_emails',
-            'receives_payment_emails', 'receives_quarterly_emails'
+            'receives_payment_emails', 'receives_quarterly_emails',
+            'receives_soundtrack_alerts'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
     
@@ -197,7 +198,8 @@ class CompanySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'legal_entity_name', 'country', 'website', 'industry',
             'location_count', 'music_zone_count', 'avg_zones_per_location',
-            'soundtrack_account_id', 'is_active', 'seasonal_emails_enabled', 'notes', 'it_notes',
+            'soundtrack_account_id', 'is_active', 'seasonal_emails_enabled',
+            'soundtrack_offline_alerts_enabled', 'notes', 'it_notes',
             'address_line1', 'address_line2', 'city', 'state', 'postal_code',
             'billing_entity', 'full_address', 'total_contract_value', 'contacts', 'zones', 'zones_summary',
             'subscription_summary', 'primary_contact', 'opportunities_count',

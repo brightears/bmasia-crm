@@ -108,6 +108,7 @@ export interface Company {
   annual_revenue?: number;
   is_active: boolean;
   seasonal_emails_enabled?: boolean;
+  soundtrack_offline_alerts_enabled?: boolean;
   notes?: string;
   it_notes?: string;
   address_line1?: string;
@@ -159,6 +160,7 @@ export interface Contact {
   receives_seasonal_emails?: boolean;
   receives_payment_emails?: boolean;
   receives_quarterly_emails?: boolean;
+  receives_soundtrack_alerts?: boolean;
 
   // These fields are not in the backend yet but used in frontend for convenience
   first_name?: string; // Computed from name
@@ -1165,6 +1167,12 @@ export interface Zone {
     end_date?: string;
   } | null;
   contract_count?: number;
+  last_api_sync?: string | null;
+  api_raw_data?: {
+    currently_playing?: string;
+    device_name?: string;
+    is_online?: boolean;
+  } | null;
   created_at: string;
   updated_at: string;
 }

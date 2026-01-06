@@ -6126,6 +6126,47 @@ class ZoneViewSet(viewsets.ModelViewSet):
         serializer = ContractZoneSerializer(queryset, many=True)
         return Response(serializer.data)
 
+    @action(detail=False, methods=['post'], url_path='sync-all')
+    def sync_all(self, request):
+        """
+        Trigger manual sync for all Soundtrack zones across all companies.
+
+        POST /api/v1/zones/sync-all/
+
+        Returns: Number of zones synced and errors encountered
+        """
+        from crm_app.services.soundtrack_api import soundtrack_api
+        synced, errors = soundtrack_api.sync_all_zones()
+        return Response({
+            'synced': synced,
+            'errors': errors,
+            'message': f'Synced {synced} zones with {errors} errors'
+        })
+
+    @action(detail=True, methods=['post'])
+    def sync(self, request, pk=None):
+        """
+        Sync single company's zones from Soundtrack API.
+
+        POST /api/v1/zones/{zone_id}/sync/
+
+        Returns: Number of zones synced and errors for this company
+        """
+        zone = self.get_object()
+        company = zone.company
+        if not company.soundtrack_account_id:
+            return Response(
+                {'error': f'Company "{company.name}" has no Soundtrack account ID configured'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        from crm_app.services.soundtrack_api import soundtrack_api
+        synced, errors = soundtrack_api.sync_company_zones(company)
+        return Response({
+            'synced': synced,
+            'errors': errors,
+            'message': f'Synced {synced} zones for {company.name} with {errors} errors'
+        })
+
 
 class StaticDocumentViewSet(viewsets.ModelViewSet):
     """

@@ -39,6 +39,7 @@ import Zones from './pages/Zones';
 import ZoneDetail from './pages/ZoneDetail';
 import ZoneNew from './pages/ZoneNew';
 import ZoneEdit from './pages/ZoneEdit';
+import ZoneStatus from './pages/ZoneStatus';
 import Users from './pages/Users';
 import MyProfile from './pages/MyProfile';
 import Settings from './pages/Settings';
@@ -418,6 +419,14 @@ function App() {
           element={
             <ProtectedRoute requiredModule="tickets">
               <ZoneEdit />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/zone-status"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <ZoneStatus />
             </ProtectedRoute>
           }
         />
