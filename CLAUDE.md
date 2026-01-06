@@ -401,10 +401,16 @@ Per-contact, per-email-type opt-out controls. Each contact can selectively opt o
 - **Development**: SQLite (`db.sqlite3`)
 - **Production**: PostgreSQL on Render (dpg-d3cbikd6ubrc73el0ke0-a)
 - **Migrations**: `crm_app/migrations/`
-  - Latest: `0039_create_default_automations.py` (Creates default system automations)
-  - `0038_add_sequence_types_and_enrollment_source.py` (Email automation consolidation)
-  - `0025_user_smtp_email_user_smtp_password.py` (Per-user SMTP fields)
-  - `0022_emailsequence_emailsequencestep_sequenceenrollment_sequenceemail.py` (Email sequences models)
+  - Latest: `0047_zone_management_improvements.py` (Contract.soundtrack_account_id, Zone.is_orphaned)
+  - `0046_soundtrack_offline_alerts.py` (ZoneOfflineAlert model, offline notifications)
+  - `0045_contract_send_renewal_reminders.py` (Multi-year contract support)
+  - `0044_contact_email_preferences.py` (Granular email opt-out)
+  - `0043_seasonal_automation_system.py` (Seasonal email campaigns)
+  - `0039_create_default_automations.py` (Creates default system automations)
+- **Migration Fix Scripts** (for production deployment issues):
+  - `fix_zone_migration.py` - Direct SQL for migrations 0046, 0047
+  - `fix_smtp_columns.py` - Direct SQL for SMTP columns
+  - `create_campaign_table_direct.py` - Direct SQL for campaign tables
 
 ## Environment Variables (.env)
 
@@ -530,6 +536,20 @@ npm run build  # Production build
 - ✅ **Zone Status Dashboard** - Real-time Soundtrack zone monitoring (`/zones`)
 
 ### Recent Improvements (January 2026)
+- ✅ **Zone Management Architecture Improvements** (Jan 6, 2026)
+  - **Contract-level Soundtrack Account ID**: Override company's account ID per contract
+  - **Live Zone Preview**: Enter Account ID → Zones fetched from Soundtrack API instantly
+  - **Orphan Detection**: Zones not in Soundtrack marked as `is_orphaned` during sync
+  - **Unified Zones Page**: Merged "Zones" and "Zone Status" into single page with stats cards, filter tabs
+  - New endpoints: `GET /zones/preview-zones/`, `GET /zones/orphaned/`, `DELETE /zones/{id}/hard-delete/`
+  - Files: ContractForm.tsx, EnhancedZonePicker.tsx, ZonesUnified.tsx, soundtrack_api.py, views.py
+  - Migration: `0047_zone_management_improvements.py`
+- ✅ **Enhanced Zone Picker** (Jan 6, 2026)
+  - Two sections: Soundtrack Zones (auto-select) + Beat Breeze Zones (manual)
+  - Select All / Clear All buttons for Soundtrack zones
+  - Manual entry for Beat Breeze zones (no API integration)
+  - "Live Preview" indicator when zones fetched from API
+  - Files: EnhancedZonePicker.tsx, ContractForm.tsx
 - ✅ **Zone Picker for Contract Forms** (Jan 6, 2026)
   - New `ZonePicker` component replaces manual zone text entry
   - Multi-select dropdown showing synced zones with status indicators (Online/Offline/Pending)
@@ -555,7 +575,9 @@ npm run build  # Production build
   - Added `smtp_password` as write-only field to UserSerializer
   - Allows setting SMTP credentials via API (secure: password never returned in responses)
   - Keith Clifton SMTP configured: keith@bmasiamusic.com ✅
-  - Pending: nikki, pom, kuk (need Gmail App Passwords)
+  - Nikki Hameede SMTP configured: nikki.h@bmasiamusic.com ✅
+  - Kuk (production) SMTP configured: production@bmasiamusic.com ✅
+  - Pending: pom (need Gmail App Password)
 - ✅ **Multi-Year Contract Support** (Jan 5, 2026)
   - `send_renewal_reminders` toggle on Contract model (default: true)
   - Checkbox in ContractForm under "Contract Period" section
