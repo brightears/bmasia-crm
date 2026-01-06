@@ -38,7 +38,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Contract, Company, ApiResponse, Zone } from '../types';
 import ApiService from '../services/api';
-import ZonePicker from './ZonePicker';
+import EnhancedZonePicker from './EnhancedZonePicker';
 
 interface ContractFormProps {
   open: boolean;
@@ -1191,15 +1191,16 @@ const ContractForm: React.FC<ContractFormProps> = ({
                 />
               </Box>
 
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                Select zones from the company's synced Soundtrack zones. Zones must be synced from Soundtrack API before they appear here.
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Soundtrack zones are auto-selected for new contracts. Beat Breeze zones can be added manually.
               </Typography>
 
-              <ZonePicker
+              <EnhancedZonePicker
                 companyId={formData.company || null}
                 selectedZones={selectedZones}
                 onChange={setSelectedZones}
                 disabled={!formData.company}
+                mode={mode}
               />
             </Box>
 
