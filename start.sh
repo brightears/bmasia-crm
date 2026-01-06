@@ -22,6 +22,10 @@ python create_campaign_table_direct.py || echo "Direct table creation failed, co
 echo "Fixing missing columns via direct SQL..."
 python fix_smtp_columns.py || echo "SMTP column fix failed, continuing anyway..."
 
+# Fix zone management migrations (0046, 0047)
+echo "Fixing zone management migrations..."
+python fix_zone_migration.py || echo "Zone migration fix failed, continuing anyway..."
+
 # Run database migrations first
 echo "======================================================"
 echo "Running database migrations..."
