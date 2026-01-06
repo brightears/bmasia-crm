@@ -18,6 +18,10 @@ fi
 echo "Creating campaign tables via direct SQL..."
 python create_campaign_table_direct.py || echo "Direct table creation failed, continuing anyway..."
 
+# Fix missing SMTP columns and Soundtrack columns directly via SQL
+echo "Fixing missing columns via direct SQL..."
+python fix_smtp_columns.py || echo "SMTP column fix failed, continuing anyway..."
+
 # Run database migrations first
 echo "======================================================"
 echo "Running database migrations..."
