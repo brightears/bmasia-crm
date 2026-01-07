@@ -86,8 +86,8 @@ class EmailService:
         if sequence_type == 'auto_payment':
             return settings.FINANCE_EMAIL  # pom@bmasiamusic.com
 
-        # Quarterly check-ins and manual sequences use default
-        return settings.DEFAULT_FROM_EMAIL  # norbert@bmasiamusic.com
+        # Quarterly check-ins and manual sequences use admin email
+        return settings.ADMIN_EMAIL  # norbert@bmasiamusic.com
 
     def _get_smtp_connection_for_sender(self, from_email: str):
         """Get SMTP connection for a specific sender email.
