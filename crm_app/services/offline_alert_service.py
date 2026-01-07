@@ -1,5 +1,6 @@
 """Offline Alert Service for Soundtrack zones"""
 import logging
+from django.conf import settings
 from django.utils import timezone
 from django.db.models import Q
 
@@ -156,13 +157,13 @@ class OfflineAlertService:
                 body = self._render_template(template.body_text, context)
                 html_body = self._render_template(template.body_html, context) if template.body_html else None
 
-                # Send email
+                # Send email from IT/Support (Keith)
                 success = email_service.send_email(
                     to_email=contact.email,
                     subject=subject,
                     body=body,
                     html_body=html_body,
-                    from_email=None  # Use default sender
+                    from_email=settings.SUPPORT_EMAIL  # IT Support - keith@bmasiamusic.com
                 )
 
                 if success:
