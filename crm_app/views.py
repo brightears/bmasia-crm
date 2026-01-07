@@ -5100,6 +5100,67 @@ class SequenceEnrollmentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+    def perform_create(self, serializer):
+        """Schedule first step when enrollment is created via direct POST"""
+        from crm_app.services.email_service import email_service
+
+        enrollment = serializer.save()
+
+        # Schedule the first step for this enrollment
+        email_service.schedule_step_execution(enrollment, step_number=1)
+
+    @action(detail=True, methods=['post'])
+    def trigger_send(self, request, pk=None):
+        """
+        Immediately trigger the next pending step for this enrollment.
+        Useful for testing email sender routing.
+        """
+        from crm_app.services.email_service import email_service
+
+        enrollment = self.get_object()
+
+        # Get or create pending step execution
+        pending_execution = enrollment.step_executions.filter(
+            status__in=['scheduled', 'pending']
+        ).order_by('step__step_number').first()
+
+        if not pending_execution:
+            # Try to schedule the first step if none exists
+            execution = email_service.schedule_step_execution(
+                enrollment, step_number=enrollment.current_step_number or 1
+            )
+            if not execution:
+                return Response(
+                    {'error': 'No pending steps to execute'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            pending_execution = execution
+
+        # Execute the step immediately
+        try:
+            success = email_service.execute_sequence_step(pending_execution.id)
+
+            if success:
+                pending_execution.refresh_from_db()
+                return Response({
+                    'success': True,
+                    'message': 'Email sent successfully',
+                    'execution_id': str(pending_execution.id),
+                    'from_email': pending_execution.email_log.from_email if pending_execution.email_log else None
+                })
+            else:
+                pending_execution.refresh_from_db()
+                return Response({
+                    'success': False,
+                    'error': pending_execution.error_message or 'Unknown error'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to send email: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 class SequenceStepExecutionViewSet(viewsets.ReadOnlyModelViewSet):
     """
