@@ -1566,7 +1566,7 @@ class EmailLog(TimestampedModel):
             title=f"Email sent: {self.subject}",
             text=f"Email sent to {self.to_email}\nType: {self.get_email_type_display()}\nStatus: Sent",
             note_type='Email',
-            created_by=None  # System generated
+            author=None  # System generated
         )
     
     def mark_as_failed(self, error_message):
