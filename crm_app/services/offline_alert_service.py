@@ -147,6 +147,10 @@ class OfflineAlertService:
         # Send to each opted-in contact
         from crm_app.services.email_service import email_service
 
+        # Get SMTP connection for keith@bmasiamusic.com
+        from_email = settings.SUPPORT_EMAIL
+        smtp_connection = email_service._get_smtp_connection_for_sender(from_email)
+
         sent_count = 0
         for contact in contacts:
             try:
@@ -157,13 +161,14 @@ class OfflineAlertService:
                 body = self._render_template(template.body_text, context)
                 html_body = self._render_template(template.body_html, context) if template.body_html else None
 
-                # Send email from IT/Support (Keith)
-                success = email_service.send_email(
+                # Send email from IT/Support (Keith) using his SMTP credentials
+                success, _ = email_service.send_email(
                     to_email=contact.email,
                     subject=subject,
-                    body=body,
-                    html_body=html_body,
-                    from_email=settings.SUPPORT_EMAIL  # IT Support - keith@bmasiamusic.com
+                    body_text=body,
+                    body_html=html_body or body,
+                    from_email=from_email,
+                    smtp_connection=smtp_connection
                 )
 
                 if success:
