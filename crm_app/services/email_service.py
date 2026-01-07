@@ -89,6 +89,50 @@ class EmailService:
         # Quarterly check-ins and manual sequences use default
         return settings.DEFAULT_FROM_EMAIL  # norbert@bmasiamusic.com
 
+    def _get_smtp_connection_for_sender(self, from_email: str):
+        """Get SMTP connection for a specific sender email.
+
+        Looks up User by smtp_email and creates a connection with their credentials.
+        Falls back to default SMTP if no matching user found.
+
+        Args:
+            from_email: The email address to send from
+
+        Returns:
+            EmailBackend connection or None to use default
+        """
+        from django.core.mail import get_connection
+        from crm_app.models import User
+
+        # Extract email address if it includes display name
+        # e.g., "BMAsia Music <norbert@bmasiamusic.com>" -> "norbert@bmasiamusic.com"
+        import re
+        email_match = re.search(r'<(.+?)>', from_email)
+        clean_email = email_match.group(1) if email_match else from_email
+
+        try:
+            # Find user with this SMTP email configured
+            user = User.objects.filter(smtp_email=clean_email).first()
+
+            if user and user.smtp_password:
+                logger.info(f"Using SMTP credentials for {clean_email}")
+                return get_connection(
+                    backend='django.core.mail.backends.smtp.EmailBackend',
+                    host='smtp.gmail.com',
+                    port=587,
+                    username=user.smtp_email,
+                    password=user.smtp_password,
+                    use_tls=True,
+                    fail_silently=False
+                )
+            else:
+                logger.info(f"No SMTP credentials found for {clean_email}, using default")
+                return None
+
+        except Exception as e:
+            logger.warning(f"Error getting SMTP connection for {clean_email}: {e}")
+            return None
+
     def send_email(
         self,
         to_email: str,
@@ -1609,6 +1653,9 @@ class EmailService:
         sequence_type = execution.enrollment.sequence.sequence_type
         from_email = self._get_sequence_sender(sequence_type)
 
+        # Get SMTP connection for this sender
+        smtp_connection = self._get_smtp_connection_for_sender(from_email)
+
         # Send email using existing method
         try:
             success, message = self.send_email(
@@ -1620,7 +1667,8 @@ class EmailService:
                 company=company,
                 contact=contact,
                 email_type='sequence',
-                template=template
+                template=template,
+                smtp_connection=smtp_connection
             )
 
             if not success:
