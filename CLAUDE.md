@@ -572,6 +572,14 @@ npm run build  # Production build
   - Added Call/Event task types for Quick Call and Schedule Event actions
   - Added New Quote action for Admin/Sales users
   - Files: QuickActions.tsx, TaskForm.tsx, Contacts/Opportunities/Contracts/Quotes/EmailTemplates/Tasks pages
+- ✅ **Email Sender Routing by Type** (Jan 7, 2026)
+  - Automatic email routing based on sequence type and email category
+  - **Seasonal campaigns** (Christmas, CNY, Diwali, etc.) → production@bmasiamusic.com
+  - **Renewal reminders** → nikki.h@bmasiamusic.com (Sales)
+  - **Payment reminders** → pom@bmasiamusic.com (Finance)
+  - **Quarterly check-ins & Manual** → norbert@bmasiamusic.com (Default)
+  - **Soundtrack offline alerts** → keith@bmasiamusic.com (IT Support)
+  - Files: `email_service.py` (`_get_sequence_sender()`), `offline_alert_service.py`
 - ✅ **Per-User SMTP API Support** (Jan 5, 2026)
   - Added `smtp_password` as write-only field to UserSerializer
   - Allows setting SMTP credentials via API (secure: password never returned in responses)

@@ -203,6 +203,23 @@ Updated `settings.py`:
 'DEFAULT_PAGINATION_CLASS': 'crm_app.pagination.FlexiblePageNumberPagination',
 ```
 
+## Email Sender Routing (Jan 7, 2026)
+
+Configured automatic email routing by type:
+
+| Email Type | Sender | Settings Key |
+|------------|--------|--------------|
+| Seasonal campaigns (Christmas, CNY, Diwali, etc.) | production@bmasiamusic.com | `MUSIC_DESIGN_EMAIL` |
+| Renewal reminders | nikki.h@bmasiamusic.com | `SALES_EMAIL` |
+| Payment reminders | pom@bmasiamusic.com | `FINANCE_EMAIL` |
+| Quarterly check-ins | norbert@bmasiamusic.com | `DEFAULT_FROM_EMAIL` |
+| Manual sequences | norbert@bmasiamusic.com | `DEFAULT_FROM_EMAIL` |
+| Soundtrack offline alerts | keith@bmasiamusic.com | `SUPPORT_EMAIL` |
+
+**Implementation:**
+- `email_service.py`: `_get_sequence_sender()` method routes by sequence_type
+- `offline_alert_service.py`: Uses `settings.SUPPORT_EMAIL` for offline alerts
+
 ## SMTP Configuration (Jan 6, 2026)
 
 Configured SMTP for additional team members:
