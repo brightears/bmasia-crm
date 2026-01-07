@@ -157,6 +157,7 @@ New unified page combining Zones + ZoneStatus:
 
 ## Commits
 
+- `74e15982` - Fix: Enable page_size query parameter for API pagination
 - `6a71b05c` - Fix: Add direct SQL script for zone management migrations
 - `97234865` - Feature: Zone Management Architecture Improvements
 
@@ -183,6 +184,24 @@ python fix_zone_migration.py || echo "Zone migration fix failed, continuing anyw
 - `fix_smtp_columns.py`
 - `create_campaign_table_direct.py`
 - `fix_zone_migration.py`
+
+### Issue: Zones page only showing 20 zones instead of all 57
+**Symptom**: ZonesUnified page showing 20 zones, but Contract form correctly showing 56 Jetts zones
+
+**Cause**: Django REST Framework's default `PageNumberPagination` ignores the `page_size` query parameter. Even though frontend requested `page_size=1000`, the backend always returned 20 (the default `PAGE_SIZE`).
+
+**Solution**: Created `crm_app/pagination.py` with `FlexiblePageNumberPagination`:
+```python
+class FlexiblePageNumberPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = 'page_size'  # This was missing!
+    max_page_size = 1000
+```
+
+Updated `settings.py`:
+```python
+'DEFAULT_PAGINATION_CLASS': 'crm_app.pagination.FlexiblePageNumberPagination',
+```
 
 ## SMTP Configuration (Jan 6, 2026)
 

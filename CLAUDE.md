@@ -541,8 +541,9 @@ npm run build  # Production build
   - **Live Zone Preview**: Enter Account ID → Zones fetched from Soundtrack API instantly
   - **Orphan Detection**: Zones not in Soundtrack marked as `is_orphaned` during sync
   - **Unified Zones Page**: Merged "Zones" and "Zone Status" into single page with stats cards, filter tabs
+  - **Flexible Pagination**: Custom `FlexiblePageNumberPagination` allows `page_size` query param (max: 1000)
   - New endpoints: `GET /zones/preview-zones/`, `GET /zones/orphaned/`, `DELETE /zones/{id}/hard-delete/`
-  - Files: ContractForm.tsx, EnhancedZonePicker.tsx, ZonesUnified.tsx, soundtrack_api.py, views.py
+  - Files: ContractForm.tsx, EnhancedZonePicker.tsx, ZonesUnified.tsx, soundtrack_api.py, views.py, pagination.py
   - Migration: `0047_zone_management_improvements.py`
 - ✅ **Enhanced Zone Picker** (Jan 6, 2026)
   - Two sections: Soundtrack Zones (auto-select) + Beat Breeze Zones (manual)
