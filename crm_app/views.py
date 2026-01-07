@@ -316,6 +316,41 @@ class UserViewSet(BaseModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+    @action(detail=True, methods=['post'])
+    def test_smtp_send(self, request, pk=None):
+        """Admin: Test a specific user's SMTP by sending actual email"""
+        if not request.user.role == 'Admin':
+            return Response({'error': 'Admin only'}, status=status.HTTP_403_FORBIDDEN)
+
+        user = self.get_object()
+        to_email = request.data.get('to_email', request.user.email)
+
+        if not user.smtp_email or not user.smtp_password:
+            return Response({'error': f'{user.username} SMTP not configured'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+
+            smtp = smtplib.SMTP('smtp.gmail.com', 587)
+            smtp.starttls()
+            smtp.login(user.smtp_email, user.smtp_password)
+
+            msg = MIMEText(f"Test email from {user.smtp_email} - SMTP verification successful!")
+            msg['Subject'] = f'[TEST] {user.username} SMTP Verification'
+            msg['From'] = user.smtp_email
+            msg['To'] = to_email
+
+            smtp.send_message(msg)
+            smtp.quit()
+
+            return Response({
+                'success': True,
+                'message': f'Test email sent from {user.smtp_email} to {to_email}'
+            })
+        except Exception as e:
+            return Response({'success': False, 'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class CompanyViewSet(BaseModelViewSet):
     """ViewSet for Company management with enhanced features"""
