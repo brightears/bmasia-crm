@@ -63,7 +63,32 @@ class EmailService:
         }
 
         return department_emails.get(department, settings.DEFAULT_FROM_EMAIL)
-    
+
+    def _get_sequence_sender(self, sequence_type: str) -> str:
+        """Get appropriate sender email based on sequence type.
+
+        Routing:
+        - Seasonal campaigns (Christmas, CNY, Diwali, etc.) → production@bmasiamusic.com
+        - Renewal reminders → nikki.h@bmasiamusic.com (Sales)
+        - Payment reminders → pom@bmasiamusic.com (Finance)
+        - Quarterly check-ins → norbert@bmasiamusic.com (Default)
+        - Manual sequences → norbert@bmasiamusic.com (Default)
+        """
+        # Seasonal campaigns - all auto_seasonal_* types
+        if sequence_type.startswith('auto_seasonal'):
+            return settings.MUSIC_DESIGN_EMAIL  # production@bmasiamusic.com
+
+        # Renewal reminders
+        if sequence_type == 'auto_renewal':
+            return settings.SALES_EMAIL  # nikki.h@bmasiamusic.com
+
+        # Payment reminders
+        if sequence_type == 'auto_payment':
+            return settings.FINANCE_EMAIL  # pom@bmasiamusic.com
+
+        # Quarterly check-ins and manual sequences use default
+        return settings.DEFAULT_FROM_EMAIL  # norbert@bmasiamusic.com
+
     def send_email(
         self,
         to_email: str,
@@ -1580,6 +1605,10 @@ class EmailService:
             execution.save()
             return False
 
+        # Determine sender based on sequence type
+        sequence_type = execution.enrollment.sequence.sequence_type
+        from_email = self._get_sequence_sender(sequence_type)
+
         # Send email using existing method
         try:
             success, message = self.send_email(
@@ -1587,6 +1616,7 @@ class EmailService:
                 subject=subject,
                 body_html=html_content,
                 body_text=text_content,
+                from_email=from_email,
                 company=company,
                 contact=contact,
                 email_type='sequence',
