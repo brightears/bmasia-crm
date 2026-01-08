@@ -43,6 +43,59 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Quote, QuoteLineItem, Company, Contact, Opportunity } from '../types';
 import ApiService from '../services/api';
 
+// Product options for dropdown
+const PRODUCT_OPTIONS = [
+  {
+    code: 'soundtrack_essential',
+    name: 'Soundtrack Essential (Serviced)',
+    description: 'Premium background music service with 100M+ licensed tracks, drag-and-drop scheduling, text-to-speech messaging, offline playback, and 24/7 support.',
+    thailandOnly: false,
+  },
+  {
+    code: 'beat_breeze',
+    name: 'Beat Breeze',
+    description: 'Essential background music with 30K+ curated tracks, 50 ready-made playlists, public performance license, multi-zone setup, and offline playback.',
+    thailandOnly: false,
+  },
+  {
+    code: 'mini_pc',
+    name: 'Windows Mini PC',
+    description: 'Hardware media player for background music system. Thailand only.',
+    thailandOnly: true,
+  },
+  {
+    code: 'soundtrack_player',
+    name: 'Soundtrack Player Box',
+    description: 'Official Soundtrack Your Brand hardware player device.',
+    thailandOnly: false,
+  },
+  {
+    code: 'custom',
+    name: 'Custom (Manual Entry)',
+    description: '',
+    thailandOnly: false,
+  },
+];
+
+// Terms & Conditions options for dropdown
+const TERMS_OPTIONS = [
+  {
+    code: '30_days',
+    label: 'Payment due within 30 days',
+    text: 'Payment is due within 30 days of acceptance. This quote is valid for the specified period.',
+  },
+  {
+    code: 'upon_receipt',
+    label: 'Payment due upon receipt',
+    text: 'Payment is due immediately upon receiving invoice and before activating subscription. All payments are to be paid on a net received basis. This quote is valid for the specified period.',
+  },
+  {
+    code: 'custom',
+    label: 'Custom (Manual Entry)',
+    text: '',
+  },
+];
+
 interface QuoteFormProps {
   open: boolean;
   onClose: () => void;
@@ -74,15 +127,16 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
     status: 'Draft' as Quote['status'],
     valid_from: new Date(),
     valid_until: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
-    terms_conditions: 'Payment is due within 30 days of acceptance. All prices are in USD. This quote is valid for the specified period.',
+    terms_conditions: TERMS_OPTIONS.find(t => t.code === '30_days')?.text || 'Payment is due within 30 days of acceptance. This quote is valid for the specified period.',
     notes: '',
     currency: 'USD',
   });
 
+  const defaultProduct = PRODUCT_OPTIONS.find(p => p.code === 'soundtrack_essential');
   const [lineItems, setLineItems] = useState<QuoteLineItem[]>([
     {
-      product_service: 'Soundtrack Essential (Serviced)',
-      description: 'Monthly subscription for background music service with professional curation',
+      product_service: defaultProduct?.name || 'Soundtrack Essential (Serviced)',
+      description: defaultProduct?.description || '',
       quantity: 1,
       unit_price: 50.00,
       discount_percentage: 0,
@@ -94,6 +148,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
   const [filteredContacts, setFilteredContacts] = useState<Contact[]>([]);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [selectedCompanyCountry, setSelectedCompanyCountry] = useState<string>('');
+  const [selectedTermsOption, setSelectedTermsOption] = useState<string>('30_days');
 
   useEffect(() => {
     if (open) {
@@ -111,6 +166,11 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
           currency: quote.currency,
         });
         setLineItems(quote.line_items || []);
+
+        // Detect terms option from existing text
+        const existingTerms = quote.terms_conditions || '';
+        const matchedTerms = TERMS_OPTIONS.find(opt => opt.text === existingTerms);
+        setSelectedTermsOption(matchedTerms ? matchedTerms.code : 'custom');
       } else {
         // Generate quote number for new quotes
         const now = new Date();
@@ -187,9 +247,23 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
     }
   };
 
-  const updateLineItem = (index: number, field: keyof QuoteLineItem, value: any) => {
+  const updateLineItem = (index: number, field: keyof QuoteLineItem | 'product_code', value: any) => {
     setLineItems(prev => {
       const newItems = [...prev];
+
+      // Handle product selection from dropdown
+      if (field === 'product_code') {
+        const product = PRODUCT_OPTIONS.find(p => p.code === value);
+        if (product && product.code !== 'custom') {
+          newItems[index] = {
+            ...newItems[index],
+            product_service: product.name,
+            description: product.description,
+          };
+        }
+        return newItems;
+      }
+
       newItems[index] = { ...newItems[index], [field]: value };
 
       // Recalculate line total when quantity, unit_price, or discount_percentage changes
@@ -203,6 +277,22 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
 
       return newItems;
     });
+  };
+
+  // Get available products based on company country (Mini PC = Thailand only)
+  const getAvailableProducts = () => {
+    return PRODUCT_OPTIONS.filter(product =>
+      !product.thailandOnly || selectedCompanyCountry === 'Thailand'
+    );
+  };
+
+  // Handle terms option change
+  const handleTermsChange = (optionCode: string) => {
+    setSelectedTermsOption(optionCode);
+    const option = TERMS_OPTIONS.find(t => t.code === optionCode);
+    if (option && option.code !== 'custom') {
+      setFormData(prev => ({ ...prev, terms_conditions: option.text }));
+    }
   };
 
   const calculateTotals = () => {
@@ -305,6 +395,8 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
   };
 
   const handleClose = () => {
+    const defaultTerms = TERMS_OPTIONS.find(t => t.code === '30_days')?.text || '';
+
     setFormData({
       quote_number: '',
       company: '',
@@ -313,13 +405,13 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
       status: 'Draft',
       valid_from: new Date(),
       valid_until: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      terms_conditions: 'Payment is due within 30 days of acceptance. All prices are in USD. This quote is valid for the specified period.',
+      terms_conditions: defaultTerms,
       notes: '',
       currency: 'USD',
     });
     setLineItems([{
-      product_service: 'Soundtrack Essential (Serviced)',
-      description: 'Monthly subscription for background music service with professional curation',
+      product_service: defaultProduct?.name || 'Soundtrack Essential (Serviced)',
+      description: defaultProduct?.description || '',
       quantity: 1,
       unit_price: 50.00,
       discount_percentage: 0,
@@ -327,6 +419,8 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
       line_total: 50.00,
     }]);
     setAttachments([]);
+    setSelectedTermsOption('30_days');
+    setSelectedCompanyCountry('');
     setError('');
     onClose();
   };
@@ -561,14 +655,40 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
                     <TableBody>
                       {lineItems.map((item, index) => (
                         <TableRow key={index}>
-                          <TableCell>
-                            <TextField
-                              fullWidth
-                              size="small"
-                              value={item.product_service}
-                              onChange={(e) => updateLineItem(index, 'product_service', e.target.value)}
-                              placeholder="Product/Service name"
-                            />
+                          <TableCell sx={{ minWidth: 200 }}>
+                            <FormControl fullWidth size="small">
+                              <Select
+                                value={
+                                  PRODUCT_OPTIONS.find(p => p.name === item.product_service)?.code || 'custom'
+                                }
+                                onChange={(e) => {
+                                  const code = e.target.value;
+                                  updateLineItem(index, 'product_code', code);
+                                  // If custom is selected, clear the product_service to let user type
+                                  if (code === 'custom') {
+                                    updateLineItem(index, 'product_service', '');
+                                  }
+                                }}
+                                displayEmpty
+                              >
+                                {getAvailableProducts().map((product) => (
+                                  <MenuItem key={product.code} value={product.code}>
+                                    {product.name}
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                            {/* Show text field for custom entry */}
+                            {!PRODUCT_OPTIONS.find(p => p.name === item.product_service) && (
+                              <TextField
+                                fullWidth
+                                size="small"
+                                value={item.product_service}
+                                onChange={(e) => updateLineItem(index, 'product_service', e.target.value)}
+                                placeholder="Enter product/service name"
+                                sx={{ mt: 1 }}
+                              />
+                            )}
                           </TableCell>
                           <TableCell>
                             <TextField
@@ -578,7 +698,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
                               rows={2}
                               value={item.description}
                               onChange={(e) => updateLineItem(index, 'description', e.target.value)}
-                              placeholder="Description"
+                              placeholder="Description (auto-filled from product selection)"
                             />
                           </TableCell>
                           <TableCell>
@@ -727,14 +847,37 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
 
             {/* Terms and Notes */}
             <Grid item xs={12} md={6}>
+              <FormControl fullWidth sx={{ mb: 2 }}>
+                <InputLabel>Terms & Conditions</InputLabel>
+                <Select
+                  value={selectedTermsOption}
+                  onChange={(e) => handleTermsChange(e.target.value)}
+                  label="Terms & Conditions"
+                >
+                  {TERMS_OPTIONS.map((option) => (
+                    <MenuItem key={option.code} value={option.code}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
               <TextField
                 fullWidth
-                label="Terms & Conditions"
+                label={selectedTermsOption === 'custom' ? 'Custom Terms' : 'Terms Preview'}
                 value={formData.terms_conditions}
                 onChange={(e) => handleInputChange('terms_conditions', e.target.value)}
                 multiline
-                rows={4}
-                placeholder="Enter terms and conditions..."
+                rows={3}
+                placeholder="Enter custom terms and conditions..."
+                disabled={selectedTermsOption !== 'custom'}
+                InputProps={{
+                  readOnly: selectedTermsOption !== 'custom',
+                }}
+                sx={{
+                  '& .MuiInputBase-input.Mui-disabled': {
+                    WebkitTextFillColor: 'rgba(0, 0, 0, 0.6)',
+                  },
+                }}
               />
             </Grid>
 
