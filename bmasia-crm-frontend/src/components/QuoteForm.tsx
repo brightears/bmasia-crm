@@ -362,6 +362,16 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
 
       const totals = calculateTotals();
 
+      // Strip read-only fields from line items before sending
+      const cleanLineItems = lineItems.map(item => ({
+        product_service: item.product_service,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        discount_percentage: item.discount_percentage,
+        tax_rate: item.tax_rate,
+      }));
+
       const quoteData: Partial<Quote> = {
         quote_number: formData.quote_number,
         company: formData.company,
@@ -377,7 +387,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
         currency: formData.currency,
         terms_conditions: formData.terms_conditions,
         notes: formData.notes,
-        line_items: lineItems,
+        line_items: cleanLineItems as any,
       };
 
       let savedQuote: Quote;
