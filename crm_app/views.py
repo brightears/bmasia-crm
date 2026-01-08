@@ -3471,40 +3471,40 @@ class QuoteViewSet(BaseModelViewSet):
             entity_account = '808-021570-838'
             payment_terms_default = 'by bank transfer on a net received, paid in full basis, with no offset to BMA\'s HSBC Bank, Hong Kong due immediately as invoiced to activate the music subscription. All Bank transfer fees, and all taxes are borne by the Client in remitting payments as invoiced.'
 
-        # Create PDF buffer
+        # Create PDF buffer - compact layout for one-page quotes
         buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.4*inch)
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.3*inch, bottomMargin=0.3*inch, leftMargin=0.5*inch, rightMargin=0.5*inch)
 
         # Container for PDF elements
         elements = []
         styles = getSampleStyleSheet()
 
-        # Custom styles - Modern 2025 design
+        # Custom styles - Modern 2025 design (compact for one-page layout)
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
-            fontSize=24,
+            fontSize=22,
             textColor=colors.HexColor('#424242'),
-            spaceAfter=12,
+            spaceAfter=8,
             fontName='Helvetica-Bold'
         )
 
         heading_style = ParagraphStyle(
             'CustomHeading',
             parent=styles['Heading2'],
-            fontSize=12,
+            fontSize=11,
             textColor=colors.HexColor('#424242'),
-            spaceAfter=8,
-            spaceBefore=8,
+            spaceAfter=4,
+            spaceBefore=4,
             fontName='Helvetica-Bold'
         )
 
         body_style = ParagraphStyle(
             'CustomBody',
             parent=styles['Normal'],
-            fontSize=10,
+            fontSize=9,
             textColor=colors.HexColor('#424242'),
-            leading=14
+            leading=12
         )
 
         small_style = ParagraphStyle(
@@ -3512,7 +3512,7 @@ class QuoteViewSet(BaseModelViewSet):
             parent=styles['Normal'],
             fontSize=7,
             textColor=colors.HexColor('#757575'),
-            leading=10
+            leading=9
         )
 
         terms_style = ParagraphStyle(
@@ -3520,7 +3520,7 @@ class QuoteViewSet(BaseModelViewSet):
             parent=styles['Normal'],
             fontSize=7,
             textColor=colors.HexColor('#757575'),
-            leading=9
+            leading=8
         )
 
         # Header - BMAsia Logo (properly sized with aspect ratio preserved)
@@ -3538,17 +3538,17 @@ class QuoteViewSet(BaseModelViewSet):
             elements.append(Paragraph("BM ASIA", title_style))
 
         # Orange accent line
-        elements.append(Spacer(1, 0.05*inch))
+        elements.append(Spacer(1, 0.03*inch))
         elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#FFA500'), spaceBefore=0, spaceAfter=0))
-        elements.append(Spacer(1, 0.15*inch))
+        elements.append(Spacer(1, 0.08*inch))
 
         # Quote title with orange color
         quote_title_style = ParagraphStyle(
             'QuoteTitle',
             parent=styles['Heading1'],
-            fontSize=24,
+            fontSize=20,
             textColor=colors.HexColor('#FFA500'),
-            spaceAfter=20,
+            spaceAfter=10,
             alignment=TA_CENTER,
             fontName='Helvetica-Bold'
         )
@@ -3584,7 +3584,7 @@ class QuoteViewSet(BaseModelViewSet):
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
         ]))
         elements.append(metadata_table)
-        elements.append(Spacer(1, 0.15*inch))
+        elements.append(Spacer(1, 0.08*inch))
 
         # Two-column From/Bill To section
         from_bill_data = [
@@ -3614,7 +3614,7 @@ class QuoteViewSet(BaseModelViewSet):
             ('TOPPADDING', (0, 1), (-1, 1), 6),
         ]))
         elements.append(from_bill_table)
-        elements.append(Spacer(1, 0.15*inch))
+        elements.append(Spacer(1, 0.08*inch))
 
         # Line items table
         elements.append(Paragraph("Items:", heading_style))
@@ -3644,18 +3644,19 @@ class QuoteViewSet(BaseModelViewSet):
                 # Header row
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+                ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                ('TOPPADDING', (0, 0), (-1, 0), 6),
 
                 # Data rows
-                ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+                ('FONT', (0, 1), (-1, -1), 'Helvetica', 8),
                 ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#212121')),
                 ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
                 ('ALIGN', (0, 1), (0, -1), 'LEFT'),
                 ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('TOPPADDING', (0, 1), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+                ('TOPPADDING', (0, 1), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
 
                 # Grid
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
@@ -3668,7 +3669,7 @@ class QuoteViewSet(BaseModelViewSet):
         else:
             elements.append(Paragraph("No line items", body_style))
 
-        elements.append(Spacer(1, 0.15*inch))
+        elements.append(Spacer(1, 0.08*inch))
 
         # Totals section
         totals_data = []
@@ -3714,7 +3715,7 @@ class QuoteViewSet(BaseModelViewSet):
         ]))
 
         elements.append(totals_table)
-        elements.append(Spacer(1, 0.15*inch))
+        elements.append(Spacer(1, 0.1*inch))
 
         # Bank Details Section - Organized blocks with background
         elements.append(Paragraph("BANK DETAILS FOR PAYMENT", heading_style))
@@ -3741,7 +3742,7 @@ class QuoteViewSet(BaseModelViewSet):
             ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e0e0e0')),
         ]))
         elements.append(bank_table)
-        elements.append(Spacer(1, 0.1*inch))
+        elements.append(Spacer(1, 0.05*inch))
 
         # Terms and conditions - integrated with bank details (no heading)
         if quote.terms_conditions:
@@ -3755,13 +3756,13 @@ class QuoteViewSet(BaseModelViewSet):
 
         # Notes (internal - optional to show on PDF)
         if quote.notes:
-            elements.append(Spacer(1, 0.1*inch))
+            elements.append(Spacer(1, 0.05*inch))
             elements.append(Paragraph("Notes:", heading_style))
             notes_text = quote.notes.replace('\n', '<br/>')
             elements.append(Paragraph(notes_text, terms_style))
 
         # Footer - entity-specific with separator
-        elements.append(Spacer(1, 0.05*inch))
+        elements.append(Spacer(1, 0.03*inch))
         elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
 
         footer_text = f"""
