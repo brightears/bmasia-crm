@@ -47,26 +47,34 @@ import ApiService from '../services/api';
 const PRODUCT_OPTIONS = [
   {
     code: 'soundtrack_essential',
-    name: 'Soundtrack Essential (Serviced)',
-    description: 'Premium background music service with 100M+ licensed tracks, drag-and-drop scheduling, text-to-speech messaging, offline playback, and 24/7 support.',
+    name: 'Soundtrack Your Brand',
+    description: `• 100+ million tracks
+• Personalized music design and support services
+• Custom API solutions
+• AI-powered content management`,
     thailandOnly: false,
   },
   {
     code: 'beat_breeze',
     name: 'Beat Breeze',
-    description: 'Essential background music with 30K+ curated tracks, 50 ready-made playlists, public performance license, multi-zone setup, and offline playback.',
+    description: `• 100,000+ tracks
+• Public performance licenses included
+• Personalized music design
+• Dedicated technical support services`,
     thailandOnly: false,
   },
   {
     code: 'mini_pc',
     name: 'Windows Mini PC',
-    description: 'Hardware media player for background music system. Thailand only.',
+    description: 'Windows Mini PC',
     thailandOnly: true,
   },
   {
     code: 'soundtrack_player',
-    name: 'Soundtrack Player Box',
-    description: 'Official Soundtrack Your Brand hardware player device.',
+    name: 'Soundtrack Player',
+    description: `• Includes a 1-year warranty
+• Shipping costs covered
+• Customs fees to be paid by the receiver`,
     thailandOnly: false,
   },
   {
@@ -171,6 +179,12 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
         const existingTerms = quote.terms_conditions || '';
         const matchedTerms = TERMS_OPTIONS.find(opt => opt.text === existingTerms);
         setSelectedTermsOption(matchedTerms ? matchedTerms.code : 'custom');
+
+        // Set company country for Mini PC visibility
+        const editCompany = companies.find(c => c.id === quote.company);
+        if (editCompany) {
+          setSelectedCompanyCountry(editCompany.country || '');
+        }
       } else {
         // Generate quote number for new quotes
         const now = new Date();
@@ -186,7 +200,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
         }));
       }
     }
-  }, [open, mode, quote]);
+  }, [open, mode, quote, companies]);
 
   useEffect(() => {
     if (formData.company) {
