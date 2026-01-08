@@ -696,6 +696,9 @@ class BulkOperationSerializer(serializers.Serializer):
 
 class QuoteLineItemSerializer(serializers.ModelSerializer):
     """Serializer for QuoteLineItem model"""
+    # Explicitly define UUID fields to ensure proper serialization
+    id = serializers.UUIDField(read_only=True)
+    quote = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
         model = QuoteLineItem
