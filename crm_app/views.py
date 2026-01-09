@@ -3732,19 +3732,22 @@ class QuoteViewSet(BaseModelViewSet):
         ]))
 
         elements.append(totals_table)
-        elements.append(Spacer(1, 0.1*inch))
 
-        # Bank Details Section - Compact design (reduced prominence per feedback)
+        # Visual separator and generous whitespace before payment section
+        elements.append(Spacer(1, 0.35*inch))
+        elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
+
+        # Bank Details Section - Compact, secondary information
         bank_heading_style = ParagraphStyle(
             'BankHeading',
             parent=styles['Normal'],
             fontSize=9,
-            textColor=colors.HexColor('#666666'),
-            spaceAfter=2,
-            spaceBefore=4,
+            textColor=colors.HexColor('#888888'),
+            spaceAfter=4,
+            spaceBefore=0,
             fontName='Helvetica-Bold'
         )
-        elements.append(Paragraph("Bank Details for Payment", bank_heading_style))
+        elements.append(Paragraph("Payment Information", bank_heading_style))
 
         bank_data = [
             ['Beneficiary', entity_name],
