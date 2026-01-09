@@ -20,6 +20,7 @@ from django.core.management import call_command
 import csv
 import json
 import os
+import re
 import uuid
 
 from .models import (
@@ -3571,16 +3572,15 @@ class QuoteViewSet(BaseModelViewSet):
         )
         elements.append(Paragraph("QUOTATION", quote_title_style))
 
-        # Document metadata table (modern grid layout)
+        # Document metadata table (modern grid layout) - Status removed per customer feedback
         metadata_data = [
-            ['Quote Number', 'Date', 'Valid Until', 'Status'],
+            ['Quote Number', 'Date', 'Valid Until'],
             [quote.quote_number,
              quote.valid_from.strftime('%b %d, %Y'),
-             quote.valid_until.strftime('%b %d, %Y'),
-             quote.status]
+             quote.valid_until.strftime('%b %d, %Y')]
         ]
 
-        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.7*inch, 1.7*inch, 1.8*inch])
+        metadata_table = Table(metadata_data, colWidths=[2.3*inch, 2.3*inch, 2.3*inch])
         metadata_table.setStyle(TableStyle([
             # Header row - orange background
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
@@ -3734,8 +3734,17 @@ class QuoteViewSet(BaseModelViewSet):
         elements.append(totals_table)
         elements.append(Spacer(1, 0.1*inch))
 
-        # Bank Details Section - Organized blocks with background
-        elements.append(Paragraph("BANK DETAILS FOR PAYMENT", heading_style))
+        # Bank Details Section - Compact design (reduced prominence per feedback)
+        bank_heading_style = ParagraphStyle(
+            'BankHeading',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.HexColor('#666666'),
+            spaceAfter=2,
+            spaceBefore=4,
+            fontName='Helvetica-Bold'
+        )
+        elements.append(Paragraph("Bank Details for Payment", bank_heading_style))
 
         bank_data = [
             ['Beneficiary', entity_name],
@@ -3744,22 +3753,22 @@ class QuoteViewSet(BaseModelViewSet):
             ['Account Number', entity_account],
         ]
 
-        bank_table = Table(bank_data, colWidths=[2*inch, 4.9*inch])
+        bank_table = Table(bank_data, colWidths=[1.5*inch, 5.4*inch])
         bank_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f5f5f5')),
-            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 10),
-            ('FONT', (1, 0), (1, -1), 'Helvetica', 10),
-            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fafafa')),
+            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 8),
+            ('FONT', (1, 0), (1, -1), 'Helvetica', 8),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#555555')),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-            ('LEFTPADDING', (0, 0), (-1, -1), 12),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
-            ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e0e0e0')),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e8e8e8')),
         ]))
         elements.append(bank_table)
-        elements.append(Spacer(1, 0.05*inch))
+        elements.append(Spacer(1, 0.03*inch))
 
         # Terms and conditions - integrated with bank details (no heading)
         if quote.terms_conditions:
@@ -3794,9 +3803,12 @@ class QuoteViewSet(BaseModelViewSet):
         pdf_data = buffer.getvalue()
         buffer.close()
 
-        # Create response
+        # Create response with customer-friendly filename
+        # Sanitize company name for filename (remove special characters)
+        safe_company_name = re.sub(r'[^\w\s-]', '', quote.company.name).strip().replace(' ', '_')
+        filename = f"Music_Quotation_for_{safe_company_name}.pdf"
         response = HttpResponse(pdf_data, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="Quote_{quote.quote_number}.pdf"'
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
 
         # Log activity
         QuoteActivity.objects.create(
