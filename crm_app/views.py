@@ -3783,12 +3783,11 @@ class QuoteViewSet(BaseModelViewSet):
             payment_terms_formatted = payment_terms_default.replace('\n', '<br/>')
             elements.append(Paragraph(payment_terms_formatted, terms_style))
 
-        # Notes (internal - optional to show on PDF)
+        # Notes - inline, not prominent
         if quote.notes:
             elements.append(Spacer(1, 0.05*inch))
-            elements.append(Paragraph("Notes:", heading_style))
             notes_text = quote.notes.replace('\n', '<br/>')
-            elements.append(Paragraph(notes_text, terms_style))
+            elements.append(Paragraph(f"Notes: {notes_text}", terms_style))
 
         # Footer - entity-specific with separator
         elements.append(Spacer(1, 0.03*inch))
@@ -3806,12 +3805,9 @@ class QuoteViewSet(BaseModelViewSet):
         pdf_data = buffer.getvalue()
         buffer.close()
 
-        # Create response with customer-friendly filename
-        # Sanitize company name for filename (remove special characters)
-        safe_company_name = re.sub(r'[^\w\s-]', '', quote.company.name).strip().replace(' ', '_')
-        filename = f"Music_Quotation_for_{safe_company_name}.pdf"
+        # Create response
         response = HttpResponse(pdf_data, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response['Content-Disposition'] = f'attachment; filename="Quote_{quote.quote_number}.pdf"'
 
         # Log activity
         QuoteActivity.objects.create(
