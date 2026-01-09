@@ -180,6 +180,10 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',  # Disabled auth for development
     ],
+    'DEFAULT_RENDERER_CLASSES': [
+        'crm_app.renderers.UUIDJSONRenderer',  # Custom renderer for UUID serialization
+        'rest_framework.renderers.BrowsableAPIRenderer',
+    ],
     'DEFAULT_PAGINATION_CLASS': 'crm_app.pagination.FlexiblePageNumberPagination',
     'PAGE_SIZE': 20,
     'DEFAULT_FILTER_BACKENDS': [
