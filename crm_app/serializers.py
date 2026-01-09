@@ -715,6 +715,10 @@ class QuoteLineItemSerializer(serializers.ModelSerializer):
 
 class QuoteAttachmentSerializer(serializers.ModelSerializer):
     """Serializer for QuoteAttachment model"""
+    # Explicitly define UUID fields to ensure proper serialization
+    id = serializers.UUIDField(read_only=True)
+    quote = serializers.PrimaryKeyRelatedField(read_only=True)
+    uploaded_by = serializers.PrimaryKeyRelatedField(read_only=True)
     uploaded_by_name = serializers.CharField(source='uploaded_by.get_full_name', read_only=True)
 
     class Meta:
@@ -723,11 +727,15 @@ class QuoteAttachmentSerializer(serializers.ModelSerializer):
             'id', 'quote', 'name', 'file', 'size', 'uploaded_by',
             'uploaded_by_name', 'created_at'
         ]
-        read_only_fields = ['id', 'size', 'created_at']
+        read_only_fields = ['id', 'quote', 'size', 'uploaded_by', 'created_at']
 
 
 class QuoteActivitySerializer(serializers.ModelSerializer):
     """Serializer for QuoteActivity model"""
+    # Explicitly define UUID fields to ensure proper serialization
+    id = serializers.UUIDField(read_only=True)
+    quote = serializers.PrimaryKeyRelatedField(read_only=True)
+    user = serializers.PrimaryKeyRelatedField(read_only=True)
     user_name = serializers.CharField(source='user.get_full_name', read_only=True)
 
     class Meta:
@@ -736,17 +744,29 @@ class QuoteActivitySerializer(serializers.ModelSerializer):
             'id', 'quote', 'user', 'user_name', 'activity_type',
             'description', 'created_at'
         ]
-        read_only_fields = ['id', 'user', 'created_at']
+        read_only_fields = ['id', 'quote', 'user', 'created_at']
 
 
 class QuoteSerializer(serializers.ModelSerializer):
     """Serializer for Quote model with nested line items and activities"""
+    # Explicitly define UUID fields to ensure proper JSON serialization
+    id = serializers.UUIDField(read_only=True)
+    company = serializers.PrimaryKeyRelatedField(queryset=Company.objects.all())
+    contact = serializers.PrimaryKeyRelatedField(queryset=Contact.objects.all(), allow_null=True, required=False)
+    opportunity = serializers.PrimaryKeyRelatedField(queryset=Opportunity.objects.all(), allow_null=True, required=False)
+    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    # Related names
     company_name = serializers.CharField(source='company.name', read_only=True)
     contact_name = serializers.CharField(source='contact.name', read_only=True)
     opportunity_name = serializers.CharField(source='opportunity.name', read_only=True)
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+
+    # Computed fields
     is_expired = serializers.ReadOnlyField()
     days_until_expiry = serializers.ReadOnlyField()
+
+    # Nested serializers
     line_items = QuoteLineItemSerializer(many=True, required=False)
     attachments = QuoteAttachmentSerializer(many=True, read_only=True)
     activities = QuoteActivitySerializer(many=True, read_only=True)
