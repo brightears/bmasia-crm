@@ -20,6 +20,7 @@ from django.core.management import call_command
 import csv
 import json
 import os
+import uuid
 
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
@@ -54,6 +55,20 @@ from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
     TaskAssigneePermission, ReadOnlyForNonOwner
 )
+
+
+def convert_uuids_to_strings(obj):
+    """
+    Recursively convert UUID objects to strings in a dict/list structure.
+    This is needed for JSONField serialization since json.dumps() can't handle UUID.
+    """
+    if isinstance(obj, uuid.UUID):
+        return str(obj)
+    elif isinstance(obj, dict):
+        return {k: convert_uuids_to_strings(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_uuids_to_strings(item) for item in obj]
+    return obj
 
 
 class BaseModelViewSet(viewsets.ModelViewSet):
@@ -94,16 +109,18 @@ class BaseModelViewSet(viewsets.ModelViewSet):
         """Add audit logging on update"""
         old_instance = self.get_object()
         old_data = self.get_serializer(old_instance).data
-        
+
         instance = serializer.save()
         new_data = self.get_serializer(instance).data
-        
+
         changes = {}
         for key, new_value in new_data.items():
             old_value = old_data.get(key)
             if old_value != new_value:
                 changes[key] = {'old': old_value, 'new': new_value}
-        
+
+        # Convert any UUID objects to strings before saving to JSONField
+        changes = convert_uuids_to_strings(changes)
         self.log_action('UPDATE', instance, changes)
     
     def perform_destroy(self, instance):
