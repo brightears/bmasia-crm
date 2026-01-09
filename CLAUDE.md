@@ -536,6 +536,14 @@ npm run build  # Production build
 - ✅ **Zone Status Dashboard** - Real-time Soundtrack zone monitoring (`/zones`)
 
 ### Recent Improvements (January 2026)
+- ✅ **Quote Form Enhancements** (Jan 9, 2026)
+  - **Product/Service Dropdown**: Predefined options (Soundtrack Your Brand, Beat Breeze, Windows Mini PC, Soundtrack Player, Custom)
+  - **Auto-Populate Description**: Selecting a product auto-fills description with bullet-point features
+  - **Terms & Conditions Dropdown**: "30 days" or "Upon receipt" presets, plus custom option
+  - **Mini PC Conditional Display**: Windows Mini PC only appears for Thailand companies
+  - **UUID Serialization Fix**: Added `convert_uuids_to_strings()` helper for audit log JSONField
+  - **Custom JSON Renderer**: `UUIDJSONRenderer` for DRF to handle UUID serialization
+  - Files: QuoteForm.tsx, serializers.py, views.py, renderers.py, settings.py
 - ✅ **Zone Management Architecture Improvements** (Jan 6, 2026)
   - **Contract-level Soundtrack Account ID**: Override company's account ID per contract
   - **Live Zone Preview**: Enter Account ID → Zones fetched from Soundtrack API instantly
@@ -572,21 +580,22 @@ npm run build  # Production build
   - Added Call/Event task types for Quick Call and Schedule Event actions
   - Added New Quote action for Admin/Sales users
   - Files: QuickActions.tsx, TaskForm.tsx, Contacts/Opportunities/Contracts/Quotes/EmailTemplates/Tasks pages
-- ✅ **Email Sender Routing by Type** (Jan 7, 2026)
-  - Automatic email routing based on sequence type and email category
-  - **Seasonal campaigns** (Christmas, CNY, Diwali, etc.) → production@bmasiamusic.com
-  - **Renewal reminders** → nikki.h@bmasiamusic.com (Sales)
-  - **Payment reminders** → pom@bmasiamusic.com (Finance)
-  - **Quarterly check-ins & Manual** → norbert@bmasiamusic.com (Default)
-  - **Soundtrack offline alerts** → keith@bmasiamusic.com (IT Support)
-  - Files: `email_service.py` (`_get_sequence_sender()`), `offline_alert_service.py`
-- ✅ **Per-User SMTP API Support** (Jan 5, 2026)
-  - Added `smtp_password` as write-only field to UserSerializer
-  - Allows setting SMTP credentials via API (secure: password never returned in responses)
-  - Keith Clifton SMTP configured: keith@bmasiamusic.com ✅
-  - Nikki Hameede SMTP configured: nikki.h@bmasiamusic.com ✅
-  - Kuk (production) SMTP configured: production@bmasiamusic.com ✅
-  - Pending: pom (need Gmail App Password)
+- ✅ **Email Sender Routing & Per-User SMTP** (Jan 7, 2026) - FULLY TESTED
+  - Automatic email routing based on sequence type with per-user SMTP authentication
+  - **Seasonal campaigns** (Christmas, CNY, Diwali, etc.) → production@bmasiamusic.com ✅
+  - **Renewal reminders** → nikki.h@bmasiamusic.com (Sales) ✅
+  - **Payment reminders** → pom@bmasiamusic.com (Finance) ⏸️ pending
+  - **Quarterly check-ins & Manual** → norbert@bmasiamusic.com (Admin) ✅
+  - **Soundtrack offline alerts** → keith@bmasiamusic.com (IT Support) ✅
+  - `_get_smtp_connection_for_sender()` looks up User by smtp_email for credentials
+  - Admin test endpoint: `POST /api/v1/users/{id}/test_smtp_send/`
+  - Files: `email_service.py`, `offline_alert_service.py`, `views.py`
+- ✅ **Per-User SMTP Configuration Status** (Jan 9, 2026) - ALL COMPLETE
+  - admin (norbert@bmasiamusic.com) ✅ configured & tested
+  - keith (keith@bmasiamusic.com) ✅ configured & tested
+  - kuk (production@bmasiamusic.com) ✅ configured & tested
+  - nikki (nikki.h@bmasiamusic.com) ✅ configured & tested
+  - pom (pom@bmasiamusic.com) ✅ configured & tested
 - ✅ **Multi-Year Contract Support** (Jan 5, 2026)
   - `send_renewal_reminders` toggle on Contract model (default: true)
   - Checkbox in ContractForm under "Contract Period" section
