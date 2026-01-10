@@ -3603,9 +3603,18 @@ class QuoteViewSet(BaseModelViewSet):
         elements.append(metadata_table)
         elements.append(Spacer(1, 0.08*inch))
 
-        # Two-column From/Bill To section
+        # Two-column From/Bill To section with subtle card styling
+        from_header_style = ParagraphStyle(
+            'FromHeader',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#888888'),
+            spaceAfter=4,
+            fontName='Helvetica-Bold'
+        )
+
         from_bill_data = [
-            [Paragraph('<b>FROM:</b>', heading_style), Paragraph('<b>BILL TO:</b>', heading_style)],
+            [Paragraph('FROM', from_header_style), Paragraph('BILL TO', from_header_style)],
             [
                 Paragraph(f"""
                 <b>{entity_name}</b><br/>
@@ -3623,18 +3632,26 @@ class QuoteViewSet(BaseModelViewSet):
             ]
         ]
 
-        from_bill_table = Table(from_bill_data, colWidths=[3.45*inch, 3.45*inch])
+        from_bill_table = Table(from_bill_data, colWidths=[3.4*inch, 3.4*inch])
         from_bill_table.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('TOPPADDING', (0, 0), (-1, 0), 0),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-            ('TOPPADDING', (0, 1), (-1, 1), 6),
+            # Header row styling
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 0),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+            # Content row
+            ('TOPPADDING', (0, 1), (-1, 1), 4),
+            ('BOTTOMPADDING', (0, 1), (-1, 1), 10),
+            # Subtle background for card effect
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#fafafa')),
+            ('BACKGROUND', (1, 0), (1, -1), colors.HexColor('#fafafa')),
+            # Subtle left border accent
+            ('LINEBELOW', (0, 0), (0, 0), 2, colors.HexColor('#FFA500')),
+            ('LINEBELOW', (1, 0), (1, 0), 2, colors.HexColor('#FFA500')),
         ]))
         elements.append(from_bill_table)
-        elements.append(Spacer(1, 0.08*inch))
-
-        # Line items table
-        elements.append(Paragraph("Items:", heading_style))
+        elements.append(Spacer(1, 0.15*inch))
 
         # Prepare line items data
         line_items = quote.line_items.all()
@@ -3783,10 +3800,10 @@ class QuoteViewSet(BaseModelViewSet):
             payment_terms_formatted = payment_terms_default.replace('\n', '<br/>')
             elements.append(Paragraph(payment_terms_formatted, terms_style))
 
-        # Notes - inline, not prominent
-        if quote.notes:
+        # Notes - only show if there's actual content (not empty/whitespace)
+        if quote.notes and quote.notes.strip():
             elements.append(Spacer(1, 0.05*inch))
-            notes_text = quote.notes.replace('\n', '<br/>')
+            notes_text = quote.notes.strip().replace('\n', '<br/>')
             elements.append(Paragraph(f"Notes: {notes_text}", terms_style))
 
         # Footer - entity-specific with separator (generous spacing above)
