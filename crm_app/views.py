@@ -849,7 +849,7 @@ class ContractViewSet(BaseModelViewSet):
         from reportlab.lib.pagesizes import letter, A4
         from reportlab.lib import colors
         from reportlab.lib.units import inch
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable, KeepTogether
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
         from io import BytesIO
@@ -1121,21 +1121,25 @@ and<br/><br/>
                 clause_style
             ))
 
-            # Build zone table with proper header styling (not raw HTML)
+            # Build zone table with proper header styling (property name shown only once)
             zone_header = ['Property', 'Zone']
             if contract.show_zone_pricing_detail and contract.price_per_zone:
                 zone_header.append('Price/Zone')
 
             zone_data = [zone_header]
+            zone_count = zones.count()
             for idx, zone in enumerate(zones, 1):
-                row = [company.name, f"Zone {idx}: {zone.name}"]
+                # Only show property name in first data row, empty for rest
+                property_name = company.name if idx == 1 else ''
+                row = [property_name, f"Zone {idx}: {zone.name}"]
                 if contract.show_zone_pricing_detail and contract.price_per_zone:
                     row.append(f"{contract.currency} {contract.price_per_zone:,.2f}")
                 zone_data.append(row)
 
             zone_col_widths = [2.5*inch, 3.0*inch] if not (contract.show_zone_pricing_detail and contract.price_per_zone) else [2.0*inch, 2.5*inch, 2.4*inch]
             zone_table = Table(zone_data, colWidths=zone_col_widths)
-            zone_table.setStyle(TableStyle([
+
+            zone_style = [
                 # Header row - orange accent
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -1145,11 +1149,19 @@ and<br/><br/>
                 ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#424242')),
                 ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#fafafa')),
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
                 ('TOPPADDING', (0, 0), (-1, -1), 6),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
                 ('LEFTPADDING', (0, 0), (-1, -1), 8),
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
-            ]))
+            ]
+
+            # Merge property name cell across all data rows if more than one zone
+            if zone_count > 1:
+                zone_style.append(('SPAN', (0, 1), (0, zone_count)))
+                zone_style.append(('VALIGN', (0, 1), (0, zone_count), 'MIDDLE'))
+
+            zone_table.setStyle(TableStyle(zone_style))
             elements.append(zone_table)
             clause_num += 1
         else:
@@ -1272,13 +1284,14 @@ and<br/><br/>
             textColor=colors.HexColor('#333333'),
         )
 
-        # Create styled bank details card
+        # Create styled bank details card (adjusted widths to fit page)
         bank_data = [
-            ['Beneficiary', 'Bank', 'SWIFT Code', 'Account Number'],
+            ['Beneficiary', 'Bank', 'SWIFT', 'Account No.'],
             [entity_name, entity_bank, entity_swift, entity_account]
         ]
 
-        bank_table = Table(bank_data, colWidths=[1.7*inch, 2.0*inch, 1.5*inch, 1.7*inch])
+        # Total width ~6.5 inches (page width minus margins)
+        bank_table = Table(bank_data, colWidths=[1.6*inch, 2.3*inch, 1.0*inch, 1.5*inch])
         bank_table.setStyle(TableStyle([
             # Header row - subtle gray
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f0f0f0')),
@@ -1290,17 +1303,20 @@ and<br/><br/>
 
             # Data row
             ('BACKGROUND', (0, 1), (-1, 1), colors.HexColor('#fafafa')),
-            ('FONT', (0, 1), (-1, 1), 'Helvetica', 9),
+            ('FONT', (0, 1), (-1, 1), 'Helvetica', 8),
             ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#333333')),
             ('ALIGN', (0, 1), (-1, 1), 'LEFT'),
             ('TOPPADDING', (0, 1), (-1, 1), 8),
             ('BOTTOMPADDING', (0, 1), (-1, 1), 8),
 
-            # Padding and borders
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            # Padding and borders - with column separators
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
             ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
             ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#FFA500')),
+            ('LINEBEFORE', (1, 0), (1, -1), 0.5, colors.HexColor('#e0e0e0')),
+            ('LINEBEFORE', (2, 0), (2, -1), 0.5, colors.HexColor('#e0e0e0')),
+            ('LINEBEFORE', (3, 0), (3, -1), 0.5, colors.HexColor('#e0e0e0')),
         ]))
         elements.append(bank_table)
         elements.append(Spacer(1, 0.2*inch))
@@ -1390,11 +1406,13 @@ and<br/><br/>
             )
             elements.append(Paragraph("<b>✓ SIGNED</b>", signed_style))
 
-        elements.append(Spacer(1, 0.3*inch))
-
-        # Signatures Section
-        elements.append(Paragraph("SIGNATURES", heading_style))
         elements.append(Spacer(1, 0.2*inch))
+
+        # Signatures Section - Keep together with footer to prevent page break
+        signature_elements = []
+
+        signature_elements.append(Paragraph("SIGNATURES", heading_style))
+        signature_elements.append(Spacer(1, 0.15*inch))
 
         # Create signature table with signatory names and titles
         bmasia_signatory = contract.bmasia_signatory_name or 'Authorized Representative'
@@ -1403,7 +1421,6 @@ and<br/><br/>
         customer_title = contract.customer_signatory_title or 'Authorized Representative'
 
         signature_data = [
-            ['', ''],
             ['_' * 40, '_' * 40],
             [bmasia_signatory, customer_signatory],
             [bmasia_title, customer_title],
@@ -1414,23 +1431,22 @@ and<br/><br/>
 
         signature_table = Table(signature_data, colWidths=[3.45*inch, 3.45*inch])
         signature_table.setStyle(TableStyle([
-            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
-            ('FONT', (0, 2), (-1, 2), 'Helvetica-Bold', 11),
-            ('FONT', (0, 3), (-1, 3), 'Helvetica', 10),
-            ('FONT', (0, 4), (-1, 4), 'Helvetica-Bold', 10),
-            ('FONT', (0, 6), (-1, 6), 'Helvetica', 9),
+            ('FONT', (0, 0), (-1, 0), 'Helvetica', 10),
+            ('FONT', (0, 1), (-1, 1), 'Helvetica-Bold', 11),
+            ('FONT', (0, 2), (-1, 2), 'Helvetica', 10),
+            ('FONT', (0, 3), (-1, 3), 'Helvetica-Bold', 10),
+            ('FONT', (0, 5), (-1, 5), 'Helvetica', 9),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
         ]))
-        elements.append(signature_table)
-        elements.append(Spacer(1, 0.3*inch))
+        signature_elements.append(signature_table)
+        signature_elements.append(Spacer(1, 0.2*inch))
 
         # Footer - entity-specific with separator (two-line format for cleaner appearance)
-        elements.append(Spacer(1, 0.25*inch))
-        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=12))
+        signature_elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
 
         footer_style = ParagraphStyle(
             'FooterText',
@@ -1443,7 +1459,10 @@ and<br/><br/>
 
         # Two-line footer: company name on line 1, address + phone on line 2
         footer_text = f"""<b>{entity_name}</b><br/>{entity_address} | Phone: {entity_phone}"""
-        elements.append(Paragraph(footer_text, footer_style))
+        signature_elements.append(Paragraph(footer_text, footer_style))
+
+        # Keep signature section and footer together on same page
+        elements.append(KeepTogether(signature_elements))
 
         # Build PDF
         doc.build(elements)
