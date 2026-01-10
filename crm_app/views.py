@@ -838,7 +838,10 @@ class ContractViewSet(BaseModelViewSet):
         """Format company address as single line"""
         if not company:
             return ''
-        parts = [company.address, company.city, company.state, company.postal_code, company.country]
+        # Use full_address property if available, otherwise build from parts
+        if hasattr(company, 'full_address') and company.full_address:
+            return company.full_address
+        parts = [company.address_line1, company.address_line2, company.city, company.state, company.postal_code, company.country]
         return ', '.join(filter(None, parts))
 
     def _generate_principal_terms_pdf(self, contract):
