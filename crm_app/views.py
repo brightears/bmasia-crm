@@ -3789,9 +3789,9 @@ class QuoteViewSet(BaseModelViewSet):
             notes_text = quote.notes.replace('\n', '<br/>')
             elements.append(Paragraph(f"Notes: {notes_text}", terms_style))
 
-        # Footer - entity-specific with separator
-        elements.append(Spacer(1, 0.03*inch))
-        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
+        # Footer - entity-specific with separator (generous spacing above)
+        elements.append(Spacer(1, 0.4*inch))
+        elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#cccccc'), spaceBefore=0, spaceAfter=6))
 
         footer_text = f"""
         <b>{entity_name}</b> | {entity_address.replace(', ', ' | ')} | Phone: {entity_phone}
