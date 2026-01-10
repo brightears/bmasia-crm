@@ -1006,34 +1006,81 @@ class ContractViewSet(BaseModelViewSet):
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
         ]))
         elements.append(metadata_table)
-        elements.append(Spacer(1, 0.2*inch))
+        elements.append(Spacer(1, 0.25*inch))
 
-        # Two-column From/Bill To section
-        from_bill_data = [
-            [Paragraph('<b>FROM:</b>', heading_style), Paragraph('<b>BILL TO:</b>', heading_style)],
-            [
-                Paragraph(f"""
-                <b>{entity_name}</b><br/>
-                {entity_address.replace(', ', '<br/>')}<br/>
-                Phone: {entity_phone}
-                {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
-                """, body_style),
-                Paragraph(f"""
-                <b>{company.legal_entity_name or company.name}</b><br/>
-                {company.full_address.replace(', ', '<br/>') if company.full_address else (company.country or '')}
-                """, body_style)
-            ]
+        # Two-column From/Bill To section with card styling (like Quote)
+        from_header_style = ParagraphStyle(
+            'FromHeader',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#888888'),
+            spaceAfter=4,
+            fontName='Helvetica-Bold'
+        )
+
+        from_content_style = ParagraphStyle(
+            'FromContent',
+            parent=styles['Normal'],
+            fontSize=10,
+            leading=14,
+            textColor=colors.HexColor('#333333'),
+        )
+
+        # Create card-style FROM section
+        from_content = Paragraph(f"""
+            <b>{entity_name}</b><br/>
+            {entity_address.replace(', ', '<br/>')}<br/>
+            Phone: {entity_phone}
+            {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
+        """, from_content_style)
+
+        from_card_data = [
+            [Paragraph('FROM', from_header_style)],
+            [from_content]
         ]
+        from_card = Table(from_card_data, colWidths=[3.3*inch])
+        from_card.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fafafa')),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 0),
+            ('TOPPADDING', (0, 1), (-1, 1), 4),
+            ('BOTTOMPADDING', (0, 1), (-1, 1), 12),
+            # Orange accent line under header
+            ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#FFA500')),
+        ]))
 
-        from_bill_table = Table(from_bill_data, colWidths=[3.45*inch, 3.45*inch])
+        # Create card-style BILL TO section
+        bill_to_content = Paragraph(f"""
+            <b>{company.legal_entity_name or company.name}</b><br/>
+            {company.full_address.replace(', ', '<br/>') if company.full_address else (company.country or '')}
+        """, from_content_style)
+
+        bill_card_data = [
+            [Paragraph('BILL TO', from_header_style)],
+            [bill_to_content]
+        ]
+        bill_card = Table(bill_card_data, colWidths=[3.3*inch])
+        bill_card.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fafafa')),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 0),
+            ('TOPPADDING', (0, 1), (-1, 1), 4),
+            ('BOTTOMPADDING', (0, 1), (-1, 1), 12),
+            # Orange accent line under header
+            ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#FFA500')),
+        ]))
+
+        # Combine into two-column layout
+        from_bill_table = Table([[from_card, bill_card]], colWidths=[3.45*inch, 3.45*inch])
         from_bill_table.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('TOPPADDING', (0, 0), (-1, 0), 0),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-            ('TOPPADDING', (0, 1), (-1, 1), 6),
         ]))
         elements.append(from_bill_table)
-        elements.append(Spacer(1, 0.2*inch))
+        elements.append(Spacer(1, 0.25*inch))
 
         # Preamble Section
         if contract.preamble_custom:
@@ -1074,11 +1121,12 @@ and<br/><br/>
                 clause_style
             ))
 
-            # Build zone table
-            zone_data = [['<b>Property</b>', '<b>Zone</b>']]
+            # Build zone table with proper header styling (not raw HTML)
+            zone_header = ['Property', 'Zone']
             if contract.show_zone_pricing_detail and contract.price_per_zone:
-                zone_data[0].append('<b>Price/Zone</b>')
+                zone_header.append('Price/Zone')
 
+            zone_data = [zone_header]
             for idx, zone in enumerate(zones, 1):
                 row = [company.name, f"Zone {idx}: {zone.name}"]
                 if contract.show_zone_pricing_detail and contract.price_per_zone:
@@ -1088,13 +1136,18 @@ and<br/><br/>
             zone_col_widths = [2.5*inch, 3.0*inch] if not (contract.show_zone_pricing_detail and contract.price_per_zone) else [2.0*inch, 2.5*inch, 2.4*inch]
             zone_table = Table(zone_data, colWidths=zone_col_widths)
             zone_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f5f5f5')),
+                # Header row - orange accent
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                 ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
+                # Data rows
                 ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
-                ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
+                ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#424242')),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#fafafa')),
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
                 ('TOPPADDING', (0, 0), (-1, -1), 6),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('LEFTPADDING', (0, 0), (-1, -1), 8),
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
             ]))
             elements.append(zone_table)
@@ -1199,16 +1252,58 @@ and<br/><br/>
         ))
         clause_num += 1
 
-        # Bank Details (sub-section under payment)
-        elements.append(Paragraph("   <b>Bank Details for Payment:</b>", clause_style))
-        bank_details_text = f"""
-        <b>Beneficiary:</b> {entity_name}<br/>
-        <b>Bank:</b> {entity_bank}<br/>
-        <b>SWIFT Code:</b> {entity_swift}<br/>
-        <b>Account Number:</b> {entity_account}
-        """
-        elements.append(Paragraph(bank_details_text, body_style))
+        # Bank Details (sub-section under payment) - styled card
         elements.append(Spacer(1, 0.1*inch))
+
+        bank_header_style = ParagraphStyle(
+            'BankHeader',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#888888'),
+            spaceAfter=4,
+            fontName='Helvetica-Bold'
+        )
+
+        bank_content_style = ParagraphStyle(
+            'BankContent',
+            parent=styles['Normal'],
+            fontSize=9,
+            leading=13,
+            textColor=colors.HexColor('#333333'),
+        )
+
+        # Create styled bank details card
+        bank_data = [
+            ['Beneficiary', 'Bank', 'SWIFT Code', 'Account Number'],
+            [entity_name, entity_bank, entity_swift, entity_account]
+        ]
+
+        bank_table = Table(bank_data, colWidths=[1.7*inch, 2.0*inch, 1.5*inch, 1.7*inch])
+        bank_table.setStyle(TableStyle([
+            # Header row - subtle gray
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f0f0f0')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#666666')),
+            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 8),
+            ('ALIGN', (0, 0), (-1, 0), 'LEFT'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+            ('TOPPADDING', (0, 0), (-1, 0), 6),
+
+            # Data row
+            ('BACKGROUND', (0, 1), (-1, 1), colors.HexColor('#fafafa')),
+            ('FONT', (0, 1), (-1, 1), 'Helvetica', 9),
+            ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#333333')),
+            ('ALIGN', (0, 1), (-1, 1), 'LEFT'),
+            ('TOPPADDING', (0, 1), (-1, 1), 8),
+            ('BOTTOMPADDING', (0, 1), (-1, 1), 8),
+
+            # Padding and borders
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+            ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#FFA500')),
+        ]))
+        elements.append(bank_table)
+        elements.append(Spacer(1, 0.2*inch))
 
         # Clause 8: Activation Date
         if contract.activation_custom:
@@ -1333,14 +1428,22 @@ and<br/><br/>
         elements.append(signature_table)
         elements.append(Spacer(1, 0.3*inch))
 
-        # Footer - entity-specific with separator
-        elements.append(Spacer(1, 0.15*inch))
-        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
+        # Footer - entity-specific with separator (two-line format for cleaner appearance)
+        elements.append(Spacer(1, 0.25*inch))
+        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=12))
 
-        footer_text = f"""
-        <b>{entity_name}</b> | {entity_address.replace(', ', ' | ')} | Phone: {entity_phone}
-        """
-        elements.append(Paragraph(footer_text, small_style))
+        footer_style = ParagraphStyle(
+            'FooterText',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#888888'),
+            alignment=TA_CENTER,
+            leading=12,
+        )
+
+        # Two-line footer: company name on line 1, address + phone on line 2
+        footer_text = f"""<b>{entity_name}</b><br/>{entity_address} | Phone: {entity_phone}"""
+        elements.append(Paragraph(footer_text, footer_style))
 
         # Build PDF
         doc.build(elements)
@@ -3059,34 +3162,81 @@ class InvoiceViewSet(BaseModelViewSet):
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
         ]))
         elements.append(metadata_table)
-        elements.append(Spacer(1, 0.2*inch))
+        elements.append(Spacer(1, 0.25*inch))
 
-        # Two-column From/Bill To section
-        from_bill_data = [
-            [Paragraph('<b>FROM:</b>', heading_style), Paragraph('<b>BILL TO:</b>', heading_style)],
-            [
-                Paragraph(f"""
-                <b>{entity_name}</b><br/>
-                {entity_address.replace(', ', '<br/>')}<br/>
-                Phone: {entity_phone}
-                {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
-                """, body_style),
-                Paragraph(f"""
-                <b>{company.legal_entity_name or company.name}</b><br/>
-                {company.full_address.replace(', ', '<br/>') if company.full_address else (company.country or '')}
-                """, body_style)
-            ]
+        # Two-column From/Bill To section with card styling (like Quote)
+        from_header_style = ParagraphStyle(
+            'FromHeader',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#888888'),
+            spaceAfter=4,
+            fontName='Helvetica-Bold'
+        )
+
+        from_content_style = ParagraphStyle(
+            'FromContent',
+            parent=styles['Normal'],
+            fontSize=10,
+            leading=14,
+            textColor=colors.HexColor('#333333'),
+        )
+
+        # Create card-style FROM section
+        from_content = Paragraph(f"""
+            <b>{entity_name}</b><br/>
+            {entity_address.replace(', ', '<br/>')}<br/>
+            Phone: {entity_phone}
+            {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
+        """, from_content_style)
+
+        from_card_data = [
+            [Paragraph('FROM', from_header_style)],
+            [from_content]
         ]
+        from_card = Table(from_card_data, colWidths=[3.3*inch])
+        from_card.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fafafa')),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 0),
+            ('TOPPADDING', (0, 1), (-1, 1), 4),
+            ('BOTTOMPADDING', (0, 1), (-1, 1), 12),
+            # Orange accent line under header
+            ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#FFA500')),
+        ]))
 
-        from_bill_table = Table(from_bill_data, colWidths=[3.45*inch, 3.45*inch])
+        # Create card-style BILL TO section
+        bill_to_content = Paragraph(f"""
+            <b>{company.legal_entity_name or company.name}</b><br/>
+            {company.full_address.replace(', ', '<br/>') if company.full_address else (company.country or '')}
+        """, from_content_style)
+
+        bill_card_data = [
+            [Paragraph('BILL TO', from_header_style)],
+            [bill_to_content]
+        ]
+        bill_card = Table(bill_card_data, colWidths=[3.3*inch])
+        bill_card.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fafafa')),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 0),
+            ('TOPPADDING', (0, 1), (-1, 1), 4),
+            ('BOTTOMPADDING', (0, 1), (-1, 1), 12),
+            # Orange accent line under header
+            ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#FFA500')),
+        ]))
+
+        # Combine into two-column layout
+        from_bill_table = Table([[from_card, bill_card]], colWidths=[3.45*inch, 3.45*inch])
         from_bill_table.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('TOPPADDING', (0, 0), (-1, 0), 0),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-            ('TOPPADDING', (0, 1), (-1, 1), 6),
         ]))
         elements.append(from_bill_table)
-        elements.append(Spacer(1, 0.2*inch))
+        elements.append(Spacer(1, 0.25*inch))
 
         # Contract reference
         contract_text = f"<b>Contract:</b> {invoice.contract.contract_number}<br/>"
@@ -3273,14 +3423,22 @@ class InvoiceViewSet(BaseModelViewSet):
             elements.append(Paragraph(notes_text, body_style))
             elements.append(Spacer(1, 0.2*inch))
 
-        # Footer - entity-specific with separator
-        elements.append(Spacer(1, 0.15*inch))
-        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
+        # Footer - entity-specific with separator (two-line format for cleaner appearance)
+        elements.append(Spacer(1, 0.25*inch))
+        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=12))
 
-        footer_text = f"""
-        <b>{entity_name}</b> | {entity_address.replace(', ', ' | ')} | Phone: {entity_phone}
-        """
-        elements.append(Paragraph(footer_text, small_style))
+        footer_style = ParagraphStyle(
+            'FooterText',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#888888'),
+            alignment=TA_CENTER,
+            leading=12,
+        )
+
+        # Two-line footer: company name on line 1, address + phone on line 2
+        footer_text = f"""<b>{entity_name}</b><br/>{entity_address} | Phone: {entity_phone}"""
+        elements.append(Paragraph(footer_text, footer_style))
 
         # Build PDF
         doc.build(elements)
