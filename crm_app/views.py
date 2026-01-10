@@ -3810,10 +3810,17 @@ class QuoteViewSet(BaseModelViewSet):
         elements.append(Spacer(1, 0.4*inch))
         elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#cccccc'), spaceBefore=0, spaceAfter=6))
 
-        footer_text = f"""
-        <b>{entity_name}</b> | {entity_address.replace(', ', ' | ')} | Phone: {entity_phone}
-        """
-        elements.append(Paragraph(footer_text, small_style))
+        # Two-line footer for cleaner appearance
+        footer_style = ParagraphStyle(
+            'FooterText',
+            parent=styles['Normal'],
+            fontSize=7,
+            textColor=colors.HexColor('#888888'),
+            leading=10,
+            alignment=TA_CENTER
+        )
+        footer_text = f"""<b>{entity_name}</b><br/>{entity_address} | Phone: {entity_phone}"""
+        elements.append(Paragraph(footer_text, footer_style))
 
         # Build PDF
         doc.build(elements)
