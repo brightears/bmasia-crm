@@ -3661,12 +3661,21 @@ class QuoteViewSet(BaseModelViewSet):
             currency_symbol = {'USD': '$', 'THB': 'THB ', 'EUR': 'EUR ', 'GBP': 'GBP '}.get(quote.currency, quote.currency + ' ')
 
             table_data = [
-                ['Description', 'Quantity', 'Unit Price', 'Total']
+                ['Product / Service', 'Quantity', 'Unit Price', 'Total']
             ]
 
             for item in line_items:
+                # Combine product name (bold) with description
+                product_name = item.product_service or 'Service'
+                description_text = item.description or ''
+                # Format: Product name in bold, description below
+                if description_text:
+                    cell_content = f"<b>{product_name}</b><br/>{description_text}"
+                else:
+                    cell_content = f"<b>{product_name}</b>"
+
                 table_data.append([
-                    Paragraph(item.description, body_style),
+                    Paragraph(cell_content, body_style),
                     str(item.quantity),
                     f"{currency_symbol}{item.unit_price:,.2f}",
                     f"{currency_symbol}{item.line_total:,.2f}"
