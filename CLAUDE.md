@@ -536,6 +536,15 @@ npm run build  # Production build
 - ✅ **Zone Status Dashboard** - Real-time Soundtrack zone monitoring (`/zones`)
 
 ### Recent Improvements (January 2026)
+- ✅ **Quote PDF Design Improvements** (Jan 10, 2026)
+  - **Removed Status from header**: "Sent" status was confusing for customers
+  - **FROM/BILL TO redesign**: Subtle card styling with light gray background + orange accent lines
+  - **Payment Information section**: Better visual separation with 0.35" whitespace + divider line
+  - **Compact bank details**: Smaller font (8pt), tighter padding, lighter colors
+  - **Notes field**: Only prints if there's actual content (not empty/whitespace)
+  - **Footer**: Intentional two-line layout (company name on line 1, address + phone on line 2)
+  - **Filename**: `Quote_{number}.pdf` format
+  - File: `crm_app/views.py` (lines ~3500-3830)
 - ✅ **Quote Form Enhancements** (Jan 9, 2026)
   - **Product/Service Dropdown**: Predefined options (Soundtrack Your Brand, Beat Breeze, Windows Mini PC, Soundtrack Player, Custom)
   - **Auto-Populate Description**: Selecting a product auto-fills description with bullet-point features
@@ -584,7 +593,7 @@ npm run build  # Production build
   - Automatic email routing based on sequence type with per-user SMTP authentication
   - **Seasonal campaigns** (Christmas, CNY, Diwali, etc.) → production@bmasiamusic.com ✅
   - **Renewal reminders** → nikki.h@bmasiamusic.com (Sales) ✅
-  - **Payment reminders** → pom@bmasiamusic.com (Finance) ⏸️ pending
+  - **Payment reminders** → pom@bmasiamusic.com (Finance) ✅
   - **Quarterly check-ins & Manual** → norbert@bmasiamusic.com (Admin) ✅
   - **Soundtrack offline alerts** → keith@bmasiamusic.com (IT Support) ✅
   - `_get_smtp_connection_for_sender()` looks up User by smtp_email for credentials
