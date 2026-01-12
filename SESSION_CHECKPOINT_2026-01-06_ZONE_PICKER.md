@@ -1,153 +1,108 @@
-# Session Checkpoint: Zone Picker & Deduplication Fix
+# Session Checkpoint: Enhanced Zone Picker
 **Date**: January 6, 2026
-**Status**: ✅ COMPLETE
+**Status**: ✅ DEPLOYED
 
 ## Summary
 
-Implemented Zone Picker component to replace manual zone text entry in contracts. Fixed Soundtrack sync deduplication to prevent duplicate zones.
+Implemented Enhanced Zone Picker to simplify zone selection for contracts, especially for companies with many Soundtrack zones (e.g., Jetts Fitness Thailand with 60+ zones).
 
 ## Problem Solved
 
-When creating contracts, users manually typed zone names which created **new Zone records**. When Soundtrack synced, it also created zones. This resulted in **duplicates** for the same physical location:
-- Manual zone: Has contract linked, no Soundtrack data
-- Synced zone: Has Soundtrack status/device info, no contract
-
-**Example**: "Canvas Ploenchit" appeared twice - one manual (pending, with contract) and one synced (online, no contract).
+When creating contracts, users had to manually select each zone from a dropdown - tedious for companies with dozens of zones. The dropdown also ran out of space for many zones.
 
 ## Solution Implemented
 
-### 1. Zone Picker Component (NEW)
+### EnhancedZonePicker Component (NEW)
 
-**File**: `bmasia-crm-frontend/src/components/ZonePicker.tsx`
+**File**: `bmasia-crm-frontend/src/components/EnhancedZonePicker.tsx`
 
-Features:
-- Multi-select Autocomplete dropdown
-- Filters zones by selected company
-- Shows zone status indicators (Online/Offline/Pending/No Device)
-- Displays platform (Soundtrack/Beat Breeze)
-- Shows warning if no zones exist for company
-- Requires company selection first
+**Features:**
+1. **Two Separate Sections**:
+   - **Soundtrack Zones** (blue border) - API-synced zones
+   - **Beat Breeze Zones** (purple border) - Manually managed zones
 
-### 2. Fixed Soundtrack Sync Deduplication
+2. **Auto-Select for New Contracts**:
+   - When a company is selected in create mode, ALL Soundtrack zones are auto-selected
+   - Edit mode preserves existing selections
 
-**File**: `crm_app/services/soundtrack_api.py`
+3. **Select All / Clear All Buttons**:
+   - Quick actions for Soundtrack zones
+   - Buttons disabled appropriately based on current selection
 
-Changed `sync_company_zones()` method:
-```python
-# OLD: Only matched by name + platform (could miss existing zones)
-zone, created = Zone.objects.get_or_create(
-    company=company,
-    name=zone_name,
-    platform='soundtrack',
-    defaults={...}
-)
+4. **Manual Zone Entry for Beat Breeze**:
+   - Dropdown for existing Beat Breeze zones
+   - Text field + Add button to create new Beat Breeze zones
+   - New zones automatically saved to database and selected
 
-# NEW: Three-tier matching
-# 1. PRIMARY: Match by soundtrack_zone_id (unique API identifier)
-zone = company.zones.filter(soundtrack_zone_id=zone_id).first()
+5. **Zone Count Summary**:
+   - Shows total zone count with platform breakdown
+   - Example: "23 zones total: 20 Soundtrack, 3 Beat Breeze"
 
-if not zone:
-    # 2. FALLBACK: Match by name + platform (catches manually created zones)
-    zone = company.zones.filter(name=zone_name, platform='soundtrack').first()
+### UI Layout
 
-if not zone:
-    # 3. CREATE: Only if no match found
-    zone = Zone.objects.create(...)
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 🎵 Soundtrack Zones                 [Select All] [Clear All]│
+│ ─────────────────────────────────────────────────────────── │
+│ [▼ Select zones...                                        ] │
+│ Selected: [●Lobby ×][●Restaurant ×][●Pool Bar ×]...         │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ 🎶 Beat Breeze Zones                           [3 selected] │
+│ ─────────────────────────────────────────────────────────── │
+│ [▼ Select existing zones...                               ] │
+│ ─── Add New Zone ────────────────────────────────────────── │
+│ [ Enter new Beat Breeze zone name...      ] [+]             │
+└─────────────────────────────────────────────────────────────┘
+
+📍 23 zones total: 20 Soundtrack, 3 Beat Breeze
 ```
 
-### 3. Update Contract Zones Endpoint (NEW)
-
-**File**: `crm_app/views.py`
-
-New endpoint: `PUT /api/v1/contracts/{id}/update-zones/`
-
-```python
-@action(detail=True, methods=['put'], url_path='update-zones')
-def update_zones(self, request, pk=None):
-    """Replace all zones for a contract with provided zone IDs"""
-    contract = self.get_object()
-    zone_ids = request.data.get('zone_ids', [])
-
-    with transaction.atomic():
-        # Deactivate current zones
-        ContractZone.objects.filter(contract=contract, is_active=True).update(
-            is_active=False, end_date=timezone.now().date()
-        )
-
-        # Activate/create links for new zones
-        for zone_id in zone_ids:
-            zone = Zone.objects.get(id=zone_id)
-            ContractZone.objects.update_or_create(
-                contract=contract, zone=zone,
-                defaults={'is_active': True, 'end_date': None, ...}
-            )
-
-    return Response(ContractZoneSerializer(active_zones, many=True).data)
-```
-
-### 4. Updated ContractForm
-
-**File**: `bmasia-crm-frontend/src/components/ContractForm.tsx`
-
-Changes:
-- Replaced `zones: ZoneFormData[]` state with `selectedZones: Zone[]`
-- Added `ZonePicker` component instead of manual text fields
-- Clears zones when company changes
-- Loads existing zones when editing a contract
-- Calls `ApiService.updateContractZones()` on save
-
-### 5. Frontend API Method
-
-**File**: `bmasia-crm-frontend/src/services/api.ts`
+### Props Interface
 
 ```typescript
-async updateContractZones(contractId: string, zoneIds: string[]): Promise<ContractZone[]> {
-  const response = await authApi.put(`/contracts/${contractId}/update-zones/`, {
-    zone_ids: zoneIds
-  });
-  return response.data;
+interface EnhancedZonePickerProps {
+  companyId: string | null;
+  selectedZones: Zone[];
+  onChange: (zones: Zone[]) => void;
+  disabled?: boolean;
+  mode: 'create' | 'edit';  // Controls auto-select behavior
 }
 ```
 
-## Duplicate Cleanup
+### ContractForm Integration
 
-Created one-time management command to clean up existing duplicates:
+**File**: `bmasia-crm-frontend/src/components/ContractForm.tsx`
 
-**File**: `crm_app/management/commands/cleanup_duplicate_zone.py`
-
-Ran on production to fix Canvas Ploenchit duplicate:
-1. Transferred contract C-2026-0105-001 to synced zone
-2. Deleted inactive ContractZone record
-3. Deleted manual duplicate zone
-
-**Result**: Only 1 "Canvas Ploenchit" zone remains with:
-- Online status ✅
-- Device name (FLG-FN7R224) ✅
-- Contract linked ✅
-- Soundtrack sync data ✅
-
-## New User Workflow
-
-1. **Sync zones first**: Go to Zone Status → Click "Sync All Zones"
-2. **Create contract**: Select company → Zone picker shows synced zones → Select zones
-3. **Edit contract**: Zone picker pre-populated with linked zones → Add/remove as needed
+- Replaced `ZonePicker` import with `EnhancedZonePicker`
+- Added `mode` prop to pass create/edit state
+- Updated help text to explain auto-select behavior
 
 ## Files Modified
 
 | File | Action | Description |
 |------|--------|-------------|
-| `crm_app/services/soundtrack_api.py` | Modified | Fixed deduplication logic |
-| `crm_app/views.py` | Modified | Added `update_zones` action |
-| `bmasia-crm-frontend/src/components/ZonePicker.tsx` | **Created** | New zone picker component |
-| `bmasia-crm-frontend/src/components/ContractForm.tsx` | Modified | Uses ZonePicker |
-| `bmasia-crm-frontend/src/components/index.ts` | Modified | Export ZonePicker |
-| `bmasia-crm-frontend/src/services/api.ts` | Modified | Added updateContractZones |
-| `crm_app/management/commands/cleanup_duplicate_zone.py` | **Created** | One-time cleanup script |
+| `bmasia-crm-frontend/src/components/EnhancedZonePicker.tsx` | **Created** | New enhanced zone picker component |
+| `bmasia-crm-frontend/src/components/ContractForm.tsx` | Modified | Uses EnhancedZonePicker with mode prop |
+| `bmasia-crm-frontend/src/components/index.ts` | Modified | Exports EnhancedZonePicker |
+
+## User Workflow
+
+### New Contract (Create Mode)
+1. Select company → All Soundtrack zones auto-selected
+2. Use "Clear All" if needed, then pick specific zones
+3. Optionally add Beat Breeze zones
+4. Save contract
+
+### Edit Contract (Edit Mode)
+1. Open contract → Existing zones shown in both sections
+2. Add/remove zones as needed
+3. Save changes
 
 ## Commits
 
-- `0f5a9507` - Feature: Zone Picker for Contract Forms
-- `f30b3122` - Add cleanup script for duplicate Canvas Ploenchit zone
+- `1f4b3e55` - Feature: Enhanced Zone Picker with auto-select and platform sections
 
 ## Production URLs
 
@@ -156,7 +111,8 @@ Ran on production to fix Canvas Ploenchit duplicate:
 
 ## Technical Notes
 
-- ZonePicker uses `ApiService.getZonesByCompany()` to fetch available zones
-- Contract zones are linked via `ContractZone` through model (ManyToMany)
-- `update-zones` endpoint uses atomic transaction for data integrity
-- Zone deletion is protected by ContractZone foreign key - must delete ContractZone first
+- ZonePicker.tsx kept unchanged for backward compatibility
+- Auto-select only triggers when selectedZones is empty (prevents override on re-render)
+- Beat Breeze zone creation uses `ApiService.createZone()` endpoint
+- Zone platform field: 'soundtrack' | 'beatbreeze'
+- Status indicators match existing ZonePicker styling

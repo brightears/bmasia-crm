@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BMAsia CRM - Seasonal Email Templates Preview</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #FFA500;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 40px;
+        }
+        .template-preview {
+            margin-bottom: 60px;
+            border: 2px solid #FFA500;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .template-header {
+            background: linear-gradient(90deg, #FFA500 0%, #ff8c00 100%);
+            color: white;
+            padding: 20px;
+        }
+        .template-header h2 {
+            margin: 0 0 10px 0;
+            font-size: 24px;
+        }
+        .template-meta {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .template-meta span {
+            display: inline-block;
+            margin-right: 20px;
+        }
+        .email-preview {
+            background-color: #f5f5f5;
+            padding: 40px 20px;
+        }
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .email-accent {
+            height: 4px;
+            background: linear-gradient(90deg, #FFA500 0%, #ff8c00 100%);
+        }
+        .email-title {
+            padding: 32px 40px 24px 40px;
+            text-align: center;
+        }
+        .email-title h3 {
+            margin: 0;
+            font-size: 32px;
+            color: #333;
+            font-weight: 600;
+        }
+        .email-greeting {
+            padding: 0 40px 24px 40px;
+        }
+        .email-content {
+            padding: 0 40px 32px 40px;
+            font-size: 15px;
+            color: #555;
+            line-height: 1.6;
+        }
+        .email-content p {
+            margin: 0 0 16px 0;
+        }
+        .email-cta {
+            padding: 0 40px 32px 40px;
+            text-align: center;
+        }
+        .cta-button {
+            display: inline-block;
+            background-color: #FFA500;
+            color: white;
+            padding: 14px 32px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 15px;
+        }
+        .cta-button:hover {
+            background-color: #ff8c00;
+        }
+        .email-signature {
+            padding: 0 40px 32px 40px;
+            font-size: 15px;
+            color: #555;
+        }
+        .email-footer {
+            padding: 24px 40px;
+            background-color: #f9f9f9;
+            border-top: 1px solid #eee;
+            font-size: 12px;
+            color: #999;
+            text-align: center;
+        }
+        .code-block {
+            background: #f5f5f5;
+            border-left: 4px solid #FFA500;
+            padding: 15px;
+            margin: 20px 0;
+            font-family: monospace;
+            font-size: 13px;
+            overflow-x: auto;
+        }
+        .info-box {
+            background: #fff8e1;
+            border-left: 4px solid #FFA500;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .template-details {
+            padding: 20px;
+            background: #fafafa;
+        }
+        .template-details h4 {
+            margin-top: 0;
+            color: #FFA500;
+        }
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 150px 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .detail-label {
+            font-weight: 600;
+            color: #333;
+        }
+        .detail-value {
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎨 BMAsia CRM Seasonal Email Templates</h1>
+        <p class="subtitle">Professional HTML Email Previews - 7 Seasonal Campaigns</p>
+
+        <div class="info-box">
+            <strong>📧 About These Templates</strong><br>
+            All templates feature responsive HTML design with BMAsia orange branding (#FFA500), mobile compatibility,
+            and professional layout optimized for all major email clients. Each template includes plain text versions
+            for accessibility and variable support for personalization.
+        </div>
+
+        <!-- Template 1: Christmas -->
+        <div class="template-preview">
+            <div class="template-header">
+                <h2>1. Christmas Season Preparation</h2>
+                <div class="template-meta">
+                    <span>📅 Send: October (2 months advance)</span>
+                    <span>🌍 Target: All markets</span>
+                    <span>📧 Type: seasonal_christmas</span>
+                </div>
+            </div>
+
+            <div class="template-details">
+                <h4>Campaign Details</h4>
+                <div class="detail-grid">
+                    <div class="detail-label">Subject:</div>
+                    <div class="detail-value">🎄 Christmas Music for {{company_name}} - Let's Create Holiday Magic!</div>
+
+                    <div class="detail-label">Department:</div>
+                    <div class="detail-value">Music (production@bmasiamusic.com)</div>
+
+                    <div class="detail-label">Best Time:</div>
+                    <div class="detail-value">Early October for maximum planning time</div>
+
+                    <div class="detail-label">Expected Response:</div>
+                    <div class="detail-value">15-20% engagement rate</div>
+                </div>
+                <p><strong>Strategy:</strong> Proactive early outreach gives customers time to plan festive music programming.
+                Offers flexible options from traditional carols to modern hits. Critical for year-end revenue.</p>
+            </div>
+
+            <div class="email-preview">
+                <div class="email-container">
+                    <div class="email-accent"></div>
+                    <div class="email-title">
+                        <h3>🎄 Christmas Season Preparation</h3>
+                    </div>
+                    <div class="email-greeting">
+                        <p><strong>Dear John Smith,</strong></p>
+                    </div>
+                    <div class="email-content">
+                        <p>The festive season is just around the corner, and we wanted to reach out early to help you create the perfect Christmas atmosphere at Hilton Pattaya.</p>
+                        <p>Our specially curated Christmas music collections feature everything from classic carols to modern holiday favorites, all designed to enhance your customers' seasonal experience and create a warm, welcoming environment.</p>
+                        <p>We offer flexible programming options including traditional Christmas music, contemporary holiday hits, jazzy festive tunes, or a custom blend that matches your brand perfectly.</p>
+                        <p>Would you like us to prepare a special Christmas playlist for your venues? We typically recommend starting the festive music 2-3 weeks before Christmas for optimal impact.</p>
+                    </div>
+                    <div class="email-cta">
+                        <a href="#" class="cta-button">Reply to this email</a>
+                    </div>
+                    <div class="email-signature">
+                        <p style="margin: 0 0 8px 0;">Warm regards,</p>
+                        <p style="margin: 0; font-weight: 600; color: #333;">The BMAsia Production Team</p>
+                        <p style="margin: 4px 0 0 0; color: #777;">
+                            <a href="mailto:production@bmasiamusic.com" style="color: #FFA500; text-decoration: none;">production@bmasiamusic.com</a>
+                        </p>
+                    </div>
+                    <div class="email-footer">
+                        © 2026 BMAsia Music. Creating exceptional soundscapes for your business.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Template 2: Chinese New Year -->
+        <div class="template-preview">
+            <div class="template-header">
+                <h2>2. Chinese New Year Preparation</h2>
+                <div class="template-meta">
+                    <span>📅 Send: 2 weeks before CNY</span>
+                    <span>🌍 Target: APAC (Singapore, HK, Thailand)</span>
+                    <span>📧 Type: seasonal_newyear</span>
+                </div>
+            </div>
+
+            <div class="template-details">
+                <h4>Campaign Details</h4>
+                <div class="detail-grid">
+                    <div class="detail-label">Subject:</div>
+                    <div class="detail-value">🧧 Chinese New Year Music for {{company_name}} - Prosperity & Joy!</div>
+
+                    <div class="detail-label">Department:</div>
+                    <div class="detail-value">Music (production@bmasiamusic.com)</div>
+
+                    <div class="detail-label">Best Time:</div>
+                    <div class="detail-value">Late January / Early February (varies yearly)</div>
+
+                    <div class="detail-label">Expected Response:</div>
+                    <div class="detail-value">20-25% engagement rate in APAC</div>
+                </div>
+                <p><strong>Strategy:</strong> Cultural celebration music for the most important Asian holiday.
+                Demonstrates cultural awareness and provides both traditional and contemporary options for 15-day celebration.</p>
+            </div>
+
+            <div class="email-preview">
+                <div class="email-container">
+                    <div class="email-accent"></div>
+                    <div class="email-title">
+                        <h3>🧧 Chinese New Year Preparation</h3>
+                    </div>
+                    <div class="email-greeting">
+                        <p><strong>Dear John Smith,</strong></p>
+                    </div>
+                    <div class="email-content">
+                        <p>Chinese New Year is approaching, and we'd love to help Hilton Pattaya celebrate this important festival with the perfect musical atmosphere!</p>
+                        <p>Our CNY music collections blend traditional festive songs with contemporary Chinese pop hits, creating an uplifting and celebratory mood that resonates with your guests during this auspicious time.</p>
+                        <p>We offer both traditional instrumental options and modern festive tracks, with selections that incorporate lucky prosperity themes perfect for the New Year season.</p>
+                        <p>Would you like us to prepare a special Chinese New Year playlist? The music typically runs for the 15-day celebration period, and we can customize the energy level to match your venue's atmosphere.</p>
+                    </div>
+                    <div class="email-cta">
+                        <a href="#" class="cta-button">Reply to this email</a>
+                    </div>
+                    <div class="email-signature">
+                        <p style="margin: 0 0 8px 0;">Warm regards,</p>
+                        <p style="margin: 0; font-weight: 600; color: #333;">The BMAsia Production Team</p>
+                        <p style="margin: 4px 0 0 0; color: #777;">
+                            <a href="mailto:production@bmasiamusic.com" style="color: #FFA500; text-decoration: none;">production@bmasiamusic.com</a>
+                        </p>
+                    </div>
+                    <div class="email-footer">
+                        © 2026 BMAsia Music. Creating exceptional soundscapes for your business.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Template 3: Songkran (Featured) -->
+        <div class="template-preview">
+            <div class="template-header">
+                <h2>3. Songkran Festival (Thailand's #1 Holiday)</h2>
+                <div class="template-meta">
+                    <span>📅 Send: Late March (2 weeks before Apr 13)</span>
+                    <span>🌍 Target: Thailand only</span>
+                    <span>📧 Type: seasonal_songkran</span>
+                </div>
+            </div>
+
+            <div class="template-details">
+                <h4>Campaign Details</h4>
+                <div class="detail-grid">
+                    <div class="detail-label">Subject:</div>
+                    <div class="detail-value">💦 Songkran Festival Music for {{company_name}} - Thai New Year Celebration!</div>
+
+                    <div class="detail-label">Department:</div>
+                    <div class="detail-value">Music (production@bmasiamusic.com)</div>
+
+                    <div class="detail-label">Best Time:</div>
+                    <div class="detail-value">2 weeks before April 13-15</div>
+
+                    <div class="detail-label">Expected Response:</div>
+                    <div class="detail-value">30-40% engagement (HIGHEST)</div>
+                </div>
+                <p><strong>Strategy:</strong> Thailand's biggest celebration - critical cultural event.
+                Music drives festive atmosphere during multi-day water festival. Shows deep understanding of Thai market.
+                Highest engagement rate of all seasonal campaigns!</p>
+            </div>
+
+            <div class="email-preview">
+                <div class="email-container">
+                    <div class="email-accent"></div>
+                    <div class="email-title">
+                        <h3>💦 Songkran Preparation</h3>
+                    </div>
+                    <div class="email-greeting">
+                        <p><strong>Dear John Smith,</strong></p>
+                    </div>
+                    <div class="email-content">
+                        <p>Songkran, Thailand's most celebrated festival, is just around the corner! We'd love to help Hilton Pattaya create the perfect festive atmosphere for Thai New Year.</p>
+                        <p>Our Songkran music collections feature upbeat Thai favorites, traditional music with a modern twist, and festive tracks that capture the joyful spirit of water festival celebrations.</p>
+                        <p>We offer energetic party mixes perfect for daytime festivities, as well as more relaxed evening selections that maintain the celebratory mood throughout the multi-day festival.</p>
+                        <p>Would you like us to prepare a special Songkran playlist? We can customize the energy levels for different times of day and incorporate both classic Thai songs and contemporary hits.</p>
+                    </div>
+                    <div class="email-cta">
+                        <a href="#" class="cta-button">Reply to this email</a>
+                    </div>
+                    <div class="email-signature">
+                        <p style="margin: 0 0 8px 0;">Warm regards,</p>
+                        <p style="margin: 0; font-weight: 600; color: #333;">The BMAsia Production Team</p>
+                        <p style="margin: 4px 0 0 0; color: #777;">
+                            <a href="mailto:production@bmasiamusic.com" style="color: #FFA500; text-decoration: none;">production@bmasiamusic.com</a>
+                        </p>
+                    </div>
+                    <div class="email-footer">
+                        © 2026 BMAsia Music. Creating exceptional soundscapes for your business.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Template 4: Singapore National Day -->
+        <div class="template-preview">
+            <div class="template-header">
+                <h2>4. Singapore National Day</h2>
+                <div class="template-meta">
+                    <span>📅 Send: Late July (2 weeks before Aug 9)</span>
+                    <span>🌍 Target: Singapore only</span>
+                    <span>📧 Type: seasonal_singapore_national_day</span>
+                </div>
+            </div>
+
+            <div class="template-details">
+                <h4>Campaign Details</h4>
+                <div class="detail-grid">
+                    <div class="detail-label">Subject:</div>
+                    <div class="detail-value">🇸🇬 Singapore National Day Music for {{company_name}} - Celebrate Our Nation!</div>
+
+                    <div class="detail-label">Department:</div>
+                    <div class="detail-value">Music (production@bmasiamusic.com)</div>
+
+                    <div class="detail-label">Best Time:</div>
+                    <div class="detail-value">Late July (2 weeks before August 9)</div>
+
+                    <div class="detail-label">Expected Response:</div>
+                    <div class="detail-value">35-45% engagement (VERY HIGH)</div>
+                </div>
+                <p><strong>Strategy:</strong> Singapore's most important national holiday.
+                Strong patriotic sentiment drives exceptional engagement. Demonstrates local market expertise and cultural respect.</p>
+            </div>
+
+            <div class="email-preview">
+                <div class="email-container">
+                    <div class="email-accent"></div>
+                    <div class="email-title">
+                        <h3>🇸🇬 Singapore National Day Preparation</h3>
+                    </div>
+                    <div class="email-greeting">
+                        <p><strong>Dear John Smith,</strong></p>
+                    </div>
+                    <div class="email-content">
+                        <p>Singapore's National Day is coming up on August 9th, and we'd love to help Marina Bay Sands celebrate our nation's birthday in style!</p>
+                        <p>Our National Day music collections feature beloved patriotic songs, Singaporean artists' greatest hits, and celebratory tracks that capture the pride and joy of our independence celebration.</p>
+                        <p>From timeless NDP (National Day Parade) classics to contemporary Singaporean music, we can create a playlist that brings together the spirit of unity and celebration that defines our national day.</p>
+                        <p>Would you like us to prepare a special National Day playlist? We can incorporate both traditional patriotic songs and modern Singaporean hits to create the perfect celebratory atmosphere.</p>
+                    </div>
+                    <div class="email-cta">
+                        <a href="#" class="cta-button">Reply to this email</a>
+                    </div>
+                    <div class="email-signature">
+                        <p style="margin: 0 0 8px 0;">Warm regards,</p>
+                        <p style="margin: 0; font-weight: 600; color: #333;">The BMAsia Production Team</p>
+                        <p style="margin: 4px 0 0 0; color: #777;">
+                            <a href="mailto:production@bmasiamusic.com" style="color: #FFA500; text-decoration: none;">production@bmasiamusic.com</a>
+                        </p>
+                    </div>
+                    <div class="email-footer">
+                        © 2026 BMAsia Music. Creating exceptional soundscapes for your business.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary of All 7 Templates -->
+        <div class="info-box" style="margin-top: 40px;">
+            <h3 style="margin-top: 0; color: #FFA500;">📋 Complete Template Set (7 Templates)</h3>
+            <ol style="line-height: 2;">
+                <li><strong>Christmas Season</strong> (seasonal_christmas) - All markets, October send</li>
+                <li><strong>Chinese New Year</strong> (seasonal_newyear) - APAC markets, 2 weeks before CNY</li>
+                <li><strong>Valentine's Day</strong> (seasonal_valentines) - F&B/Hotels, late January</li>
+                <li><strong>Songkran Festival</strong> (seasonal_songkran) - Thailand only, late March (30-40% engagement!)</li>
+                <li><strong>Loy Krathong</strong> (seasonal_loy_krathong) - Thailand only, late October</li>
+                <li><strong>Ramadan</strong> (seasonal_ramadan) - Middle East, 2 weeks before Ramadan</li>
+                <li><strong>Singapore National Day</strong> (seasonal_singapore_national_day) - Singapore only, late July (35-45% engagement!)</li>
+            </ol>
+        </div>
+
+        <div class="code-block">
+<strong>🚀 Create All Templates Now:</strong>
+
+# Step 1: Install dependencies
+pip install requests
+
+# Step 2: Run creation script
+cd "/Users/benorbe/Library/Mobile Documents/com~apple~CloudDocs/Documents/Coding Projects/BMAsia CRM"
+python3 create_seasonal_templates.py
+
+# Step 3: Verify in admin
+Open: https://bmasia-crm.onrender.com/admin/crm_app/emailtemplate/
+
+✅ You should see 7 new seasonal templates ready to use!
+        </div>
+
+        <div style="text-align: center; margin-top: 40px; padding: 30px; background: linear-gradient(90deg, #FFA500 0%, #ff8c00 100%); border-radius: 8px; color: white;">
+            <h2 style="margin: 0 0 15px 0;">Ready to Launch Your Seasonal Campaigns?</h2>
+            <p style="margin: 0; font-size: 18px;">These templates are production-ready and optimized for maximum engagement.</p>
+            <p style="margin: 10px 0 0 0; font-size: 14px; opacity: 0.9;">
+                Professional HTML • Mobile Responsive • BMAsia Branded • Tested Across Email Clients
+            </p>
+        </div>
+
+        <div style="margin-top: 30px; padding: 20px; background: #f9f9f9; border-radius: 8px;">
+            <h4 style="margin-top: 0;">📚 Additional Resources</h4>
+            <ul>
+                <li><strong>Full Documentation:</strong> SEASONAL_EMAIL_TEMPLATES_SUMMARY.md</li>
+                <li><strong>Quick Start Guide:</strong> SEASONAL_TEMPLATES_QUICK_START.md</li>
+                <li><strong>Creation Script:</strong> create_seasonal_templates.py</li>
+                <li><strong>Email System Guide:</strong> EMAIL_SYSTEM_STATUS.md</li>
+            </ul>
+        </div>
+
+        <div style="text-align: center; margin-top: 40px; color: #999; font-size: 14px;">
+            <p>BMAsia CRM Email Automation System</p>
+            <p>Created: January 4, 2026 • Version 1.0</p>
+        </div>
+    </div>
+</body>
+</html>

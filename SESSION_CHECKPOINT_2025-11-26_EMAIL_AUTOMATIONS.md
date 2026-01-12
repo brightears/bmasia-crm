@@ -1,8 +1,16 @@
 # Session Checkpoint - November 26, 2025
-## Email Automations Consolidation Complete
+## Email Automations Consolidation + Settings Removal Complete
 
 ### Session Summary
-Successfully consolidated the confusing "Email Automation" section from Settings with "Email Sequences" in Marketing & Campaigns into a unified "Email Automations" system.
+1. Successfully consolidated the confusing "Email Automation" section from Settings with "Email Sequences" in Marketing & Campaigns into a unified "Email Automations" system.
+2. Removed the Settings page entirely from the application (no longer needed).
+
+### Settings Page Removal (Latest)
+- **Deleted**: `bmasia-crm-frontend/src/pages/Settings.tsx`
+- **Removed from**: Layout.tsx (sidebar + user menu), App.tsx (route + import)
+- **Cleaned up**: permissions.ts, usePermissions.ts
+- **Commit**: `33c4bf4c` - "Remove Settings page from navigation and routing"
+- **Deploy**: Frontend `dep-d4jfjti4d50c73ckl7q0` - LIVE
 
 ### What Was Accomplished
 

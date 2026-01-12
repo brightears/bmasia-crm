@@ -14,13 +14,34 @@ interface ThemeProviderProps {
   children: ReactNode;
 }
 
-// Department colors
-const departmentColors = {
+// Department colors - Supports both new and legacy roles
+const departmentColors: Record<string, { primary: string; light: string; dark: string }> = {
   Sales: {
     primary: '#1976d2',
     light: '#42a5f5',
     dark: '#1565c0',
   },
+  Finance: {
+    primary: '#0288d1',
+    light: '#03a9f4',
+    dark: '#01579b',
+  },
+  Tech: {
+    primary: '#388e3c',
+    light: '#66bb6a',
+    dark: '#2e7d32',
+  },
+  Music: {
+    primary: '#7b1fa2',
+    light: '#ba68c8',
+    dark: '#6a1b9a',
+  },
+  Admin: {
+    primary: '#616161',
+    light: '#9e9e9e',
+    dark: '#424242',
+  },
+  // Legacy role support
   Marketing: {
     primary: '#7b1fa2',
     light: '#ba68c8',
@@ -30,11 +51,6 @@ const departmentColors = {
     primary: '#388e3c',
     light: '#66bb6a',
     dark: '#2e7d32',
-  },
-  Admin: {
-    primary: '#616161',
-    light: '#9e9e9e',
-    dark: '#424242',
   },
 };
 
