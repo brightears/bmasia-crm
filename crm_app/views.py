@@ -1426,7 +1426,8 @@ and<br/><br/>
         try:
             sig_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'Chris Signature.png')
             if os.path.exists(sig_path):
-                signature_img = Image(sig_path, width=1.5*inch, height=0.6*inch)
+                # Larger signature
+                signature_img = Image(sig_path, width=2.2*inch, height=0.9*inch)
 
             # Select stamp based on billing entity
             if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
@@ -1435,38 +1436,59 @@ and<br/><br/>
                 stamp_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'BMAsia Stamp.png')
 
             if os.path.exists(stamp_path):
-                stamp_img = Image(stamp_path, width=1.0*inch, height=1.0*inch)
+                stamp_img = Image(stamp_path, width=1.3*inch, height=1.3*inch)
         except Exception as e:
             # If images fail to load, continue without them
             pass
 
-        # Build BMAsia signature block with signature image and stamp
-        bmasia_sig_content = []
-        if signature_img:
-            bmasia_sig_content.append(signature_img)
-        bmasia_sig_content.append(Paragraph('_' * 35, ParagraphStyle('SigLine', alignment=TA_CENTER)))
-        bmasia_sig_content.append(Paragraph(f"<b>{bmasia_signatory}</b>", ParagraphStyle('SigName', alignment=TA_CENTER, fontSize=11, fontName='Helvetica-Bold')))
-        bmasia_sig_content.append(Paragraph(bmasia_title, ParagraphStyle('SigTitle', alignment=TA_CENTER, fontSize=10)))
-        bmasia_sig_content.append(Paragraph(f"<b>{entity_name}</b>", ParagraphStyle('SigCompany', alignment=TA_CENTER, fontSize=10, fontName='Helvetica-Bold')))
-        if stamp_img:
-            bmasia_sig_content.append(Spacer(1, 0.1*inch))
-            bmasia_sig_content.append(stamp_img)
-        bmasia_sig_content.append(Spacer(1, 0.1*inch))
-        bmasia_sig_content.append(Paragraph('Date: _________________', ParagraphStyle('SigDate', alignment=TA_CENTER, fontSize=9)))
+        # Auto-fill date for BMAsia side (already signed)
+        from datetime import datetime
+        bmasia_date = datetime.now().strftime('%d %B %Y')
 
-        # Build customer signature block (empty for them to sign)
+        # Text styles
+        sig_line_style = ParagraphStyle('SigLine', alignment=TA_CENTER, fontSize=10)
+        sig_name_style = ParagraphStyle('SigName', alignment=TA_CENTER, fontSize=11, fontName='Helvetica-Bold')
+        sig_title_style = ParagraphStyle('SigTitle', alignment=TA_CENTER, fontSize=10)
+        sig_company_style = ParagraphStyle('SigCompany', alignment=TA_CENTER, fontSize=10, fontName='Helvetica-Bold')
+        sig_date_style = ParagraphStyle('SigDate', alignment=TA_CENTER, fontSize=9)
+
+        # BMAsia signature block - signature and stamp side by side, overlapping line/text
+        bmasia_sig_content = []
+
+        # Row 1: Signature and stamp side by side (will overlap text below)
+        if signature_img or stamp_img:
+            sig_stamp_data = [[signature_img or '', stamp_img or '']]
+            sig_stamp_table = Table(sig_stamp_data, colWidths=[2.0*inch, 1.4*inch])
+            sig_stamp_table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (0, 0), 'RIGHT'),
+                ('ALIGN', (1, 0), (1, 0), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), -20),  # Overlap the line below
+            ]))
+            bmasia_sig_content.append(sig_stamp_table)
+
+        bmasia_sig_content.append(Paragraph('_' * 35, sig_line_style))
+        bmasia_sig_content.append(Paragraph(f"<b>{bmasia_signatory}</b>", sig_name_style))
+        bmasia_sig_content.append(Paragraph(bmasia_title, sig_title_style))
+        bmasia_sig_content.append(Paragraph(f"<b>{entity_name}</b>", sig_company_style))
+        bmasia_sig_content.append(Spacer(1, 0.1*inch))
+        bmasia_sig_content.append(Paragraph(f'Date: <u>{bmasia_date}</u>', sig_date_style))
+
+        # Customer signature block (empty for them to sign)
         customer_sig_content = []
-        customer_sig_content.append(Spacer(1, 0.6*inch))  # Space where signature would go
-        customer_sig_content.append(Paragraph('_' * 35, ParagraphStyle('SigLine', alignment=TA_CENTER)))
-        customer_sig_content.append(Paragraph(f"<b>{customer_signatory}</b>", ParagraphStyle('SigName', alignment=TA_CENTER, fontSize=11, fontName='Helvetica-Bold')))
-        customer_sig_content.append(Paragraph(customer_title, ParagraphStyle('SigTitle', alignment=TA_CENTER, fontSize=10)))
-        customer_sig_content.append(Paragraph(f"<b>{company.legal_entity_name or company.name}</b>", ParagraphStyle('SigCompany', alignment=TA_CENTER, fontSize=10, fontName='Helvetica-Bold')))
-        customer_sig_content.append(Spacer(1, 1.1*inch))  # Space for customer stamp
-        customer_sig_content.append(Paragraph('Date: _________________', ParagraphStyle('SigDate', alignment=TA_CENTER, fontSize=9)))
+        customer_sig_content.append(Spacer(1, 0.7*inch))  # Space for signature
+        customer_sig_content.append(Paragraph('_' * 35, sig_line_style))
+        customer_sig_content.append(Paragraph(f"<b>{customer_signatory}</b>", sig_name_style))
+        customer_sig_content.append(Paragraph(customer_title, sig_title_style))
+        customer_sig_content.append(Paragraph(f"<b>{company.legal_entity_name or company.name}</b>", sig_company_style))
+        customer_sig_content.append(Spacer(1, 0.1*inch))
+        customer_sig_content.append(Paragraph('Date: _________________', sig_date_style))
 
         # Create two-column table for signatures
-        bmasia_cell = Table([[item] for item in bmasia_sig_content], colWidths=[3.3*inch])
-        customer_cell = Table([[item] for item in customer_sig_content], colWidths=[3.3*inch])
+        bmasia_cell = Table([[item] for item in bmasia_sig_content], colWidths=[3.4*inch])
+        bmasia_cell.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER')]))
+        customer_cell = Table([[item] for item in customer_sig_content], colWidths=[3.4*inch])
+        customer_cell.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER')]))
 
         signature_table = Table([[bmasia_cell, customer_cell]], colWidths=[3.45*inch, 3.45*inch])
         signature_table.setStyle(TableStyle([
