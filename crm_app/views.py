@@ -1415,35 +1415,66 @@ and<br/><br/>
         signature_elements.append(Spacer(1, 0.15*inch))
 
         # Create signature table with signatory names and titles
-        bmasia_signatory = contract.bmasia_signatory_name or 'Authorized Representative'
-        bmasia_title = contract.bmasia_signatory_title or 'Authorized Representative'
+        bmasia_signatory = contract.bmasia_signatory_name or 'Chris Andrews'
+        bmasia_title = contract.bmasia_signatory_title or 'Director'
         customer_signatory = contract.customer_signatory_name or 'Authorized Representative'
         customer_title = contract.customer_signatory_title or 'Authorized Representative'
 
-        signature_data = [
-            ['_' * 40, '_' * 40],
-            [bmasia_signatory, customer_signatory],
-            [bmasia_title, customer_title],
-            [entity_name, company.legal_entity_name or company.name],
-            ['', ''],
-            ['Date: _________________', 'Date: _________________'],
-        ]
+        # Load signature and stamp images
+        signature_img = None
+        stamp_img = None
+        try:
+            sig_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'Chris Signature.png')
+            if os.path.exists(sig_path):
+                signature_img = Image(sig_path, width=1.5*inch, height=0.6*inch)
 
-        signature_table = Table(signature_data, colWidths=[3.45*inch, 3.45*inch])
+            # Select stamp based on billing entity
+            if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+                stamp_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'BMAsia Thai Stamp.png')
+            else:
+                stamp_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'BMAsia Stamp.png')
+
+            if os.path.exists(stamp_path):
+                stamp_img = Image(stamp_path, width=1.0*inch, height=1.0*inch)
+        except Exception as e:
+            # If images fail to load, continue without them
+            pass
+
+        # Build BMAsia signature block with signature image and stamp
+        bmasia_sig_content = []
+        if signature_img:
+            bmasia_sig_content.append(signature_img)
+        bmasia_sig_content.append(Paragraph('_' * 35, ParagraphStyle('SigLine', alignment=TA_CENTER)))
+        bmasia_sig_content.append(Paragraph(f"<b>{bmasia_signatory}</b>", ParagraphStyle('SigName', alignment=TA_CENTER, fontSize=11, fontName='Helvetica-Bold')))
+        bmasia_sig_content.append(Paragraph(bmasia_title, ParagraphStyle('SigTitle', alignment=TA_CENTER, fontSize=10)))
+        bmasia_sig_content.append(Paragraph(f"<b>{entity_name}</b>", ParagraphStyle('SigCompany', alignment=TA_CENTER, fontSize=10, fontName='Helvetica-Bold')))
+        if stamp_img:
+            bmasia_sig_content.append(Spacer(1, 0.1*inch))
+            bmasia_sig_content.append(stamp_img)
+        bmasia_sig_content.append(Spacer(1, 0.1*inch))
+        bmasia_sig_content.append(Paragraph('Date: _________________', ParagraphStyle('SigDate', alignment=TA_CENTER, fontSize=9)))
+
+        # Build customer signature block (empty for them to sign)
+        customer_sig_content = []
+        customer_sig_content.append(Spacer(1, 0.6*inch))  # Space where signature would go
+        customer_sig_content.append(Paragraph('_' * 35, ParagraphStyle('SigLine', alignment=TA_CENTER)))
+        customer_sig_content.append(Paragraph(f"<b>{customer_signatory}</b>", ParagraphStyle('SigName', alignment=TA_CENTER, fontSize=11, fontName='Helvetica-Bold')))
+        customer_sig_content.append(Paragraph(customer_title, ParagraphStyle('SigTitle', alignment=TA_CENTER, fontSize=10)))
+        customer_sig_content.append(Paragraph(f"<b>{company.legal_entity_name or company.name}</b>", ParagraphStyle('SigCompany', alignment=TA_CENTER, fontSize=10, fontName='Helvetica-Bold')))
+        customer_sig_content.append(Spacer(1, 1.1*inch))  # Space for customer stamp
+        customer_sig_content.append(Paragraph('Date: _________________', ParagraphStyle('SigDate', alignment=TA_CENTER, fontSize=9)))
+
+        # Create two-column table for signatures
+        bmasia_cell = Table([[item] for item in bmasia_sig_content], colWidths=[3.3*inch])
+        customer_cell = Table([[item] for item in customer_sig_content], colWidths=[3.3*inch])
+
+        signature_table = Table([[bmasia_cell, customer_cell]], colWidths=[3.45*inch, 3.45*inch])
         signature_table.setStyle(TableStyle([
-            ('FONT', (0, 0), (-1, 0), 'Helvetica', 10),
-            ('FONT', (0, 1), (-1, 1), 'Helvetica-Bold', 11),
-            ('FONT', (0, 2), (-1, 2), 'Helvetica', 10),
-            ('FONT', (0, 3), (-1, 3), 'Helvetica-Bold', 10),
-            ('FONT', (0, 5), (-1, 5), 'Helvetica', 9),
-            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ]))
         signature_elements.append(signature_table)
-        signature_elements.append(Spacer(1, 0.2*inch))
+        signature_elements.append(Spacer(1, 0.15*inch))
 
         # Footer - entity-specific with separator (two-line format for cleaner appearance)
         signature_elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
