@@ -1455,20 +1455,18 @@ and<br/><br/>
         # BMAsia signature block - signature and stamp side by side, overlapping line/text
         bmasia_sig_content = []
 
-        # Row 1: Signature and stamp side by side, centered (will overlap text below)
+        # Row 1: Signature and stamp side by side, shifted right to center over line
         if signature_img or stamp_img:
             sig_stamp_data = [[signature_img or '', stamp_img or '']]
-            # Use tighter column widths to keep signature and stamp close together
+            # Signature + stamp table - shifted right with left padding
             sig_stamp_table = Table(sig_stamp_data, colWidths=[2.2*inch, 1.3*inch])
             sig_stamp_table.setStyle(TableStyle([
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),  # Center both cells
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), -20),  # Overlap the line below
+                ('LEFTPADDING', (0, 0), (0, 0), 25),  # Shift signature right to center over line
             ]))
-            # Wrap in another table to center the sig_stamp_table within the column
-            centered_sig_stamp = Table([[sig_stamp_table]], colWidths=[3.4*inch])
-            centered_sig_stamp.setStyle(TableStyle([('ALIGN', (0, 0), (0, 0), 'CENTER')]))
-            bmasia_sig_content.append(centered_sig_stamp)
+            bmasia_sig_content.append(sig_stamp_table)
 
         bmasia_sig_content.append(Paragraph('_' * 35, sig_line_style))
         bmasia_sig_content.append(Paragraph(f"<b>{bmasia_signatory}</b>", sig_name_style))
@@ -1479,7 +1477,7 @@ and<br/><br/>
 
         # Customer signature block (empty for them to sign)
         customer_sig_content = []
-        customer_sig_content.append(Spacer(1, 1.1*inch))  # Match height of sig+stamp on BMAsia side
+        customer_sig_content.append(Spacer(1, 0.85*inch))  # Space for signature, reduced to fit on page
         customer_sig_content.append(Paragraph('_' * 35, sig_line_style))
         customer_sig_content.append(Paragraph(f"<b>{customer_signatory}</b>", sig_name_style))
         customer_sig_content.append(Paragraph(customer_title, sig_title_style))
