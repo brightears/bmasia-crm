@@ -4256,3 +4256,175 @@ class ExpenseEntry(TimestampedModel):
         if not self.is_overdue:
             return 0
         return (timezone.now().date() - self.due_date).days
+
+
+# =============================================================================
+# BALANCE SHEET MODELS (Finance Module - Phase 6)
+# =============================================================================
+
+class BalanceSheetSnapshot(TimestampedModel):
+    """
+    Stores balance sheet data for a specific quarter.
+    Allows manual overrides while calculating from underlying data when possible.
+    Part of Finance Module - Phase 6 (Balance Sheet).
+
+    Balance Sheet Structure:
+    - ASSETS
+      - Current Assets: Cash & Bank, Accounts Receivable, Other Current Assets
+      - Fixed Assets: Equipment (less Accumulated Depreciation)
+    - LIABILITIES
+      - Current Liabilities: Accounts Payable, Accrued Expenses, Other Current
+      - Long-term Liabilities: Long-term Debt, Other Long-term
+    - EQUITY
+      - Share Capital, Additional Paid-in Capital, Retained Earnings, Other Equity
+
+    Accounting Equation: Assets = Liabilities + Equity
+    """
+    BILLING_ENTITY_CHOICES = [
+        ('bmasia_th', 'BMAsia (Thailand) Co., Ltd.'),
+        ('bmasia_hk', 'BMAsia Limited'),
+    ]
+    CURRENCY_CHOICES = [
+        ('THB', 'Thai Baht'),
+        ('USD', 'US Dollar'),
+    ]
+    QUARTER_CHOICES = [
+        (1, 'Q1 (Jan-Mar)'),
+        (2, 'Q2 (Apr-Jun)'),
+        (3, 'Q3 (Jul-Sep)'),
+        (4, 'Q4 (Oct-Dec)'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # Period
+    year = models.IntegerField(help_text="Year (e.g., 2026)")
+    quarter = models.IntegerField(
+        choices=QUARTER_CHOICES,
+        help_text="Quarter (1-4)"
+    )
+
+    # Entity and currency
+    billing_entity = models.CharField(
+        max_length=20,
+        choices=BILLING_ENTITY_CHOICES,
+        help_text="Which BMAsia entity this applies to"
+    )
+    currency = models.CharField(
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        default='THB'
+    )
+
+    # ==========================================================================
+    # ASSETS (null = calculate from data, value = override)
+    # ==========================================================================
+
+    # Current Assets
+    cash_and_bank = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+        help_text="Override: Cash and bank balances (from CashFlowSnapshot closing balance)"
+    )
+    accounts_receivable = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+        help_text="Override: Outstanding customer invoices (Sent + Overdue)"
+    )
+    other_current_assets = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Manual entry: Prepaid expenses, deposits, etc."
+    )
+
+    # Fixed Assets
+    gross_fixed_assets = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+        help_text="Override: Total CapEx purchases (computer equipment, office equipment)"
+    )
+    accumulated_depreciation = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+        help_text="Override: Total accumulated depreciation"
+    )
+
+    # ==========================================================================
+    # LIABILITIES
+    # ==========================================================================
+
+    # Current Liabilities
+    accounts_payable = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+        help_text="Override: Outstanding vendor payments (pending + approved expenses)"
+    )
+    accrued_expenses = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Manual entry: Accrued salaries, taxes, etc."
+    )
+    other_current_liabilities = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Manual entry: Short-term portions of loans, etc."
+    )
+
+    # Long-term Liabilities
+    long_term_debt = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Manual entry: Long-term loans and borrowings"
+    )
+    other_long_term_liabilities = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Manual entry: Deferred tax liabilities, etc."
+    )
+
+    # ==========================================================================
+    # EQUITY
+    # ==========================================================================
+
+    share_capital = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Manual entry: Issued share capital"
+    )
+    additional_paid_in_capital = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Manual entry: Share premium / APIC"
+    )
+    retained_earnings = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+        help_text="Override: Cumulative net profit (calculated from P&L)"
+    )
+    other_equity = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Manual entry: Other reserves, adjustments"
+    )
+
+    # ==========================================================================
+    # METADATA
+    # ==========================================================================
+
+    notes = models.TextField(blank=True, help_text="Notes about this period")
+    is_finalized = models.BooleanField(
+        default=False,
+        help_text="Mark as finalized to prevent auto-recalculation"
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='balance_sheet_snapshots'
+    )
+
+    class Meta:
+        unique_together = ['year', 'quarter', 'billing_entity', 'currency']
+        ordering = ['-year', '-quarter']
+        indexes = [
+            models.Index(fields=['year', 'quarter']),
+            models.Index(fields=['billing_entity', 'year', 'quarter']),
+        ]
+        verbose_name = 'Balance Sheet Snapshot'
+        verbose_name_plural = 'Balance Sheet Snapshots'
+
+    def __str__(self):
+        return f"Balance Sheet: {self.year} Q{self.quarter} | {self.currency} | {self.billing_entity}"
+
+    @property
+    def quarter_name(self):
+        """Return quarter display name"""
+        quarter_names = {1: 'Q1', 2: 'Q2', 3: 'Q3', 4: 'Q4'}
+        return quarter_names.get(self.quarter, f'Q{self.quarter}')

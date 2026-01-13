@@ -8439,3 +8439,99 @@ class CashFlowViewSet(viewsets.ViewSet):
             return Response({
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class BalanceSheetViewSet(viewsets.ViewSet):
+    """
+    ViewSet for Balance Sheet generation.
+    Part of Finance Module - Phase 6.
+
+    Endpoints:
+    - GET /api/v1/balance-sheet/quarterly/?year=2026&quarter=1 - Quarterly Balance Sheet
+    - GET /api/v1/balance-sheet/trend/?year=2026 - Quarterly trend data
+    """
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'], url_path='quarterly')
+    def quarterly(self, request):
+        """
+        GET /api/v1/balance-sheet/quarterly/?year=2026&quarter=1&billing_entity=bmasia_th&currency=THB
+
+        Returns Balance Sheet for a specific quarter.
+        """
+        from crm_app.services.balance_sheet_service import BalanceSheetService
+
+        year = request.query_params.get('year')
+        quarter = request.query_params.get('quarter')
+        billing_entity = request.query_params.get('billing_entity')
+        currency = request.query_params.get('currency')
+
+        if not year or not quarter:
+            return Response({
+                'error': 'year and quarter are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            quarter = int(quarter)
+        except ValueError:
+            return Response({
+                'error': 'year and quarter must be integers'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if quarter < 1 or quarter > 4:
+            return Response({
+                'error': 'quarter must be between 1 and 4'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = BalanceSheetService()
+            bs = service.get_quarterly_balance_sheet(
+                year=year,
+                quarter=quarter,
+                billing_entity=billing_entity,
+                currency=currency
+            )
+            return Response(bs)
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='trend')
+    def trend(self, request):
+        """
+        GET /api/v1/balance-sheet/trend/?year=2026&billing_entity=bmasia_th&currency=THB
+
+        Returns quarterly Balance Sheet trend data for charts.
+        """
+        from crm_app.services.balance_sheet_service import BalanceSheetService
+
+        year = request.query_params.get('year')
+        billing_entity = request.query_params.get('billing_entity')
+        currency = request.query_params.get('currency')
+
+        if not year:
+            return Response({
+                'error': 'year is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+        except ValueError:
+            return Response({
+                'error': 'year must be an integer'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = BalanceSheetService()
+            trend = service.get_quarterly_trend(
+                year=year,
+                billing_entity=billing_entity,
+                currency=currency
+            )
+            return Response(trend)
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
