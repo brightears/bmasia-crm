@@ -525,6 +525,12 @@ npm run build  # Production build
 - ✅ **Seasonal Email Automation** - 10 templates with country-based targeting (Jan 2026)
 - ✅ **SeasonalTriggerDate Model** - Admin-configurable variable holiday dates
 - ✅ **Multi-Year Contract Support** - `send_renewal_reminders` toggle to skip renewal emails
+- 🚧 **Finance & Accounting Module** (Jan 13, 2026) - IN PROGRESS
+  - Phase 1: Revenue Tracking (New/Renewals/Canceled/Add-ons)
+  - Models created: MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent
+  - Contract.lifecycle_type field added
+  - Migration: `0048_finance_revenue_tracking.py` ready to apply
+  - Plan file: `.claude/plans/memoized-churning-bird.md`
 
 ### Frontend (React + TypeScript)
 - ✅ Authentication with JWT tokens (AuthContext)

@@ -745,12 +745,37 @@ class Contract(TimestampedModel):
     customer_contact_email = models.EmailField(blank=True)
     customer_contact_title = models.CharField(max_length=255, blank=True)
 
+    # Finance tracking - Revenue lifecycle
+    LIFECYCLE_TYPE_CHOICES = [
+        ('new', 'New Contract'),
+        ('renewal', 'Renewal'),
+        ('addon', 'Add-on (Zone Addition)'),
+        ('churn', 'Canceled/Churned'),
+    ]
+
+    lifecycle_type = models.CharField(
+        max_length=20,
+        choices=LIFECYCLE_TYPE_CHOICES,
+        blank=True,
+        help_text="Revenue type classification for finance tracking"
+    )
+    lifecycle_type_manually_set = models.BooleanField(
+        default=False,
+        help_text="If true, lifecycle_type was manually set and won't be auto-updated"
+    )
+    lifecycle_effective_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Date when this lifecycle type became effective"
+    )
+
     class Meta:
         ordering = ['-start_date']
         indexes = [
             models.Index(fields=['company', 'is_active']),
             models.Index(fields=['end_date', 'auto_renew']),
             models.Index(fields=['status', 'end_date']),
+            models.Index(fields=['lifecycle_type', 'lifecycle_effective_date']),
         ]
     
     def __str__(self):
@@ -3378,6 +3403,276 @@ class StaticDocument(models.Model):
 
     def __str__(self):
         return f"{self.name} (v{self.version})"
+
+
+# ============================================================================
+# Finance & Accounting Module
+# ============================================================================
+
+class MonthlyRevenueSnapshot(TimestampedModel):
+    """
+    Monthly revenue snapshot for tracking contracted value and cash received.
+    Used for dashboard metrics and finance reporting.
+    """
+    CATEGORY_CHOICES = [
+        ('new', 'New Contract'),
+        ('renewal', 'Renewal'),
+        ('addon', 'Add-on (Zone Addition)'),
+        ('churn', 'Canceled/Churned'),
+    ]
+
+    CURRENCY_CHOICES = [
+        ('USD', 'USD - US Dollar'),
+        ('THB', 'THB - Thai Baht'),
+        ('EUR', 'EUR - Euro'),
+        ('GBP', 'GBP - British Pound'),
+    ]
+
+    BILLING_ENTITY_CHOICES = [
+        ('bmasia_hk', 'BMAsia Limited (Hong Kong)'),
+        ('bmasia_th', 'BMAsia (Thailand) Co., Ltd.'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    year = models.IntegerField(help_text="Year of the snapshot (e.g., 2026)")
+    month = models.IntegerField(help_text="Month of the snapshot (1-12)")
+    category = models.CharField(
+        max_length=20,
+        choices=CATEGORY_CHOICES,
+        help_text="Revenue category (new/renewal/addon/churn)"
+    )
+    currency = models.CharField(
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        default='USD',
+        help_text="Currency for this snapshot"
+    )
+    billing_entity = models.CharField(
+        max_length=20,
+        choices=BILLING_ENTITY_CHOICES,
+        help_text="Which BMAsia entity is billing"
+    )
+
+    # Metrics
+    contract_count = models.IntegerField(
+        default=0,
+        help_text="Number of contracts in this category for the month"
+    )
+    contracted_value = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        default=0,
+        help_text="Total contract value for this category"
+    )
+    cash_received = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        default=0,
+        help_text="Actual cash received in this period"
+    )
+
+    # Manual override capability
+    is_manually_overridden = models.BooleanField(
+        default=False,
+        help_text="If true, values were manually entered and won't be auto-calculated"
+    )
+    override_reason = models.TextField(
+        blank=True,
+        help_text="Reason for manual override"
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text="Additional notes about this snapshot"
+    )
+
+    class Meta:
+        ordering = ['-year', '-month', 'category']
+        unique_together = [['year', 'month', 'category', 'currency', 'billing_entity']]
+        indexes = [
+            models.Index(fields=['year', 'month']),
+            models.Index(fields=['category', 'year', 'month']),
+            models.Index(fields=['billing_entity', 'year', 'month']),
+            models.Index(fields=['currency', 'year', 'month']),
+        ]
+        verbose_name = 'Monthly Revenue Snapshot'
+        verbose_name_plural = 'Monthly Revenue Snapshots'
+
+    def __str__(self):
+        return f"{self.year}-{self.month:02d} | {self.get_category_display()} | {self.currency} | {self.billing_entity}"
+
+
+class MonthlyRevenueTarget(TimestampedModel):
+    """
+    Monthly revenue targets set by management for forecasting and goal tracking.
+    Separate from actual snapshots to enable comparison.
+    """
+    CATEGORY_CHOICES = MonthlyRevenueSnapshot.CATEGORY_CHOICES
+    CURRENCY_CHOICES = MonthlyRevenueSnapshot.CURRENCY_CHOICES
+    BILLING_ENTITY_CHOICES = MonthlyRevenueSnapshot.BILLING_ENTITY_CHOICES
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    year = models.IntegerField(help_text="Target year (e.g., 2026)")
+    month = models.IntegerField(help_text="Target month (1-12)")
+    category = models.CharField(
+        max_length=20,
+        choices=CATEGORY_CHOICES,
+        help_text="Revenue category for this target"
+    )
+    currency = models.CharField(
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        default='USD',
+        help_text="Currency for this target"
+    )
+    billing_entity = models.CharField(
+        max_length=20,
+        choices=BILLING_ENTITY_CHOICES,
+        help_text="Which BMAsia entity this target applies to"
+    )
+
+    # Target metrics
+    target_contract_count = models.IntegerField(
+        default=0,
+        help_text="Target number of contracts for this category"
+    )
+    target_revenue = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        default=0,
+        help_text="Target contracted revenue"
+    )
+    target_cash_flow = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        default=0,
+        help_text="Target cash collection"
+    )
+
+    notes = models.TextField(
+        blank=True,
+        help_text="Notes about this target or assumptions"
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='revenue_targets',
+        help_text="User who set this target"
+    )
+
+    class Meta:
+        ordering = ['-year', '-month', 'category']
+        unique_together = [['year', 'month', 'category', 'currency', 'billing_entity']]
+        indexes = [
+            models.Index(fields=['year', 'month']),
+            models.Index(fields=['category', 'year', 'month']),
+            models.Index(fields=['billing_entity', 'year', 'month']),
+        ]
+        verbose_name = 'Monthly Revenue Target'
+        verbose_name_plural = 'Monthly Revenue Targets'
+
+    def __str__(self):
+        return f"Target: {self.year}-{self.month:02d} | {self.get_category_display()} | {self.currency}"
+
+
+class ContractRevenueEvent(TimestampedModel):
+    """
+    Tracks revenue-impacting events for contracts (renewals, add-ons, churns, payments).
+    Used for detailed audit trail and revenue recognition.
+    """
+    EVENT_TYPE_CHOICES = [
+        ('new_contract', 'New Contract Signed'),
+        ('renewal', 'Contract Renewed'),
+        ('addon_zones', 'Zones Added'),
+        ('removal_zones', 'Zones Removed'),
+        ('value_increase', 'Value Increased'),
+        ('value_decrease', 'Value Decreased'),
+        ('payment_received', 'Payment Received'),
+        ('payment_overdue', 'Payment Overdue'),
+        ('churn', 'Contract Churned/Canceled'),
+        ('reactivation', 'Contract Reactivated'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    contract = models.ForeignKey(
+        Contract,
+        on_delete=models.CASCADE,
+        related_name='revenue_events',
+        help_text="Contract associated with this event"
+    )
+    event_type = models.CharField(
+        max_length=30,
+        choices=EVENT_TYPE_CHOICES,
+        help_text="Type of revenue event"
+    )
+    event_date = models.DateField(
+        help_text="Date when this event occurred"
+    )
+
+    # Financial impact
+    contract_value_change = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text="Change in total contract value (positive or negative)"
+    )
+    monthly_value_change = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text="Change in monthly recurring value"
+    )
+    zone_count_change = models.IntegerField(
+        default=0,
+        help_text="Change in number of zones (positive or negative)"
+    )
+
+    # Payment tracking
+    expected_payment_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="When payment was expected"
+    )
+    actual_payment_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="When payment was actually received"
+    )
+    payment_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Amount of payment received"
+    )
+
+    notes = models.TextField(
+        blank=True,
+        help_text="Additional details about this event"
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='contract_revenue_events',
+        help_text="User who logged this event"
+    )
+
+    class Meta:
+        ordering = ['-event_date', '-created_at']
+        indexes = [
+            models.Index(fields=['contract', 'event_date']),
+            models.Index(fields=['event_type', 'event_date']),
+            models.Index(fields=['event_date']),
+            models.Index(fields=['contract', 'event_type']),
+        ]
+        verbose_name = 'Contract Revenue Event'
+        verbose_name_plural = 'Contract Revenue Events'
+
+    def __str__(self):
+        return f"{self.contract.contract_number} | {self.get_event_type_display()} | {self.event_date}"
 
 
 # Signal handlers for KB system
