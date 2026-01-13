@@ -1472,3 +1472,105 @@ export interface MonthlyExpenseSummary {
     capex: number;
   };
 }
+
+// ====================
+// P&L Report Types (Phase 4 - Finance Module)
+// ====================
+
+export interface PLRevenueBreakdown {
+  new_contracts: number;
+  renewals: number;
+  addons: number;
+  churned: number;
+  total: number;
+}
+
+export interface PLExpenseBreakdown {
+  cogs: number;
+  gna: number;
+  sales_marketing: number;
+  total_opex: number;
+}
+
+export interface PLSummary {
+  revenue: PLRevenueBreakdown;
+  expenses: PLExpenseBreakdown;
+  gross_profit: number;
+  gross_margin: number;
+  operating_profit: number;
+  operating_margin: number;
+  net_profit: number;
+  net_margin: number;
+}
+
+export interface PLStatement {
+  period: {
+    year: number;
+    month?: number;
+    start_date: string;
+    end_date: string;
+  };
+  currency: string;
+  billing_entity: string;
+  summary: PLSummary;
+  revenue_detail: {
+    by_category: Array<{
+      category: string;
+      amount: number;
+      contract_count: number;
+    }>;
+    total: number;
+  };
+  expense_detail: {
+    cogs: Array<{
+      category_id: string;
+      category_name: string;
+      amount: number;
+    }>;
+    gna: Array<{
+      category_id: string;
+      category_name: string;
+      amount: number;
+    }>;
+    sales_marketing: Array<{
+      category_id: string;
+      category_name: string;
+      amount: number;
+    }>;
+  };
+}
+
+export interface PLComparative {
+  current: PLStatement;
+  previous: PLStatement;
+  variance: {
+    revenue: {
+      amount: number;
+      percentage: number;
+    };
+    gross_profit: {
+      amount: number;
+      percentage: number;
+    };
+    operating_profit: {
+      amount: number;
+      percentage: number;
+    };
+    net_profit: {
+      amount: number;
+      percentage: number;
+    };
+  };
+}
+
+export interface PLTrendData {
+  month: number;
+  month_name: string;
+  revenue: number;
+  cogs: number;
+  gross_profit: number;
+  opex: number;
+  net_profit: number;
+  gross_margin: number;
+  net_margin: number;
+}

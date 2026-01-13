@@ -45,6 +45,7 @@ import Settings from './pages/Settings';
 import RevenueDashboard from './pages/RevenueDashboard';
 import AccountsReceivable from './pages/AccountsReceivable';
 import AccountsPayable from './pages/AccountsPayable';
+import ProfitLoss from './pages/ProfitLoss';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -227,6 +228,14 @@ function App() {
           element={
             <ProtectedRoute requiredModule="invoices">
               <AccountsPayable />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/finance/pl"
+          element={
+            <ProtectedRoute requiredModule="invoices">
+              <ProfitLoss />
             </ProtectedRoute>
           }
         />

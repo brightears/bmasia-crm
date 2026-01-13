@@ -73,6 +73,9 @@ router.register(r'recurring-expenses', views.RecurringExpenseViewSet, basename='
 router.register(r'expenses', views.ExpenseEntryViewSet, basename='expense')
 router.register(r'ap-aging', views.APAgingViewSet, basename='ap-aging')
 
+# P&L Report routes (Phase 4 - Finance Module)
+router.register(r'profit-loss', views.ProfitLossViewSet, basename='profit-loss')
+
 # The API URLs are now determined automatically by the router.
 urlpatterns = [
     path('v1/', include(router.urls)),

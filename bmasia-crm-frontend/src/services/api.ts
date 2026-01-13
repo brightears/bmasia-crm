@@ -7,7 +7,8 @@ import {
   ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
   SeasonalTriggerDate,
   Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry,
-  APAgingReport, APAgingSummary, OverdueExpense, MonthlyExpenseSummary
+  APAgingReport, APAgingSummary, OverdueExpense, MonthlyExpenseSummary,
+  PLStatement, PLComparative, PLTrendData
 } from '../types';
 import { authApi } from './authService';
 import { MockApiService } from './mockData';
@@ -1451,6 +1452,43 @@ class ApiService {
     if (currency) params.currency = currency;
     if (billingEntity) params.billing_entity = billingEntity;
     const response = await authApi.get('/ap-aging/monthly-summary/', { params });
+    return response.data;
+  }
+
+  // ====================
+  // P&L Report Methods (Phase 4 - Finance Module)
+  // ====================
+
+  async getPLMonthly(year: number, month: number, currency?: string, billingEntity?: string): Promise<PLStatement> {
+    const params: any = { year, month };
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    const response = await authApi.get('/profit-loss/monthly/', { params });
+    return response.data;
+  }
+
+  async getPLYTD(year: number, throughMonth?: number, currency?: string, billingEntity?: string): Promise<PLStatement> {
+    const params: any = { year };
+    if (throughMonth) params.through_month = throughMonth;
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    const response = await authApi.get('/profit-loss/ytd/', { params });
+    return response.data;
+  }
+
+  async getPLComparative(year: number, month: number, compareYear: number, currency?: string, billingEntity?: string): Promise<PLComparative> {
+    const params: any = { year, month, compare_year: compareYear };
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    const response = await authApi.get('/profit-loss/comparative/', { params });
+    return response.data;
+  }
+
+  async getPLTrend(year: number, currency?: string, billingEntity?: string): Promise<PLTrendData[]> {
+    const params: any = { year };
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    const response = await authApi.get('/profit-loss/trend/', { params });
     return response.data;
   }
 }

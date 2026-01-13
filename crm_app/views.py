@@ -8104,3 +8104,195 @@ class APAgingViewSet(viewsets.ViewSet):
             return Response({
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ProfitLossViewSet(viewsets.ViewSet):
+    """
+    ViewSet for Profit & Loss Statement generation.
+
+    Endpoints:
+    - GET /api/v1/profit-loss/monthly/?year=2026&month=1 - Monthly P&L statement
+    - GET /api/v1/profit-loss/ytd/?year=2026&through_month=6 - Year-to-date P&L
+    - GET /api/v1/profit-loss/comparative/?year=2026&month=1&compare_year=2025 - YoY comparison
+    - GET /api/v1/profit-loss/trend/?year=2026 - Monthly trend data
+    """
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'], url_path='monthly')
+    def monthly(self, request):
+        """
+        GET /api/v1/profit-loss/monthly/?year=2026&month=1&billing_entity=bmasia_th&currency=THB
+
+        Returns P&L statement for a single month.
+        """
+        from crm_app.services.profit_loss_service import ProfitLossService
+
+        year = request.query_params.get('year')
+        month = request.query_params.get('month')
+        billing_entity = request.query_params.get('billing_entity')
+        currency = request.query_params.get('currency')
+
+        if not year or not month:
+            return Response({
+                'error': 'year and month are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            month = int(month)
+        except ValueError:
+            return Response({
+                'error': 'year and month must be integers'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if month < 1 or month > 12:
+            return Response({
+                'error': 'month must be between 1 and 12'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = ProfitLossService()
+            pl = service.get_monthly_profit_loss(
+                year=year,
+                month=month,
+                billing_entity=billing_entity,
+                currency=currency
+            )
+            return Response(pl)
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='ytd')
+    def ytd(self, request):
+        """
+        GET /api/v1/profit-loss/ytd/?year=2026&through_month=6&billing_entity=bmasia_th&currency=THB
+
+        Returns Year-to-Date P&L statement.
+        """
+        from crm_app.services.profit_loss_service import ProfitLossService
+
+        year = request.query_params.get('year')
+        through_month = request.query_params.get('through_month')
+        billing_entity = request.query_params.get('billing_entity')
+        currency = request.query_params.get('currency')
+
+        if not year or not through_month:
+            return Response({
+                'error': 'year and through_month are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            through_month = int(through_month)
+        except ValueError:
+            return Response({
+                'error': 'year and through_month must be integers'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if through_month < 1 or through_month > 12:
+            return Response({
+                'error': 'through_month must be between 1 and 12'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = ProfitLossService()
+            pl = service.get_ytd_profit_loss(
+                year=year,
+                through_month=through_month,
+                billing_entity=billing_entity,
+                currency=currency
+            )
+            return Response(pl)
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='comparative')
+    def comparative(self, request):
+        """
+        GET /api/v1/profit-loss/comparative/?year=2026&month=1&compare_year=2025
+
+        Returns P&L comparison between two periods (Year-over-Year).
+        """
+        from crm_app.services.profit_loss_service import ProfitLossService
+
+        year = request.query_params.get('year')
+        month = request.query_params.get('month')
+        compare_year = request.query_params.get('compare_year')
+        billing_entity = request.query_params.get('billing_entity')
+        currency = request.query_params.get('currency')
+
+        if not year or not month or not compare_year:
+            return Response({
+                'error': 'year, month, and compare_year are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            month = int(month)
+            compare_year = int(compare_year)
+        except ValueError:
+            return Response({
+                'error': 'year, month, and compare_year must be integers'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = ProfitLossService()
+            comparison = service.get_comparative_profit_loss(
+                year=year,
+                month=month,
+                compare_year=compare_year,
+                billing_entity=billing_entity,
+                currency=currency
+            )
+            return Response(comparison)
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='trend')
+    def trend(self, request):
+        """
+        GET /api/v1/profit-loss/trend/?year=2026&billing_entity=bmasia_th&currency=THB
+
+        Returns monthly P&L trend data for charts.
+        """
+        from crm_app.services.profit_loss_service import ProfitLossService
+
+        year = request.query_params.get('year')
+        billing_entity = request.query_params.get('billing_entity')
+        currency = request.query_params.get('currency')
+
+        if not year:
+            return Response({
+                'error': 'year is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+        except ValueError:
+            return Response({
+                'error': 'year must be an integer'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = ProfitLossService()
+            trend = service.get_monthly_trend(
+                year=year,
+                billing_entity=billing_entity,
+                currency=currency
+            )
+            return Response({
+                'year': year,
+                'billing_entity': billing_entity or 'all',
+                'currency': currency or 'all',
+                'months': trend
+            })
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
