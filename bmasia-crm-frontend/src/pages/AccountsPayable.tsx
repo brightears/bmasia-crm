@@ -23,8 +23,8 @@ import {
   Tooltip,
   LinearProgress,
   Stack,
+  GridLegacy as Grid,
 } from '@mui/material';
-import Grid from '@mui/material/Grid';
 import {
   KeyboardArrowDown as ExpandMoreIcon,
   KeyboardArrowUp as ExpandLessIcon,
