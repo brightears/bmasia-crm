@@ -1261,3 +1261,15 @@ export interface SeasonalTriggerDate {
   updated_at?: string;
   created_at?: string;
 }
+
+// Revenue Dashboard Types
+export type RevenueCategory = 'new' | 'renewal' | 'addon' | 'churn';
+
+export interface MonthlyRevenueData {
+  month: number;
+  month_name: string;
+  new: { count: number; value: number };
+  renewal: { count: number; value: number };
+  addon: { count: number; value: number };
+  churn: { count: number; value: number };
+}

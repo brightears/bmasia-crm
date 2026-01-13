@@ -34,7 +34,8 @@ from .models import (
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
     Zone, Device, StaticDocument,
     ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
-    SeasonalTriggerDate
+    SeasonalTriggerDate,
+    MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
@@ -50,7 +51,8 @@ from .serializers import (
     KBArticleAttachmentSerializer, TicketKBArticleSerializer,
     ZoneSerializer, DeviceSerializer, StaticDocumentSerializer,
     ContractTemplateSerializer, ServicePackageItemSerializer, CorporatePdfTemplateSerializer, ContractDocumentSerializer,
-    SeasonalTriggerDateSerializer
+    SeasonalTriggerDateSerializer,
+    MonthlyRevenueSnapshotSerializer, MonthlyRevenueTargetSerializer, ContractRevenueEventSerializer, RevenueMonthlyDataSerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -6834,3 +6836,343 @@ class SeasonalTriggerDateViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         """Auto-set updated_by from request user on update"""
         serializer.save(updated_by=self.request.user)
+
+
+# ============================================================================
+# Revenue Dashboard ViewSet
+# ============================================================================
+
+class RevenueViewSet(viewsets.ViewSet):
+    """
+    ViewSet for Revenue Dashboard API endpoints.
+    Provides aggregated revenue data, targets, and year-over-year comparisons.
+
+    Endpoints:
+    - GET /api/v1/revenue/ - List monthly snapshots (supports filtering by year, month, currency, billing_entity, category)
+    - GET /api/v1/revenue/monthly/?year=2026&currency=USD&billing_entity=bmasia_hk - Monthly grid data
+    - GET /api/v1/revenue/targets/ - List targets
+    - POST /api/v1/revenue/targets/ - Create/update targets
+    - GET /api/v1/revenue/year-over-year/?year=2026&compare_year=2025 - YoY comparison
+    - GET /api/v1/revenue/events/ - List revenue events
+    """
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'], url_path='monthly')
+    def monthly(self, request):
+        """
+        GET /api/v1/revenue/monthly/?year=2026&currency=USD&billing_entity=bmasia_hk
+
+        Returns monthly revenue grid data aggregated by category (new/renewal/addon/churn).
+        Supports filtering by year, currency, and billing entity.
+
+        Response format:
+        {
+            "year": 2026,
+            "currency": "USD",
+            "billing_entity": "bmasia_hk",
+            "months": [
+                {
+                    "month": 1,
+                    "new": {"count": 5, "value": 50000.00},
+                    "renewal": {"count": 10, "value": 100000.00},
+                    "addon": {"count": 2, "value": 10000.00},
+                    "churn": {"count": 1, "value": -20000.00}
+                },
+                ...
+            ]
+        }
+        """
+        year = request.query_params.get('year', timezone.now().year)
+        currency = request.query_params.get('currency', 'USD')
+        billing_entity = request.query_params.get('billing_entity', 'bmasia_hk')
+
+        try:
+            year = int(year)
+        except ValueError:
+            return Response(
+                {"error": "Invalid year parameter"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Query snapshots for the given year, currency, and billing entity
+        snapshots = MonthlyRevenueSnapshot.objects.filter(
+            year=year,
+            currency=currency,
+            billing_entity=billing_entity
+        ).order_by('month', 'category')
+
+        # Aggregate data by month
+        monthly_data = {}
+        for snapshot in snapshots:
+            month = snapshot.month
+            if month not in monthly_data:
+                monthly_data[month] = {
+                    'month': month,
+                    'new': {'count': 0, 'value': 0},
+                    'renewal': {'count': 0, 'value': 0},
+                    'addon': {'count': 0, 'value': 0},
+                    'churn': {'count': 0, 'value': 0}
+                }
+
+            category = snapshot.category
+            monthly_data[month][category] = {
+                'count': snapshot.contract_count,
+                'value': float(snapshot.contracted_value)
+            }
+
+        # Convert to list and sort by month
+        months = [monthly_data[m] for m in sorted(monthly_data.keys())]
+
+        return Response({
+            'year': year,
+            'currency': currency,
+            'billing_entity': billing_entity,
+            'months': months
+        })
+
+    @action(detail=False, methods=['get', 'post'], url_path='targets')
+    def targets(self, request):
+        """
+        GET /api/v1/revenue/targets/?year=2026&currency=USD&billing_entity=bmasia_hk
+        Returns revenue targets for the specified filters.
+
+        POST /api/v1/revenue/targets/
+        Create or update revenue targets (bulk upsert).
+        Expects array of target objects with year, month, category, currency, billing_entity.
+        """
+        if request.method == 'GET':
+            year = request.query_params.get('year')
+            currency = request.query_params.get('currency')
+            billing_entity = request.query_params.get('billing_entity')
+
+            queryset = MonthlyRevenueTarget.objects.select_related('created_by').all()
+
+            if year:
+                try:
+                    queryset = queryset.filter(year=int(year))
+                except ValueError:
+                    return Response(
+                        {"error": "Invalid year parameter"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+            if currency:
+                queryset = queryset.filter(currency=currency)
+
+            if billing_entity:
+                queryset = queryset.filter(billing_entity=billing_entity)
+
+            queryset = queryset.order_by('year', 'month', 'category')
+            serializer = MonthlyRevenueTargetSerializer(queryset, many=True)
+            return Response(serializer.data)
+
+        elif request.method == 'POST':
+            # Bulk create/update targets
+            targets_data = request.data if isinstance(request.data, list) else [request.data]
+
+            created_targets = []
+            updated_targets = []
+
+            for target_data in targets_data:
+                # Check if target exists
+                existing_target = MonthlyRevenueTarget.objects.filter(
+                    year=target_data.get('year'),
+                    month=target_data.get('month'),
+                    category=target_data.get('category'),
+                    currency=target_data.get('currency'),
+                    billing_entity=target_data.get('billing_entity')
+                ).first()
+
+                if existing_target:
+                    # Update existing
+                    serializer = MonthlyRevenueTargetSerializer(existing_target, data=target_data, partial=True)
+                    if serializer.is_valid():
+                        serializer.save(created_by=request.user)
+                        updated_targets.append(serializer.data)
+                    else:
+                        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    # Create new
+                    serializer = MonthlyRevenueTargetSerializer(data=target_data)
+                    if serializer.is_valid():
+                        serializer.save(created_by=request.user)
+                        created_targets.append(serializer.data)
+                    else:
+                        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+            return Response({
+                'created': created_targets,
+                'updated': updated_targets,
+                'total': len(created_targets) + len(updated_targets)
+            }, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'], url_path='year-over-year')
+    def year_over_year(self, request):
+        """
+        GET /api/v1/revenue/year-over-year/?year=2026&compare_year=2025&currency=USD&billing_entity=bmasia_hk
+
+        Returns year-over-year comparison data for the specified years.
+        Shows month-by-month comparison of revenue categories.
+
+        Response format:
+        {
+            "year": 2026,
+            "compare_year": 2025,
+            "currency": "USD",
+            "billing_entity": "bmasia_hk",
+            "comparison": [
+                {
+                    "month": 1,
+                    "current_year": {"new": 50000, "renewal": 100000, "addon": 10000, "churn": -20000, "total": 140000},
+                    "previous_year": {"new": 40000, "renewal": 90000, "addon": 8000, "churn": -15000, "total": 123000},
+                    "growth": {"new": 25.0, "renewal": 11.1, "addon": 25.0, "churn": -33.3, "total": 13.8}
+                },
+                ...
+            ]
+        }
+        """
+        year = request.query_params.get('year', timezone.now().year)
+        compare_year = request.query_params.get('compare_year', int(year) - 1 if year else timezone.now().year - 1)
+        currency = request.query_params.get('currency', 'USD')
+        billing_entity = request.query_params.get('billing_entity', 'bmasia_hk')
+
+        try:
+            year = int(year)
+            compare_year = int(compare_year)
+        except ValueError:
+            return Response(
+                {"error": "Invalid year parameters"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get snapshots for both years
+        current_snapshots = MonthlyRevenueSnapshot.objects.filter(
+            year=year,
+            currency=currency,
+            billing_entity=billing_entity
+        ).order_by('month', 'category')
+
+        previous_snapshots = MonthlyRevenueSnapshot.objects.filter(
+            year=compare_year,
+            currency=currency,
+            billing_entity=billing_entity
+        ).order_by('month', 'category')
+
+        # Aggregate by month and category
+        def aggregate_snapshots(snapshots):
+            data = {}
+            for snapshot in snapshots:
+                month = snapshot.month
+                if month not in data:
+                    data[month] = {'new': 0, 'renewal': 0, 'addon': 0, 'churn': 0}
+                data[month][snapshot.category] = float(snapshot.contracted_value)
+            return data
+
+        current_data = aggregate_snapshots(current_snapshots)
+        previous_data = aggregate_snapshots(previous_snapshots)
+
+        # Calculate comparison
+        comparison = []
+        for month in range(1, 13):
+            current = current_data.get(month, {'new': 0, 'renewal': 0, 'addon': 0, 'churn': 0})
+            previous = previous_data.get(month, {'new': 0, 'renewal': 0, 'addon': 0, 'churn': 0})
+
+            current_total = current['new'] + current['renewal'] + current['addon'] + current['churn']
+            previous_total = previous['new'] + previous['renewal'] + previous['addon'] + previous['churn']
+
+            # Calculate growth percentages
+            growth = {}
+            for category in ['new', 'renewal', 'addon', 'churn']:
+                if previous[category] != 0:
+                    growth[category] = round(((current[category] - previous[category]) / abs(previous[category])) * 100, 1)
+                else:
+                    growth[category] = 0 if current[category] == 0 else 100.0
+
+            if previous_total != 0:
+                growth['total'] = round(((current_total - previous_total) / abs(previous_total)) * 100, 1)
+            else:
+                growth['total'] = 0 if current_total == 0 else 100.0
+
+            comparison.append({
+                'month': month,
+                'current_year': {**current, 'total': current_total},
+                'previous_year': {**previous, 'total': previous_total},
+                'growth': growth
+            })
+
+        return Response({
+            'year': year,
+            'compare_year': compare_year,
+            'currency': currency,
+            'billing_entity': billing_entity,
+            'comparison': comparison
+        })
+
+    @action(detail=False, methods=['get'], url_path='events')
+    def events(self, request):
+        """
+        GET /api/v1/revenue/events/?contract={contract_id}&event_type={type}&start_date={date}&end_date={date}
+
+        Returns list of contract revenue events with filtering options.
+        """
+        queryset = ContractRevenueEvent.objects.select_related('contract', 'contract__company', 'created_by').all()
+
+        # Apply filters
+        contract_id = request.query_params.get('contract')
+        if contract_id:
+            queryset = queryset.filter(contract_id=contract_id)
+
+        event_type = request.query_params.get('event_type')
+        if event_type:
+            queryset = queryset.filter(event_type=event_type)
+
+        start_date = request.query_params.get('start_date')
+        if start_date:
+            queryset = queryset.filter(event_date__gte=start_date)
+
+        end_date = request.query_params.get('end_date')
+        if end_date:
+            queryset = queryset.filter(event_date__lte=end_date)
+
+        queryset = queryset.order_by('-event_date', '-created_at')[:100]  # Limit to 100 most recent
+        serializer = ContractRevenueEventSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def list(self, request):
+        """
+        GET /api/v1/revenue/?year={year}&month={month}&currency={currency}&billing_entity={entity}&category={category}
+
+        Returns list of monthly revenue snapshots with filtering options.
+        """
+        queryset = MonthlyRevenueSnapshot.objects.all()
+
+        # Apply filters
+        year = request.query_params.get('year')
+        if year:
+            try:
+                queryset = queryset.filter(year=int(year))
+            except ValueError:
+                return Response({"error": "Invalid year parameter"}, status=status.HTTP_400_BAD_REQUEST)
+
+        month = request.query_params.get('month')
+        if month:
+            try:
+                queryset = queryset.filter(month=int(month))
+            except ValueError:
+                return Response({"error": "Invalid month parameter"}, status=status.HTTP_400_BAD_REQUEST)
+
+        currency = request.query_params.get('currency')
+        if currency:
+            queryset = queryset.filter(currency=currency)
+
+        billing_entity = request.query_params.get('billing_entity')
+        if billing_entity:
+            queryset = queryset.filter(billing_entity=billing_entity)
+
+        category = request.query_params.get('category')
+        if category:
+            queryset = queryset.filter(category=category)
+
+        queryset = queryset.order_by('-year', '-month', 'category')
+        serializer = MonthlyRevenueSnapshotSerializer(queryset, many=True)
+        return Response(serializer.data)

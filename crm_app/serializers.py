@@ -13,7 +13,8 @@ from .models import (
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
     Device, StaticDocument,
     ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
-    SeasonalTriggerDate
+    SeasonalTriggerDate,
+    MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent
 )
 
 
@@ -1853,3 +1854,76 @@ class SeasonalTriggerDateSerializer(serializers.ModelSerializer):
             'updated_by', 'updated_by_name', 'updated_at', 'created_at'
         ]
         read_only_fields = ['id', 'updated_by', 'updated_at', 'created_at']
+
+
+# ============================================================================
+# Revenue Dashboard Serializers
+# ============================================================================
+
+class MonthlyRevenueSnapshotSerializer(serializers.ModelSerializer):
+    """Serializer for MonthlyRevenueSnapshot model"""
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+    currency_display = serializers.CharField(source='get_currency_display', read_only=True)
+    billing_entity_display = serializers.CharField(source='get_billing_entity_display', read_only=True)
+
+    class Meta:
+        model = MonthlyRevenueSnapshot
+        fields = [
+            'id', 'year', 'month', 'category', 'category_display',
+            'currency', 'currency_display', 'billing_entity', 'billing_entity_display',
+            'contract_count', 'contracted_value', 'cash_received',
+            'is_manually_overridden', 'override_reason', 'notes',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class MonthlyRevenueTargetSerializer(serializers.ModelSerializer):
+    """Serializer for MonthlyRevenueTarget model"""
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+    currency_display = serializers.CharField(source='get_currency_display', read_only=True)
+    billing_entity_display = serializers.CharField(source='get_billing_entity_display', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True, default='')
+
+    class Meta:
+        model = MonthlyRevenueTarget
+        fields = [
+            'id', 'year', 'month', 'category', 'category_display',
+            'currency', 'currency_display', 'billing_entity', 'billing_entity_display',
+            'target_contract_count', 'target_revenue', 'target_cash_flow',
+            'notes', 'created_by', 'created_by_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+
+
+class ContractRevenueEventSerializer(serializers.ModelSerializer):
+    """Serializer for ContractRevenueEvent model"""
+    event_type_display = serializers.CharField(source='get_event_type_display', read_only=True)
+    contract_number = serializers.CharField(source='contract.contract_number', read_only=True)
+    company_name = serializers.CharField(source='contract.company.name', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True, default='')
+
+    class Meta:
+        model = ContractRevenueEvent
+        fields = [
+            'id', 'contract', 'contract_number', 'company_name',
+            'event_type', 'event_type_display', 'event_date',
+            'contract_value_change', 'monthly_value_change', 'zone_count_change',
+            'expected_payment_date', 'actual_payment_date', 'payment_amount',
+            'notes', 'created_by', 'created_by_name',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+
+
+class RevenueMonthlyDataSerializer(serializers.Serializer):
+    """
+    Serializer for aggregated monthly revenue data.
+    Used for the revenue grid view showing new/renewal/addon/churn by month.
+    """
+    month = serializers.IntegerField(min_value=1, max_value=12)
+    new = serializers.DictField(child=serializers.DecimalField(max_digits=15, decimal_places=2), required=False)
+    renewal = serializers.DictField(child=serializers.DecimalField(max_digits=15, decimal_places=2), required=False)
+    addon = serializers.DictField(child=serializers.DecimalField(max_digits=15, decimal_places=2), required=False)
+    churn = serializers.DictField(child=serializers.DecimalField(max_digits=15, decimal_places=2), required=False)

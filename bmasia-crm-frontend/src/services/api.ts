@@ -1168,6 +1168,12 @@ class ApiService {
   async deleteSeasonalTriggerDate(id: string): Promise<void> {
     await authApi.delete(`/seasonal-trigger-dates/${id}/`);
   }
+
+  // Revenue Dashboard
+  async getRevenueMonthly(year: number): Promise<any> {
+    const response = await authApi.get('/revenue/monthly/', { params: { year } });
+    return response.data;
+  }
 }
 
 export interface EmailSendData {

@@ -60,6 +60,9 @@ router.register(r'contract-documents', views.ContractDocumentViewSet, basename='
 # Settings routes
 router.register(r'seasonal-trigger-dates', views.SeasonalTriggerDateViewSet, basename='seasonal-trigger-date')
 
+# Revenue Dashboard routes
+router.register(r'revenue', views.RevenueViewSet, basename='revenue')
+
 # The API URLs are now determined automatically by the router.
 urlpatterns = [
     path('v1/', include(router.urls)),

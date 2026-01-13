@@ -58,6 +58,7 @@ import {
   AutoMode as AutoModeIcon,
   Settings as SettingsIcon,
   Wifi as WifiIcon,
+  AttachMoney as AttachMoneyIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -156,6 +157,12 @@ const unifiedNavigation = [
       { text: 'Email Templates', icon: <EmailIcon />, path: '/email-templates' },
       { text: 'Email Automations', icon: <AutoModeIcon />, path: '/email-automations' },
       { text: 'Segments', icon: <GroupIcon />, path: '/segments' },
+    ],
+  },
+  {
+    title: 'Finance',
+    items: [
+      { text: 'Revenue', icon: <AttachMoneyIcon />, path: '/revenue' },
     ],
   },
   {

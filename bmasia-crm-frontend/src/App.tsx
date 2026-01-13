@@ -42,6 +42,7 @@ import ZoneEdit from './pages/ZoneEdit';
 import Users from './pages/Users';
 import MyProfile from './pages/MyProfile';
 import Settings from './pages/Settings';
+import RevenueDashboard from './pages/RevenueDashboard';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -200,6 +201,14 @@ function App() {
           element={
             <ProtectedRoute requiredModule="invoices">
               <Invoices />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/revenue"
+          element={
+            <ProtectedRoute requiredModule="invoices">
+              <RevenueDashboard />
             </ProtectedRoute>
           }
         />
