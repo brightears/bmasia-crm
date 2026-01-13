@@ -525,7 +525,7 @@ npm run build  # Production build
 - ✅ **Seasonal Email Automation** - 10 templates with country-based targeting (Jan 2026)
 - ✅ **SeasonalTriggerDate Model** - Admin-configurable variable holiday dates
 - ✅ **Multi-Year Contract Support** - `send_renewal_reminders` toggle to skip renewal emails
-- 🚧 **Finance & Accounting Module** (Jan 13, 2026) - IN PROGRESS
+- ✅ **Finance & Accounting Module** (Jan 13, 2026) - 5 PHASES COMPLETE
   - **Phase 1 COMPLETE**: Revenue Tracking (New/Renewals/Canceled/Add-ons)
     - Models: MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent
     - Contract.lifecycle_type field
@@ -538,7 +538,19 @@ npm run build  # Production build
     - AP Aging service for accounts payable tracking
     - AccountsPayable.tsx page at `/finance/ap`
     - Migration: `0049_expense_module.py`
-  - **Next**: P&L Statement, Cash Flow Report, Balance Sheet
+  - **Phase 4 COMPLETE**: Profit & Loss Report
+    - ProfitLossService with monthly, YTD, comparative, and trend calculations
+    - P&L Structure: Revenue → COGS → Gross Profit → OpEx (G&A, S&M) → Net Profit
+    - ProfitLoss.tsx page at `/finance/pl`
+    - API: `/api/v1/profit-loss/monthly/`, `/ytd/`, `/comparative/`, `/trend/`
+  - **Phase 5 COMPLETE**: Cash Flow Statement
+    - CashFlowSnapshot model for storing cash flow data with manual overrides
+    - CashFlowService with monthly, YTD, and trend calculations
+    - Cash Flow Indirect Method: Operating + Investing + Financing Activities
+    - CashFlow.tsx page at `/finance/cash-flow`
+    - API: `/api/v1/cash-flow/monthly/`, `/ytd/`, `/trend/`
+    - Migration: `0050_cash_flow_module.py`
+  - **Remaining**: Balance Sheet (Quarterly)
   - Plan file: `.claude/plans/memoized-churning-bird.md`
 
 ### Frontend (React + TypeScript)
@@ -555,8 +567,28 @@ npm run build  # Production build
 - ✅ **Email Template Variable Guide** - Interactive variable insertion with tooltips
 - ✅ **Settings Page** - Variable holiday date management (`/settings`)
 - ✅ **Zone Status Dashboard** - Real-time Soundtrack zone monitoring (`/zones`)
+- ✅ **Finance Module Pages** (Jan 2026):
+  - Revenue Dashboard (`/revenue`) - New/Renewals/Churn/Add-ons tracking
+  - Accounts Receivable (`/finance/ar`) - AR aging with 30/60/90+ buckets
+  - Accounts Payable (`/finance/ap`) - AP aging report
+  - Profit & Loss (`/finance/pl`) - P&L statement with YoY comparison
+  - Cash Flow (`/finance/cash-flow`) - Cash flow statement with trend chart
 
 ### Recent Improvements (January 2026)
+- ✅ **Cash Flow Statement - Phase 5** (Jan 13, 2026)
+  - CashFlowSnapshot model for storing monthly cash flow data
+  - CashFlowService calculates Operating, Investing, Financing activities
+  - Data sources: Invoice.paid_date (cash from customers), ExpenseEntry.payment_date (cash to suppliers/employees)
+  - CashFlow.tsx frontend with KPI cards, statement table, and trend chart
+  - API: `/api/v1/cash-flow/monthly/`, `/ytd/`, `/trend/`
+  - Migration: `0050_cash_flow_module.py`
+- ✅ **Profit & Loss Report - Phase 4** (Jan 13, 2026)
+  - ProfitLossService with monthly, YTD, comparative (YoY), and trend calculations
+  - Revenue breakdown: New contracts, Renewals, Add-ons
+  - Expense breakdown: COGS, G&A, Sales & Marketing
+  - Calculated: Gross Profit, Operating Expenses, Net Profit, Margins
+  - ProfitLoss.tsx frontend with KPI cards, P&L table, and trend chart
+  - API: `/api/v1/profit-loss/monthly/`, `/ytd/`, `/comparative/`, `/trend/`
 - ✅ **Contract PDF Signature & Stamp** (Jan 12, 2026)
   - **Chris Andrews signature**: Auto-added to BMAsia side of all contracts
   - **Company stamps**: Thai stamp for Thailand entity, International stamp for HK entity
