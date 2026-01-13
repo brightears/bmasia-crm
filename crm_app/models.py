@@ -3687,3 +3687,449 @@ def update_article_rating_counts(sender, instance, **kwargs):
 # Connect signals
 signals.post_save.connect(update_article_rating_counts, sender=KBArticleRating)
 signals.post_delete.connect(update_article_rating_counts, sender=KBArticleRating)
+
+
+# =============================================================================
+# EXPENSE & ACCOUNTS PAYABLE MODELS (Finance Module - Phase 3)
+# =============================================================================
+
+class Vendor(TimestampedModel):
+    """
+    Supplier/vendor master for expense tracking and AP management.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # Basic info
+    name = models.CharField(max_length=255, help_text="Vendor/supplier name")
+    legal_name = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Official registered company name for invoices"
+    )
+    tax_id = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Tax ID / VAT number"
+    )
+
+    # Contact info
+    contact_name = models.CharField(max_length=255, blank=True)
+    email = models.EmailField(blank=True)
+    phone = models.CharField(max_length=50, blank=True)
+    website = models.URLField(blank=True)
+
+    # Address
+    address = models.TextField(blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    country = models.CharField(max_length=100, blank=True)
+
+    # Payment info
+    PAYMENT_TERMS_CHOICES = [
+        ('immediate', 'Due on Receipt'),
+        ('net_15', 'Net 15'),
+        ('net_30', 'Net 30'),
+        ('net_45', 'Net 45'),
+        ('net_60', 'Net 60'),
+    ]
+    payment_terms = models.CharField(
+        max_length=20,
+        choices=PAYMENT_TERMS_CHOICES,
+        default='net_30',
+        help_text="Standard payment terms for this vendor"
+    )
+    default_currency = models.CharField(
+        max_length=3,
+        default='THB',
+        help_text="Default currency for this vendor"
+    )
+
+    # Bank details for payments
+    bank_name = models.CharField(max_length=255, blank=True)
+    bank_account_number = models.CharField(max_length=50, blank=True)
+    bank_account_name = models.CharField(max_length=255, blank=True)
+
+    # Status
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+
+    # Billing entity association
+    BILLING_ENTITY_CHOICES = [
+        ('bmasia_th', 'BMAsia (Thailand) Co., Ltd.'),
+        ('bmasia_hk', 'BMAsia Limited'),
+        ('both', 'Both Entities'),
+    ]
+    billing_entity = models.CharField(
+        max_length=20,
+        choices=BILLING_ENTITY_CHOICES,
+        default='bmasia_th',
+        help_text="Which BMAsia entity pays this vendor"
+    )
+
+    class Meta:
+        ordering = ['name']
+        indexes = [
+            models.Index(fields=['name']),
+            models.Index(fields=['billing_entity']),
+            models.Index(fields=['is_active']),
+        ]
+        verbose_name = 'Vendor'
+        verbose_name_plural = 'Vendors'
+
+    def __str__(self):
+        return self.name
+
+
+class ExpenseCategory(TimestampedModel):
+    """
+    Hierarchical expense categories for P&L reporting.
+
+    Top-level categories:
+    - COGS (Cost of Goods Sold): Soundtrack licenses, hardware costs
+    - G&A (General & Administrative): Salaries, rent, utilities, insurance
+    - Sales & Marketing: Marketing campaigns, sales commissions, travel
+    - CapEx (Capital Expenditure): Equipment, software licenses (capitalized)
+    """
+    CATEGORY_TYPE_CHOICES = [
+        ('opex_cogs', 'Operating - COGS'),
+        ('opex_gna', 'Operating - G&A'),
+        ('opex_sales', 'Operating - Sales & Marketing'),
+        ('capex', 'Capital Expenditure'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255, help_text="Category name")
+    description = models.TextField(blank=True)
+
+    category_type = models.CharField(
+        max_length=20,
+        choices=CATEGORY_TYPE_CHOICES,
+        help_text="Which section of P&L this appears in"
+    )
+
+    # Hierarchy support
+    parent_category = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='subcategories',
+        help_text="Parent category for nesting"
+    )
+
+    # For CapEx categories - depreciation settings
+    is_depreciable = models.BooleanField(
+        default=False,
+        help_text="For CapEx: whether assets in this category depreciate"
+    )
+    useful_life_months = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="For CapEx: standard useful life in months (e.g., 36 for 3 years)"
+    )
+    depreciation_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Annual depreciation rate as percentage (e.g., 33.33 for 3-year assets)"
+    )
+
+    # Display order
+    sort_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['category_type', 'sort_order', 'name']
+        indexes = [
+            models.Index(fields=['category_type']),
+            models.Index(fields=['parent_category']),
+        ]
+        verbose_name = 'Expense Category'
+        verbose_name_plural = 'Expense Categories'
+
+    def __str__(self):
+        if self.parent_category:
+            return f"{self.parent_category.name} > {self.name}"
+        return self.name
+
+    @property
+    def full_path(self):
+        """Return full category path (e.g., 'G&A > Utilities > Electricity')"""
+        if self.parent_category:
+            return f"{self.parent_category.full_path} > {self.name}"
+        return self.name
+
+
+class RecurringExpense(TimestampedModel):
+    """
+    Fixed recurring monthly expenses.
+    Auto-generates ExpenseEntry records each month.
+
+    Examples: Office rent, Soundtrack licenses, software subscriptions
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # Basic info
+    name = models.CharField(max_length=255, help_text="Expense description")
+    category = models.ForeignKey(
+        ExpenseCategory,
+        on_delete=models.PROTECT,
+        related_name='recurring_expenses'
+    )
+    vendor = models.ForeignKey(
+        Vendor,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='recurring_expenses'
+    )
+
+    # Amount
+    amount = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        help_text="Monthly amount"
+    )
+    currency = models.CharField(max_length=3, default='THB')
+
+    # Billing entity
+    BILLING_ENTITY_CHOICES = [
+        ('bmasia_th', 'BMAsia (Thailand) Co., Ltd.'),
+        ('bmasia_hk', 'BMAsia Limited'),
+    ]
+    billing_entity = models.CharField(
+        max_length=20,
+        choices=BILLING_ENTITY_CHOICES,
+        default='bmasia_th'
+    )
+
+    # Schedule
+    start_date = models.DateField(help_text="When this expense starts")
+    end_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="When this expense ends (null = ongoing)"
+    )
+    payment_day = models.PositiveIntegerField(
+        default=1,
+        help_text="Day of month when payment is typically due (1-28)"
+    )
+
+    # Status
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+
+    # Last auto-generated entry date (for cron job tracking)
+    last_generated_month = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Last month for which an entry was auto-generated"
+    )
+
+    class Meta:
+        ordering = ['name']
+        indexes = [
+            models.Index(fields=['category']),
+            models.Index(fields=['billing_entity']),
+            models.Index(fields=['is_active']),
+            models.Index(fields=['start_date', 'end_date']),
+        ]
+        verbose_name = 'Recurring Expense'
+        verbose_name_plural = 'Recurring Expenses'
+
+    def __str__(self):
+        return f"{self.name} ({self.currency} {self.amount}/mo)"
+
+
+class ExpenseEntry(TimestampedModel):
+    """
+    Individual expense record.
+    Can be manually entered or auto-generated from RecurringExpense.
+    """
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('pending', 'Pending Approval'),
+        ('approved', 'Approved'),
+        ('paid', 'Paid'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # Basic info
+    description = models.CharField(max_length=500, help_text="Expense description")
+    category = models.ForeignKey(
+        ExpenseCategory,
+        on_delete=models.PROTECT,
+        related_name='expense_entries'
+    )
+    vendor = models.ForeignKey(
+        Vendor,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='expense_entries'
+    )
+
+    # Link to recurring expense if auto-generated
+    recurring_expense = models.ForeignKey(
+        RecurringExpense,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='generated_entries',
+        help_text="If auto-generated from a recurring expense"
+    )
+
+    # Amount
+    amount = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        help_text="Expense amount"
+    )
+    currency = models.CharField(max_length=3, default='THB')
+
+    # Tax handling
+    tax_amount = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        default=0,
+        help_text="Tax amount (VAT, etc.)"
+    )
+    is_tax_inclusive = models.BooleanField(
+        default=True,
+        help_text="Whether the amount includes tax"
+    )
+
+    # Billing entity
+    BILLING_ENTITY_CHOICES = [
+        ('bmasia_th', 'BMAsia (Thailand) Co., Ltd.'),
+        ('bmasia_hk', 'BMAsia Limited'),
+    ]
+    billing_entity = models.CharField(
+        max_length=20,
+        choices=BILLING_ENTITY_CHOICES,
+        default='bmasia_th'
+    )
+
+    # Dates
+    expense_date = models.DateField(
+        help_text="Date expense was incurred"
+    )
+    due_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Payment due date"
+    )
+    payment_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Actual payment date"
+    )
+
+    # Vendor invoice info
+    vendor_invoice_number = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Vendor's invoice number"
+    )
+    vendor_invoice_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Date on vendor's invoice"
+    )
+
+    # Status and workflow
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending'
+    )
+
+    # Payment info
+    PAYMENT_METHOD_CHOICES = [
+        ('bank_transfer', 'Bank Transfer'),
+        ('credit_card', 'Credit Card'),
+        ('cash', 'Cash'),
+        ('cheque', 'Cheque'),
+        ('auto_debit', 'Auto Debit'),
+    ]
+    payment_method = models.CharField(
+        max_length=20,
+        choices=PAYMENT_METHOD_CHOICES,
+        blank=True
+    )
+    payment_reference = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Bank transfer reference, cheque number, etc."
+    )
+
+    # Approval workflow
+    approved_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='approved_expenses'
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+
+    # Attachment (receipt/invoice)
+    receipt_file = models.FileField(
+        upload_to='expense_receipts/%Y/%m/',
+        blank=True,
+        null=True,
+        help_text="Scanned receipt or invoice"
+    )
+
+    # Notes
+    notes = models.TextField(blank=True)
+
+    # Created by
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_expenses'
+    )
+
+    class Meta:
+        ordering = ['-expense_date', '-created_at']
+        indexes = [
+            models.Index(fields=['category']),
+            models.Index(fields=['vendor']),
+            models.Index(fields=['billing_entity']),
+            models.Index(fields=['expense_date']),
+            models.Index(fields=['due_date']),
+            models.Index(fields=['status']),
+            models.Index(fields=['payment_date']),
+            models.Index(fields=['-expense_date', 'billing_entity']),
+        ]
+        verbose_name = 'Expense Entry'
+        verbose_name_plural = 'Expense Entries'
+
+    def __str__(self):
+        return f"{self.expense_date} | {self.description[:50]} | {self.currency} {self.amount}"
+
+    @property
+    def total_amount(self):
+        """Total amount including tax"""
+        if self.is_tax_inclusive:
+            return self.amount
+        return self.amount + self.tax_amount
+
+    @property
+    def is_overdue(self):
+        """Check if payment is overdue"""
+        if self.status == 'paid' or not self.due_date:
+            return False
+        return self.due_date < timezone.now().date()
+
+    @property
+    def days_overdue(self):
+        """Calculate days overdue (0 if not overdue)"""
+        if not self.is_overdue:
+            return 0
+        return (timezone.now().date() - self.due_date).days

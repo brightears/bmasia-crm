@@ -1273,3 +1273,202 @@ export interface MonthlyRevenueData {
   addon: { count: number; value: number };
   churn: { count: number; value: number };
 }
+
+// ============================================================================
+// Expense Module Types (Phase 3 - Finance Module)
+// ============================================================================
+
+export type PaymentTerms = 'immediate' | 'net_15' | 'net_30' | 'net_45' | 'net_60';
+export type ExpenseCategoryType = 'opex_cogs' | 'opex_gna' | 'opex_sales' | 'capex';
+export type ExpenseStatus = 'draft' | 'pending' | 'approved' | 'paid' | 'cancelled';
+export type PaymentMethod = 'bank_transfer' | 'credit_card' | 'cash' | 'cheque' | 'auto_debit';
+
+export interface Vendor {
+  id: string;
+  name: string;
+  legal_name?: string;
+  tax_id?: string;
+  contact_name?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  address?: string;
+  city?: string;
+  country?: string;
+  payment_terms: PaymentTerms;
+  default_currency: string;
+  bank_name?: string;
+  bank_account_number?: string;
+  bank_account_name?: string;
+  is_active: boolean;
+  notes?: string;
+  billing_entity: 'bmasia_th' | 'bmasia_hk' | 'both';
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  description?: string;
+  category_type: ExpenseCategoryType;
+  category_type_display?: string;
+  parent_category?: string;
+  parent_category_name?: string;
+  full_path: string;
+  is_depreciable: boolean;
+  useful_life_months?: number;
+  depreciation_rate?: number;
+  sort_order: number;
+  is_active: boolean;
+  children?: ExpenseCategory[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RecurringExpense {
+  id: string;
+  name: string;
+  category: string;
+  category_name: string;
+  category_full_path?: string;
+  vendor?: string;
+  vendor_name?: string;
+  amount: number;
+  currency: string;
+  billing_entity: 'bmasia_th' | 'bmasia_hk';
+  start_date: string;
+  end_date?: string;
+  payment_day: number;
+  is_active: boolean;
+  notes?: string;
+  last_generated_month?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExpenseEntry {
+  id: string;
+  description: string;
+  category: string;
+  category_name: string;
+  category_full_path?: string;
+  category_type?: ExpenseCategoryType;
+  vendor?: string;
+  vendor_name?: string;
+  recurring_expense?: string;
+  recurring_expense_name?: string;
+  amount: number;
+  currency: string;
+  tax_amount: number;
+  is_tax_inclusive: boolean;
+  billing_entity: 'bmasia_th' | 'bmasia_hk';
+  expense_date: string;
+  due_date?: string;
+  payment_date?: string;
+  vendor_invoice_number?: string;
+  vendor_invoice_date?: string;
+  status: ExpenseStatus;
+  status_display?: string;
+  payment_method?: PaymentMethod;
+  payment_reference?: string;
+  approved_at?: string;
+  approved_by?: string;
+  approved_by_name?: string;
+  created_by?: string;
+  created_by_name?: string;
+  receipt_file?: string;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// AP Aging Types
+export interface APAgingSummary {
+  total_ap: number;
+  current: number;
+  '1_30': number;
+  '31_60': number;
+  '61_90': number;
+  '90_plus': number;
+  expense_count: number;
+}
+
+export interface APExpenseDetail {
+  expense_id: string;
+  description: string;
+  vendor_id: string;
+  vendor_name: string;
+  category_id: string;
+  category_name: string;
+  expense_date: string;
+  due_date?: string;
+  amount: number;
+  currency: string;
+  days_overdue: number;
+  aging_bucket: 'current' | '1_30' | '31_60' | '61_90' | '90_plus';
+  status: ExpenseStatus;
+  vendor_invoice_number?: string;
+}
+
+export interface APVendorDetail {
+  vendor_id: string;
+  vendor_name: string;
+  total: number;
+  current: number;
+  '1_30': number;
+  '31_60': number;
+  '61_90': number;
+  '90_plus': number;
+  expenses: APExpenseDetail[];
+}
+
+export interface APCategoryDetail {
+  category_id: string;
+  category_name: string;
+  category_type: ExpenseCategoryType;
+  total: number;
+  current: number;
+  '1_30': number;
+  '31_60': number;
+  '61_90': number;
+  '90_plus': number;
+}
+
+export interface APAgingReport {
+  as_of_date: string;
+  currency: string;
+  billing_entity: string;
+  summary: APAgingSummary;
+  by_vendor: APVendorDetail[];
+  by_category: APCategoryDetail[];
+  expenses: APExpenseDetail[];
+}
+
+export interface OverdueExpense extends APExpenseDetail {
+  priority_score?: number;
+}
+
+export interface MonthlyExpenseSummary {
+  year: number;
+  month?: number;
+  currency: string;
+  billing_entity: string;
+  by_category_type: Array<{
+    category_type: ExpenseCategoryType;
+    total: number;
+    count: number;
+    categories: Array<{
+      category_id: string;
+      category_name: string;
+      total: number;
+      count: number;
+    }>;
+  }>;
+  totals: {
+    cogs: number;
+    gna: number;
+    sales_marketing: number;
+    capex: number;
+  };
+}

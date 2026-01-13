@@ -66,6 +66,13 @@ router.register(r'revenue', views.RevenueViewSet, basename='revenue')
 # AR Aging routes
 router.register(r'ar-aging', views.ARAgingViewSet, basename='ar-aging')
 
+# Expense Module routes (Phase 3 - Finance Module)
+router.register(r'vendors', views.VendorViewSet, basename='vendor')
+router.register(r'expense-categories', views.ExpenseCategoryViewSet, basename='expense-category')
+router.register(r'recurring-expenses', views.RecurringExpenseViewSet, basename='recurring-expense')
+router.register(r'expenses', views.ExpenseEntryViewSet, basename='expense')
+router.register(r'ap-aging', views.APAgingViewSet, basename='ap-aging')
+
 # The API URLs are now determined automatically by the router.
 urlpatterns = [
     path('v1/', include(router.urls)),

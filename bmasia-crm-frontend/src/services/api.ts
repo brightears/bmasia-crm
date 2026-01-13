@@ -5,7 +5,9 @@ import {
   CustomerSegment, SegmentMemberResponse, SegmentValidationResponse,
   EnrollInSequenceResponse, SegmentFilterCriteria, Zone, PreviewZone, ContractZone, Device,
   ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
-  SeasonalTriggerDate
+  SeasonalTriggerDate,
+  Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry,
+  APAgingReport, APAgingSummary, OverdueExpense, MonthlyExpenseSummary
 } from '../types';
 import { authApi } from './authService';
 import { MockApiService } from './mockData';
@@ -1237,6 +1239,218 @@ class ApiService {
     if (billingEntity) params.billing_entity = billingEntity;
     if (limit) params.limit = limit;
     const response = await authApi.get('/ar-aging/collection-priority/', { params });
+    return response.data;
+  }
+
+  // ============================================================================
+  // Expense Module (Phase 3 - Finance Module)
+  // ============================================================================
+
+  // Vendors
+  async getVendors(): Promise<Vendor[]> {
+    const response = await authApi.get('/vendors/');
+    return response.data.results || response.data;
+  }
+
+  async getVendor(id: string): Promise<Vendor> {
+    const response = await authApi.get(`/vendors/${id}/`);
+    return response.data;
+  }
+
+  async createVendor(data: Partial<Vendor>): Promise<Vendor> {
+    const response = await authApi.post('/vendors/', data);
+    return response.data;
+  }
+
+  async updateVendor(id: string, data: Partial<Vendor>): Promise<Vendor> {
+    const response = await authApi.patch(`/vendors/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteVendor(id: string): Promise<void> {
+    await authApi.delete(`/vendors/${id}/`);
+  }
+
+  async getActiveVendors(): Promise<Vendor[]> {
+    const response = await authApi.get('/vendors/active/');
+    return response.data;
+  }
+
+  async getVendorsByEntity(entity: string): Promise<Vendor[]> {
+    const response = await authApi.get('/vendors/by-entity/', { params: { entity } });
+    return response.data;
+  }
+
+  // Expense Categories
+  async getExpenseCategories(): Promise<ExpenseCategory[]> {
+    const response = await authApi.get('/expense-categories/');
+    return response.data.results || response.data;
+  }
+
+  async getExpenseCategory(id: string): Promise<ExpenseCategory> {
+    const response = await authApi.get(`/expense-categories/${id}/`);
+    return response.data;
+  }
+
+  async createExpenseCategory(data: Partial<ExpenseCategory>): Promise<ExpenseCategory> {
+    const response = await authApi.post('/expense-categories/', data);
+    return response.data;
+  }
+
+  async updateExpenseCategory(id: string, data: Partial<ExpenseCategory>): Promise<ExpenseCategory> {
+    const response = await authApi.patch(`/expense-categories/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteExpenseCategory(id: string): Promise<void> {
+    await authApi.delete(`/expense-categories/${id}/`);
+  }
+
+  async getExpenseCategoryTree(): Promise<ExpenseCategory[]> {
+    const response = await authApi.get('/expense-categories/tree/');
+    return response.data;
+  }
+
+  async getExpenseCategoriesByType(type: string): Promise<ExpenseCategory[]> {
+    const response = await authApi.get('/expense-categories/by-type/', { params: { type } });
+    return response.data;
+  }
+
+  async initializeDefaultCategories(): Promise<{ success: boolean; created: number; message: string }> {
+    const response = await authApi.post('/expense-categories/initialize-defaults/');
+    return response.data;
+  }
+
+  // Recurring Expenses
+  async getRecurringExpenses(): Promise<RecurringExpense[]> {
+    const response = await authApi.get('/recurring-expenses/');
+    return response.data.results || response.data;
+  }
+
+  async getRecurringExpense(id: string): Promise<RecurringExpense> {
+    const response = await authApi.get(`/recurring-expenses/${id}/`);
+    return response.data;
+  }
+
+  async createRecurringExpense(data: Partial<RecurringExpense>): Promise<RecurringExpense> {
+    const response = await authApi.post('/recurring-expenses/', data);
+    return response.data;
+  }
+
+  async updateRecurringExpense(id: string, data: Partial<RecurringExpense>): Promise<RecurringExpense> {
+    const response = await authApi.patch(`/recurring-expenses/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteRecurringExpense(id: string): Promise<void> {
+    await authApi.delete(`/recurring-expenses/${id}/`);
+  }
+
+  async getActiveRecurringExpenses(): Promise<RecurringExpense[]> {
+    const response = await authApi.get('/recurring-expenses/active/');
+    return response.data;
+  }
+
+  async generateRecurringExpenseEntry(id: string, year: number, month: number): Promise<{ success: boolean; expense_entry_id: string; message: string }> {
+    const response = await authApi.post(`/recurring-expenses/${id}/generate-entries/`, { year, month });
+    return response.data;
+  }
+
+  // Expense Entries
+  async getExpenses(filters?: { category?: string; vendor?: string; billing_entity?: string; status?: string; currency?: string }): Promise<ExpenseEntry[]> {
+    const response = await authApi.get('/expenses/', { params: filters });
+    return response.data.results || response.data;
+  }
+
+  async getExpense(id: string): Promise<ExpenseEntry> {
+    const response = await authApi.get(`/expenses/${id}/`);
+    return response.data;
+  }
+
+  async createExpense(data: Partial<ExpenseEntry>): Promise<ExpenseEntry> {
+    const response = await authApi.post('/expenses/', data);
+    return response.data;
+  }
+
+  async updateExpense(id: string, data: Partial<ExpenseEntry>): Promise<ExpenseEntry> {
+    const response = await authApi.patch(`/expenses/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteExpense(id: string): Promise<void> {
+    await authApi.delete(`/expenses/${id}/`);
+  }
+
+  async approveExpense(id: string): Promise<ExpenseEntry> {
+    const response = await authApi.post(`/expenses/${id}/approve/`);
+    return response.data;
+  }
+
+  async payExpense(id: string, data: { payment_date?: string; payment_method?: string; payment_reference?: string }): Promise<ExpenseEntry> {
+    const response = await authApi.post(`/expenses/${id}/pay/`, data);
+    return response.data;
+  }
+
+  async cancelExpense(id: string): Promise<ExpenseEntry> {
+    const response = await authApi.post(`/expenses/${id}/cancel/`);
+    return response.data;
+  }
+
+  async getPendingExpenses(): Promise<ExpenseEntry[]> {
+    const response = await authApi.get('/expenses/pending/');
+    return response.data;
+  }
+
+  async getExpensesByMonth(year: number, month: number, currency?: string, billingEntity?: string): Promise<{ year: number; month: number; count: number; expenses: ExpenseEntry[] }> {
+    const params: any = { year, month };
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    const response = await authApi.get('/expenses/by-month/', { params });
+    return response.data;
+  }
+
+  // AP Aging
+  async getAPAgingReport(currency?: string, billingEntity?: string, asOfDate?: string): Promise<APAgingReport> {
+    const params: any = {};
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    if (asOfDate) params.as_of_date = asOfDate;
+    const response = await authApi.get('/ap-aging/report/', { params });
+    return response.data;
+  }
+
+  async getAPAgingSummary(currency?: string, billingEntity?: string): Promise<APAgingSummary> {
+    const params: any = {};
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    const response = await authApi.get('/ap-aging/summary/', { params });
+    return response.data;
+  }
+
+  async getAPOverdueExpenses(minDays?: number, currency?: string, billingEntity?: string): Promise<{ count: number; min_days_overdue: number; expenses: OverdueExpense[] }> {
+    const params: any = {};
+    if (minDays) params.min_days = minDays;
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    const response = await authApi.get('/ap-aging/overdue/', { params });
+    return response.data;
+  }
+
+  async getPaymentPriorityList(currency?: string, billingEntity?: string, limit?: number): Promise<{ count: number; expenses: OverdueExpense[] }> {
+    const params: any = {};
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    if (limit) params.limit = limit;
+    const response = await authApi.get('/ap-aging/payment-priority/', { params });
+    return response.data;
+  }
+
+  async getMonthlyExpenseSummary(year: number, month?: number, currency?: string, billingEntity?: string): Promise<MonthlyExpenseSummary> {
+    const params: any = { year };
+    if (month) params.month = month;
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    const response = await authApi.get('/ap-aging/monthly-summary/', { params });
     return response.data;
   }
 }

@@ -35,7 +35,8 @@ from .models import (
     Zone, Device, StaticDocument,
     ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
     SeasonalTriggerDate,
-    MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent
+    MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent,
+    Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
@@ -52,7 +53,8 @@ from .serializers import (
     ZoneSerializer, DeviceSerializer, StaticDocumentSerializer,
     ContractTemplateSerializer, ServicePackageItemSerializer, CorporatePdfTemplateSerializer, ContractDocumentSerializer,
     SeasonalTriggerDateSerializer,
-    MonthlyRevenueSnapshotSerializer, MonthlyRevenueTargetSerializer, ContractRevenueEventSerializer, RevenueMonthlyDataSerializer
+    MonthlyRevenueSnapshotSerializer, MonthlyRevenueTargetSerializer, ContractRevenueEventSerializer, RevenueMonthlyDataSerializer,
+    VendorSerializer, ExpenseCategorySerializer, RecurringExpenseSerializer, ExpenseEntrySerializer, ExpenseEntryCreateSerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -7458,6 +7460,646 @@ class ARAgingViewSet(viewsets.ViewSet):
                 'count': len(priority_list),
                 'invoices': priority_list
             })
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# EXPENSE MODULE ViewSets (Phase 3 - Finance Module)
+# ============================================================================
+
+class VendorViewSet(BaseModelViewSet):
+    """
+    ViewSet for Vendor management.
+
+    Vendors are suppliers/payees for expense tracking and AP aging.
+
+    Endpoints:
+    - GET /api/v1/vendors/ - List all vendors
+    - POST /api/v1/vendors/ - Create vendor
+    - GET /api/v1/vendors/{id}/ - Get vendor details
+    - PUT/PATCH /api/v1/vendors/{id}/ - Update vendor
+    - DELETE /api/v1/vendors/{id}/ - Delete vendor
+    - GET /api/v1/vendors/active/ - List active vendors only
+    - GET /api/v1/vendors/by-entity/?entity=bmasia_th - Filter by billing entity
+    """
+    queryset = Vendor.objects.all()
+    serializer_class = VendorSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['billing_entity', 'is_active', 'default_currency', 'payment_terms']
+    search_fields = ['name', 'legal_name', 'contact_name', 'email']
+    ordering_fields = ['name', 'created_at', 'updated_at']
+    ordering = ['name']
+
+    @action(detail=False, methods=['get'], url_path='active')
+    def active(self, request):
+        """GET /api/v1/vendors/active/ - List active vendors only"""
+        vendors = self.get_queryset().filter(is_active=True)
+        serializer = self.get_serializer(vendors, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='by-entity')
+    def by_entity(self, request):
+        """GET /api/v1/vendors/by-entity/?entity=bmasia_th"""
+        entity = request.query_params.get('entity')
+        if not entity:
+            return Response({'error': 'entity parameter required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        vendors = self.get_queryset().filter(
+            Q(billing_entity=entity) | Q(billing_entity='both'),
+            is_active=True
+        )
+        serializer = self.get_serializer(vendors, many=True)
+        return Response(serializer.data)
+
+
+class ExpenseCategoryViewSet(BaseModelViewSet):
+    """
+    ViewSet for Expense Category management.
+
+    Categories organize expenses for P&L reporting (COGS, G&A, Sales & Marketing, CapEx).
+
+    Endpoints:
+    - GET /api/v1/expense-categories/ - List all categories
+    - POST /api/v1/expense-categories/ - Create category
+    - GET /api/v1/expense-categories/{id}/ - Get category details
+    - PUT/PATCH /api/v1/expense-categories/{id}/ - Update category
+    - DELETE /api/v1/expense-categories/{id}/ - Delete category
+    - GET /api/v1/expense-categories/tree/ - Get hierarchical tree view
+    - GET /api/v1/expense-categories/by-type/?type=opex_cogs - Filter by type
+    - POST /api/v1/expense-categories/initialize-defaults/ - Create default categories
+    """
+    queryset = ExpenseCategory.objects.all()
+    serializer_class = ExpenseCategorySerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['category_type', 'is_active', 'is_depreciable', 'parent_category']
+    search_fields = ['name', 'description']
+    ordering_fields = ['category_type', 'sort_order', 'name']
+    ordering = ['category_type', 'sort_order', 'name']
+
+    @action(detail=False, methods=['get'], url_path='tree')
+    def tree(self, request):
+        """
+        GET /api/v1/expense-categories/tree/
+
+        Returns hierarchical tree view of categories.
+        """
+        # Get top-level categories (no parent)
+        top_level = self.get_queryset().filter(
+            parent_category__isnull=True,
+            is_active=True
+        ).prefetch_related('subcategories')
+
+        def build_tree(category):
+            return {
+                'id': str(category.id),
+                'name': category.name,
+                'category_type': category.category_type,
+                'full_path': category.full_path,
+                'is_depreciable': category.is_depreciable,
+                'children': [build_tree(sub) for sub in category.subcategories.filter(is_active=True)]
+            }
+
+        tree = [build_tree(cat) for cat in top_level]
+        return Response(tree)
+
+    @action(detail=False, methods=['get'], url_path='by-type')
+    def by_type(self, request):
+        """GET /api/v1/expense-categories/by-type/?type=opex_cogs"""
+        category_type = request.query_params.get('type')
+        if not category_type:
+            return Response({'error': 'type parameter required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        categories = self.get_queryset().filter(
+            category_type=category_type,
+            is_active=True
+        )
+        serializer = self.get_serializer(categories, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['post'], url_path='initialize-defaults')
+    def initialize_defaults(self, request):
+        """
+        POST /api/v1/expense-categories/initialize-defaults/
+
+        Creates default expense categories if they don't exist.
+        """
+        defaults = [
+            # COGS Categories
+            {'name': 'Soundtrack Licenses', 'category_type': 'opex_cogs', 'sort_order': 10},
+            {'name': 'Hardware Costs', 'category_type': 'opex_cogs', 'sort_order': 20},
+            {'name': 'Technical Support', 'category_type': 'opex_cogs', 'sort_order': 30},
+
+            # G&A Categories
+            {'name': 'Salaries (Non-Sales)', 'category_type': 'opex_gna', 'sort_order': 10},
+            {'name': 'Office Rent', 'category_type': 'opex_gna', 'sort_order': 20},
+            {'name': 'Utilities', 'category_type': 'opex_gna', 'sort_order': 30},
+            {'name': 'Insurance', 'category_type': 'opex_gna', 'sort_order': 40},
+            {'name': 'Professional Services', 'category_type': 'opex_gna', 'sort_order': 50},
+            {'name': 'Office Supplies', 'category_type': 'opex_gna', 'sort_order': 60},
+            {'name': 'Software Subscriptions', 'category_type': 'opex_gna', 'sort_order': 70},
+
+            # Sales & Marketing Categories
+            {'name': 'Sales Salaries & Commissions', 'category_type': 'opex_sales', 'sort_order': 10},
+            {'name': 'Marketing Campaigns', 'category_type': 'opex_sales', 'sort_order': 20},
+            {'name': 'Travel & Entertainment', 'category_type': 'opex_sales', 'sort_order': 30},
+            {'name': 'Trade Shows & Events', 'category_type': 'opex_sales', 'sort_order': 40},
+
+            # CapEx Categories
+            {'name': 'Computer Equipment', 'category_type': 'capex', 'is_depreciable': True, 'useful_life_months': 36, 'depreciation_rate': 33.33, 'sort_order': 10},
+            {'name': 'Office Equipment', 'category_type': 'capex', 'is_depreciable': True, 'useful_life_months': 60, 'depreciation_rate': 20.00, 'sort_order': 20},
+            {'name': 'Software Licenses (Multi-Year)', 'category_type': 'capex', 'is_depreciable': True, 'useful_life_months': 36, 'depreciation_rate': 33.33, 'sort_order': 30},
+        ]
+
+        created = 0
+        for cat_data in defaults:
+            obj, was_created = ExpenseCategory.objects.get_or_create(
+                name=cat_data['name'],
+                defaults=cat_data
+            )
+            if was_created:
+                created += 1
+
+        return Response({
+            'success': True,
+            'created': created,
+            'message': f'Created {created} default categories'
+        })
+
+
+class RecurringExpenseViewSet(BaseModelViewSet):
+    """
+    ViewSet for Recurring Expense management.
+
+    Recurring expenses are fixed monthly costs that auto-generate ExpenseEntry records.
+
+    Endpoints:
+    - GET /api/v1/recurring-expenses/ - List all recurring expenses
+    - POST /api/v1/recurring-expenses/ - Create recurring expense
+    - GET /api/v1/recurring-expenses/{id}/ - Get details
+    - PUT/PATCH /api/v1/recurring-expenses/{id}/ - Update
+    - DELETE /api/v1/recurring-expenses/{id}/ - Delete
+    - GET /api/v1/recurring-expenses/active/ - List active only
+    - POST /api/v1/recurring-expenses/{id}/generate-entries/ - Generate expense entries for a period
+    """
+    queryset = RecurringExpense.objects.all()
+    serializer_class = RecurringExpenseSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['category', 'vendor', 'billing_entity', 'is_active', 'currency']
+    search_fields = ['name', 'notes']
+    ordering_fields = ['name', 'amount', 'created_at']
+    ordering = ['name']
+
+    def get_queryset(self):
+        return RecurringExpense.objects.select_related('category', 'vendor').all()
+
+    @action(detail=False, methods=['get'], url_path='active')
+    def active(self, request):
+        """GET /api/v1/recurring-expenses/active/ - List active recurring expenses"""
+        expenses = self.get_queryset().filter(is_active=True)
+        serializer = self.get_serializer(expenses, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='generate-entries')
+    def generate_entries(self, request, pk=None):
+        """
+        POST /api/v1/recurring-expenses/{id}/generate-entries/
+
+        Body: { "year": 2026, "month": 1 }
+
+        Generates an expense entry for the specified month.
+        """
+        from datetime import date
+        from decimal import Decimal
+
+        recurring = self.get_object()
+
+        year = request.data.get('year')
+        month = request.data.get('month')
+
+        if not year or not month:
+            return Response({
+                'error': 'year and month are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            month = int(month)
+        except ValueError:
+            return Response({
+                'error': 'year and month must be integers'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if already generated
+        target_date = date(year, month, recurring.payment_day)
+        existing = ExpenseEntry.objects.filter(
+            recurring_expense=recurring,
+            expense_date__year=year,
+            expense_date__month=month
+        ).exists()
+
+        if existing:
+            return Response({
+                'error': f'Entry already exists for {year}-{month:02d}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if within start/end date range
+        if recurring.start_date > target_date:
+            return Response({
+                'error': f'Recurring expense starts on {recurring.start_date}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if recurring.end_date and recurring.end_date < target_date:
+            return Response({
+                'error': f'Recurring expense ended on {recurring.end_date}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Calculate due date based on vendor payment terms
+        due_date = target_date
+        if recurring.vendor and recurring.vendor.payment_terms:
+            terms_days = {
+                'immediate': 0,
+                'net_15': 15,
+                'net_30': 30,
+                'net_45': 45,
+                'net_60': 60
+            }
+            days = terms_days.get(recurring.vendor.payment_terms, 30)
+            due_date = target_date + timedelta(days=days)
+
+        # Create expense entry
+        entry = ExpenseEntry.objects.create(
+            category=recurring.category,
+            vendor=recurring.vendor,
+            recurring_expense=recurring,
+            description=f"{recurring.name} - {year}/{month:02d}",
+            amount=recurring.amount,
+            currency=recurring.currency,
+            billing_entity=recurring.billing_entity,
+            expense_date=target_date,
+            due_date=due_date,
+            status='pending',
+            created_by=request.user if request.user.is_authenticated else None
+        )
+
+        # Update last_generated_month
+        recurring.last_generated_month = target_date
+        recurring.save(update_fields=['last_generated_month'])
+
+        return Response({
+            'success': True,
+            'expense_entry_id': str(entry.id),
+            'message': f'Generated expense entry for {year}-{month:02d}'
+        })
+
+
+class ExpenseEntryViewSet(BaseModelViewSet):
+    """
+    ViewSet for Expense Entry management.
+
+    Individual expense records for tracking AP and generating P&L.
+
+    Endpoints:
+    - GET /api/v1/expenses/ - List all expenses
+    - POST /api/v1/expenses/ - Create expense
+    - GET /api/v1/expenses/{id}/ - Get details
+    - PUT/PATCH /api/v1/expenses/{id}/ - Update
+    - DELETE /api/v1/expenses/{id}/ - Delete
+    - POST /api/v1/expenses/{id}/approve/ - Approve expense
+    - POST /api/v1/expenses/{id}/pay/ - Mark as paid
+    - POST /api/v1/expenses/{id}/cancel/ - Cancel expense
+    - GET /api/v1/expenses/pending/ - List pending expenses
+    - GET /api/v1/expenses/by-month/?year=2026&month=1 - Expenses for a month
+    """
+    queryset = ExpenseEntry.objects.all()
+    serializer_class = ExpenseEntrySerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['category', 'vendor', 'billing_entity', 'status', 'currency']
+    search_fields = ['description', 'vendor_invoice_number', 'notes']
+    ordering_fields = ['expense_date', 'due_date', 'amount', 'created_at']
+    ordering = ['-expense_date', '-created_at']
+
+    def get_queryset(self):
+        return ExpenseEntry.objects.select_related('category', 'vendor', 'recurring_expense', 'created_by', 'approved_by').all()
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return ExpenseEntryCreateSerializer
+        return ExpenseEntrySerializer
+
+    @action(detail=True, methods=['post'], url_path='approve')
+    def approve(self, request, pk=None):
+        """POST /api/v1/expenses/{id}/approve/ - Approve expense"""
+        expense = self.get_object()
+
+        if expense.status not in ['draft', 'pending']:
+            return Response({
+                'error': f'Cannot approve expense with status: {expense.status}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        expense.status = 'approved'
+        expense.approved_by = request.user if request.user.is_authenticated else None
+        expense.approved_at = timezone.now()
+        expense.save(update_fields=['status', 'approved_by', 'approved_at', 'updated_at'])
+
+        serializer = self.get_serializer(expense)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='pay')
+    def pay(self, request, pk=None):
+        """
+        POST /api/v1/expenses/{id}/pay/
+
+        Body: {
+            "payment_date": "2026-01-15",
+            "payment_method": "bank_transfer",
+            "payment_reference": "REF-12345"
+        }
+        """
+        from datetime import datetime
+
+        expense = self.get_object()
+
+        if expense.status not in ['pending', 'approved']:
+            return Response({
+                'error': f'Cannot pay expense with status: {expense.status}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        payment_date_str = request.data.get('payment_date')
+        if payment_date_str:
+            try:
+                payment_date = datetime.strptime(payment_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({
+                    'error': 'Invalid payment_date format. Use YYYY-MM-DD'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            payment_date = date.today()
+
+        expense.status = 'paid'
+        expense.payment_date = payment_date
+        expense.payment_method = request.data.get('payment_method', '')
+        expense.payment_reference = request.data.get('payment_reference', '')
+        expense.save(update_fields=['status', 'payment_date', 'payment_method', 'payment_reference', 'updated_at'])
+
+        serializer = self.get_serializer(expense)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='cancel')
+    def cancel(self, request, pk=None):
+        """POST /api/v1/expenses/{id}/cancel/ - Cancel expense"""
+        expense = self.get_object()
+
+        if expense.status == 'paid':
+            return Response({
+                'error': 'Cannot cancel a paid expense'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        expense.status = 'cancelled'
+        expense.save(update_fields=['status', 'updated_at'])
+
+        serializer = self.get_serializer(expense)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='pending')
+    def pending(self, request):
+        """GET /api/v1/expenses/pending/ - List pending expenses"""
+        expenses = self.get_queryset().filter(status='pending')
+        serializer = self.get_serializer(expenses, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='by-month')
+    def by_month(self, request):
+        """
+        GET /api/v1/expenses/by-month/?year=2026&month=1&currency=THB&billing_entity=bmasia_th
+
+        Returns expenses for a specific month (for P&L calculation).
+        """
+        year = request.query_params.get('year')
+        month = request.query_params.get('month')
+        currency = request.query_params.get('currency')
+        billing_entity = request.query_params.get('billing_entity')
+
+        if not year or not month:
+            return Response({
+                'error': 'year and month are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            month = int(month)
+        except ValueError:
+            return Response({
+                'error': 'year and month must be integers'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        queryset = self.get_queryset().filter(
+            expense_date__year=year,
+            expense_date__month=month,
+            status__in=['approved', 'paid']
+        )
+
+        if currency:
+            queryset = queryset.filter(currency=currency)
+        if billing_entity:
+            queryset = queryset.filter(billing_entity=billing_entity)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            'year': year,
+            'month': month,
+            'count': queryset.count(),
+            'expenses': serializer.data
+        })
+
+
+class APAgingViewSet(viewsets.ViewSet):
+    """
+    ViewSet for Accounts Payable Aging Report.
+
+    Endpoints:
+    - GET /api/v1/ap-aging/report/ - Full AP aging report with expense details
+    - GET /api/v1/ap-aging/summary/ - Summary totals by aging bucket
+    - GET /api/v1/ap-aging/overdue/ - List of overdue expenses
+    - GET /api/v1/ap-aging/payment-priority/ - Prioritized payment list
+    - GET /api/v1/ap-aging/monthly-summary/?year=2026&month=1 - Monthly expense summary (for P&L)
+    """
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'], url_path='report')
+    def report(self, request):
+        """
+        GET /api/v1/ap-aging/report/?currency=THB&billing_entity=bmasia_th&as_of_date=2026-01-13
+
+        Returns full AP aging report with expense details grouped by vendor.
+        """
+        from crm_app.services.ap_aging_service import APAgingService
+        from datetime import datetime
+
+        currency = request.query_params.get('currency')
+        billing_entity = request.query_params.get('billing_entity')
+        as_of_date_str = request.query_params.get('as_of_date')
+
+        as_of_date = None
+        if as_of_date_str:
+            try:
+                as_of_date = datetime.strptime(as_of_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({
+                    'error': 'Invalid date format. Use YYYY-MM-DD'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = APAgingService()
+            report = service.get_ap_aging_report(
+                as_of_date=as_of_date,
+                currency=currency,
+                billing_entity=billing_entity
+            )
+            return Response(report)
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='summary')
+    def summary(self, request):
+        """
+        GET /api/v1/ap-aging/summary/?currency=THB&billing_entity=bmasia_th
+
+        Returns just the summary totals (for dashboard KPI cards).
+        """
+        from crm_app.services.ap_aging_service import APAgingService
+
+        currency = request.query_params.get('currency')
+        billing_entity = request.query_params.get('billing_entity')
+
+        try:
+            service = APAgingService()
+            summary = service.get_ap_summary(
+                currency=currency,
+                billing_entity=billing_entity
+            )
+            return Response(summary)
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='overdue')
+    def overdue(self, request):
+        """
+        GET /api/v1/ap-aging/overdue/?min_days=30&currency=THB&billing_entity=bmasia_th
+
+        Returns list of expenses overdue by at least min_days.
+        """
+        from crm_app.services.ap_aging_service import APAgingService
+
+        min_days = request.query_params.get('min_days', 1)
+        currency = request.query_params.get('currency')
+        billing_entity = request.query_params.get('billing_entity')
+
+        try:
+            min_days = int(min_days)
+        except ValueError:
+            return Response({
+                'error': 'Invalid min_days parameter'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = APAgingService()
+            expenses = service.get_overdue_expenses(
+                min_days_overdue=min_days,
+                currency=currency,
+                billing_entity=billing_entity
+            )
+            return Response({
+                'count': len(expenses),
+                'min_days_overdue': min_days,
+                'expenses': expenses
+            })
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='payment-priority')
+    def payment_priority(self, request):
+        """
+        GET /api/v1/ap-aging/payment-priority/?limit=20&currency=THB
+
+        Returns prioritized list for payment.
+        Sorted by: amount * days_overdue (highest priority first)
+        """
+        from crm_app.services.ap_aging_service import APAgingService
+
+        limit = request.query_params.get('limit', 20)
+        currency = request.query_params.get('currency')
+        billing_entity = request.query_params.get('billing_entity')
+
+        try:
+            limit = int(limit)
+        except ValueError:
+            limit = 20
+
+        try:
+            service = APAgingService()
+            priority_list = service.get_payment_priority_list(
+                currency=currency,
+                billing_entity=billing_entity,
+                limit=limit
+            )
+            return Response({
+                'count': len(priority_list),
+                'expenses': priority_list
+            })
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='monthly-summary')
+    def monthly_summary(self, request):
+        """
+        GET /api/v1/ap-aging/monthly-summary/?year=2026&month=1&currency=THB&billing_entity=bmasia_th
+
+        Returns expense summary by category type for P&L generation.
+        """
+        from crm_app.services.ap_aging_service import APAgingService
+
+        year = request.query_params.get('year')
+        month = request.query_params.get('month')
+        currency = request.query_params.get('currency')
+        billing_entity = request.query_params.get('billing_entity')
+
+        if not year:
+            return Response({
+                'error': 'year is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            month = int(month) if month else None
+        except ValueError:
+            return Response({
+                'error': 'year and month must be integers'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = APAgingService()
+            summary = service.get_monthly_expense_summary(
+                year=year,
+                month=month,
+                currency=currency,
+                billing_entity=billing_entity
+            )
+            return Response(summary)
         except Exception as e:
             return Response({
                 'error': str(e)

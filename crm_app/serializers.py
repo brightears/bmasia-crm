@@ -14,7 +14,8 @@ from .models import (
     Device, StaticDocument,
     ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
     SeasonalTriggerDate,
-    MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent
+    MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent,
+    Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry
 )
 
 
@@ -1927,3 +1928,137 @@ class RevenueMonthlyDataSerializer(serializers.Serializer):
     renewal = serializers.DictField(child=serializers.DecimalField(max_digits=15, decimal_places=2), required=False)
     addon = serializers.DictField(child=serializers.DecimalField(max_digits=15, decimal_places=2), required=False)
     churn = serializers.DictField(child=serializers.DecimalField(max_digits=15, decimal_places=2), required=False)
+
+
+# =============================================================================
+# EXPENSE & ACCOUNTS PAYABLE SERIALIZERS (Finance Module - Phase 3)
+# =============================================================================
+
+class VendorSerializer(serializers.ModelSerializer):
+    """Serializer for Vendor model"""
+    billing_entity_display = serializers.CharField(source='get_billing_entity_display', read_only=True)
+    payment_terms_display = serializers.CharField(source='get_payment_terms_display', read_only=True)
+
+    class Meta:
+        model = Vendor
+        fields = [
+            'id', 'name', 'legal_name', 'tax_id',
+            'contact_name', 'email', 'phone', 'website',
+            'address', 'city', 'country',
+            'payment_terms', 'payment_terms_display',
+            'default_currency',
+            'bank_name', 'bank_account_number', 'bank_account_name',
+            'is_active', 'notes',
+            'billing_entity', 'billing_entity_display',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ExpenseCategorySerializer(serializers.ModelSerializer):
+    """Serializer for ExpenseCategory model"""
+    category_type_display = serializers.CharField(source='get_category_type_display', read_only=True)
+    full_path = serializers.CharField(read_only=True)
+    parent_category_name = serializers.CharField(source='parent_category.name', read_only=True, default='')
+    subcategories = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ExpenseCategory
+        fields = [
+            'id', 'name', 'description',
+            'category_type', 'category_type_display',
+            'parent_category', 'parent_category_name', 'full_path',
+            'is_depreciable', 'useful_life_months', 'depreciation_rate',
+            'sort_order', 'is_active',
+            'subcategories',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_subcategories(self, obj):
+        """Get list of child category IDs"""
+        return list(obj.subcategories.values_list('id', flat=True))
+
+
+class RecurringExpenseSerializer(serializers.ModelSerializer):
+    """Serializer for RecurringExpense model"""
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    category_full_path = serializers.CharField(source='category.full_path', read_only=True)
+    vendor_name = serializers.CharField(source='vendor.name', read_only=True, default='')
+    billing_entity_display = serializers.CharField(source='get_billing_entity_display', read_only=True)
+
+    class Meta:
+        model = RecurringExpense
+        fields = [
+            'id', 'name',
+            'category', 'category_name', 'category_full_path',
+            'vendor', 'vendor_name',
+            'amount', 'currency',
+            'billing_entity', 'billing_entity_display',
+            'start_date', 'end_date', 'payment_day',
+            'is_active', 'notes',
+            'last_generated_month',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'last_generated_month', 'created_at', 'updated_at']
+
+
+class ExpenseEntrySerializer(serializers.ModelSerializer):
+    """Serializer for ExpenseEntry model"""
+    category_name = serializers.CharField(source='category.name', read_only=True)
+    category_full_path = serializers.CharField(source='category.full_path', read_only=True)
+    category_type = serializers.CharField(source='category.category_type', read_only=True)
+    vendor_name = serializers.CharField(source='vendor.name', read_only=True, default='')
+    billing_entity_display = serializers.CharField(source='get_billing_entity_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    payment_method_display = serializers.CharField(source='get_payment_method_display', read_only=True, default='')
+    approved_by_name = serializers.CharField(source='approved_by.get_full_name', read_only=True, default='')
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True, default='')
+    total_amount = serializers.DecimalField(max_digits=15, decimal_places=2, read_only=True)
+    is_overdue = serializers.BooleanField(read_only=True)
+    days_overdue = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = ExpenseEntry
+        fields = [
+            'id', 'description',
+            'category', 'category_name', 'category_full_path', 'category_type',
+            'vendor', 'vendor_name',
+            'recurring_expense',
+            'amount', 'currency', 'tax_amount', 'is_tax_inclusive', 'total_amount',
+            'billing_entity', 'billing_entity_display',
+            'expense_date', 'due_date', 'payment_date',
+            'vendor_invoice_number', 'vendor_invoice_date',
+            'status', 'status_display',
+            'payment_method', 'payment_method_display', 'payment_reference',
+            'approved_by', 'approved_by_name', 'approved_at',
+            'receipt_file',
+            'notes',
+            'created_by', 'created_by_name',
+            'is_overdue', 'days_overdue',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'approved_by', 'approved_at', 'created_by', 'created_at', 'updated_at']
+
+
+class ExpenseEntryCreateSerializer(serializers.ModelSerializer):
+    """Simplified serializer for creating expense entries"""
+
+    class Meta:
+        model = ExpenseEntry
+        fields = [
+            'description', 'category', 'vendor', 'recurring_expense',
+            'amount', 'currency', 'tax_amount', 'is_tax_inclusive',
+            'billing_entity',
+            'expense_date', 'due_date',
+            'vendor_invoice_number', 'vendor_invoice_date',
+            'status', 'payment_method', 'payment_reference',
+            'notes'
+        ]
+
+    def create(self, validated_data):
+        """Create expense entry with current user as creator"""
+        request = self.context.get('request')
+        if request and hasattr(request, 'user'):
+            validated_data['created_by'] = request.user
+        return super().create(validated_data)
