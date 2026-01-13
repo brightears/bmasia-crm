@@ -7317,3 +7317,148 @@ class RevenueViewSet(viewsets.ViewSet):
                 'success': False,
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ARAgingViewSet(viewsets.ViewSet):
+    """
+    ViewSet for Accounts Receivable Aging Report.
+
+    Endpoints:
+    - GET /api/v1/ar-aging/report/ - Full AR aging report with invoice details
+    - GET /api/v1/ar-aging/summary/ - Summary totals by aging bucket
+    - GET /api/v1/ar-aging/overdue/ - List of overdue invoices
+    - GET /api/v1/ar-aging/collection-priority/ - Prioritized collection list
+    """
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'], url_path='report')
+    def report(self, request):
+        """
+        GET /api/v1/ar-aging/report/?currency=USD&billing_entity=bmasia_th&as_of_date=2026-01-13
+
+        Returns full AR aging report with invoice details grouped by company.
+        """
+        from crm_app.services.ar_aging_service import ARAgingService
+        from datetime import datetime
+
+        currency = request.query_params.get('currency')
+        billing_entity = request.query_params.get('billing_entity')
+        as_of_date_str = request.query_params.get('as_of_date')
+
+        as_of_date = None
+        if as_of_date_str:
+            try:
+                as_of_date = datetime.strptime(as_of_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({
+                    'error': 'Invalid date format. Use YYYY-MM-DD'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = ARAgingService()
+            report = service.get_ar_aging_report(
+                as_of_date=as_of_date,
+                currency=currency,
+                billing_entity=billing_entity
+            )
+            return Response(report)
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='summary')
+    def summary(self, request):
+        """
+        GET /api/v1/ar-aging/summary/?currency=USD&billing_entity=bmasia_th
+
+        Returns just the summary totals (for dashboard KPI cards).
+        """
+        from crm_app.services.ar_aging_service import ARAgingService
+
+        currency = request.query_params.get('currency')
+        billing_entity = request.query_params.get('billing_entity')
+
+        try:
+            service = ARAgingService()
+            summary = service.get_ar_summary(
+                currency=currency,
+                billing_entity=billing_entity
+            )
+            return Response(summary)
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='overdue')
+    def overdue(self, request):
+        """
+        GET /api/v1/ar-aging/overdue/?min_days=30&currency=USD&billing_entity=bmasia_th
+
+        Returns list of invoices overdue by at least min_days.
+        """
+        from crm_app.services.ar_aging_service import ARAgingService
+
+        min_days = request.query_params.get('min_days', 1)
+        currency = request.query_params.get('currency')
+        billing_entity = request.query_params.get('billing_entity')
+
+        try:
+            min_days = int(min_days)
+        except ValueError:
+            return Response({
+                'error': 'Invalid min_days parameter'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = ARAgingService()
+            invoices = service.get_overdue_invoices(
+                min_days_overdue=min_days,
+                currency=currency,
+                billing_entity=billing_entity
+            )
+            return Response({
+                'count': len(invoices),
+                'min_days_overdue': min_days,
+                'invoices': invoices
+            })
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='collection-priority')
+    def collection_priority(self, request):
+        """
+        GET /api/v1/ar-aging/collection-priority/?limit=20&currency=USD
+
+        Returns prioritized list for collection efforts.
+        Sorted by: amount * days_overdue (highest priority first)
+        """
+        from crm_app.services.ar_aging_service import ARAgingService
+
+        limit = request.query_params.get('limit', 20)
+        currency = request.query_params.get('currency')
+        billing_entity = request.query_params.get('billing_entity')
+
+        try:
+            limit = int(limit)
+        except ValueError:
+            limit = 20
+
+        try:
+            service = ARAgingService()
+            priority_list = service.get_collection_priority_list(
+                currency=currency,
+                billing_entity=billing_entity,
+                limit=limit
+            )
+            return Response({
+                'count': len(priority_list),
+                'invoices': priority_list
+            })
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -1203,6 +1203,42 @@ class ApiService {
     const response = await authApi.get('/revenue/year-over-year/', { params });
     return response.data;
   }
+
+  // AR Aging
+  async getARAgingReport(currency?: string, billingEntity?: string, asOfDate?: string): Promise<ARAgingReport> {
+    const params: any = {};
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    if (asOfDate) params.as_of_date = asOfDate;
+    const response = await authApi.get('/ar-aging/report/', { params });
+    return response.data;
+  }
+
+  async getARAgingSummary(currency?: string, billingEntity?: string): Promise<ARAgingSummary> {
+    const params: any = {};
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    const response = await authApi.get('/ar-aging/summary/', { params });
+    return response.data;
+  }
+
+  async getOverdueInvoices(minDays?: number, currency?: string, billingEntity?: string): Promise<OverdueInvoice[]> {
+    const params: any = {};
+    if (minDays) params.min_days = minDays;
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    const response = await authApi.get('/ar-aging/overdue/', { params });
+    return response.data;
+  }
+
+  async getCollectionPriorityList(currency?: string, billingEntity?: string, limit?: number): Promise<OverdueInvoice[]> {
+    const params: any = {};
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    if (limit) params.limit = limit;
+    const response = await authApi.get('/ar-aging/collection-priority/', { params });
+    return response.data;
+  }
 }
 
 export interface EmailSendData {
@@ -1244,6 +1280,67 @@ export interface AutomatedEmail {
   subject: string;
   company: string | null;
   contact: string | null;
+}
+
+// AR Aging Types
+export interface ARAgingSummary {
+  total_ar: number;
+  current: number;
+  '1_30': number;
+  '31_60': number;
+  '61_90': number;
+  '90_plus': number;
+  invoice_count: number;
+}
+
+export interface ARInvoiceDetail {
+  invoice_id: string;
+  invoice_number: string;
+  company_id: string;
+  company_name: string;
+  issue_date: string;
+  due_date: string;
+  amount: number;
+  currency: string;
+  days_overdue: number;
+  aging_bucket: string;
+  status: string;
+}
+
+export interface ARCompanyDetail {
+  company_id: string;
+  company_name: string;
+  total: number;
+  current: number;
+  '1_30': number;
+  '31_60': number;
+  '61_90': number;
+  '90_plus': number;
+  invoices: ARInvoiceDetail[];
+}
+
+export interface ARAgingReport {
+  as_of_date: string;
+  currency: string;
+  billing_entity: string;
+  summary: ARAgingSummary;
+  by_company: ARCompanyDetail[];
+  invoices: ARInvoiceDetail[];
+}
+
+export interface OverdueInvoice {
+  invoice_id: string;
+  invoice_number: string;
+  company_name: string;
+  company_id: string;
+  due_date: string;
+  amount: number;
+  currency: string;
+  days_overdue: number;
+  aging_bucket: string;
+  contact_email: string;
+  contact_phone: string;
+  priority_score?: number;
 }
 
 const apiService = new ApiService();

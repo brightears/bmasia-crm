@@ -63,6 +63,9 @@ router.register(r'seasonal-trigger-dates', views.SeasonalTriggerDateViewSet, bas
 # Revenue Dashboard routes
 router.register(r'revenue', views.RevenueViewSet, basename='revenue')
 
+# AR Aging routes
+router.register(r'ar-aging', views.ARAgingViewSet, basename='ar-aging')
+
 # The API URLs are now determined automatically by the router.
 urlpatterns = [
     path('v1/', include(router.urls)),

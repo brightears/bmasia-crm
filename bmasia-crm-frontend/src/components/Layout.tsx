@@ -163,6 +163,7 @@ const unifiedNavigation = [
     title: 'Finance',
     items: [
       { text: 'Revenue', icon: <AttachMoneyIcon />, path: '/revenue' },
+      { text: 'AR Aging', icon: <ReceiptIcon />, path: '/finance/ar' },
     ],
   },
   {
