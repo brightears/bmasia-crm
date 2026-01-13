@@ -1222,7 +1222,7 @@ class ApiService {
     return response.data;
   }
 
-  async getOverdueInvoices(minDays?: number, currency?: string, billingEntity?: string): Promise<OverdueInvoice[]> {
+  async getAROverdueInvoices(minDays?: number, currency?: string, billingEntity?: string): Promise<OverdueInvoice[]> {
     const params: any = {};
     if (minDays) params.min_days = minDays;
     if (currency) params.currency = currency;
