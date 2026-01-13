@@ -14,7 +14,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Grid,
+  GridLegacy as Grid,
   Alert,
   CircularProgress,
   SelectChangeEvent,
