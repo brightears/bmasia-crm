@@ -17,8 +17,6 @@ import {
   MenuItem,
   Alert,
   CircularProgress,
-  Chip,
-  Divider,
   LinearProgress,
   Stack,
   ToggleButton,
@@ -46,7 +44,66 @@ import {
   Bar,
 } from 'recharts';
 import api from '../services/api';
-import { PLStatement, PLTrendData } from '../types';
+
+// Backend P&L response interface (matches actual backend response)
+interface PLCategory {
+  category_id: string;
+  category_name: string;
+  amount: number;
+  count: number;
+}
+
+interface PLResponse {
+  period: {
+    year: number;
+    month?: number;
+    month_name?: string;
+    through_month?: number;
+    type: string;
+  };
+  billing_entity: string;
+  currency: string;
+  revenue: {
+    new: { count: number; value: number };
+    renewal: { count: number; value: number };
+    addon: { count: number; value: number };
+    churn: { count: number; value: number };
+    total: number;
+  };
+  cogs: {
+    categories: PLCategory[];
+    total: number;
+  };
+  gross_profit: number;
+  gross_margin: number;
+  operating_expenses: {
+    gna: {
+      categories: PLCategory[];
+      total: number;
+    };
+    sales_marketing: {
+      categories: PLCategory[];
+      total: number;
+    };
+    total: number;
+  };
+  operating_income: number;
+  operating_margin: number;
+  net_profit: number;
+  net_margin: number;
+}
+
+interface TrendData {
+  month: number;
+  month_name: string;
+  revenue: number;
+  cogs: number;
+  gross_profit: number;
+  operating_expenses: number;
+  net_profit: number;
+  gross_margin: number;
+  net_margin: number;
+}
 
 // Format currency
 const formatCurrency = (amount: number, currency: string = 'THB') => {
@@ -125,12 +182,14 @@ const KPICard: React.FC<KPICardProps> = ({ title, value, subtitle, icon, color, 
 
 // P&L Statement Table Component
 interface PLTableProps {
-  statement: PLStatement;
+  statement: PLResponse;
   currency: string;
 }
 
 const PLStatementTable: React.FC<PLTableProps> = ({ statement, currency }) => {
-  const { summary, revenue_detail, expense_detail } = statement;
+  const periodLabel = statement.period.type === 'ytd'
+    ? `Year-to-Date through ${statement.period.month_name || `Month ${statement.period.through_month}`}`
+    : statement.period.month_name;
 
   return (
     <TableContainer component={Paper} variant="outlined">
@@ -139,7 +198,7 @@ const PLStatementTable: React.FC<PLTableProps> = ({ statement, currency }) => {
           <TableRow sx={{ backgroundColor: 'grey.100' }}>
             <TableCell colSpan={2}>
               <Typography fontWeight="bold">
-                Profit & Loss Statement - {statement.period.start_date} to {statement.period.end_date}
+                Profit & Loss Statement - {periodLabel} {statement.period.year}
               </Typography>
             </TableCell>
           </TableRow>
@@ -152,21 +211,27 @@ const PLStatementTable: React.FC<PLTableProps> = ({ statement, currency }) => {
             </TableCell>
           </TableRow>
           <TableRow>
-            <TableCell sx={{ pl: 4 }}>New Contracts</TableCell>
-            <TableCell align="right">{formatCurrency(summary.revenue.new_contracts, currency)}</TableCell>
+            <TableCell sx={{ pl: 4 }}>New Contracts ({statement.revenue.new.count})</TableCell>
+            <TableCell align="right">{formatCurrency(statement.revenue.new.value, currency)}</TableCell>
           </TableRow>
           <TableRow>
-            <TableCell sx={{ pl: 4 }}>Renewals</TableCell>
-            <TableCell align="right">{formatCurrency(summary.revenue.renewals, currency)}</TableCell>
+            <TableCell sx={{ pl: 4 }}>Renewals ({statement.revenue.renewal.count})</TableCell>
+            <TableCell align="right">{formatCurrency(statement.revenue.renewal.value, currency)}</TableCell>
           </TableRow>
           <TableRow>
-            <TableCell sx={{ pl: 4 }}>Add-ons</TableCell>
-            <TableCell align="right">{formatCurrency(summary.revenue.addons, currency)}</TableCell>
+            <TableCell sx={{ pl: 4 }}>Add-ons ({statement.revenue.addon.count})</TableCell>
+            <TableCell align="right">{formatCurrency(statement.revenue.addon.value, currency)}</TableCell>
           </TableRow>
+          {statement.revenue.churn.count > 0 && (
+            <TableRow>
+              <TableCell sx={{ pl: 4, color: '#d32f2f' }}>Churn ({statement.revenue.churn.count})</TableCell>
+              <TableCell align="right" sx={{ color: '#d32f2f' }}>{formatCurrency(statement.revenue.churn.value, currency)}</TableCell>
+            </TableRow>
+          )}
           <TableRow sx={{ borderTop: 2, borderColor: 'grey.300' }}>
             <TableCell sx={{ fontWeight: 'bold' }}>Total Revenue</TableCell>
             <TableCell align="right" sx={{ fontWeight: 'bold', color: '#1976d2' }}>
-              {formatCurrency(summary.revenue.total, currency)}
+              {formatCurrency(statement.revenue.total, currency)}
             </TableCell>
           </TableRow>
 
@@ -176,13 +241,13 @@ const PLStatementTable: React.FC<PLTableProps> = ({ statement, currency }) => {
               <Typography fontWeight="bold" sx={{ color: '#e65100' }}>COST OF GOODS SOLD (COGS)</Typography>
             </TableCell>
           </TableRow>
-          {expense_detail.cogs.map((item) => (
+          {statement.cogs.categories.map((item) => (
             <TableRow key={item.category_id}>
               <TableCell sx={{ pl: 4 }}>{item.category_name}</TableCell>
               <TableCell align="right">{formatCurrency(item.amount, currency)}</TableCell>
             </TableRow>
           ))}
-          {expense_detail.cogs.length === 0 && (
+          {statement.cogs.categories.length === 0 && (
             <TableRow>
               <TableCell sx={{ pl: 4, fontStyle: 'italic' }} colSpan={2}>No COGS expenses recorded</TableCell>
             </TableRow>
@@ -190,7 +255,7 @@ const PLStatementTable: React.FC<PLTableProps> = ({ statement, currency }) => {
           <TableRow sx={{ borderTop: 2, borderColor: 'grey.300' }}>
             <TableCell sx={{ fontWeight: 'bold' }}>Total COGS</TableCell>
             <TableCell align="right" sx={{ fontWeight: 'bold', color: '#e65100' }}>
-              {formatCurrency(summary.expenses.cogs, currency)}
+              {formatCurrency(statement.cogs.total, currency)}
             </TableCell>
           </TableRow>
 
@@ -201,10 +266,10 @@ const PLStatementTable: React.FC<PLTableProps> = ({ statement, currency }) => {
             </TableCell>
             <TableCell align="right">
               <Typography fontWeight="bold" color="success.main">
-                {formatCurrency(summary.gross_profit, currency)}
+                {formatCurrency(statement.gross_profit, currency)}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                ({formatPercent(summary.gross_margin)} margin)
+                ({formatPercent(statement.gross_margin)} margin)
               </Typography>
             </TableCell>
           </TableRow>
@@ -215,13 +280,13 @@ const PLStatementTable: React.FC<PLTableProps> = ({ statement, currency }) => {
               <Typography fontWeight="bold" sx={{ color: '#7b1fa2' }}>GENERAL & ADMINISTRATIVE (G&A)</Typography>
             </TableCell>
           </TableRow>
-          {expense_detail.gna.map((item) => (
+          {statement.operating_expenses.gna.categories.map((item) => (
             <TableRow key={item.category_id}>
               <TableCell sx={{ pl: 4 }}>{item.category_name}</TableCell>
               <TableCell align="right">{formatCurrency(item.amount, currency)}</TableCell>
             </TableRow>
           ))}
-          {expense_detail.gna.length === 0 && (
+          {statement.operating_expenses.gna.categories.length === 0 && (
             <TableRow>
               <TableCell sx={{ pl: 4, fontStyle: 'italic' }} colSpan={2}>No G&A expenses recorded</TableCell>
             </TableRow>
@@ -229,7 +294,7 @@ const PLStatementTable: React.FC<PLTableProps> = ({ statement, currency }) => {
           <TableRow sx={{ borderTop: 1, borderColor: 'grey.300' }}>
             <TableCell sx={{ pl: 2, fontWeight: 'medium' }}>Total G&A</TableCell>
             <TableCell align="right" sx={{ fontWeight: 'medium' }}>
-              {formatCurrency(summary.expenses.gna, currency)}
+              {formatCurrency(statement.operating_expenses.gna.total, currency)}
             </TableCell>
           </TableRow>
 
@@ -239,13 +304,13 @@ const PLStatementTable: React.FC<PLTableProps> = ({ statement, currency }) => {
               <Typography fontWeight="bold" sx={{ color: '#00838f' }}>SALES & MARKETING</Typography>
             </TableCell>
           </TableRow>
-          {expense_detail.sales_marketing.map((item) => (
+          {statement.operating_expenses.sales_marketing.categories.map((item) => (
             <TableRow key={item.category_id}>
               <TableCell sx={{ pl: 4 }}>{item.category_name}</TableCell>
               <TableCell align="right">{formatCurrency(item.amount, currency)}</TableCell>
             </TableRow>
           ))}
-          {expense_detail.sales_marketing.length === 0 && (
+          {statement.operating_expenses.sales_marketing.categories.length === 0 && (
             <TableRow>
               <TableCell sx={{ pl: 4, fontStyle: 'italic' }} colSpan={2}>No Sales & Marketing expenses recorded</TableCell>
             </TableRow>
@@ -253,7 +318,7 @@ const PLStatementTable: React.FC<PLTableProps> = ({ statement, currency }) => {
           <TableRow sx={{ borderTop: 1, borderColor: 'grey.300' }}>
             <TableCell sx={{ pl: 2, fontWeight: 'medium' }}>Total Sales & Marketing</TableCell>
             <TableCell align="right" sx={{ fontWeight: 'medium' }}>
-              {formatCurrency(summary.expenses.sales_marketing, currency)}
+              {formatCurrency(statement.operating_expenses.sales_marketing.total, currency)}
             </TableCell>
           </TableRow>
 
@@ -261,23 +326,38 @@ const PLStatementTable: React.FC<PLTableProps> = ({ statement, currency }) => {
           <TableRow sx={{ borderTop: 2, borderColor: 'grey.400' }}>
             <TableCell sx={{ fontWeight: 'bold' }}>Total Operating Expenses</TableCell>
             <TableCell align="right" sx={{ fontWeight: 'bold', color: '#d32f2f' }}>
-              {formatCurrency(summary.expenses.total_opex, currency)}
+              {formatCurrency(statement.operating_expenses.total, currency)}
+            </TableCell>
+          </TableRow>
+
+          {/* Operating Income */}
+          <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+            <TableCell>
+              <Typography fontWeight="bold">OPERATING INCOME</Typography>
+            </TableCell>
+            <TableCell align="right">
+              <Typography fontWeight="bold" color={statement.operating_income >= 0 ? 'success.main' : 'error.main'}>
+                {formatCurrency(statement.operating_income, currency)}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                ({formatPercent(statement.operating_margin)} margin)
+              </Typography>
             </TableCell>
           </TableRow>
 
           {/* Net Profit */}
-          <TableRow sx={{ backgroundColor: summary.net_profit >= 0 ? '#c8e6c9' : '#ffcdd2' }}>
+          <TableRow sx={{ backgroundColor: statement.net_profit >= 0 ? '#c8e6c9' : '#ffcdd2' }}>
             <TableCell>
               <Typography variant="h6" fontWeight="bold">
                 NET PROFIT
               </Typography>
             </TableCell>
             <TableCell align="right">
-              <Typography variant="h6" fontWeight="bold" color={summary.net_profit >= 0 ? 'success.main' : 'error.main'}>
-                {formatCurrency(summary.net_profit, currency)}
+              <Typography variant="h6" fontWeight="bold" color={statement.net_profit >= 0 ? 'success.main' : 'error.main'}>
+                {formatCurrency(statement.net_profit, currency)}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                ({formatPercent(summary.net_margin)} margin)
+                ({formatPercent(statement.net_margin)} margin)
               </Typography>
             </TableCell>
           </TableRow>
@@ -289,7 +369,7 @@ const PLStatementTable: React.FC<PLTableProps> = ({ statement, currency }) => {
 
 // Trend Chart Component
 interface TrendChartProps {
-  data: PLTrendData[];
+  data: TrendData[];
   currency: string;
 }
 
@@ -346,7 +426,7 @@ const TrendChart: React.FC<TrendChartProps> = ({ data, currency }) => {
 
 // Margin Chart Component
 interface MarginChartProps {
-  data: PLTrendData[];
+  data: TrendData[];
 }
 
 const MarginChart: React.FC<MarginChartProps> = ({ data }) => {
@@ -374,8 +454,8 @@ const MarginChart: React.FC<MarginChartProps> = ({ data }) => {
 
 // Main Component
 const ProfitLoss: React.FC = () => {
-  const [statement, setStatement] = useState<PLStatement | null>(null);
-  const [trendData, setTrendData] = useState<PLTrendData[]>([]);
+  const [statement, setStatement] = useState<PLResponse | null>(null);
+  const [trendData, setTrendData] = useState<TrendData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [year, setYear] = useState<number>(new Date().getFullYear());
@@ -409,32 +489,60 @@ const ProfitLoss: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      // Load P&L statement
-      let statementData: PLStatement;
+      // Load P&L statement - use raw fetch to get proper response
+      const token = localStorage.getItem('accessToken');
+      const baseUrl = process.env.REACT_APP_API_URL || '';
+
+      const params = new URLSearchParams();
+      params.append('year', year.toString());
+
       if (viewMode === 'monthly') {
-        statementData = await api.getPLMonthly(
-          year,
-          month,
-          currency || undefined,
-          billingEntity || undefined
-        );
+        params.append('month', month.toString());
       } else {
-        statementData = await api.getPLYTD(
-          year,
-          month,
-          currency || undefined,
-          billingEntity || undefined
-        );
+        params.append('through_month', month.toString());
       }
+
+      if (currency) params.append('currency', currency);
+      if (billingEntity) params.append('billing_entity', billingEntity);
+
+      const endpoint = viewMode === 'monthly' ? 'monthly' : 'ytd';
+      const plResponse = await fetch(
+        `${baseUrl}/api/v1/profit-loss/${endpoint}/?${params.toString()}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (!plResponse.ok) {
+        throw new Error(`Failed to load P&L data: ${plResponse.statusText}`);
+      }
+
+      const statementData: PLResponse = await plResponse.json();
       setStatement(statementData);
 
       // Load trend data
-      const trend = await api.getPLTrend(
-        year,
-        currency || undefined,
-        billingEntity || undefined
+      const trendParams = new URLSearchParams();
+      trendParams.append('year', year.toString());
+      if (currency) trendParams.append('currency', currency);
+      if (billingEntity) trendParams.append('billing_entity', billingEntity);
+
+      const trendResponse = await fetch(
+        `${baseUrl}/api/v1/profit-loss/trend/?${trendParams.toString()}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
       );
-      setTrendData(trend);
+
+      if (trendResponse.ok) {
+        const trend: TrendData[] = await trendResponse.json();
+        setTrendData(trend);
+      }
     } catch (err: any) {
       console.error('Error loading P&L data:', err);
       setError(err.message || 'Failed to load P&L report');
@@ -451,7 +559,6 @@ const ProfitLoss: React.FC = () => {
     );
   }
 
-  const summary = statement?.summary;
   const displayCurrency = currency || 'THB';
 
   return (
@@ -536,12 +643,12 @@ const ProfitLoss: React.FC = () => {
       )}
 
       {/* KPI Cards */}
-      {summary && (
+      {statement && (
         <Grid container spacing={3} sx={{ mb: 3 }}>
           <Grid item xs={12} sm={6} md={3}>
             <KPICard
               title="Total Revenue"
-              value={formatCurrency(summary.revenue.total, displayCurrency)}
+              value={formatCurrency(statement.revenue.total, displayCurrency)}
               subtitle={viewMode === 'monthly' ? `${months.find(m => m.value === month)?.label} ${year}` : `YTD ${year}`}
               icon={<MoneyIcon />}
               color="#1976d2"
@@ -550,8 +657,8 @@ const ProfitLoss: React.FC = () => {
           <Grid item xs={12} sm={6} md={3}>
             <KPICard
               title="Gross Profit"
-              value={formatCurrency(summary.gross_profit, displayCurrency)}
-              subtitle={`${formatPercent(summary.gross_margin)} margin`}
+              value={formatCurrency(statement.gross_profit, displayCurrency)}
+              subtitle={`${formatPercent(statement.gross_margin)} margin`}
               icon={<ReceiptIcon />}
               color="#4caf50"
             />
@@ -559,8 +666,8 @@ const ProfitLoss: React.FC = () => {
           <Grid item xs={12} sm={6} md={3}>
             <KPICard
               title="Operating Expenses"
-              value={formatCurrency(summary.expenses.total_opex, displayCurrency)}
-              subtitle={`COGS: ${formatCurrency(summary.expenses.cogs, displayCurrency)}`}
+              value={formatCurrency(statement.operating_expenses.total, displayCurrency)}
+              subtitle={`COGS: ${formatCurrency(statement.cogs.total, displayCurrency)}`}
               icon={<AccountBalanceIcon />}
               color="#ff9800"
             />
@@ -568,10 +675,10 @@ const ProfitLoss: React.FC = () => {
           <Grid item xs={12} sm={6} md={3}>
             <KPICard
               title="Net Profit"
-              value={formatCurrency(summary.net_profit, displayCurrency)}
-              subtitle={`${formatPercent(summary.net_margin)} margin`}
+              value={formatCurrency(statement.net_profit, displayCurrency)}
+              subtitle={`${formatPercent(statement.net_margin)} margin`}
               icon={<ChartIcon />}
-              color={summary.net_profit >= 0 ? '#4caf50' : '#f44336'}
+              color={statement.net_profit >= 0 ? '#4caf50' : '#f44336'}
             />
           </Grid>
         </Grid>
@@ -600,7 +707,7 @@ const ProfitLoss: React.FC = () => {
       {statement && (
         <Box mt={3}>
           <Typography variant="caption" color="text.secondary">
-            Report Period: {statement.period.start_date} to {statement.period.end_date} |
+            Period: {statement.period.year} {statement.period.type === 'monthly' ? statement.period.month_name : `YTD through Month ${statement.period.through_month}`} |
             Currency: {statement.currency} |
             Entity: {statement.billing_entity === 'all' ? 'All Entities' : statement.billing_entity}
           </Typography>

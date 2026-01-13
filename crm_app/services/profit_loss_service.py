@@ -481,8 +481,7 @@ class ProfitLossService:
         categories = []
         category_totals = queryset.values(
             'category__id',
-            'category__name',
-            'category__full_path'
+            'category__name'
         ).annotate(
             total=Sum('amount'),
             count=Count('id')
@@ -494,7 +493,6 @@ class ProfitLossService:
             categories.append({
                 'category_id': str(cat['category__id']),
                 'category_name': cat['category__name'],
-                'full_path': cat['category__full_path'],
                 'amount': float(cat_total),
                 'count': cat['count']
             })
@@ -515,7 +513,6 @@ class ProfitLossService:
                 accumulator['categories'][cat_id] = {
                     'category_id': cat_id,
                     'category_name': cat['category_name'],
-                    'full_path': cat.get('full_path', cat['category_name']),
                     'amount': Decimal('0'),
                     'count': 0
                 }
@@ -528,7 +525,6 @@ class ProfitLossService:
             {
                 'category_id': cat['category_id'],
                 'category_name': cat['category_name'],
-                'full_path': cat['full_path'],
                 'amount': float(cat['amount']),
                 'count': cat['count']
             }
