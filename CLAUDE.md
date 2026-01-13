@@ -526,10 +526,19 @@ npm run build  # Production build
 - ✅ **SeasonalTriggerDate Model** - Admin-configurable variable holiday dates
 - ✅ **Multi-Year Contract Support** - `send_renewal_reminders` toggle to skip renewal emails
 - 🚧 **Finance & Accounting Module** (Jan 13, 2026) - IN PROGRESS
-  - Phase 1: Revenue Tracking (New/Renewals/Canceled/Add-ons)
-  - Models created: MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent
-  - Contract.lifecycle_type field added
-  - Migration: `0048_finance_revenue_tracking.py` ready to apply
+  - **Phase 1 COMPLETE**: Revenue Tracking (New/Renewals/Canceled/Add-ons)
+    - Models: MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent
+    - Contract.lifecycle_type field
+    - Revenue Dashboard page at `/revenue`
+  - **Phase 2 COMPLETE**: AR Aging Report
+    - AR Aging service with aging bucket calculations (30/60/90+ days)
+    - AccountsReceivable.tsx page at `/finance/ar`
+  - **Phase 3 COMPLETE**: Expense Module + AP Aging
+    - Models: Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry
+    - AP Aging service for accounts payable tracking
+    - AccountsPayable.tsx page at `/finance/ap`
+    - Migration: `0049_expense_module.py`
+  - **Next**: P&L Statement, Cash Flow Report, Balance Sheet
   - Plan file: `.claude/plans/memoized-churning-bird.md`
 
 ### Frontend (React + TypeScript)
