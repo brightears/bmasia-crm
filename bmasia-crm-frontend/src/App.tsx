@@ -46,6 +46,7 @@ import RevenueDashboard from './pages/RevenueDashboard';
 import AccountsReceivable from './pages/AccountsReceivable';
 import AccountsPayable from './pages/AccountsPayable';
 import ProfitLoss from './pages/ProfitLoss';
+import CashFlow from './pages/CashFlow';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -236,6 +237,14 @@ function App() {
           element={
             <ProtectedRoute requiredModule="invoices">
               <ProfitLoss />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/finance/cash-flow"
+          element={
+            <ProtectedRoute requiredModule="invoices">
+              <CashFlow />
             </ProtectedRoute>
           }
         />

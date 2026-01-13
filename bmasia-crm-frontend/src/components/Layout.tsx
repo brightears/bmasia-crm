@@ -166,6 +166,7 @@ const unifiedNavigation = [
       { text: 'AR Aging', icon: <ReceiptIcon />, path: '/finance/ar' },
       { text: 'AP Aging', icon: <ReceiptIcon />, path: '/finance/ap' },
       { text: 'Profit & Loss', icon: <ReceiptIcon />, path: '/finance/pl' },
+      { text: 'Cash Flow', icon: <ReceiptIcon />, path: '/finance/cash-flow' },
     ],
   },
   {

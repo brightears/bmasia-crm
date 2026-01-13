@@ -8296,3 +8296,146 @@ class ProfitLossViewSet(viewsets.ViewSet):
             return Response({
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class CashFlowViewSet(viewsets.ViewSet):
+    """
+    ViewSet for Cash Flow Statement generation.
+    Part of Finance Module - Phase 5.
+
+    Endpoints:
+    - GET /api/v1/cash-flow/monthly/?year=2026&month=1 - Monthly Cash Flow statement
+    - GET /api/v1/cash-flow/ytd/?year=2026&through_month=6 - Year-to-date Cash Flow
+    - GET /api/v1/cash-flow/trend/?year=2026 - Monthly trend data
+    """
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'], url_path='monthly')
+    def monthly(self, request):
+        """
+        GET /api/v1/cash-flow/monthly/?year=2026&month=1&billing_entity=bmasia_th&currency=THB
+
+        Returns Cash Flow Statement for a single month.
+        """
+        from crm_app.services.cash_flow_service import CashFlowService
+
+        year = request.query_params.get('year')
+        month = request.query_params.get('month')
+        billing_entity = request.query_params.get('billing_entity')
+        currency = request.query_params.get('currency')
+
+        if not year or not month:
+            return Response({
+                'error': 'year and month are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            month = int(month)
+        except ValueError:
+            return Response({
+                'error': 'year and month must be integers'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if month < 1 or month > 12:
+            return Response({
+                'error': 'month must be between 1 and 12'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = CashFlowService()
+            cf = service.get_monthly_cash_flow(
+                year=year,
+                month=month,
+                billing_entity=billing_entity,
+                currency=currency
+            )
+            return Response(cf)
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='ytd')
+    def ytd(self, request):
+        """
+        GET /api/v1/cash-flow/ytd/?year=2026&through_month=6&billing_entity=bmasia_th&currency=THB
+
+        Returns Year-to-Date Cash Flow Statement.
+        """
+        from crm_app.services.cash_flow_service import CashFlowService
+
+        year = request.query_params.get('year')
+        through_month = request.query_params.get('through_month')
+        billing_entity = request.query_params.get('billing_entity')
+        currency = request.query_params.get('currency')
+
+        if not year or not through_month:
+            return Response({
+                'error': 'year and through_month are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            through_month = int(through_month)
+        except ValueError:
+            return Response({
+                'error': 'year and through_month must be integers'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if through_month < 1 or through_month > 12:
+            return Response({
+                'error': 'through_month must be between 1 and 12'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = CashFlowService()
+            cf = service.get_ytd_cash_flow(
+                year=year,
+                through_month=through_month,
+                billing_entity=billing_entity,
+                currency=currency
+            )
+            return Response(cf)
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='trend')
+    def trend(self, request):
+        """
+        GET /api/v1/cash-flow/trend/?year=2026&billing_entity=bmasia_th&currency=THB
+
+        Returns monthly Cash Flow trend data for charts.
+        """
+        from crm_app.services.cash_flow_service import CashFlowService
+
+        year = request.query_params.get('year')
+        billing_entity = request.query_params.get('billing_entity')
+        currency = request.query_params.get('currency')
+
+        if not year:
+            return Response({
+                'error': 'year is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+        except ValueError:
+            return Response({
+                'error': 'year must be an integer'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = CashFlowService()
+            trend = service.get_monthly_trend(
+                year=year,
+                billing_entity=billing_entity,
+                currency=currency
+            )
+            return Response(trend)
+        except Exception as e:
+            return Response({
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

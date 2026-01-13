@@ -3576,6 +3576,129 @@ class MonthlyRevenueTarget(TimestampedModel):
         return f"Target: {self.year}-{self.month:02d} | {self.get_category_display()} | {self.currency}"
 
 
+class CashFlowSnapshot(TimestampedModel):
+    """
+    Stores cash flow data for a specific period.
+    Includes opening balance and allows manual overrides.
+    Part of Finance Module - Phase 5 (Cash Flow Statement).
+    """
+    BILLING_ENTITY_CHOICES = [
+        ('bmasia_th', 'BMAsia (Thailand) Co., Ltd.'),
+        ('bmasia_hk', 'BMAsia Limited'),
+    ]
+    CURRENCY_CHOICES = [
+        ('THB', 'Thai Baht'),
+        ('USD', 'US Dollar'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # Period
+    year = models.IntegerField(help_text="Year (e.g., 2026)")
+    month = models.IntegerField(help_text="Month (1-12)")
+
+    # Entity and currency
+    billing_entity = models.CharField(
+        max_length=20,
+        choices=BILLING_ENTITY_CHOICES,
+        help_text="Which BMAsia entity this applies to"
+    )
+    currency = models.CharField(
+        max_length=3,
+        choices=CURRENCY_CHOICES,
+        default='THB'
+    )
+
+    # Opening balance (manually entered or carried forward)
+    opening_cash_balance = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        default=0,
+        help_text="Cash balance at start of period"
+    )
+
+    # Operating Activities (null = calculate from data, value = override)
+    cash_from_customers = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+        help_text="Override: Cash received from customer invoice payments"
+    )
+    cash_to_suppliers = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+        help_text="Override: Cash paid to suppliers (non-salary OpEx)"
+    )
+    cash_to_employees = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+        help_text="Override: Cash paid for salaries/payroll"
+    )
+    other_operating_cash = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Other operating cash flows (manual entry)"
+    )
+
+    # Investing Activities
+    capex_purchases = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+        help_text="Override: Cash paid for capital expenditures"
+    )
+    asset_sales = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Cash received from asset sales"
+    )
+    other_investing_cash = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Other investing cash flows"
+    )
+
+    # Financing Activities (manual entry - no auto-calculation)
+    loan_proceeds = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Cash received from new loans"
+    )
+    loan_repayments = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Cash paid to repay loans"
+    )
+    equity_injections = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Cash received from equity investments"
+    )
+    dividends_paid = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Cash paid as dividends"
+    )
+    other_financing_cash = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Other financing cash flows"
+    )
+
+    # Metadata
+    notes = models.TextField(blank=True, help_text="Notes about this period")
+    is_finalized = models.BooleanField(
+        default=False,
+        help_text="Mark as finalized to prevent auto-recalculation"
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cash_flow_snapshots'
+    )
+
+    class Meta:
+        unique_together = ['year', 'month', 'billing_entity', 'currency']
+        ordering = ['-year', '-month']
+        indexes = [
+            models.Index(fields=['year', 'month']),
+            models.Index(fields=['billing_entity', 'year', 'month']),
+        ]
+        verbose_name = 'Cash Flow Snapshot'
+        verbose_name_plural = 'Cash Flow Snapshots'
+
+    def __str__(self):
+        return f"Cash Flow: {self.year}-{self.month:02d} | {self.currency} | {self.billing_entity}"
+
+
 class ContractRevenueEvent(TimestampedModel):
     """
     Tracks revenue-impacting events for contracts (renewals, add-ons, churns, payments).
