@@ -224,6 +224,12 @@ Use this agent when:
 - **Discount Display**: Shows percentage + amount: "Discount (10.0%): -฿500.00"
 - **Legal Entity Names**: Uses legal_entity_name when available, falls back to name
 - **Optimizations**: Single-page quotes for simple items, optimized logo (880x377px)
+- **Contract Signatures** (Jan 2026):
+  - Chris Andrews signature scan auto-added to BMAsia side
+  - Company stamp based on billing entity (Thai stamp vs International stamp)
+  - BMAsia date auto-filled (contracts are pre-signed)
+  - Signature overlaps line for natural look
+  - Static files: `crm_app/static/signatures/` (Chris Signature.png, BMAsia Thai Stamp.png, BMAsia Stamp.png)
 - **File**: `crm_app/views.py` (lines ~515-1750)
 
 ### Quote Line Items
@@ -536,6 +542,17 @@ npm run build  # Production build
 - ✅ **Zone Status Dashboard** - Real-time Soundtrack zone monitoring (`/zones`)
 
 ### Recent Improvements (January 2026)
+- ✅ **Contract PDF Signature & Stamp** (Jan 12, 2026)
+  - **Chris Andrews signature**: Auto-added to BMAsia side of all contracts
+  - **Company stamps**: Thai stamp for Thailand entity, International stamp for HK entity
+  - **Auto-filled date**: BMAsia side date auto-populated (contracts are pre-signed)
+  - **Signature positioning**: Overlaps signature line for natural look, shifted right to center
+  - **FROM/BILL TO redesign**: Card styling matching Quote PDF design
+  - **Bank details table**: Fixed column overflow with proper widths and separators
+  - **Zone table**: Property name shown once (merged cells) instead of repeated per zone
+  - **KeepTogether**: Signature section + footer kept on same page
+  - Static files: `crm_app/static/signatures/` (3 PNG files)
+  - File: `crm_app/views.py` (lines ~1100-1520)
 - ✅ **Quote PDF Design Improvements** (Jan 10, 2026)
   - **Removed Status from header**: "Sent" status was confusing for customers
   - **FROM/BILL TO redesign**: Subtle card styling with light gray background + orange accent lines
