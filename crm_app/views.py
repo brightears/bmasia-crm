@@ -7176,3 +7176,144 @@ class RevenueViewSet(viewsets.ViewSet):
         queryset = queryset.order_by('-year', '-month', 'category')
         serializer = MonthlyRevenueSnapshotSerializer(queryset, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['post'], url_path='classify-contracts')
+    def classify_contracts(self, request):
+        """
+        POST /api/v1/revenue/classify-contracts/
+
+        Classify all contracts by lifecycle type (new/renewal/addon/churn).
+        Use this to auto-detect and set lifecycle_type for contracts.
+
+        Body:
+        - force: boolean (optional) - If true, reclassify all contracts except manually set ones
+
+        Returns:
+        - counts by lifecycle type
+        """
+        from crm_app.services.revenue_tracking_service import RevenueTrackingService
+
+        force = request.data.get('force', False)
+
+        try:
+            service = RevenueTrackingService()
+            results = service.classify_all_contracts(force=force)
+
+            return Response({
+                'success': True,
+                'classified': results,
+                'total': sum(results.values()),
+                'message': f"Classified {sum(results.values())} contracts"
+            })
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'], url_path='generate-snapshots')
+    def generate_snapshots(self, request):
+        """
+        POST /api/v1/revenue/generate-snapshots/
+
+        Generate monthly revenue snapshots from contract data.
+
+        Body:
+        - year: int (required) - Year to generate snapshots for
+        - month: int (optional) - Specific month (1-12), or all months if not provided
+        - billing_entity: string (optional) - Filter by entity (bmasia_th or bmasia_hk)
+        - currency: string (optional) - Filter by currency (USD, THB)
+        - force: boolean (optional) - Recalculate even if manually overridden
+
+        Returns:
+        - count of snapshots created/updated
+        """
+        from crm_app.services.revenue_tracking_service import RevenueTrackingService
+
+        year = request.data.get('year')
+        if not year:
+            return Response({
+                'error': 'year is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+        except ValueError:
+            return Response({
+                'error': 'Invalid year parameter'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        month = request.data.get('month')
+        billing_entity = request.data.get('billing_entity')
+        currency = request.data.get('currency')
+        force = request.data.get('force', False)
+
+        try:
+            service = RevenueTrackingService()
+
+            if month:
+                try:
+                    month = int(month)
+                except ValueError:
+                    return Response({
+                        'error': 'Invalid month parameter'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                snapshots = service.generate_monthly_snapshot(
+                    year=year,
+                    month=month,
+                    billing_entity=billing_entity,
+                    currency=currency,
+                    force=force
+                )
+            else:
+                # Generate for all months
+                snapshots = service.generate_snapshots_for_year(year, force=force)
+
+            return Response({
+                'success': True,
+                'snapshots_created': len(snapshots),
+                'year': year,
+                'month': month,
+                'message': f"Generated {len(snapshots)} snapshots for {year}" + (f"-{month:02d}" if month else "")
+            })
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'], url_path='initialize')
+    def initialize(self, request):
+        """
+        POST /api/v1/revenue/initialize/
+
+        Initialize the finance module by classifying all contracts and creating events.
+        Use this once when first setting up the Finance Module.
+
+        WARNING: This will classify all contracts and create revenue events.
+        Only run once per installation.
+
+        Returns:
+        - contracts_classified: count
+        - events_created: count
+        - errors: list of any errors
+        """
+        from crm_app.services.revenue_tracking_service import RevenueTrackingService
+
+        try:
+            service = RevenueTrackingService()
+            results = service.initialize_from_existing_contracts(created_by=request.user)
+
+            return Response({
+                'success': True,
+                'contracts_classified': results['contracts_classified'],
+                'events_created': results['events_created'],
+                'errors': results['errors'],
+                'message': f"Initialized finance module: {results['contracts_classified']} contracts, {results['events_created']} events"
+            })
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

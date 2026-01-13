@@ -1170,8 +1170,37 @@ class ApiService {
   }
 
   // Revenue Dashboard
-  async getRevenueMonthly(year: number): Promise<any> {
-    const response = await authApi.get('/revenue/monthly/', { params: { year } });
+  async getRevenueMonthly(year: number, currency?: string, billingEntity?: string): Promise<any> {
+    const params: any = { year };
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    const response = await authApi.get('/revenue/monthly/', { params });
+    return response.data;
+  }
+
+  async initializeRevenueModule(): Promise<any> {
+    const response = await authApi.post('/revenue/initialize/');
+    return response.data;
+  }
+
+  async classifyContracts(force: boolean = false): Promise<any> {
+    const response = await authApi.post('/revenue/classify-contracts/', { force });
+    return response.data;
+  }
+
+  async generateRevenueSnapshots(year: number, month?: number, force: boolean = false): Promise<any> {
+    const data: any = { year, force };
+    if (month) data.month = month;
+    const response = await authApi.post('/revenue/generate-snapshots/', data);
+    return response.data;
+  }
+
+  async getRevenueYoY(year: number, compareYear?: number, currency?: string, billingEntity?: string): Promise<any> {
+    const params: any = { year };
+    if (compareYear) params.compare_year = compareYear;
+    if (currency) params.currency = currency;
+    if (billingEntity) params.billing_entity = billingEntity;
+    const response = await authApi.get('/revenue/year-over-year/', { params });
     return response.data;
   }
 }

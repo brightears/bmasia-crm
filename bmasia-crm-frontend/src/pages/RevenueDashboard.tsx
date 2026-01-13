@@ -18,12 +18,23 @@ import {
   Alert,
   CircularProgress,
   SelectChangeEvent,
+  Button,
+  Snackbar,
+  Tooltip,
+  IconButton,
+  Menu,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material';
 import {
   TrendingUp,
   Autorenew,
   AddCircle,
   RemoveCircle,
+  Refresh,
+  Settings,
+  PlayArrow,
+  MoreVert,
 } from '@mui/icons-material';
 import { MonthlyRevenueData } from '../types';
 import ApiService from '../services/api';
@@ -73,62 +84,140 @@ const KPICard: React.FC<KPICardProps> = ({ title, value, count, icon, color }) =
 const RevenueDashboard: React.FC = () => {
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState<number>(currentYear);
+  const [currency, setCurrency] = useState<string>('USD');
+  const [billingEntity, setBillingEntity] = useState<string>('bmasia_th');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
   const [monthlyData, setMonthlyData] = useState<MonthlyRevenueData[]>([]);
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
+    open: false,
+    message: '',
+    severity: 'success',
+  });
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
 
   // Generate year options (current year and 3 years back)
   const yearOptions = Array.from({ length: 4 }, (_, i) => currentYear - i);
 
   useEffect(() => {
     loadRevenueData();
-  }, [selectedYear]);
+  }, [selectedYear, currency, billingEntity]);
 
   const loadRevenueData = async () => {
     try {
       setLoading(true);
       setError('');
-      // For now, using mock data until backend is ready
-      const mockData: MonthlyRevenueData[] = generateMockData(selectedYear);
-      setMonthlyData(mockData);
+
+      const response = await ApiService.getRevenueMonthly(selectedYear, currency, billingEntity);
+
+      // Transform API response to component format
+      const months = response.months || [];
+      const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ];
+
+      // Fill in all 12 months with data or zeros
+      const transformedData: MonthlyRevenueData[] = monthNames.map((name, index) => {
+        const monthNum = index + 1;
+        const monthData = months.find((m: any) => m.month === monthNum);
+
+        return {
+          month: monthNum,
+          month_name: name,
+          new: monthData?.new || { count: 0, value: 0 },
+          renewal: monthData?.renewal || { count: 0, value: 0 },
+          addon: monthData?.addon || { count: 0, value: 0 },
+          churn: monthData?.churn || { count: 0, value: 0 },
+        };
+      });
+
+      setMonthlyData(transformedData);
     } catch (err: any) {
-      setError('Failed to load revenue data');
       console.error('Revenue dashboard error:', err);
+      setError('Failed to load revenue data. Make sure to initialize the finance module first.');
     } finally {
       setLoading(false);
     }
   };
 
-  const generateMockData = (year: number): MonthlyRevenueData[] => {
-    const months = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ];
-
-    return months.map((month, index) => ({
-      month: index + 1,
-      month_name: month,
-      new: {
-        count: Math.floor(Math.random() * 10) + 3,
-        value: Math.floor(Math.random() * 50000) + 20000,
-      },
-      renewal: {
-        count: Math.floor(Math.random() * 15) + 5,
-        value: Math.floor(Math.random() * 80000) + 40000,
-      },
-      addon: {
-        count: Math.floor(Math.random() * 5) + 1,
-        value: Math.floor(Math.random() * 20000) + 5000,
-      },
-      churn: {
-        count: Math.floor(Math.random() * 3),
-        value: -Math.floor(Math.random() * 15000),
-      },
-    }));
-  };
-
   const handleYearChange = (event: SelectChangeEvent<number>) => {
     setSelectedYear(event.target.value as number);
+  };
+
+  const handleCurrencyChange = (event: SelectChangeEvent<string>) => {
+    setCurrency(event.target.value);
+  };
+
+  const handleEntityChange = (event: SelectChangeEvent<string>) => {
+    setBillingEntity(event.target.value);
+  };
+
+  const handleInitialize = async () => {
+    setActionLoading('initialize');
+    try {
+      const result = await ApiService.initializeRevenueModule();
+      setSnackbar({
+        open: true,
+        message: result.message || 'Finance module initialized successfully',
+        severity: 'success',
+      });
+      loadRevenueData();
+    } catch (err: any) {
+      setSnackbar({
+        open: true,
+        message: err.response?.data?.error || 'Failed to initialize finance module',
+        severity: 'error',
+      });
+    } finally {
+      setActionLoading(null);
+      setMenuAnchor(null);
+    }
+  };
+
+  const handleClassifyContracts = async () => {
+    setActionLoading('classify');
+    try {
+      const result = await ApiService.classifyContracts(true);
+      setSnackbar({
+        open: true,
+        message: result.message || 'Contracts classified successfully',
+        severity: 'success',
+      });
+      loadRevenueData();
+    } catch (err: any) {
+      setSnackbar({
+        open: true,
+        message: err.response?.data?.error || 'Failed to classify contracts',
+        severity: 'error',
+      });
+    } finally {
+      setActionLoading(null);
+      setMenuAnchor(null);
+    }
+  };
+
+  const handleGenerateSnapshots = async () => {
+    setActionLoading('generate');
+    try {
+      const result = await ApiService.generateRevenueSnapshots(selectedYear, undefined, true);
+      setSnackbar({
+        open: true,
+        message: result.message || 'Snapshots generated successfully',
+        severity: 'success',
+      });
+      loadRevenueData();
+    } catch (err: any) {
+      setSnackbar({
+        open: true,
+        message: err.response?.data?.error || 'Failed to generate snapshots',
+        severity: 'error',
+      });
+    } finally {
+      setActionLoading(null);
+      setMenuAnchor(null);
+    }
   };
 
   const calculateYTDTotals = () => {
@@ -150,9 +239,10 @@ const RevenueDashboard: React.FC = () => {
   };
 
   const formatCurrency = (value: number): string => {
-    return new Intl.NumberFormat('en-US', {
+    const locale = currency === 'THB' ? 'th-TH' : 'en-US';
+    return new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: 'USD',
+      currency: currency,
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(Math.abs(value));
@@ -171,6 +261,7 @@ const RevenueDashboard: React.FC = () => {
   }
 
   const ytdTotals = calculateYTDTotals();
+  const hasData = monthlyData.some(m => m.new.count > 0 || m.renewal.count > 0 || m.addon.count > 0 || m.churn.count > 0);
 
   return (
     <Box>
@@ -183,24 +274,72 @@ const RevenueDashboard: React.FC = () => {
             Year-to-date revenue breakdown by category
           </Typography>
         </Box>
-        <FormControl sx={{ minWidth: 120 }}>
-          <Select
-            value={selectedYear}
-            onChange={handleYearChange}
-            size="small"
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <FormControl size="small" sx={{ minWidth: 100 }}>
+            <Select value={currency} onChange={handleCurrencyChange}>
+              <MenuItem value="USD">USD</MenuItem>
+              <MenuItem value="THB">THB</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 150 }}>
+            <Select value={billingEntity} onChange={handleEntityChange}>
+              <MenuItem value="bmasia_th">Thailand</MenuItem>
+              <MenuItem value="bmasia_hk">Hong Kong</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 100 }}>
+            <Select value={selectedYear} onChange={handleYearChange}>
+              {yearOptions.map((year) => (
+                <MenuItem key={year} value={year}>
+                  {year}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <Tooltip title="Refresh data">
+            <IconButton onClick={loadRevenueData} disabled={loading}>
+              <Refresh />
+            </IconButton>
+          </Tooltip>
+          <IconButton onClick={(e) => setMenuAnchor(e.currentTarget)}>
+            <MoreVert />
+          </IconButton>
+          <Menu
+            anchorEl={menuAnchor}
+            open={Boolean(menuAnchor)}
+            onClose={() => setMenuAnchor(null)}
           >
-            {yearOptions.map((year) => (
-              <MenuItem key={year} value={year}>
-                {year}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+            <MenuItem onClick={handleInitialize} disabled={actionLoading !== null}>
+              <ListItemIcon>
+                {actionLoading === 'initialize' ? <CircularProgress size={20} /> : <Settings fontSize="small" />}
+              </ListItemIcon>
+              <ListItemText>Initialize Finance Module</ListItemText>
+            </MenuItem>
+            <MenuItem onClick={handleClassifyContracts} disabled={actionLoading !== null}>
+              <ListItemIcon>
+                {actionLoading === 'classify' ? <CircularProgress size={20} /> : <PlayArrow fontSize="small" />}
+              </ListItemIcon>
+              <ListItemText>Classify All Contracts</ListItemText>
+            </MenuItem>
+            <MenuItem onClick={handleGenerateSnapshots} disabled={actionLoading !== null}>
+              <ListItemIcon>
+                {actionLoading === 'generate' ? <CircularProgress size={20} /> : <Refresh fontSize="small" />}
+              </ListItemIcon>
+              <ListItemText>Generate {selectedYear} Snapshots</ListItemText>
+            </MenuItem>
+          </Menu>
+        </Box>
       </Box>
 
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
           {error}
+        </Alert>
+      )}
+
+      {!hasData && !error && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          No revenue data found for {selectedYear}. Click the menu (⋮) to initialize the finance module or generate snapshots.
         </Alert>
       )}
 
@@ -340,6 +479,20 @@ const RevenueDashboard: React.FC = () => {
           </Table>
         </TableContainer>
       </Paper>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={6000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+      >
+        <Alert
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };
