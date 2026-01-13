@@ -12,7 +12,7 @@ Comprehensive financial reporting module for BMAsia CRM. Replaces manual spreads
 | 3 | Expense Module + AP Aging | ✅ Complete | `/finance/ap` |
 | 4 | Profit & Loss | ✅ Complete | `/finance/pl` |
 | 5 | Cash Flow | ✅ Complete | `/finance/cash-flow` |
-| 6 | Balance Sheet | 🚧 Pending | `/finance/balance-sheet` |
+| 6 | Balance Sheet | ✅ Complete | `/finance/balance-sheet` |
 
 ## Phase 1: Revenue Dashboard
 - **Models**: MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent
@@ -40,12 +40,18 @@ Comprehensive financial reporting module for BMAsia CRM. Replaces manual spreads
 - **Migration**: `0050_cash_flow_module.py`
 - **API**: `/api/v1/cash-flow/monthly/`, `/ytd/`, `/trend/`
 
-## Phase 6: Balance Sheet (Quarterly) - PLANNED
-- **Components**: Assets (Cash, AR, Fixed Assets), Liabilities (AP), Equity (Retained Earnings)
-- **AR Integration**: Uses Invoice aging data
-- **AP Integration**: Uses ExpenseEntry aging data
-- **CapEx**: From ExpenseEntry where category_type='capex'
-- **Depreciation**: Country-specific rules (Thailand: 3-5 years, HK: 3-5 years)
+## Phase 6: Balance Sheet (Quarterly) ✅ COMPLETE
+- **Model**: BalanceSheetSnapshot (quarterly snapshots with manual overrides)
+- **Service**: BalanceSheetService (quarterly and trend calculations)
+- **Data Sources**:
+  - Cash & Bank: from CashFlowSnapshot closing balance
+  - AR: from Invoice where status in ['Sent', 'Overdue']
+  - Fixed Assets: from ExpenseEntry where category_type='capex'
+  - AP: from ExpenseEntry where status in ['pending', 'approved']
+  - Retained Earnings: from cumulative P&L net profit
+- **Depreciation**: Country-specific rates (Computer: 33.33%/3yr, Office: 20%/5yr)
+- **Migration**: `0051_balance_sheet_module.py`
+- **API**: `/api/v1/balance-sheet/quarterly/`, `/trend/`
 
 ## Key Files
 - Backend Services: `crm_app/services/profit_loss_service.py`, `cash_flow_service.py`

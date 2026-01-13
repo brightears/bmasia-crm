@@ -2,6 +2,16 @@
 
 ## January 2026
 
+### Jan 13, 2026 - Finance Module Phases 4, 5 & 6
+- **Balance Sheet (Phase 6)**
+  - BalanceSheetSnapshot model for quarterly snapshots with manual overrides
+  - BalanceSheetService calculates Assets, Liabilities, Equity
+  - Data: CashFlowSnapshot (cash), Invoice (AR), ExpenseEntry (CapEx/AP), P&L (retained earnings)
+  - Depreciation: Thailand/HK rates (Computer 33.33%/3yr, Office 20%/5yr)
+  - BalanceSheet.tsx with KPI cards, hierarchical statement table, quarterly trend chart
+  - API: `/api/v1/balance-sheet/quarterly/`, `/trend/`
+  - Migration: `0051_balance_sheet_module.py`
+
 ### Jan 13, 2026 - Finance Module Phases 4 & 5
 - **Cash Flow Statement (Phase 5)**
   - CashFlowSnapshot model for monthly data with manual overrides
