@@ -1,69 +1,110 @@
-# Session Checkpoint - January 13, 2026
+# Session Checkpoint: Finance Module Complete
+**Date:** January 13, 2026
+**Session Focus:** Finance & Accounting Module - ALL 6 PHASES COMPLETE
 
-## Finance & Accounting Module - Phase 1 Started
+## Summary
+Completed the entire Finance & Accounting Module for BMAsia CRM, including documentation restructuring.
 
-### What Was Accomplished
+## What Was Completed
 
-1. **Plan Created & Approved** (`.claude/plans/memoized-churning-bird.md`)
-   - 7 financial reports: Revenue Dashboard, P&L, Cash Flow, AR, AP, Balance Sheet, CapEx
-   - Finance Overview hub page design
-   - Accounting basis: Revenue accrued, Subscriptions accrued, Other expenses cash basis
-   - Separate books for Thailand vs HK entities
-   - Both THB and USD with exchange rate conversion
+### 1. Documentation Restructure
+Reorganized CLAUDE.md from 875 lines to 104 lines using Anthropic's recommended `.claude/rules/` structure:
+- `.claude/rules/deployment.md` - Render deployment workflow
+- `.claude/rules/subagents.md` - Sub-agent usage guide
+- `.claude/rules/finance-module.md` - Finance module documentation
+- `.claude/rules/implementation-history.md` - Feature history
 
-2. **Database Models Implemented** (`crm_app/models.py`)
-   - `Contract.lifecycle_type` field (new/renewal/addon/churn)
-   - `Contract.lifecycle_type_manually_set` flag
-   - `Contract.lifecycle_effective_date`
-   - `MonthlyRevenueSnapshot` - monthly revenue by category
-   - `MonthlyRevenueTarget` - budget targets
-   - `ContractRevenueEvent` - granular revenue events
+### 2. Phase 4: Profit & Loss Report
+- **Service:** `crm_app/services/profit_loss_service.py`
+- **ViewSet:** ProfitLossViewSet in `crm_app/views.py`
+- **Frontend:** `bmasia-crm-frontend/src/pages/ProfitLoss.tsx`
+- **API:** `/api/v1/profit-loss/monthly/`, `/ytd/`, `/comparative/`, `/trend/`
 
-3. **Migration Created & Deployed**
-   - File: `crm_app/migrations/0048_finance_revenue_tracking.py`
-   - Status: APPLIED to production (deploy dep-d5its4mr433s738omr7g is LIVE)
+### 3. Phase 5: Cash Flow Statement
+- **Model:** CashFlowSnapshot (`crm_app/models.py`)
+- **Service:** `crm_app/services/cash_flow_service.py`
+- **ViewSet:** CashFlowViewSet in `crm_app/views.py`
+- **Frontend:** `bmasia-crm-frontend/src/pages/CashFlow.tsx`
+- **API:** `/api/v1/cash-flow/monthly/`, `/ytd/`, `/trend/`
+- **Migration:** `0050_cash_flow_module.py`
 
-4. **Documentation Created**
-   - `FINANCE_MODULE_PHASE1.md` - Technical docs
-   - `FINANCE_USAGE_EXAMPLES.md` - Code examples
-   - `IMPLEMENTATION_SUMMARY.md` - Quick reference
+### 4. Phase 6: Balance Sheet
+- **Model:** BalanceSheetSnapshot (`crm_app/models.py`)
+- **Service:** `crm_app/services/balance_sheet_service.py`
+- **ViewSet:** BalanceSheetViewSet in `crm_app/views.py`
+- **Frontend:** `bmasia-crm-frontend/src/pages/BalanceSheet.tsx`
+- **API:** `/api/v1/balance-sheet/quarterly/`, `/trend/`
+- **Migration:** `0051_balance_sheet_module.py`
 
-### Git Status
-- Commit: `87ffae12` pushed to `origin/main`
-- All changes committed and deployed
+### 5. Bug Fix: Auth Token Key
+Fixed authentication issue in finance pages - they were using wrong localStorage key:
+- **Wrong:** `localStorage.getItem('accessToken')`
+- **Correct:** `localStorage.getItem('bmasia_access_token')`
+- Fixed in: ProfitLoss.tsx, CashFlow.tsx, BalanceSheet.tsx
 
-### Next Steps (Continue Here)
+## Finance Module Status - ALL 6 PHASES COMPLETE
 
-1. **Create RevenueTrackingService** (`crm_app/services/revenue_tracking_service.py`)
-   - Auto-detect lifecycle_type for contracts
-   - Logic: new (no prior contracts), renewal (follows expired), addon (zones added), churn (terminated)
+| Phase | Feature | Route | Status |
+|-------|---------|-------|--------|
+| 1 | Revenue Dashboard | `/revenue` | ✅ |
+| 2 | AR Aging | `/finance/ar` | ✅ |
+| 3 | Expense + AP Aging | `/finance/ap` | ✅ |
+| 4 | Profit & Loss | `/finance/pl` | ✅ |
+| 5 | Cash Flow | `/finance/cash-flow` | ✅ |
+| 6 | Balance Sheet | `/finance/balance-sheet` | ✅ |
 
-2. **Create API Endpoints** (`crm_app/views.py`)
-   - `RevenueViewSet` with endpoints:
-     - `/api/v1/revenue/monthly/` - monthly grid data
-     - `/api/v1/revenue/targets/` - budget targets
-     - `/api/v1/revenue/year-over-year/` - YoY comparison
+## PENDING: PDF/Excel Export
+Export functionality is NOT yet implemented for any finance reports. This needs:
+- Backend PDF generation (using ReportLab, similar to Quote/Invoice PDFs)
+- Backend Excel generation (using openpyxl)
+- Frontend download buttons on each finance page
+- BMAsia branding on PDF exports
 
-3. **Build Frontend** (`bmasia-crm-frontend/src/pages/RevenueDashboard.tsx`)
-   - KPI cards for New/Renewal/Churn/Addon
-   - Monthly grid with YoY comparison
-   - Edit dialogs for overrides and targets
+## Key Files Modified/Created
 
-### Key User Decisions (Confirmed)
-- **Expense Categories**: COGS, G&A, Sales & Marketing (separate)
-- **CapEx**: Computer equipment, Office equipment, Software licenses
-- **Depreciation**: Country-based (Thai GAAP for Thailand, different for HK)
-- **Currency**: Both THB and USD with conversion
-- **Multi-Entity**: Separate books for Thailand vs HK
-- **Access**: Admin + Finance users only
+### Backend
+- `crm_app/models.py` - CashFlowSnapshot, BalanceSheetSnapshot
+- `crm_app/services/cash_flow_service.py` - NEW
+- `crm_app/services/balance_sheet_service.py` - NEW
+- `crm_app/services/profit_loss_service.py`
+- `crm_app/views.py` - CashFlowViewSet, BalanceSheetViewSet, ProfitLossViewSet
+- `crm_app/urls.py` - Routes added
 
-### Files Modified This Session
-- `crm_app/models.py` - Added lifecycle fields + 3 new models
-- `crm_app/migrations/0048_finance_revenue_tracking.py` - New migration
-- `CLAUDE.md` - Updated with Finance Module status
-- `.claude/plans/memoized-churning-bird.md` - Full plan
+### Frontend
+- `bmasia-crm-frontend/src/pages/ProfitLoss.tsx`
+- `bmasia-crm-frontend/src/pages/CashFlow.tsx` - NEW
+- `bmasia-crm-frontend/src/pages/BalanceSheet.tsx` - NEW
+- `bmasia-crm-frontend/src/App.tsx` - Routes
+- `bmasia-crm-frontend/src/components/Layout.tsx` - Nav links
 
-### Contract PDF Signature (Also Done Today)
-- Chris Andrews signature auto-added to contracts
-- Thai/International stamps based on billing entity
-- Commits: c3ef77f5, 97558545, 49776174
+### Documentation
+- `CLAUDE.md` - Slimmed to 104 lines
+- `.claude/rules/deployment.md` - NEW
+- `.claude/rules/subagents.md` - NEW
+- `.claude/rules/finance-module.md` - NEW
+- `.claude/rules/implementation-history.md` - NEW
+
+## Migrations
+- `0050_cash_flow_module.py` - CashFlowSnapshot
+- `0051_balance_sheet_module.py` - BalanceSheetSnapshot
+
+## Next Steps
+1. **Add PDF/Excel Export** to all finance reports
+2. **Populate data** - Enter companies, contracts, invoices, expenses
+3. **Finance Overview Hub** - Summary dashboard (optional)
+
+## Technical Notes
+
+### Balance Sheet Data Sources
+- **Cash & Bank:** CashFlowSnapshot closing balance
+- **AR:** Invoice where status in ['Sent', 'Overdue']
+- **Fixed Assets:** ExpenseEntry where category_type='capex'
+- **Depreciation:** Thailand/HK rates (Computer 33.33%/3yr, Office 20%/5yr)
+- **AP:** ExpenseEntry where status in ['pending', 'approved']
+- **Retained Earnings:** Cumulative P&L net profit
+
+### Auth Token Storage
+Token stored as `bmasia_access_token` in localStorage/sessionStorage. All pages using direct fetch must use this key.
+
+---
+**End of Session Checkpoint**

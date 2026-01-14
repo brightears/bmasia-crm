@@ -14,6 +14,21 @@ Comprehensive financial reporting module for BMAsia CRM. Replaces manual spreads
 | 5 | Cash Flow | ✅ Complete | `/finance/cash-flow` |
 | 6 | Balance Sheet | ✅ Complete | `/finance/balance-sheet` |
 
+## Pending Features
+
+### PDF/Excel Export (Not Yet Implemented)
+All finance reports should have export functionality:
+- **PDF Export**: Professional formatted reports with BMAsia branding
+- **Excel Export**: Data tables for further analysis
+
+Reports needing export:
+- [ ] Revenue Dashboard
+- [ ] AR Aging Report
+- [ ] AP Aging Report
+- [ ] Profit & Loss Statement
+- [ ] Cash Flow Statement
+- [ ] Balance Sheet
+
 ## Phase 1: Revenue Dashboard
 - **Models**: MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent
 - **Fields**: Contract.lifecycle_type (new/renewal/addon/churn)
