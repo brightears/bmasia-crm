@@ -57,13 +57,10 @@ interface ZoneFormData {
 }
 
 const contractStatuses = [
-  'Draft',
-  'Sent',
-  'Signed',
   'Active',
+  'Renewed',
   'Expired',
-  'Terminated',
-  'Renewed'
+  'Cancelled'
 ];
 
 const contractTypes = [
@@ -119,7 +116,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
     contract_number: '',
     contract_type: 'Annual' as 'Annual' | 'Monthly' | 'One-time' | 'Custom',
     contract_category: 'standard' as 'standard' | 'corporate_master' | 'participation',
-    status: 'Draft' as 'Draft' | 'Sent' | 'Signed' | 'Active' | 'Expired' | 'Terminated' | 'Renewed',
+    status: 'Active' as 'Active' | 'Renewed' | 'Expired' | 'Cancelled',
     start_date: null as Date | null,
     end_date: null as Date | null,
     value: '',
@@ -317,7 +314,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
       contract_number: '',
       contract_type: 'Annual' as 'Annual' | 'Monthly' | 'One-time' | 'Custom',
       contract_category: 'standard' as 'standard' | 'corporate_master' | 'participation',
-      status: 'Draft' as 'Draft' | 'Sent' | 'Signed' | 'Active' | 'Expired' | 'Terminated' | 'Renewed',
+      status: 'Active' as 'Active' | 'Renewed' | 'Expired' | 'Cancelled',
       start_date: null,
       end_date: null,
       value: '',

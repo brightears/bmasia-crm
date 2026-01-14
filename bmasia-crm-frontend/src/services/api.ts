@@ -336,6 +336,11 @@ class ApiService {
     return response.data;
   }
 
+  async duplicateForRenewal(id: string): Promise<{ message: string; new_contract: Contract; original_status: string }> {
+    const response = await authApi.post(`/contracts/${id}/duplicate_for_renewal/`);
+    return response.data;
+  }
+
   // Contract-Zone Management
   async addZonesToContract(contractId: string, zones: {id?: string; name?: string; platform?: string}[]): Promise<Zone[]> {
     const response = await authApi.post(`/contracts/${contractId}/add-zones/`, { zones });

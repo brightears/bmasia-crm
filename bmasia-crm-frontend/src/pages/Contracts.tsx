@@ -45,6 +45,7 @@ import {
   Refresh,
   GetApp,
   Email,
+  Autorenew,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -304,6 +305,19 @@ const Contracts: React.FC = () => {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       setError('Failed to download PDF');
+    }
+    setActionMenuAnchor(null);
+  };
+
+  const handleDuplicateForRenewal = async (contract: Contract) => {
+    if (window.confirm(`Create renewal contract for "${contract.contract_number}"?\n\nThis will:\n• Create a new Active contract starting ${contract.end_date}\n• Mark the current contract as Renewed`)) {
+      try {
+        const result = await ApiService.duplicateForRenewal(contract.id);
+        setSuccess(`Renewal contract ${result.new_contract.contract_number} created successfully`);
+        loadContracts();
+      } catch (err) {
+        setError('Failed to create renewal contract');
+      }
     }
     setActionMenuAnchor(null);
   };
@@ -645,15 +659,14 @@ const Contracts: React.FC = () => {
             </ListItemIcon>
             <ListItemText>Download PDF</ListItemText>
           </MenuItem>
-          <MenuItem onClick={() => {
-            // Handle renewal
-            console.log('Send renewal notice for:', actionMenuContract?.id);
-            handleActionMenuClose();
-          }}>
+          <MenuItem
+            onClick={() => handleDuplicateForRenewal(actionMenuContract!)}
+            disabled={actionMenuContract?.status !== 'Active'}
+          >
             <ListItemIcon>
-              <Refresh fontSize="small" />
+              <Autorenew fontSize="small" />
             </ListItemIcon>
-            <ListItemText>Send Renewal Notice</ListItemText>
+            <ListItemText>Duplicate for Renewal</ListItemText>
           </MenuItem>
           <Divider />
           <MenuItem

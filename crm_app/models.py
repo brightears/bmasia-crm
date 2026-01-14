@@ -580,13 +580,10 @@ class Contract(TimestampedModel):
     ]
     
     CONTRACT_STATUS_CHOICES = [
-        ('Draft', 'Draft'),
-        ('Sent', 'Sent for Signature'),
-        ('Signed', 'Signed'),
         ('Active', 'Active'),
-        ('Expired', 'Expired'),
-        ('Terminated', 'Terminated'),
         ('Renewed', 'Renewed'),
+        ('Expired', 'Expired'),
+        ('Cancelled', 'Cancelled'),
     ]
     
     SERVICE_TYPE_CHOICES = [
@@ -617,7 +614,7 @@ class Contract(TimestampedModel):
     contract_number = models.CharField(max_length=50, unique=True)
     contract_type = models.CharField(max_length=20, choices=CONTRACT_TYPE_CHOICES, default='Annual')
     service_type = models.CharField(max_length=50, choices=SERVICE_TYPE_CHOICES, blank=True, help_text="Specific service or plan")
-    status = models.CharField(max_length=20, choices=CONTRACT_STATUS_CHOICES, default='Draft')
+    status = models.CharField(max_length=20, choices=CONTRACT_STATUS_CHOICES, default='Active')
     start_date = models.DateField()
     end_date = models.DateField()
     value = models.DecimalField(max_digits=12, decimal_places=2)
@@ -638,6 +635,14 @@ class Contract(TimestampedModel):
     )
 
     # Renewal tracking
+    renewed_from = models.ForeignKey(
+        'self',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='renewals',
+        help_text="Previous contract this was renewed from"
+    )
     renewal_notice_sent = models.BooleanField(default=False)
     renewal_notice_date = models.DateField(null=True, blank=True)
     send_renewal_reminders = models.BooleanField(

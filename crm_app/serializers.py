@@ -518,6 +518,10 @@ class ContractSerializer(serializers.ModelSerializer):
     master_contract_number = serializers.CharField(source='master_contract.contract_number', read_only=True, allow_null=True)
     participation_agreements_count = serializers.SerializerMethodField()
 
+    # Renewal tracking
+    renewed_from_contract_number = serializers.CharField(source='renewed_from.contract_number', read_only=True, allow_null=True)
+    renewal_count = serializers.SerializerMethodField()
+
     # Contract Content Management fields
     preamble_template_name = serializers.CharField(source='preamble_template.name', read_only=True, allow_null=True)
     payment_template_name = serializers.CharField(source='payment_template.name', read_only=True, allow_null=True)
@@ -533,7 +537,8 @@ class ContractSerializer(serializers.ModelSerializer):
             'contract_number', 'contract_type', 'status', 'start_date', 'end_date',
             'value', 'currency', 'auto_renew', 'renewal_period_months', 'is_active',
             'payment_terms', 'billing_frequency', 'discount_percentage', 'notes',
-            'renewal_notice_sent', 'renewal_notice_date', 'send_renewal_reminders', 'days_until_expiry',
+            'renewal_notice_sent', 'renewal_notice_date', 'send_renewal_reminders',
+            'renewed_from', 'renewed_from_contract_number', 'renewal_count', 'days_until_expiry',
             'is_expiring_soon', 'monthly_value', 'invoices', 'paid_invoices_count',
             'outstanding_amount', 'contract_zones', 'active_zone_count', 'total_zone_count',
             # Soundtrack account ID fields
@@ -581,6 +586,10 @@ class ContractSerializer(serializers.ModelSerializer):
         if obj.contract_category == 'corporate_master':
             return obj.participation_agreements.count()
         return 0
+
+    def get_renewal_count(self, obj):
+        """Count how many times this contract has been renewed"""
+        return obj.renewals.count()
 
     def get_effective_soundtrack_account_id(self, obj):
         """Get the effective Soundtrack account ID (contract override or company default)"""

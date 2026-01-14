@@ -314,7 +314,7 @@ export interface Contract {
   opportunity_name?: string;
   contract_number: string;
   contract_type: 'Annual' | 'Monthly' | 'One-time' | 'Custom';
-  status: 'Draft' | 'Sent' | 'Signed' | 'Active' | 'Expired' | 'Terminated' | 'Renewed';
+  status: 'Active' | 'Renewed' | 'Expired' | 'Cancelled';
   start_date: string;
   end_date: string;
   value: number;
@@ -329,6 +329,9 @@ export interface Contract {
   renewal_notice_sent: boolean;
   renewal_notice_date?: string;
   send_renewal_reminders?: boolean;
+  renewed_from?: string;
+  renewed_from_contract_number?: string;
+  renewal_count?: number;
   days_until_expiry: number;
   is_expiring_soon: boolean;
   monthly_value: number;

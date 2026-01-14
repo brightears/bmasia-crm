@@ -748,6 +748,102 @@ class ContractViewSet(BaseModelViewSet):
 
         return Response({'message': 'Renewal notice marked as sent'})
 
+    @action(detail=True, methods=['post'])
+    def duplicate_for_renewal(self, request, pk=None):
+        """
+        Create a new contract as a renewal of the current one.
+        - Copies all details from the original contract
+        - Sets start_date = original end_date
+        - Sets end_date = start_date + renewal_period_months
+        - Marks original contract as 'Renewed'
+        - Links new contract to original via renewed_from
+        """
+        from dateutil.relativedelta import relativedelta
+        import uuid
+
+        original = self.get_object()
+
+        # Generate new contract number
+        today = timezone.now()
+        base_number = f"C-{today.strftime('%Y%m%d')}"
+        random_suffix = str(uuid.uuid4())[:4].upper()
+        new_contract_number = f"{base_number}-{random_suffix}"
+
+        # Calculate new dates
+        new_start_date = original.end_date
+        renewal_months = original.renewal_period_months or 12
+        new_end_date = new_start_date + relativedelta(months=renewal_months)
+
+        # Create the new contract
+        new_contract = Contract.objects.create(
+            company=original.company,
+            opportunity=None,  # New contract, no opportunity link
+            contract_number=new_contract_number,
+            contract_type=original.contract_type,
+            service_type=original.service_type,
+            status='Active',
+            start_date=new_start_date,
+            end_date=new_end_date,
+            value=original.value,
+            currency=original.currency,
+            auto_renew=original.auto_renew,
+            renewal_period_months=original.renewal_period_months,
+            is_active=True,
+            payment_terms=original.payment_terms,
+            billing_frequency=original.billing_frequency,
+            discount_percentage=original.discount_percentage,
+            notes=f"Renewal of {original.contract_number}",
+            soundtrack_account_id=original.soundtrack_account_id,
+            renewed_from=original,
+            send_renewal_reminders=original.send_renewal_reminders,
+            contract_category=original.contract_category,
+            corporate_parent=original.corporate_parent,
+            # Content fields
+            preamble_text=original.preamble_text,
+            custom_preamble=original.custom_preamble,
+            payment_terms_text=original.payment_terms_text,
+            custom_payment_terms=original.custom_payment_terms,
+            activation_terms_text=original.activation_terms_text,
+            custom_activation_terms=original.custom_activation_terms,
+            show_zone_pricing_detail=original.show_zone_pricing_detail,
+            price_per_zone=original.price_per_zone,
+            service_package_items=original.service_package_items,
+            custom_service_items=original.custom_service_items,
+            bmasia_contact_name=original.bmasia_contact_name,
+            bmasia_contact_title=original.bmasia_contact_title,
+            bmasia_contact_email=original.bmasia_contact_email,
+            customer_contact_name=original.customer_contact_name,
+            customer_contact_title=original.customer_contact_title,
+        )
+
+        # Copy zones to new contract
+        for zone in original.zones.all():
+            new_contract.zones.add(zone)
+
+        # Mark original as renewed
+        original.status = 'Renewed'
+        original.is_active = False
+        original.save()
+
+        self.log_action('CREATE', new_contract, {
+            'action': 'Renewal created',
+            'renewed_from': str(original.id),
+            'original_contract_number': original.contract_number
+        })
+
+        self.log_action('UPDATE', original, {
+            'status': {'old': 'Active', 'new': 'Renewed'},
+            'is_active': {'old': True, 'new': False},
+            'action': 'Marked as renewed'
+        })
+
+        serializer = self.get_serializer(new_contract)
+        return Response({
+            'message': f'Renewal contract {new_contract_number} created',
+            'new_contract': serializer.data,
+            'original_status': 'Renewed'
+        }, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
         """Generate and download PDF for contract based on contract_category"""
