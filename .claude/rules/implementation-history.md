@@ -2,6 +2,27 @@
 
 ## January 2026
 
+### Jan 14, 2026 - Contract Form Improvements
+
+**Contract Tax Fields (VAT Support)**
+- Added `tax_rate`, `tax_amount`, `total_value` fields to Contract model
+- Auto-calculation: THB contracts get 7% VAT, USD contracts 0% tax
+- Helper text in form: "Enter base price (excluding VAT)"
+- Live VAT calculation display in ContractForm
+- Migration: `0053_contract_tax_fields.py`
+
+**Contract Content Section Removal**
+- Removed unused template dropdowns (Preamble, Payment Terms, Activation Terms)
+- Removed Service Package multi-select and custom service items
+- These were built but never integrated into PDF generation
+- Simplified form by ~300 lines of code
+
+**Multiple Customer Signatories**
+- Added `additional_customer_signatories` JSONField to Contract model
+- UI: "Add Customer Signatory" button with name/title fields + delete button
+- Contract PDF renders all signatories with signature lines
+- Migration: `0054_contract_additional_signatories.py`
+
 ### Jan 14, 2026 - Finance PDF/Excel Export (Phase 7)
 - **FinanceExportService** (`crm_app/services/finance_export_service.py`)
   - ReportLab PDF generation with BMAsia branding (#FFA500)
@@ -108,6 +129,9 @@
 - CorporatePdfTemplate model (Hilton HPA format)
 
 ## Migration History (Recent)
+- `0054_contract_additional_signatories.py` - Multiple customer signatories
+- `0053_contract_tax_fields.py` - VAT/tax support for contracts
+- `0052_contract_status_simplification.py` - Contract status cleanup
 - `0051_balance_sheet_module.py` - BalanceSheetSnapshot model
 - `0050_cash_flow_module.py` - CashFlowSnapshot model
 - `0049_expense_module.py` - Expense tracking
