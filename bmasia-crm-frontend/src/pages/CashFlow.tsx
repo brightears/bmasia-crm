@@ -682,8 +682,8 @@ const CashFlow: React.FC = () => {
             onChange={(_, newMode) => newMode && setViewMode(newMode)}
             size="small"
           >
-            <ToggleButton value="monthly">Monthly</ToggleButton>
-            <ToggleButton value="ytd">Year-to-Date</ToggleButton>
+            <ToggleButton value="monthly" sx={{ whiteSpace: 'nowrap' }}>Monthly</ToggleButton>
+            <ToggleButton value="ytd" sx={{ whiteSpace: 'nowrap' }}>Year-to-Date</ToggleButton>
           </ToggleButtonGroup>
           <FormControl size="small" sx={{ minWidth: 100 }}>
             <InputLabel>Year</InputLabel>
