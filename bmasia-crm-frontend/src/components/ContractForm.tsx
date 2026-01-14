@@ -147,6 +147,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
   const [selectedZones, setSelectedZones] = useState<Zone[]>([]);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [masterContracts, setMasterContracts] = useState<Contract[]>([]);
+  const [additionalSignatories, setAdditionalSignatories] = useState<Array<{ name: string; title: string }>>([]);
 
   // Soundtrack Account ID preview state
   const [soundtrackAccountId, setSoundtrackAccountId] = useState('');
@@ -222,6 +223,9 @@ const ContractForm: React.FC<ContractFormProps> = ({
       customer_contact_title: contract.customer_contact_title || '',
     });
 
+    // Load additional signatories
+    setAdditionalSignatories(contract.additional_customer_signatories || []);
+
     // Load existing contract zones in edit mode
     if (contract.id) {
       loadContractZones(contract.id, contract.company);
@@ -283,6 +287,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
     });
     setSelectedZones([]);
     setAttachments([]);
+    setAdditionalSignatories([]);
     setError('');
     setShowErrors(false);
   };
@@ -406,6 +411,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
         start_date: formData.start_date.toISOString().split('T')[0],
         end_date: formData.end_date.toISOString().split('T')[0],
         price_per_zone: formData.price_per_zone ? parseFloat(formData.price_per_zone) : undefined,
+        additional_customer_signatories: additionalSignatories.length > 0 ? additionalSignatories : [],
       };
 
       let savedContract: Contract;
@@ -622,6 +628,12 @@ const ContractForm: React.FC<ContractFormProps> = ({
               </Typography>
 
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {/* Customer Signatories */}
+                <Typography variant="subtitle2" color="text.secondary">
+                  Customer Signatories
+                </Typography>
+
+                {/* Primary Customer Signatory */}
                 <Box sx={{ display: 'flex', gap: 2 }}>
                   <TextField
                     fullWidth
@@ -639,6 +651,58 @@ const ContractForm: React.FC<ContractFormProps> = ({
                   />
                 </Box>
 
+                {/* Additional Customer Signatories */}
+                {additionalSignatories.map((signatory, index) => (
+                  <Box key={index} sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                    <TextField
+                      fullWidth
+                      label={`Additional Signatory ${index + 1} Name`}
+                      value={signatory.name}
+                      onChange={(e) => {
+                        const updated = [...additionalSignatories];
+                        updated[index] = { ...updated[index], name: e.target.value };
+                        setAdditionalSignatories(updated);
+                      }}
+                      placeholder="e.g., Jane Doe"
+                    />
+                    <TextField
+                      fullWidth
+                      label={`Additional Signatory ${index + 1} Title`}
+                      value={signatory.title}
+                      onChange={(e) => {
+                        const updated = [...additionalSignatories];
+                        updated[index] = { ...updated[index], title: e.target.value };
+                        setAdditionalSignatories(updated);
+                      }}
+                      placeholder="e.g., Director"
+                    />
+                    <IconButton
+                      onClick={() => {
+                        setAdditionalSignatories(additionalSignatories.filter((_, i) => i !== index));
+                      }}
+                      color="error"
+                      size="small"
+                    >
+                      <Delete />
+                    </IconButton>
+                  </Box>
+                ))}
+
+                {/* Add Additional Signatory Button */}
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<AddIcon />}
+                  onClick={() => setAdditionalSignatories([...additionalSignatories, { name: '', title: '' }])}
+                  sx={{ alignSelf: 'flex-start' }}
+                >
+                  Add Customer Signatory
+                </Button>
+
+                {/* BMAsia Signatory */}
+                <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 1 }}>
+                  BMAsia Signatory
+                </Typography>
                 <Box sx={{ display: 'flex', gap: 2 }}>
                   <TextField
                     fullWidth

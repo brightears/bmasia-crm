@@ -546,7 +546,7 @@ class ContractSerializer(serializers.ModelSerializer):
             'soundtrack_account_id', 'effective_soundtrack_account_id',
             # Corporate contract fields
             'contract_category', 'master_contract', 'master_contract_number',
-            'customer_signatory_name', 'customer_signatory_title',
+            'customer_signatory_name', 'customer_signatory_title', 'additional_customer_signatories',
             'bmasia_signatory_name', 'bmasia_signatory_title', 'custom_terms',
             'participation_agreements_count',
             # Contract Content Management fields

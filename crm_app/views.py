@@ -1577,6 +1577,8 @@ and<br/><br/>
 
         # Customer signature block (empty for them to sign)
         customer_sig_content = []
+
+        # Primary customer signatory
         customer_sig_content.append(Spacer(1, 0.85*inch))  # Space for signature, reduced to fit on page
         customer_sig_content.append(Paragraph('_' * 35, sig_line_style))
         customer_sig_content.append(Paragraph(f"<b>{customer_signatory}</b>", sig_name_style))
@@ -1584,6 +1586,19 @@ and<br/><br/>
         customer_sig_content.append(Paragraph(f"<b>{company.legal_entity_name or company.name}</b>", sig_company_style))
         customer_sig_content.append(Spacer(1, 0.1*inch))
         customer_sig_content.append(Paragraph('Date: _________________', sig_date_style))
+
+        # Additional customer signatories
+        additional_signatories = contract.additional_customer_signatories or []
+        for signatory in additional_signatories:
+            if signatory.get('name') or signatory.get('title'):
+                customer_sig_content.append(Spacer(1, 0.3*inch))  # Space between signatories
+                customer_sig_content.append(Spacer(1, 0.6*inch))  # Space for signature
+                customer_sig_content.append(Paragraph('_' * 35, sig_line_style))
+                customer_sig_content.append(Paragraph(f"<b>{signatory.get('name', 'Authorized Representative')}</b>", sig_name_style))
+                customer_sig_content.append(Paragraph(signatory.get('title', ''), sig_title_style))
+                customer_sig_content.append(Paragraph(f"<b>{company.legal_entity_name or company.name}</b>", sig_company_style))
+                customer_sig_content.append(Spacer(1, 0.1*inch))
+                customer_sig_content.append(Paragraph('Date: _________________', sig_date_style))
 
         # Create two-column table for signatures
         bmasia_cell = Table([[item] for item in bmasia_sig_content], colWidths=[3.4*inch])

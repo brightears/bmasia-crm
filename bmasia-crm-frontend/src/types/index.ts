@@ -349,6 +349,7 @@ export interface Contract {
   master_contract_number?: string;
   customer_signatory_name?: string;
   customer_signatory_title?: string;
+  additional_customer_signatories?: Array<{ name: string; title: string }>;
   bmasia_signatory_name?: string;
   bmasia_signatory_title?: string;
   custom_terms?: string;

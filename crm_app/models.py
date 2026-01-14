@@ -696,6 +696,11 @@ class Contract(TimestampedModel):
 
     customer_signatory_name = models.CharField(max_length=255, blank=True)
     customer_signatory_title = models.CharField(max_length=255, blank=True)
+    additional_customer_signatories = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='Additional customer signatories: [{"name": "...", "title": "..."}]'
+    )
     bmasia_signatory_name = models.CharField(max_length=255, blank=True)
     bmasia_signatory_title = models.CharField(max_length=255, blank=True)
     custom_terms = models.TextField(blank=True, help_text="Custom terms for master agreements")
