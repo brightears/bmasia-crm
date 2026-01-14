@@ -8297,6 +8297,113 @@ class ProfitLossViewSet(viewsets.ViewSet):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(detail=False, methods=['get'], url_path='export/pdf')
+    def export_pdf(self, request):
+        """
+        GET /api/v1/profit-loss/export/pdf/?year=2026&month=1&billing_entity=bmasia_th&currency=THB
+
+        Export P&L statement as PDF.
+        """
+        from crm_app.services.profit_loss_service import ProfitLossService
+        from crm_app.services.finance_export_service import FinanceExportService
+
+        year = request.query_params.get('year')
+        month = request.query_params.get('month')
+        through_month = request.query_params.get('through_month')
+        billing_entity = request.query_params.get('billing_entity', 'all')
+        currency = request.query_params.get('currency', 'all')
+
+        if not year:
+            return Response({'error': 'year is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            if month:
+                month = int(month)
+            if through_month:
+                through_month = int(through_month)
+        except ValueError:
+            return Response({'error': 'Invalid numeric parameters'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            pl_service = ProfitLossService()
+            export_service = FinanceExportService()
+
+            # Get P&L data
+            if through_month:
+                data = pl_service.get_ytd_profit_loss(year, through_month, billing_entity, currency)
+                filename = f"PL_YTD_{year}_through_{through_month}.pdf"
+            elif month:
+                data = pl_service.get_monthly_profit_loss(year, month, billing_entity, currency)
+                filename = f"PL_{year}_{month:02d}.pdf"
+            else:
+                return Response({'error': 'Either month or through_month is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Generate PDF
+            pdf_buffer = export_service.generate_pl_pdf(data, year, month or through_month, billing_entity, currency)
+
+            response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='export/excel')
+    def export_excel(self, request):
+        """
+        GET /api/v1/profit-loss/export/excel/?year=2026&month=1&billing_entity=bmasia_th&currency=THB
+
+        Export P&L statement as Excel.
+        """
+        from crm_app.services.profit_loss_service import ProfitLossService
+        from crm_app.services.finance_export_service import FinanceExportService
+
+        year = request.query_params.get('year')
+        month = request.query_params.get('month')
+        through_month = request.query_params.get('through_month')
+        billing_entity = request.query_params.get('billing_entity', 'all')
+        currency = request.query_params.get('currency', 'all')
+
+        if not year:
+            return Response({'error': 'year is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            if month:
+                month = int(month)
+            if through_month:
+                through_month = int(through_month)
+        except ValueError:
+            return Response({'error': 'Invalid numeric parameters'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            pl_service = ProfitLossService()
+            export_service = FinanceExportService()
+
+            # Get P&L data
+            if through_month:
+                data = pl_service.get_ytd_profit_loss(year, through_month, billing_entity, currency)
+                filename = f"PL_YTD_{year}_through_{through_month}.xlsx"
+            elif month:
+                data = pl_service.get_monthly_profit_loss(year, month, billing_entity, currency)
+                filename = f"PL_{year}_{month:02d}.xlsx"
+            else:
+                return Response({'error': 'Either month or through_month is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Generate Excel
+            excel_buffer = export_service.generate_pl_excel(data, year, month or through_month, billing_entity, currency)
+
+            response = HttpResponse(
+                excel_buffer.getvalue(),
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class CashFlowViewSet(viewsets.ViewSet):
     """
@@ -8440,6 +8547,113 @@ class CashFlowViewSet(viewsets.ViewSet):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(detail=False, methods=['get'], url_path='export/pdf')
+    def export_pdf(self, request):
+        """
+        GET /api/v1/cash-flow/export/pdf/?year=2026&month=1&billing_entity=bmasia_th&currency=THB
+
+        Export Cash Flow statement as PDF.
+        """
+        from crm_app.services.cash_flow_service import CashFlowService
+        from crm_app.services.finance_export_service import FinanceExportService
+
+        year = request.query_params.get('year')
+        month = request.query_params.get('month')
+        through_month = request.query_params.get('through_month')
+        billing_entity = request.query_params.get('billing_entity', 'all')
+        currency = request.query_params.get('currency', 'all')
+
+        if not year:
+            return Response({'error': 'year is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            if month:
+                month = int(month)
+            if through_month:
+                through_month = int(through_month)
+        except ValueError:
+            return Response({'error': 'Invalid numeric parameters'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            cf_service = CashFlowService()
+            export_service = FinanceExportService()
+
+            # Get Cash Flow data
+            if through_month:
+                data = cf_service.get_ytd_cash_flow(year, through_month, billing_entity, currency)
+                filename = f"CashFlow_YTD_{year}_through_{through_month}.pdf"
+            elif month:
+                data = cf_service.get_monthly_cash_flow(year, month, billing_entity, currency)
+                filename = f"CashFlow_{year}_{month:02d}.pdf"
+            else:
+                return Response({'error': 'Either month or through_month is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Generate PDF
+            pdf_buffer = export_service.generate_cash_flow_pdf(data, year, month or through_month, billing_entity, currency)
+
+            response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='export/excel')
+    def export_excel(self, request):
+        """
+        GET /api/v1/cash-flow/export/excel/?year=2026&month=1&billing_entity=bmasia_th&currency=THB
+
+        Export Cash Flow statement as Excel.
+        """
+        from crm_app.services.cash_flow_service import CashFlowService
+        from crm_app.services.finance_export_service import FinanceExportService
+
+        year = request.query_params.get('year')
+        month = request.query_params.get('month')
+        through_month = request.query_params.get('through_month')
+        billing_entity = request.query_params.get('billing_entity', 'all')
+        currency = request.query_params.get('currency', 'all')
+
+        if not year:
+            return Response({'error': 'year is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            if month:
+                month = int(month)
+            if through_month:
+                through_month = int(through_month)
+        except ValueError:
+            return Response({'error': 'Invalid numeric parameters'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            cf_service = CashFlowService()
+            export_service = FinanceExportService()
+
+            # Get Cash Flow data
+            if through_month:
+                data = cf_service.get_ytd_cash_flow(year, through_month, billing_entity, currency)
+                filename = f"CashFlow_YTD_{year}_through_{through_month}.xlsx"
+            elif month:
+                data = cf_service.get_monthly_cash_flow(year, month, billing_entity, currency)
+                filename = f"CashFlow_{year}_{month:02d}.xlsx"
+            else:
+                return Response({'error': 'Either month or through_month is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Generate Excel
+            excel_buffer = export_service.generate_cash_flow_excel(data, year, month or through_month, billing_entity, currency)
+
+            response = HttpResponse(
+                excel_buffer.getvalue(),
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class BalanceSheetViewSet(viewsets.ViewSet):
     """
@@ -8535,3 +8749,96 @@ class BalanceSheetViewSet(viewsets.ViewSet):
             return Response({
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='export/pdf')
+    def export_pdf(self, request):
+        """
+        GET /api/v1/balance-sheet/export/pdf/?year=2026&quarter=1&billing_entity=bmasia_th&currency=THB
+
+        Export Balance Sheet as PDF.
+        """
+        from crm_app.services.balance_sheet_service import BalanceSheetService
+        from crm_app.services.finance_export_service import FinanceExportService
+
+        year = request.query_params.get('year')
+        quarter = request.query_params.get('quarter')
+        billing_entity = request.query_params.get('billing_entity', 'all')
+        currency = request.query_params.get('currency', 'all')
+
+        if not year or not quarter:
+            return Response({'error': 'year and quarter are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            quarter = int(quarter)
+        except ValueError:
+            return Response({'error': 'year and quarter must be integers'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if quarter < 1 or quarter > 4:
+            return Response({'error': 'quarter must be between 1 and 4'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            bs_service = BalanceSheetService()
+            export_service = FinanceExportService()
+
+            # Get Balance Sheet data
+            data = bs_service.get_quarterly_balance_sheet(year, quarter, billing_entity, currency)
+            filename = f"BalanceSheet_{year}_Q{quarter}.pdf"
+
+            # Generate PDF
+            pdf_buffer = export_service.generate_balance_sheet_pdf(data, year, quarter, billing_entity, currency)
+
+            response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='export/excel')
+    def export_excel(self, request):
+        """
+        GET /api/v1/balance-sheet/export/excel/?year=2026&quarter=1&billing_entity=bmasia_th&currency=THB
+
+        Export Balance Sheet as Excel.
+        """
+        from crm_app.services.balance_sheet_service import BalanceSheetService
+        from crm_app.services.finance_export_service import FinanceExportService
+
+        year = request.query_params.get('year')
+        quarter = request.query_params.get('quarter')
+        billing_entity = request.query_params.get('billing_entity', 'all')
+        currency = request.query_params.get('currency', 'all')
+
+        if not year or not quarter:
+            return Response({'error': 'year and quarter are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            quarter = int(quarter)
+        except ValueError:
+            return Response({'error': 'year and quarter must be integers'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if quarter < 1 or quarter > 4:
+            return Response({'error': 'quarter must be between 1 and 4'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            bs_service = BalanceSheetService()
+            export_service = FinanceExportService()
+
+            # Get Balance Sheet data
+            data = bs_service.get_quarterly_balance_sheet(year, quarter, billing_entity, currency)
+            filename = f"BalanceSheet_{year}_Q{quarter}.xlsx"
+
+            # Generate Excel
+            excel_buffer = export_service.generate_balance_sheet_excel(data, year, quarter, billing_entity, currency)
+
+            response = HttpResponse(
+                excel_buffer.getvalue(),
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

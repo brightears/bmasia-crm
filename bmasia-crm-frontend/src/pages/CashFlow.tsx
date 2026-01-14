@@ -22,6 +22,7 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   GridLegacy as Grid,
+  Button,
 } from '@mui/material';
 import {
   TrendingUp as TrendingUpIcon,
@@ -30,6 +31,8 @@ import {
   ShowChart as ChartIcon,
   AttachMoney as MoneyIcon,
   Build as BuildIcon,
+  PictureAsPdf as PdfIcon,
+  TableChart as ExcelIcon,
 } from '@mui/icons-material';
 import {
   LineChart,
@@ -457,6 +460,7 @@ const CashFlow: React.FC = () => {
   const [currency, setCurrency] = useState<string>('');
   const [billingEntity, setBillingEntity] = useState<string>('');
   const [viewMode, setViewMode] = useState<'monthly' | 'ytd'>('monthly');
+  const [exporting, setExporting] = useState<'pdf' | 'excel' | null>(null);
 
   const months = [
     { value: 1, label: 'January' },
@@ -547,6 +551,90 @@ const CashFlow: React.FC = () => {
     }
   };
 
+  const handleExportPDF = async () => {
+    setExporting('pdf');
+    try {
+      const token = localStorage.getItem('bmasia_access_token') || sessionStorage.getItem('bmasia_access_token');
+      const baseUrl = process.env.REACT_APP_API_URL || '';
+      const params = new URLSearchParams();
+      params.append('year', year.toString());
+
+      if (viewMode === 'monthly') {
+        params.append('month', month.toString());
+      } else {
+        params.append('through_month', month.toString());
+      }
+
+      if (currency) params.append('currency', currency);
+      if (billingEntity) params.append('billing_entity', billingEntity);
+
+      const endpoint = viewMode === 'monthly' ? 'monthly' : 'ytd';
+      const response = await fetch(
+        `${baseUrl}/api/v1/cash-flow/${endpoint}/export/pdf/?${params.toString()}`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (!response.ok) throw new Error('Export failed');
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `CashFlow_${year}_${viewMode === 'monthly' ? month : `YTD_M${month}`}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('Export error:', err);
+      setError('Failed to export PDF');
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    setExporting('excel');
+    try {
+      const token = localStorage.getItem('bmasia_access_token') || sessionStorage.getItem('bmasia_access_token');
+      const baseUrl = process.env.REACT_APP_API_URL || '';
+      const params = new URLSearchParams();
+      params.append('year', year.toString());
+
+      if (viewMode === 'monthly') {
+        params.append('month', month.toString());
+      } else {
+        params.append('through_month', month.toString());
+      }
+
+      if (currency) params.append('currency', currency);
+      if (billingEntity) params.append('billing_entity', billingEntity);
+
+      const endpoint = viewMode === 'monthly' ? 'monthly' : 'ytd';
+      const response = await fetch(
+        `${baseUrl}/api/v1/cash-flow/${endpoint}/export/excel/?${params.toString()}`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (!response.ok) throw new Error('Export failed');
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `CashFlow_${year}_${viewMode === 'monthly' ? month : `YTD_M${month}`}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('Export error:', err);
+      setError('Failed to export Excel');
+    } finally {
+      setExporting(null);
+    }
+  };
+
   if (loading && !statement) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -570,6 +658,26 @@ const CashFlow: React.FC = () => {
           </Typography>
         </Box>
         <Stack direction="row" spacing={2} alignItems="center">
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={exporting === 'pdf' ? <CircularProgress size={16} /> : <PdfIcon />}
+              onClick={handleExportPDF}
+              disabled={exporting !== null || loading}
+            >
+              PDF
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={exporting === 'excel' ? <CircularProgress size={16} /> : <ExcelIcon />}
+              onClick={handleExportExcel}
+              disabled={exporting !== null || loading}
+            >
+              Excel
+            </Button>
+          </Stack>
           <ToggleButtonGroup
             value={viewMode}
             exclusive

@@ -20,6 +20,7 @@ import {
   LinearProgress,
   Stack,
   GridLegacy as Grid,
+  Button,
 } from '@mui/material';
 import {
   AccountBalance as AccountBalanceIcon,
@@ -27,6 +28,8 @@ import {
   TrendingUp as TrendingUpIcon,
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
+  PictureAsPdf as PdfIcon,
+  TableChart as ExcelIcon,
 } from '@mui/icons-material';
 import {
   BarChart,
@@ -431,6 +434,7 @@ const BalanceSheet: React.FC = () => {
   const [quarter, setQuarter] = useState<number>(Math.ceil((new Date().getMonth() + 1) / 3));
   const [currency, setCurrency] = useState<string>('');
   const [billingEntity, setBillingEntity] = useState<string>('');
+  const [exporting, setExporting] = useState<'pdf' | 'excel' | null>(null);
 
   const quarters = [
     { value: 1, label: 'Q1' },
@@ -506,6 +510,76 @@ const BalanceSheet: React.FC = () => {
     }
   };
 
+  const handleExportPDF = async () => {
+    setExporting('pdf');
+    try {
+      const token = localStorage.getItem('bmasia_access_token') || sessionStorage.getItem('bmasia_access_token');
+      const baseUrl = process.env.REACT_APP_API_URL || '';
+      const params = new URLSearchParams();
+      params.append('year', year.toString());
+      params.append('quarter', quarter.toString());
+      if (currency) params.append('currency', currency);
+      if (billingEntity) params.append('billing_entity', billingEntity);
+
+      const response = await fetch(
+        `${baseUrl}/api/v1/balance-sheet/quarterly/export/pdf/?${params.toString()}`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (!response.ok) throw new Error('Export failed');
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `BalanceSheet_${year}_Q${quarter}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('Export error:', err);
+      setError('Failed to export PDF');
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    setExporting('excel');
+    try {
+      const token = localStorage.getItem('bmasia_access_token') || sessionStorage.getItem('bmasia_access_token');
+      const baseUrl = process.env.REACT_APP_API_URL || '';
+      const params = new URLSearchParams();
+      params.append('year', year.toString());
+      params.append('quarter', quarter.toString());
+      if (currency) params.append('currency', currency);
+      if (billingEntity) params.append('billing_entity', billingEntity);
+
+      const response = await fetch(
+        `${baseUrl}/api/v1/balance-sheet/quarterly/export/excel/?${params.toString()}`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (!response.ok) throw new Error('Export failed');
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `BalanceSheet_${year}_Q${quarter}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('Export error:', err);
+      setError('Failed to export Excel');
+    } finally {
+      setExporting(null);
+    }
+  };
+
   if (loading && !statement) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
@@ -529,6 +603,26 @@ const BalanceSheet: React.FC = () => {
           </Typography>
         </Box>
         <Stack direction="row" spacing={2} alignItems="center">
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={exporting === 'pdf' ? <CircularProgress size={16} /> : <PdfIcon />}
+              onClick={handleExportPDF}
+              disabled={exporting !== null || loading}
+            >
+              PDF
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={exporting === 'excel' ? <CircularProgress size={16} /> : <ExcelIcon />}
+              onClick={handleExportExcel}
+              disabled={exporting !== null || loading}
+            >
+              Excel
+            </Button>
+          </Stack>
           <FormControl size="small" sx={{ minWidth: 100 }}>
             <InputLabel>Year</InputLabel>
             <Select

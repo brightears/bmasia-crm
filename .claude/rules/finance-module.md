@@ -14,20 +14,34 @@ Comprehensive financial reporting module for BMAsia CRM. Replaces manual spreads
 | 5 | Cash Flow | ✅ Complete | `/finance/cash-flow` |
 | 6 | Balance Sheet | ✅ Complete | `/finance/balance-sheet` |
 
-## Pending Features
+## PDF/Excel Export (Phase 7) - COMPLETE
 
-### PDF/Excel Export (Not Yet Implemented)
-All finance reports should have export functionality:
-- **PDF Export**: Professional formatted reports with BMAsia branding
-- **Excel Export**: Data tables for further analysis
+### FinanceExportService (`crm_app/services/finance_export_service.py`)
+Generates professional PDF and Excel exports for finance reports.
 
-Reports needing export:
-- [ ] Revenue Dashboard
-- [ ] AR Aging Report
-- [ ] AP Aging Report
-- [ ] Profit & Loss Statement
-- [ ] Cash Flow Statement
-- [ ] Balance Sheet
+#### API Endpoints
+| Report | PDF Export | Excel Export |
+|--------|------------|--------------|
+| Profit & Loss | `GET /api/v1/profit-loss/export/pdf/` | `GET /api/v1/profit-loss/export/excel/` |
+| Cash Flow | `GET /api/v1/cash-flow/export/pdf/` | `GET /api/v1/cash-flow/export/excel/` |
+| Balance Sheet | `GET /api/v1/balance-sheet/export/pdf/` | `GET /api/v1/balance-sheet/export/excel/` |
+
+#### Query Parameters
+- **P&L / Cash Flow**: `year`, `month` (or `through_month` for YTD), `billing_entity`, `currency`
+- **Balance Sheet**: `year`, `quarter`, `billing_entity`, `currency`
+
+#### Features
+- BMAsia branding with orange (#FFA500) accents
+- Professional table formatting with alternating row colors
+- Currency formatting based on selected currency
+- Header with logo, period, entity info
+- Footer with generation timestamp
+- Excel: Auto-fit columns, proper number formatting
+
+### Pending Export Features
+- [ ] Revenue Dashboard export
+- [ ] AR Aging Report export
+- [ ] AP Aging Report export
 
 ## Phase 1: Revenue Dashboard
 - **Models**: MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent
@@ -69,8 +83,13 @@ Reports needing export:
 - **API**: `/api/v1/balance-sheet/quarterly/`, `/trend/`
 
 ## Key Files
-- Backend Services: `crm_app/services/profit_loss_service.py`, `cash_flow_service.py`
-- Frontend Pages: `ProfitLoss.tsx`, `CashFlow.tsx`, `AccountsReceivable.tsx`, `AccountsPayable.tsx`
+- Backend Services:
+  - `crm_app/services/profit_loss_service.py`
+  - `crm_app/services/cash_flow_service.py`
+  - `crm_app/services/balance_sheet_service.py`
+  - `crm_app/services/finance_export_service.py` (PDF/Excel export)
+- Frontend Pages: `ProfitLoss.tsx`, `CashFlow.tsx`, `AccountsReceivable.tsx`, `AccountsPayable.tsx`, `BalanceSheet.tsx`
+- Views: `crm_app/views.py` (ProfitLossViewSet, CashFlowViewSet, BalanceSheetViewSet)
 - Plan file: `.claude/plans/memoized-churning-bird.md`
 
 ## Multi-Entity Support
