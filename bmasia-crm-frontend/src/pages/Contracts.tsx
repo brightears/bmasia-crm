@@ -59,13 +59,10 @@ import EmailSendDialog from '../components/EmailSendDialog';
 
 const statusOptions = [
   { value: '', label: 'All Statuses' },
-  { value: 'Draft', label: 'Draft', color: '#9e9e9e' },
-  { value: 'Sent', label: 'Sent', color: '#2196f3' },
-  { value: 'Signed', label: 'Signed', color: '#4caf50' },
   { value: 'Active', label: 'Active', color: '#4caf50' },
-  { value: 'Expired', label: 'Expired', color: '#f44336' },
-  { value: 'Terminated', label: 'Terminated', color: '#f44336' },
-  { value: 'Renewed', label: 'Renewed', color: '#4caf50' },
+  { value: 'Renewed', label: 'Renewed', color: '#2196f3' },
+  { value: 'Expired', label: 'Expired', color: '#9e9e9e' },
+  { value: 'Cancelled', label: 'Cancelled', color: '#f44336' },
 ];
 
 const typeOptions = [

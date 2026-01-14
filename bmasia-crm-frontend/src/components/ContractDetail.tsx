@@ -492,7 +492,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
                   </TimelineContent>
                 </TimelineItem>
 
-                {contract.status === 'Signed' && (
+                {contract.status === 'Active' && (
                   <TimelineItem>
                     <TimelineSeparator>
                       <TimelineDot color="success">
@@ -502,10 +502,10 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
                     </TimelineSeparator>
                     <TimelineContent>
                       <Typography variant="body2" fontWeight="medium">
-                        Contract Signed
+                        Contract Active
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        {formatDate(contract.start_date)}
+                        Started: {formatDate(contract.start_date)}
                       </Typography>
                     </TimelineContent>
                   </TimelineItem>
