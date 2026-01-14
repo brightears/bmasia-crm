@@ -535,7 +535,8 @@ class ContractSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'company', 'company_name', 'opportunity', 'opportunity_name',
             'contract_number', 'contract_type', 'status', 'start_date', 'end_date',
-            'value', 'currency', 'auto_renew', 'renewal_period_months', 'is_active',
+            'value', 'tax_rate', 'tax_amount', 'total_value',
+            'currency', 'auto_renew', 'renewal_period_months', 'is_active',
             'payment_terms', 'billing_frequency', 'discount_percentage', 'notes',
             'renewal_notice_sent', 'renewal_notice_date', 'send_renewal_reminders',
             'renewed_from', 'renewed_from_contract_number', 'renewal_count', 'days_until_expiry',
@@ -595,8 +596,31 @@ class ContractSerializer(serializers.ModelSerializer):
         """Get the effective Soundtrack account ID (contract override or company default)"""
         return obj.soundtrack_account_id or obj.company.soundtrack_account_id
 
+    def _calculate_tax_fields(self, validated_data):
+        """Auto-calculate tax fields based on currency."""
+        from decimal import Decimal
+
+        currency = validated_data.get('currency', 'USD')
+        value = validated_data.get('value', Decimal('0'))
+
+        # THB contracts get 7% VAT, others get 0%
+        if currency == 'THB':
+            tax_rate = Decimal('7.00')
+        else:
+            tax_rate = Decimal('0.00')
+
+        # Calculate tax amount and total value
+        tax_amount = (value * tax_rate / Decimal('100')).quantize(Decimal('0.01'))
+        total_value = value + tax_amount
+
+        validated_data['tax_rate'] = tax_rate
+        validated_data['tax_amount'] = tax_amount
+        validated_data['total_value'] = total_value
+
+        return validated_data
+
     def create(self, validated_data):
-        """Create contract with auto-generated contract number"""
+        """Create contract with auto-generated contract number and tax calculation"""
         # Auto-generate contract number if not provided
         if not validated_data.get('contract_number'):
             today = timezone.now().date()
@@ -607,7 +631,28 @@ class ContractSerializer(serializers.ModelSerializer):
             ).count() + 1
             validated_data['contract_number'] = f'C-{date_str}-{count:03d}'
 
+        # Auto-calculate tax fields
+        validated_data = self._calculate_tax_fields(validated_data)
+
         return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        """Update contract with tax recalculation if value or currency changed"""
+        # Check if value or currency changed
+        value_changed = 'value' in validated_data
+        currency_changed = 'currency' in validated_data
+
+        if value_changed or currency_changed:
+            # Use new values if provided, otherwise use existing
+            if 'value' not in validated_data:
+                validated_data['value'] = instance.value
+            if 'currency' not in validated_data:
+                validated_data['currency'] = instance.currency
+
+            # Recalculate tax fields
+            validated_data = self._calculate_tax_fields(validated_data)
+
+        return super().update(instance, validated_data)
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

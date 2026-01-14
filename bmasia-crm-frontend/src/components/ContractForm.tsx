@@ -835,6 +835,18 @@ const ContractForm: React.FC<ContractFormProps> = ({
                     value={formData.value}
                     onChange={(e) => setFormData(prev => ({ ...prev, value: e.target.value }))}
                     fullWidth
+                    helperText={
+                      formData.currency === 'THB'
+                        ? 'Enter base price (excluding VAT). System will add 7% VAT automatically.'
+                        : 'Enter contract value'
+                    }
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          {formData.currency === 'THB' ? '฿' : formData.currency === 'EUR' ? '€' : formData.currency === 'GBP' ? '£' : '$'}
+                        </InputAdornment>
+                      ),
+                    }}
                   />
 
                   <FormControl sx={{ minWidth: 120 }}>
@@ -850,6 +862,30 @@ const ContractForm: React.FC<ContractFormProps> = ({
                     </Select>
                   </FormControl>
                 </Box>
+
+                {/* Tax calculation display for THB contracts */}
+                {formData.currency === 'THB' && formData.value && parseFloat(formData.value) > 0 && (
+                  <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
+                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                      Tax Calculation (7% VAT)
+                    </Typography>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                      <Typography variant="body2" color="text.secondary">Base Value:</Typography>
+                      <Typography variant="body2">฿{parseFloat(formData.value).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                      <Typography variant="body2" color="text.secondary">VAT (7%):</Typography>
+                      <Typography variant="body2">฿{(parseFloat(formData.value) * 0.07).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography>
+                    </Box>
+                    <Divider sx={{ my: 1 }} />
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography variant="body2" fontWeight="bold">Total (incl. VAT):</Typography>
+                      <Typography variant="body2" fontWeight="bold" color="primary">
+                        ฿{(parseFloat(formData.value) * 1.07).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </Typography>
+                    </Box>
+                  </Paper>
+                )}
 
                 <Box sx={{ display: 'flex', gap: 2 }}>
                   <FormControl fullWidth>

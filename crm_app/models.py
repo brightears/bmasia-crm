@@ -617,7 +617,29 @@ class Contract(TimestampedModel):
     status = models.CharField(max_length=20, choices=CONTRACT_STATUS_CHOICES, default='Active')
     start_date = models.DateField()
     end_date = models.DateField()
-    value = models.DecimalField(max_digits=12, decimal_places=2)
+    value = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        help_text="Base contract value (excluding VAT/tax)"
+    )
+    tax_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text="Tax rate percentage (e.g., 7 for 7% VAT)"
+    )
+    tax_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text="Calculated: value × tax_rate"
+    )
+    total_value = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text="Total including tax: value + tax_amount"
+    )
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
     auto_renew = models.BooleanField(default=False)
     renewal_period_months = models.IntegerField(default=12)

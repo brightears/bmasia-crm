@@ -319,6 +319,9 @@ export interface Contract {
   end_date: string;
   value: number;
   currency: string;
+  tax_rate: number;
+  tax_amount: number;
+  total_value: number;
   auto_renew: boolean;
   renewal_period_months: number;
   is_active: boolean;
