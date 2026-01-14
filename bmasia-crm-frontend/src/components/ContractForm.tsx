@@ -134,13 +134,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
     bmasia_signatory_name: '',
     bmasia_signatory_title: '',
     custom_terms: '',
-    // Contract Content Management fields
-    preamble_template: '',
-    preamble_custom: '',
-    payment_template: '',
-    payment_custom: '',
-    activation_template: '',
-    activation_custom: '',
     show_zone_pricing_detail: true,
     price_per_zone: '',
     bmasia_contact_name: '',
@@ -161,21 +154,10 @@ const ContractForm: React.FC<ContractFormProps> = ({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
 
-  // Contract Content Management state
-  const [contractTemplates, setContractTemplates] = useState<any[]>([]);
-  const [servicePackageItems, setServicePackageItems] = useState<any[]>([]);
-  const [selectedServiceItems, setSelectedServiceItems] = useState<any[]>([]);
-  const [customServiceItems, setCustomServiceItems] = useState<Array<{ name: string; description: string }>>([]);
-  const [customizePreamble, setCustomizePreamble] = useState(false);
-  const [customizePayment, setCustomizePayment] = useState(false);
-  const [customizeActivation, setCustomizeActivation] = useState(false);
-
   useEffect(() => {
     if (open) {
       loadCompanies();
       loadMasterContracts();
-      loadContractTemplates();
-      loadServicePackageItems();
       if (mode === 'edit' && contract) {
         populateForm(contract);
       } else {
@@ -204,23 +186,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
     }
   };
 
-  const loadContractTemplates = async () => {
-    try {
-      const response = await ApiService.getContractTemplates({ page_size: 1000 });
-      setContractTemplates(response.results || []);
-    } catch (err) {
-      console.error('Failed to load contract templates:', err);
-    }
-  };
-
-  const loadServicePackageItems = async () => {
-    try {
-      const items = await ApiService.getServicePackageItems();
-      setServicePackageItems(items);
-    } catch (err) {
-      console.error('Failed to load service package items:', err);
-    }
-  };
 
 
   const populateForm = (contract: Contract) => {
@@ -247,13 +212,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
       bmasia_signatory_name: contract.bmasia_signatory_name || '',
       bmasia_signatory_title: contract.bmasia_signatory_title || '',
       custom_terms: contract.custom_terms || '',
-      // Contract Content Management fields
-      preamble_template: contract.preamble_template || '',
-      preamble_custom: contract.preamble_custom || '',
-      payment_template: contract.payment_template || '',
-      payment_custom: contract.payment_custom || '',
-      activation_template: contract.activation_template || '',
-      activation_custom: contract.activation_custom || '',
       show_zone_pricing_detail: contract.show_zone_pricing_detail ?? true,
       price_per_zone: contract.price_per_zone?.toString() || '',
       bmasia_contact_name: contract.bmasia_contact_name || '',
@@ -263,24 +221,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
       customer_contact_email: contract.customer_contact_email || '',
       customer_contact_title: contract.customer_contact_title || '',
     });
-
-    // Set customize flags
-    setCustomizePreamble(!!contract.preamble_custom);
-    setCustomizePayment(!!contract.payment_custom);
-    setCustomizeActivation(!!contract.activation_custom);
-
-    // Set service items
-    if (contract.service_items && contract.service_items.length > 0) {
-      const selectedItems = servicePackageItems.filter(item =>
-        contract.service_items?.includes(item.id)
-      );
-      setSelectedServiceItems(selectedItems);
-    }
-
-    // Set custom service items
-    if (contract.custom_service_items) {
-      setCustomServiceItems(contract.custom_service_items);
-    }
 
     // Load existing contract zones in edit mode
     if (contract.id) {
@@ -332,13 +272,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
       bmasia_signatory_name: '',
       bmasia_signatory_title: '',
       custom_terms: '',
-      // Contract Content Management fields
-      preamble_template: '',
-      preamble_custom: '',
-      payment_template: '',
-      payment_custom: '',
-      activation_template: '',
-      activation_custom: '',
       show_zone_pricing_detail: true,
       price_per_zone: '',
       bmasia_contact_name: '',
@@ -350,11 +283,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
     });
     setSelectedZones([]);
     setAttachments([]);
-    setSelectedServiceItems([]);
-    setCustomServiceItems([]);
-    setCustomizePreamble(false);
-    setCustomizePayment(false);
-    setCustomizeActivation(false);
     setError('');
     setShowErrors(false);
   };
@@ -478,8 +406,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
         start_date: formData.start_date.toISOString().split('T')[0],
         end_date: formData.end_date.toISOString().split('T')[0],
         price_per_zone: formData.price_per_zone ? parseFloat(formData.price_per_zone) : undefined,
-        service_items: selectedServiceItems.map(item => item.id),
-        custom_service_items: customServiceItems.length > 0 ? customServiceItems : undefined,
       };
 
       let savedContract: Contract;
@@ -928,323 +854,91 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
             <Divider />
 
-            {/* Contract Content Section */}
+            {/* Zone Pricing */}
             <Box>
               <Typography variant="h6" gutterBottom>
-                Contract Content
+                Zone Pricing
+              </Typography>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={formData.show_zone_pricing_detail}
+                    onChange={(e) => setFormData(prev => ({ ...prev, show_zone_pricing_detail: e.target.checked }))}
+                  />
+                }
+                label="Show Zone Pricing Detail on Contract"
+              />
+
+              {formData.show_zone_pricing_detail && (
+                <TextField
+                  label="Price Per Zone"
+                  type="number"
+                  value={formData.price_per_zone}
+                  onChange={(e) => setFormData(prev => ({ ...prev, price_per_zone: e.target.value }))}
+                  fullWidth
+                  sx={{ mt: 1 }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        {formData.currency === 'THB' ? '฿' : formData.currency === 'EUR' ? '€' : formData.currency === 'GBP' ? '£' : '$'}
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              )}
+            </Box>
+
+            <Divider />
+
+            {/* Contact Information */}
+            <Box>
+              <Typography variant="h6" gutterBottom>
+                Contract Contacts
               </Typography>
 
-              {/* Template Selectors */}
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {/* Preamble Template */}
-                <Box>
-                  <FormControl fullWidth>
-                    <InputLabel>Preamble Template</InputLabel>
-                    <Select
-                      value={formData.preamble_template}
-                      onChange={(e) => setFormData(prev => ({ ...prev, preamble_template: e.target.value }))}
-                      label="Preamble Template"
-                    >
-                      <MenuItem value="">
-                        <em>None</em>
-                      </MenuItem>
-                      {contractTemplates
-                        .filter(t => t.template_type === 'preamble' && t.is_active)
-                        .map(template => (
-                          <MenuItem key={template.id} value={template.id}>
-                            {template.name} {template.is_default && '(Default)'}
-                          </MenuItem>
-                        ))}
-                    </Select>
-                  </FormControl>
-
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={customizePreamble}
-                        onChange={(e) => setCustomizePreamble(e.target.checked)}
-                      />
-                    }
-                    label="Customize preamble text"
-                    sx={{ mt: 1 }}
-                  />
-
-                  {customizePreamble && (
-                    <TextField
-                      fullWidth
-                      multiline
-                      rows={4}
-                      label="Custom Preamble Text"
-                      value={formData.preamble_custom}
-                      onChange={(e) => setFormData(prev => ({ ...prev, preamble_custom: e.target.value }))}
-                      placeholder="Enter custom preamble text..."
-                      sx={{ mt: 1 }}
-                    />
-                  )}
-                </Box>
-
-                {/* Payment Template */}
-                <Box>
-                  <FormControl fullWidth>
-                    <InputLabel>Payment Terms Template</InputLabel>
-                    <Select
-                      value={formData.payment_template}
-                      onChange={(e) => setFormData(prev => ({ ...prev, payment_template: e.target.value }))}
-                      label="Payment Terms Template"
-                    >
-                      <MenuItem value="">
-                        <em>None</em>
-                      </MenuItem>
-                      {contractTemplates
-                        .filter(t => ['payment_thailand', 'payment_international'].includes(t.template_type) && t.is_active)
-                        .map(template => (
-                          <MenuItem key={template.id} value={template.id}>
-                            {template.name} {template.is_default && '(Default)'}
-                          </MenuItem>
-                        ))}
-                    </Select>
-                  </FormControl>
-
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={customizePayment}
-                        onChange={(e) => setCustomizePayment(e.target.checked)}
-                      />
-                    }
-                    label="Customize payment terms"
-                    sx={{ mt: 1 }}
-                  />
-
-                  {customizePayment && (
-                    <TextField
-                      fullWidth
-                      multiline
-                      rows={4}
-                      label="Custom Payment Terms"
-                      value={formData.payment_custom}
-                      onChange={(e) => setFormData(prev => ({ ...prev, payment_custom: e.target.value }))}
-                      placeholder="Enter custom payment terms..."
-                      sx={{ mt: 1 }}
-                    />
-                  )}
-                </Box>
-
-                {/* Activation Template */}
-                <Box>
-                  <FormControl fullWidth>
-                    <InputLabel>Activation Terms Template</InputLabel>
-                    <Select
-                      value={formData.activation_template}
-                      onChange={(e) => setFormData(prev => ({ ...prev, activation_template: e.target.value }))}
-                      label="Activation Terms Template"
-                    >
-                      <MenuItem value="">
-                        <em>None</em>
-                      </MenuItem>
-                      {contractTemplates
-                        .filter(t => t.template_type === 'activation' && t.is_active)
-                        .map(template => (
-                          <MenuItem key={template.id} value={template.id}>
-                            {template.name} {template.is_default && '(Default)'}
-                          </MenuItem>
-                        ))}
-                    </Select>
-                  </FormControl>
-
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={customizeActivation}
-                        onChange={(e) => setCustomizeActivation(e.target.checked)}
-                      />
-                    }
-                    label="Customize activation terms"
-                    sx={{ mt: 1 }}
-                  />
-
-                  {customizeActivation && (
-                    <TextField
-                      fullWidth
-                      multiline
-                      rows={4}
-                      label="Custom Activation Terms"
-                      value={formData.activation_custom}
-                      onChange={(e) => setFormData(prev => ({ ...prev, activation_custom: e.target.value }))}
-                      placeholder="Enter custom activation terms..."
-                      sx={{ mt: 1 }}
-                    />
-                  )}
-                </Box>
-              </Box>
-
-              {/* Service Package Items */}
-              <Box sx={{ mt: 3 }}>
-                <Typography variant="subtitle1" gutterBottom>
-                  Service Package
-                </Typography>
-
-                <Autocomplete
-                  multiple
-                  options={servicePackageItems}
-                  getOptionLabel={(option) => option.name}
-                  value={selectedServiceItems}
-                  onChange={(_, newValue) => setSelectedServiceItems(newValue)}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Select Service Items"
-                      placeholder="Choose service package items"
-                    />
-                  )}
-                  renderTags={(value, getTagProps) =>
-                    value.map((option, index) => (
-                      <Chip
-                        label={option.name}
-                        {...getTagProps({ index })}
-                        color={option.is_standard ? 'primary' : 'default'}
-                      />
-                    ))
-                  }
-                />
-
-                {/* Custom Service Items */}
-                <Box sx={{ mt: 2 }}>
-                  <Typography variant="body2" color="text.secondary" gutterBottom>
-                    Custom Service Items (optional)
-                  </Typography>
-
-                  {customServiceItems.map((item, index) => (
-                    <Paper key={index} sx={{ p: 2, mb: 1 }}>
-                      <Box sx={{ display: 'flex', gap: 2, alignItems: 'start' }}>
-                        <TextField
-                          fullWidth
-                          size="small"
-                          label="Item Name"
-                          value={item.name}
-                          onChange={(e) => {
-                            const newItems = [...customServiceItems];
-                            newItems[index].name = e.target.value;
-                            setCustomServiceItems(newItems);
-                          }}
-                        />
-                        <TextField
-                          fullWidth
-                          size="small"
-                          label="Description"
-                          value={item.description}
-                          onChange={(e) => {
-                            const newItems = [...customServiceItems];
-                            newItems[index].description = e.target.value;
-                            setCustomServiceItems(newItems);
-                          }}
-                        />
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => {
-                            setCustomServiceItems(customServiceItems.filter((_, i) => i !== index));
-                          }}
-                        >
-                          <Delete />
-                        </IconButton>
-                      </Box>
-                    </Paper>
-                  ))}
-
-                  <Button
-                    startIcon={<AddIcon />}
-                    onClick={() => setCustomServiceItems([...customServiceItems, { name: '', description: '' }])}
-                    variant="outlined"
-                    size="small"
-                    sx={{ mt: 1 }}
-                  >
-                    Add Custom Service Item
-                  </Button>
-                </Box>
-              </Box>
-
-              {/* Zone Pricing */}
-              <Box sx={{ mt: 3 }}>
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={formData.show_zone_pricing_detail}
-                      onChange={(e) => setFormData(prev => ({ ...prev, show_zone_pricing_detail: e.target.checked }))}
-                    />
-                  }
-                  label="Show Zone Pricing Detail"
-                />
-
-                {formData.show_zone_pricing_detail && (
+                <Box sx={{ display: 'flex', gap: 2 }}>
                   <TextField
-                    label="Price Per Zone"
-                    type="number"
-                    value={formData.price_per_zone}
-                    onChange={(e) => setFormData(prev => ({ ...prev, price_per_zone: e.target.value }))}
                     fullWidth
-                    sx={{ mt: 1 }}
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          {formData.currency === 'THB' ? '฿' : formData.currency === 'EUR' ? '€' : formData.currency === 'GBP' ? '£' : '$'}
-                        </InputAdornment>
-                      ),
-                    }}
+                    label="BMAsia Contact Name"
+                    value={formData.bmasia_contact_name}
+                    onChange={(e) => setFormData(prev => ({ ...prev, bmasia_contact_name: e.target.value }))}
                   />
-                )}
-              </Box>
+                  <TextField
+                    fullWidth
+                    label="BMAsia Contact Email"
+                    type="email"
+                    value={formData.bmasia_contact_email}
+                    onChange={(e) => setFormData(prev => ({ ...prev, bmasia_contact_email: e.target.value }))}
+                  />
+                  <TextField
+                    fullWidth
+                    label="BMAsia Contact Title"
+                    value={formData.bmasia_contact_title}
+                    onChange={(e) => setFormData(prev => ({ ...prev, bmasia_contact_title: e.target.value }))}
+                  />
+                </Box>
 
-              {/* Contact Information */}
-              <Box sx={{ mt: 3 }}>
-                <Typography variant="subtitle1" gutterBottom>
-                  Contact Information
-                </Typography>
-
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <Box sx={{ display: 'flex', gap: 2 }}>
-                    <TextField
-                      fullWidth
-                      label="BMAsia Contact Name"
-                      value={formData.bmasia_contact_name}
-                      onChange={(e) => setFormData(prev => ({ ...prev, bmasia_contact_name: e.target.value }))}
-                    />
-                    <TextField
-                      fullWidth
-                      label="BMAsia Contact Email"
-                      type="email"
-                      value={formData.bmasia_contact_email}
-                      onChange={(e) => setFormData(prev => ({ ...prev, bmasia_contact_email: e.target.value }))}
-                    />
-                    <TextField
-                      fullWidth
-                      label="BMAsia Contact Title"
-                      value={formData.bmasia_contact_title}
-                      onChange={(e) => setFormData(prev => ({ ...prev, bmasia_contact_title: e.target.value }))}
-                    />
-                  </Box>
-
-                  <Box sx={{ display: 'flex', gap: 2 }}>
-                    <TextField
-                      fullWidth
-                      label="Customer Contact Name"
-                      value={formData.customer_contact_name}
-                      onChange={(e) => setFormData(prev => ({ ...prev, customer_contact_name: e.target.value }))}
-                    />
-                    <TextField
-                      fullWidth
-                      label="Customer Contact Email"
-                      type="email"
-                      value={formData.customer_contact_email}
-                      onChange={(e) => setFormData(prev => ({ ...prev, customer_contact_email: e.target.value }))}
-                    />
-                    <TextField
-                      fullWidth
-                      label="Customer Contact Title"
-                      value={formData.customer_contact_title}
-                      onChange={(e) => setFormData(prev => ({ ...prev, customer_contact_title: e.target.value }))}
-                    />
-                  </Box>
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <TextField
+                    fullWidth
+                    label="Customer Contact Name"
+                    value={formData.customer_contact_name}
+                    onChange={(e) => setFormData(prev => ({ ...prev, customer_contact_name: e.target.value }))}
+                  />
+                  <TextField
+                    fullWidth
+                    label="Customer Contact Email"
+                    type="email"
+                    value={formData.customer_contact_email}
+                    onChange={(e) => setFormData(prev => ({ ...prev, customer_contact_email: e.target.value }))}
+                  />
+                  <TextField
+                    fullWidth
+                    label="Customer Contact Title"
+                    value={formData.customer_contact_title}
+                    onChange={(e) => setFormData(prev => ({ ...prev, customer_contact_title: e.target.value }))}
+                  />
                 </Box>
               </Box>
             </Box>
