@@ -522,7 +522,7 @@ const BalanceSheet: React.FC = () => {
       if (billingEntity) params.append('billing_entity', billingEntity);
 
       const response = await fetch(
-        `${baseUrl}/api/v1/balance-sheet/quarterly/export/pdf/?${params.toString()}`,
+        `${baseUrl}/api/v1/balance-sheet/export/pdf/?${params.toString()}`,
         { headers: { 'Authorization': `Bearer ${token}` } }
       );
 
@@ -557,7 +557,7 @@ const BalanceSheet: React.FC = () => {
       if (billingEntity) params.append('billing_entity', billingEntity);
 
       const response = await fetch(
-        `${baseUrl}/api/v1/balance-sheet/quarterly/export/excel/?${params.toString()}`,
+        `${baseUrl}/api/v1/balance-sheet/export/excel/?${params.toString()}`,
         { headers: { 'Authorization': `Bearer ${token}` } }
       );
 

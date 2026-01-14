@@ -572,9 +572,8 @@ const ProfitLoss: React.FC = () => {
       if (currency) params.append('currency', currency);
       if (billingEntity) params.append('billing_entity', billingEntity);
 
-      const endpoint = viewMode === 'monthly' ? 'monthly' : 'ytd';
       const response = await fetch(
-        `${baseUrl}/api/v1/profit-loss/${endpoint}/export/pdf/?${params.toString()}`,
+        `${baseUrl}/api/v1/profit-loss/export/pdf/?${params.toString()}`,
         { headers: { 'Authorization': `Bearer ${token}` } }
       );
 
@@ -614,9 +613,8 @@ const ProfitLoss: React.FC = () => {
       if (currency) params.append('currency', currency);
       if (billingEntity) params.append('billing_entity', billingEntity);
 
-      const endpoint = viewMode === 'monthly' ? 'monthly' : 'ytd';
       const response = await fetch(
-        `${baseUrl}/api/v1/profit-loss/${endpoint}/export/excel/?${params.toString()}`,
+        `${baseUrl}/api/v1/profit-loss/export/excel/?${params.toString()}`,
         { headers: { 'Authorization': `Bearer ${token}` } }
       );
 

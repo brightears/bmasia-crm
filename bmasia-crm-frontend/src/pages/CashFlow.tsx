@@ -568,9 +568,8 @@ const CashFlow: React.FC = () => {
       if (currency) params.append('currency', currency);
       if (billingEntity) params.append('billing_entity', billingEntity);
 
-      const endpoint = viewMode === 'monthly' ? 'monthly' : 'ytd';
       const response = await fetch(
-        `${baseUrl}/api/v1/cash-flow/${endpoint}/export/pdf/?${params.toString()}`,
+        `${baseUrl}/api/v1/cash-flow/export/pdf/?${params.toString()}`,
         { headers: { 'Authorization': `Bearer ${token}` } }
       );
 
@@ -610,9 +609,8 @@ const CashFlow: React.FC = () => {
       if (currency) params.append('currency', currency);
       if (billingEntity) params.append('billing_entity', billingEntity);
 
-      const endpoint = viewMode === 'monthly' ? 'monthly' : 'ytd';
       const response = await fetch(
-        `${baseUrl}/api/v1/cash-flow/${endpoint}/export/excel/?${params.toString()}`,
+        `${baseUrl}/api/v1/cash-flow/export/excel/?${params.toString()}`,
         { headers: { 'Authorization': `Bearer ${token}` } }
       );
 
