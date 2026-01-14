@@ -490,7 +490,7 @@ const ProfitLoss: React.FC = () => {
     setError(null);
     try {
       // Load P&L statement - use raw fetch to get proper response
-      const token = localStorage.getItem('accessToken');
+      const token = localStorage.getItem('bmasia_access_token') || sessionStorage.getItem('bmasia_access_token');
       const baseUrl = process.env.REACT_APP_API_URL || '';
 
       const params = new URLSearchParams();
