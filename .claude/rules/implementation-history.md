@@ -2,6 +2,17 @@
 
 ## January 2026
 
+### Jan 14, 2026 - Finance PDF/Excel Export (Phase 7)
+- **FinanceExportService** (`crm_app/services/finance_export_service.py`)
+  - ReportLab PDF generation with BMAsia branding (#FFA500)
+  - openpyxl Excel generation with auto-fit columns
+- **Export Endpoints** added to ViewSets:
+  - `/api/v1/profit-loss/export/pdf/` and `/excel/`
+  - `/api/v1/cash-flow/export/pdf/` and `/excel/`
+  - `/api/v1/balance-sheet/export/pdf/` and `/excel/`
+- **Frontend Download Buttons** in ProfitLoss.tsx, CashFlow.tsx, BalanceSheet.tsx
+- **UI Fix**: Toggle buttons (Monthly/Year-to-Date) now have `whiteSpace: nowrap`
+
 ### Jan 13, 2026 - Finance Module Phases 4, 5 & 6
 - **Balance Sheet (Phase 6)**
   - BalanceSheetSnapshot model for quarterly snapshots with manual overrides
@@ -97,6 +108,7 @@
 - CorporatePdfTemplate model (Hilton HPA format)
 
 ## Migration History (Recent)
+- `0051_balance_sheet_module.py` - BalanceSheetSnapshot model
 - `0050_cash_flow_module.py` - CashFlowSnapshot model
 - `0049_expense_module.py` - Expense tracking
 - `0047_zone_management_improvements.py` - Zone improvements
