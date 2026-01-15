@@ -36,7 +36,7 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { Contract, Company, ApiResponse, Zone, PreviewZone } from '../types';
+import { Contract, Company, ApiResponse, Zone, PreviewZone, ContractTemplate } from '../types';
 import ApiService from '../services/api';
 import EnhancedZonePicker from './EnhancedZonePicker';
 
@@ -148,6 +148,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
   const [attachments, setAttachments] = useState<File[]>([]);
   const [masterContracts, setMasterContracts] = useState<Contract[]>([]);
   const [additionalSignatories, setAdditionalSignatories] = useState<Array<{ name: string; title: string }>>([]);
+  const [contractTemplates, setContractTemplates] = useState<ContractTemplate[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
 
   // Soundtrack Account ID preview state
   const [soundtrackAccountId, setSoundtrackAccountId] = useState('');
@@ -159,6 +161,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
     if (open) {
       loadCompanies();
       loadMasterContracts();
+      loadContractTemplates();
       if (mode === 'edit' && contract) {
         populateForm(contract);
       } else {
@@ -187,7 +190,14 @@ const ContractForm: React.FC<ContractFormProps> = ({
     }
   };
 
-
+  const loadContractTemplates = async () => {
+    try {
+      const response = await ApiService.getContractTemplates({ is_active: true });
+      setContractTemplates(response.results || []);
+    } catch (err) {
+      console.error('Failed to load contract templates:', err);
+    }
+  };
 
   const populateForm = (contract: Contract) => {
     setFormData({
@@ -225,6 +235,9 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
     // Load additional signatories
     setAdditionalSignatories(contract.additional_customer_signatories || []);
+
+    // Load selected template
+    setSelectedTemplate(contract.preamble_template || '');
 
     // Load existing contract zones in edit mode
     if (contract.id) {
@@ -288,6 +301,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
     setSelectedZones([]);
     setAttachments([]);
     setAdditionalSignatories([]);
+    setSelectedTemplate('');
     setError('');
     setShowErrors(false);
   };
@@ -412,6 +426,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
         end_date: formData.end_date.toISOString().split('T')[0],
         price_per_zone: formData.price_per_zone ? parseFloat(formData.price_per_zone) : undefined,
         additional_customer_signatories: additionalSignatories.length > 0 ? additionalSignatories : [],
+        preamble_template: selectedTemplate || undefined,
       };
 
       let savedContract: Contract;
@@ -580,6 +595,32 @@ const ContractForm: React.FC<ContractFormProps> = ({
                     </Select>
                   </FormControl>
                 </Box>
+
+                {/* Contract Template Selection */}
+                {contractTemplates.length > 0 && (
+                  <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+                    <FormControl fullWidth>
+                      <InputLabel>Contract Template</InputLabel>
+                      <Select
+                        value={selectedTemplate}
+                        onChange={(e) => setSelectedTemplate(e.target.value)}
+                        label="Contract Template"
+                      >
+                        <MenuItem value="">
+                          <em>Standard (Default)</em>
+                        </MenuItem>
+                        {contractTemplates.map((template) => (
+                          <MenuItem key={template.id} value={template.id}>
+                            {template.name}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
+                        Select a template to use predefined contract terms
+                      </Typography>
+                    </FormControl>
+                  </Box>
+                )}
 
                 {formData.contract_category === 'participation' && (
                   <Box sx={{ mt: 2 }}>
