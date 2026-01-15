@@ -182,6 +182,7 @@ const unifiedNavigation = [
     title: 'Administration',
     items: [
       { text: 'Users', icon: <PeopleIcon />, path: '/users' },
+      { text: 'Contract Templates', icon: <DescriptionIcon />, path: '/contract-templates' },
       { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
     ],
   },

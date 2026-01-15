@@ -48,6 +48,7 @@ import AccountsPayable from './pages/AccountsPayable';
 import ProfitLoss from './pages/ProfitLoss';
 import CashFlow from './pages/CashFlow';
 import BalanceSheet from './pages/BalanceSheet';
+import ContractTemplates from './pages/ContractTemplates';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -495,6 +496,7 @@ function App() {
         {/* Profile route - accessible to all authenticated users */}
         <Route path="/profile" element={<MyProfile />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/contract-templates" element={<ContractTemplates />} />
         <Route path="/system-status" element={<PlaceholderPage title="System Status" />} />
 
         {/* Mobile more page */}

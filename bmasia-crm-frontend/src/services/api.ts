@@ -1120,6 +1120,20 @@ class ApiService {
     return response.data;
   }
 
+  async createContractTemplate(data: any): Promise<any> {
+    const response = await authApi.post('/contract-templates/', data);
+    return response.data;
+  }
+
+  async updateContractTemplate(id: string, data: any): Promise<any> {
+    const response = await authApi.put(`/contract-templates/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteContractTemplate(id: string): Promise<void> {
+    await authApi.delete(`/contract-templates/${id}/`);
+  }
+
   async getServicePackageItems(): Promise<any[]> {
     const response = await authApi.get('/service-package-items/', {
       params: { page_size: 1000 }
