@@ -2,6 +2,26 @@
 
 ## January 2026
 
+### Jan 15, 2026 - Contract Template Management
+
+**Contract Template Dropdown in ContractForm**
+- Added template selection dropdown after Contract Category
+- Loads active templates from `/api/v1/contract-templates/`
+- Saves selection as `preamble_template` on contract
+- Pre-selects saved template when editing
+
+**Contract Templates Management Page** (`/contract-templates`)
+- New frontend page: `ContractTemplates.tsx`
+- Full CRUD: Create, Edit, Duplicate, Delete templates
+- Search by name/content
+- Filter by template type (preamble, payment_thailand, etc.)
+- Filter by active/inactive status
+- Form component: `ContractTemplateForm.tsx`
+  - Variable guide with click-to-copy and double-click-to-insert
+  - Available variables: {{company_name}}, {{contract_number}}, {{start_date}}, etc.
+- Navigation: Administration → Contract Templates
+- API methods added: `createContractTemplate`, `updateContractTemplate`, `deleteContractTemplate`
+
 ### Jan 14, 2026 - Contract Form Improvements
 
 **Contract Tax Fields (VAT Support)**

@@ -62,6 +62,13 @@ BMAsia CRM is a comprehensive Customer Relationship Management system:
 | 5. Cash Flow | ✅ | `/finance/cash-flow` |
 | 6. Balance Sheet | ✅ | `/finance/balance-sheet` |
 
+### Contract Templates (Jan 15, 2026)
+- **Management Page**: `/contract-templates` - Full CRUD for contract templates
+- **ContractForm Dropdown**: Select template when creating/editing contracts
+- **Files**: `ContractTemplates.tsx`, `ContractTemplateForm.tsx`
+- **Navigation**: Administration → Contract Templates
+- **Variables**: `{{company_name}}`, `{{contract_number}}`, `{{start_date}}`, `{{end_date}}`, `{{value}}`, `{{currency}}`
+
 ## Key Project Files
 
 ### Backend (Django)
