@@ -57,17 +57,27 @@ const TEMPLATE_TYPES = [
 
 // Available variables for contract templates
 const TEMPLATE_VARIABLES = [
+  // Company & Client Info
   { name: 'company_name', description: 'Company name' },
   { name: 'legal_entity_name', description: 'Legal entity name (if set)' },
+  { name: 'client_address', description: 'Client full address' },
+  { name: 'contact_name', description: 'Primary contact name' },
+  { name: 'contact_email', description: 'Primary contact email' },
+  // Contract Details
   { name: 'contract_number', description: 'Contract number' },
   { name: 'start_date', description: 'Contract start date' },
   { name: 'end_date', description: 'Contract end date' },
+  { name: 'agreement_date', description: 'Agreement/signature date' },
   { name: 'value', description: 'Contract value' },
   { name: 'currency', description: 'Currency (THB, USD, etc.)' },
   { name: 'billing_frequency', description: 'Billing frequency' },
   { name: 'payment_terms', description: 'Payment terms' },
-  { name: 'contact_name', description: 'Primary contact name' },
-  { name: 'contact_email', description: 'Primary contact email' },
+  // Venue & Zones
+  { name: 'venue_names', description: 'Venue/property names (comma-separated)' },
+  { name: 'number_of_zones', description: 'Total number of zones' },
+  // Signatories
+  { name: 'client_signatory_name', description: 'Client signatory name' },
+  { name: 'client_signatory_title', description: 'Client signatory title' },
 ];
 
 const initialFormData: FormData = {
