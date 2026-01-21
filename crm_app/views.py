@@ -1293,7 +1293,40 @@ class ContractViewSet(BaseModelViewSet):
                 elements.append(zone_table)
                 elements.append(Spacer(1, 0.2*inch))
 
-            # Skip directly to Additional Terms and Signatures (jump to line ~1502)
+            # Template mode: Skip Additional Terms, Status Indicator, and Signatures
+            # (template already contains complete contract with signatures)
+            # Just add a simple footer and build the PDF
+
+            # Footer for template mode
+            elements.append(Spacer(1, 0.3*inch))
+            elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
+
+            footer_style = ParagraphStyle(
+                'FooterText',
+                parent=styles['Normal'],
+                fontSize=8,
+                textColor=colors.HexColor('#888888'),
+                alignment=TA_CENTER,
+                leading=12,
+            )
+            footer_text = f"""<b>{entity_name}</b><br/>{entity_address} | Phone: {entity_phone}"""
+            elements.append(Paragraph(footer_text, footer_style))
+
+            # Build PDF and return early
+            doc.build(elements)
+            pdf_data = buffer.getvalue()
+            buffer.close()
+
+            response = HttpResponse(pdf_data, content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="Contract_{contract.contract_number}.pdf"'
+
+            self.log_action('VIEW', contract, {
+                'action': 'PDF generated and downloaded (template mode)',
+                'contract_number': contract.contract_number,
+                'status': contract.status
+            })
+
+            return response
 
         else:
             # NO TEMPLATE: Use default preamble and hardcoded clause structure
