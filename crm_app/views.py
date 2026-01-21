@@ -919,19 +919,49 @@ class ContractViewSet(BaseModelViewSet):
     def _substitute_template_variables(self, content, contract):
         """Replace template variables with actual values"""
         company = contract.company
+
+        # Get primary contact
+        primary_contact = None
+        if company:
+            primary_contact = company.contacts.filter(is_primary=True).first()
+            if not primary_contact:
+                primary_contact = company.contacts.first()
+
+        # Get venue/zone names
+        zones = contract.get_active_zones()
+        venue_names = ', '.join([z.name for z in zones]) if zones.exists() else ''
+
         replacements = {
+            # Company & Client Info
+            '{{company_name}}': company.name if company else '',
+            '{{legal_entity_name}}': company.legal_entity_name or company.name if company else '',
+            '{{company_legal_name}}': company.legal_entity_name or company.name if company else '',  # alias
+            '{{client_address}}': self._format_company_address(company) if company else '',
+            '{{company_address}}': self._format_company_address(company) if company else '',  # alias
+            '{{contact_name}}': primary_contact.name if primary_contact else '',
+            '{{contact_email}}': primary_contact.email if primary_contact else '',
+
+            # Contract Details
+            '{{contract_number}}': contract.contract_number or '',
             '{{start_date}}': contract.start_date.strftime('%d %B %Y') if contract.start_date else '',
             '{{end_date}}': contract.end_date.strftime('%d %B %Y') if contract.end_date else '',
-            '{{company_name}}': company.name if company else '',
-            '{{company_legal_name}}': company.legal_entity_name or company.name if company else '',
-            '{{company_address}}': self._format_company_address(company) if company else '',
-            '{{contract_number}}': contract.contract_number,
+            '{{agreement_date}}': contract.start_date.strftime('%d %B %Y') if contract.start_date else '',
             '{{value}}': f"{contract.currency} {contract.value:,.2f}" if contract.value else '',
-            '{{currency}}': contract.currency,
-            '{{zone_count}}': str(contract.get_zone_count()),
+            '{{currency}}': contract.currency or '',
+            '{{billing_frequency}}': contract.billing_frequency or '',
+            '{{payment_terms}}': contract.payment_terms or '',
+
+            # Venue & Zones
+            '{{venue_names}}': venue_names,
+            '{{number_of_zones}}': str(contract.get_zone_count()),
+            '{{zone_count}}': str(contract.get_zone_count()),  # alias
+
+            # Signatories
+            '{{client_signatory_name}}': contract.customer_signatory_name or '',
+            '{{client_signatory_title}}': contract.customer_signatory_title or '',
         }
         for var, value in replacements.items():
-            content = content.replace(var, value)
+            content = content.replace(var, str(value))
         return content
 
     def _format_company_address(self, company):
