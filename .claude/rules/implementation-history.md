@@ -2,6 +2,21 @@
 
 ## January 2026
 
+### Jan 21, 2026 - Signature Blocks Template Variable
+
+**Feature**: `{{signature_blocks}}` for side-by-side signatures in contract PDFs
+
+**Implementation**:
+- Created `_build_signature_blocks_table()` helper method
+- BMAsia (left column): signature image + stamp, name, title, company, auto-dated
+- Client (right column): signature space, name, title, company, blank date
+- Supports additional customer signatories from JSONField
+- Recursive `render_segment()` function handles both `{{zones_table}}` and `{{signature_blocks}}`
+
+**Usage**: Add `{{signature_blocks}}` at end of template for two-column signature table
+
+---
+
 ### Jan 21, 2026 - Zones Table Position Fix
 
 **Problem**: When `{{zones_table}}` in template, zones appeared after signatures (at end of PDF)
