@@ -979,6 +979,64 @@ class ContractViewSet(BaseModelViewSet):
             zone_lines.append(f"Zone {idx}: {zone.name}")
         return "<br/>".join(zone_lines) if zone_lines else ""
 
+    def _build_zones_table(self, contract, zones):
+        """Build a styled zones Table flowable for PDF insertion"""
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import Table, TableStyle
+
+        company = contract.company
+
+        # Build header
+        zone_header = ['Property', 'Zone']
+        if contract.show_zone_pricing_detail and contract.price_per_zone:
+            zone_header.append('Price/Zone')
+
+        # Build data rows
+        zone_data = [zone_header]
+        zone_count = zones.count()
+        for idx, zone in enumerate(zones, 1):
+            # Only show property name in first data row
+            property_name = company.name if idx == 1 else ''
+            row = [property_name, f"Zone {idx}: {zone.name}"]
+            if contract.show_zone_pricing_detail and contract.price_per_zone:
+                row.append(f"{contract.currency} {contract.price_per_zone:,.2f}")
+            zone_data.append(row)
+
+        # Set column widths
+        if contract.show_zone_pricing_detail and contract.price_per_zone:
+            zone_col_widths = [2.0*inch, 2.5*inch, 2.4*inch]
+        else:
+            zone_col_widths = [2.5*inch, 3.0*inch]
+
+        zone_table = Table(zone_data, colWidths=zone_col_widths)
+
+        # Style the table
+        zone_style_list = [
+            # Header row - orange accent
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
+            # Data rows
+            ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#424242')),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#fafafa')),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+        ]
+
+        # Merge property cells if multiple zones
+        if zone_count > 1:
+            zone_style_list.append(('SPAN', (0, 1), (0, zone_count)))
+            zone_style_list.append(('VALIGN', (0, 1), (0, zone_count), 'MIDDLE'))
+
+        zone_table.setStyle(TableStyle(zone_style_list))
+        return zone_table
+
     def _format_company_address(self, company):
         """Format company address as single line"""
         if not company:
@@ -1232,66 +1290,41 @@ class ContractViewSet(BaseModelViewSet):
             # FULL TEMPLATE MODE: Template contains complete contract text
             # Skip all hardcoded clauses and render only template content
             template_content = contract.preamble_template.content
+            zones = contract.get_active_zones()
 
             # Handle {{zones_table}} special variable
-            zones = contract.get_active_zones()
             if '{{zones_table}}' in template_content:
+                # SPLIT at {{zones_table}} and insert proper Table flowable
+                parts = template_content.split('{{zones_table}}')
+
+                # Substitute variables in first part and render
+                before_content = self._substitute_template_variables(parts[0], contract)
+                if before_content.strip():
+                    elements.append(Paragraph(before_content, body_style))
+
+                # Insert proper zones Table (if zones exist)
                 if zones.exists():
-                    # Generate zones as simple text table for inline insertion
-                    zones_text = self._generate_zones_text(contract, zones)
-                    template_content = template_content.replace('{{zones_table}}', zones_text)
-                else:
-                    template_content = template_content.replace('{{zones_table}}', '')
+                    zone_table = self._build_zones_table(contract, zones)
+                    elements.append(zone_table)
+                    elements.append(Spacer(1, 0.15*inch))
 
-            # Substitute all template variables
-            template_content = self._substitute_template_variables(template_content, contract)
-
-            # Render the full template content
-            elements.append(Paragraph(template_content, body_style))
-            elements.append(Spacer(1, 0.2*inch))
-
-            # If zones exist but {{zones_table}} wasn't in template, append a zones table
-            if zones.exists() and '{{zones_table}}' not in contract.preamble_template.content:
-                elements.append(Paragraph("<b>Locations for provision of services:</b>", clause_style))
-                # Build zone table
-                zone_header = ['Property', 'Zone']
-                if contract.show_zone_pricing_detail and contract.price_per_zone:
-                    zone_header.append('Price/Zone')
-
-                zone_data = [zone_header]
-                zone_count = zones.count()
-                for idx, zone in enumerate(zones, 1):
-                    property_name = company.name if idx == 1 else ''
-                    row = [property_name, f"Zone {idx}: {zone.name}"]
-                    if contract.show_zone_pricing_detail and contract.price_per_zone:
-                        row.append(f"{contract.currency} {contract.price_per_zone:,.2f}")
-                    zone_data.append(row)
-
-                zone_col_widths = [2.5*inch, 3.0*inch] if not (contract.show_zone_pricing_detail and contract.price_per_zone) else [2.0*inch, 2.5*inch, 2.4*inch]
-                zone_table = Table(zone_data, colWidths=zone_col_widths)
-
-                zone_style_list = [
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                    ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
-                    ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
-                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#424242')),
-                    ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#fafafa')),
-                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                    ('TOPPADDING', (0, 0), (-1, -1), 6),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 8),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
-                ]
-
-                if zone_count > 1:
-                    zone_style_list.append(('SPAN', (0, 1), (0, zone_count)))
-                    zone_style_list.append(('VALIGN', (0, 1), (0, zone_count), 'MIDDLE'))
-
-                zone_table.setStyle(TableStyle(zone_style_list))
-                elements.append(zone_table)
+                # Substitute variables in second part and render
+                if len(parts) > 1 and parts[1].strip():
+                    after_content = self._substitute_template_variables(parts[1], contract)
+                    elements.append(Paragraph(after_content, body_style))
+                    elements.append(Spacer(1, 0.2*inch))
+            else:
+                # No {{zones_table}} - render as single paragraph
+                template_content = self._substitute_template_variables(template_content, contract)
+                elements.append(Paragraph(template_content, body_style))
                 elements.append(Spacer(1, 0.2*inch))
+
+                # Append zones table at end if zones exist
+                if zones.exists():
+                    elements.append(Paragraph("<b>Locations for provision of services:</b>", clause_style))
+                    zone_table = self._build_zones_table(contract, zones)
+                    elements.append(zone_table)
+                    elements.append(Spacer(1, 0.2*inch))
 
             # Template mode: Skip Additional Terms, Status Indicator, and Signatures
             # (template already contains complete contract with signatures)
