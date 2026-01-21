@@ -846,13 +846,20 @@ class ContractViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
-        """Generate and download PDF for contract based on contract_category"""
+        """Generate and download PDF for contract based on template's pdf_format or contract_category"""
         contract = self.get_object()
 
-        # Route to appropriate PDF generator based on contract category
-        if contract.contract_category == 'corporate_master':
+        # Determine PDF format: prefer template's pdf_format, fallback to contract_category
+        pdf_format = 'standard'  # default
+        if contract.preamble_template and contract.preamble_template.pdf_format:
+            pdf_format = contract.preamble_template.pdf_format
+        elif contract.contract_category:
+            pdf_format = contract.contract_category
+
+        # Route to appropriate PDF generator
+        if pdf_format == 'corporate_master':
             return self._generate_master_agreement_pdf(contract)
-        elif contract.contract_category == 'participation':
+        elif pdf_format == 'participation':
             return self._generate_participation_agreement_pdf(contract)
         else:  # standard
             return self._generate_principal_terms_pdf(contract)

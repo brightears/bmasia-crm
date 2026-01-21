@@ -1868,9 +1868,11 @@ class StaticDocumentSerializer(serializers.ModelSerializer):
 
 class ContractTemplateSerializer(serializers.ModelSerializer):
     """Serializer for ContractTemplate model"""
+    pdf_format_display = serializers.CharField(source='get_pdf_format_display', read_only=True)
+
     class Meta:
         model = ContractTemplate
-        fields = ['id', 'name', 'template_type', 'content', 'is_default', 'is_active', 'version', 'created_at', 'updated_at']
+        fields = ['id', 'name', 'template_type', 'content', 'pdf_format', 'pdf_format_display', 'is_default', 'is_active', 'version', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
 
 

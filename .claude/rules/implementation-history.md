@@ -2,6 +2,23 @@
 
 ## January 2026
 
+### Jan 21, 2026 - Contract Template Simplification (In Progress)
+
+**Key Insight**: Templates can contain ENTIRE contract structure (not just snippets)
+- User created full contract template with all clauses, signature blocks in HTML format
+- Proposed: Remove Contract Category, use templates as complete contracts
+- Discussion ongoing about simplifying PDF generation to just render template content
+
+**Backend Variables Added**:
+- `{{client_address}}`, `{{venue_names}}`, `{{number_of_zones}}`
+- `{{agreement_date}}`, `{{client_signatory_name}}`, `{{client_signatory_title}}`
+- `{{contact_name}}`, `{{contact_email}}`, `{{billing_frequency}}`, `{{payment_terms}}`
+
+**Form Simplified**:
+- Removed Template Type dropdown (not needed)
+- Removed Default switch (just Active/Inactive)
+- Removed Type column and filter from list page
+
 ### Jan 15, 2026 - Contract Template Management
 
 **Contract Template Dropdown in ContractForm**
@@ -14,13 +31,9 @@
 - New frontend page: `ContractTemplates.tsx`
 - Full CRUD: Create, Edit, Duplicate, Delete templates
 - Search by name/content
-- Filter by template type (preamble, payment_thailand, etc.)
-- Filter by active/inactive status
-- Form component: `ContractTemplateForm.tsx`
-  - Variable guide with click-to-copy and double-click-to-insert
-  - Available variables: {{company_name}}, {{contract_number}}, {{start_date}}, etc.
+- Simplified form with variable guide (click to copy, double-click to insert)
 - Navigation: Administration → Contract Templates
-- API methods added: `createContractTemplate`, `updateContractTemplate`, `deleteContractTemplate`
+- API methods: `createContractTemplate`, `updateContractTemplate`, `deleteContractTemplate`
 
 ### Jan 14, 2026 - Contract Form Improvements
 

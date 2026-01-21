@@ -403,6 +403,11 @@ const ContractForm: React.FC<ContractFormProps> = ({
         return;
       }
 
+      if (!selectedTemplate) {
+        setError('Please select a contract template');
+        return;
+      }
+
       if (formData.contract_category === 'participation' && !formData.master_contract) {
         setError('Please select a master contract for participation agreements');
         return;
@@ -581,46 +586,44 @@ const ContractForm: React.FC<ContractFormProps> = ({
                   </FormControl>
                 </Box>
 
+                {/* Contract Template Selection */}
                 <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
                   <FormControl fullWidth>
-                    <InputLabel>Contract Category</InputLabel>
+                    <InputLabel>Contract Template *</InputLabel>
                     <Select
-                      value={formData.contract_category}
-                      onChange={(e) => setFormData(prev => ({ ...prev, contract_category: e.target.value as any }))}
-                      label="Contract Category"
+                      value={selectedTemplate}
+                      onChange={(e) => {
+                        const templateId = e.target.value;
+                        setSelectedTemplate(templateId);
+                        // Update contract_category based on template's pdf_format
+                        const template = contractTemplates.find(t => t.id === templateId);
+                        if (template?.pdf_format) {
+                          setFormData(prev => ({ ...prev, contract_category: template.pdf_format as any }));
+                        } else {
+                          setFormData(prev => ({ ...prev, contract_category: 'standard' as any }));
+                        }
+                      }}
+                      label="Contract Template *"
                     >
-                      <MenuItem value="standard">Standard Contract</MenuItem>
-                      <MenuItem value="corporate_master">Corporate Master Agreement</MenuItem>
-                      <MenuItem value="participation">Participation Agreement</MenuItem>
+                      <MenuItem value="">
+                        <em>Select a template</em>
+                      </MenuItem>
+                      {contractTemplates.map((template) => (
+                        <MenuItem key={template.id} value={template.id}>
+                          {template.name}
+                          {template.pdf_format !== 'standard' && (
+                            <Typography component="span" variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
+                              ({template.pdf_format_display || template.pdf_format})
+                            </Typography>
+                          )}
+                        </MenuItem>
+                      ))}
                     </Select>
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
+                      Template determines contract structure and PDF format
+                    </Typography>
                   </FormControl>
                 </Box>
-
-                {/* Contract Template Selection */}
-                {contractTemplates.length > 0 && (
-                  <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-                    <FormControl fullWidth>
-                      <InputLabel>Contract Template</InputLabel>
-                      <Select
-                        value={selectedTemplate}
-                        onChange={(e) => setSelectedTemplate(e.target.value)}
-                        label="Contract Template"
-                      >
-                        <MenuItem value="">
-                          <em>Standard (Default)</em>
-                        </MenuItem>
-                        {contractTemplates.map((template) => (
-                          <MenuItem key={template.id} value={template.id}>
-                            {template.name}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
-                        Select a template to use predefined contract terms
-                      </Typography>
-                    </FormControl>
-                  </Box>
-                )}
 
                 {formData.contract_category === 'participation' && (
                   <Box sx={{ mt: 2 }}>

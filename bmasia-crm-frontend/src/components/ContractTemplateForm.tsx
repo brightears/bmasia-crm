@@ -16,6 +16,11 @@ import {
   Paper,
   Chip,
   Tooltip,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel,
+  SelectChangeEvent,
 } from '@mui/material';
 import {
   Save,
@@ -35,10 +40,18 @@ interface ContractTemplateFormProps {
 interface FormData {
   name: string;
   template_type: string;
+  pdf_format: string;
   version: string;
   content: string;
   is_active: boolean;
 }
+
+// PDF format options - determines which PDF structure is used when generating contracts
+const PDF_FORMAT_OPTIONS = [
+  { value: 'standard', label: 'Standard Contract' },
+  { value: 'corporate_master', label: 'Corporate Master Agreement' },
+  { value: 'participation', label: 'Participation Agreement' },
+];
 
 // Available variables for contract templates
 const TEMPLATE_VARIABLES = [
@@ -68,6 +81,7 @@ const TEMPLATE_VARIABLES = [
 const initialFormData: FormData = {
   name: '',
   template_type: 'preamble', // Default type, not shown in UI
+  pdf_format: 'standard',
   version: '1.0',
   content: '',
   is_active: true,
@@ -89,6 +103,7 @@ const ContractTemplateForm: React.FC<ContractTemplateFormProps> = ({
       setFormData({
         name: template.name || '',
         template_type: template.template_type || 'preamble',
+        pdf_format: template.pdf_format || 'standard',
         version: template.version || '1.0',
         content: template.content || '',
         is_active: template.is_active ?? true,
@@ -181,6 +196,24 @@ const ContractTemplateForm: React.FC<ContractTemplateFormProps> = ({
               />
             </Grid>
 
+            {/* PDF Format */}
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>PDF Format</InputLabel>
+                <Select
+                  value={formData.pdf_format}
+                  label="PDF Format"
+                  onChange={(e: SelectChangeEvent) => handleChange('pdf_format', e.target.value)}
+                >
+                  {PDF_FORMAT_OPTIONS.map((option) => (
+                    <MenuItem key={option.value} value={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
             {/* Version */}
             <Grid item xs={12} sm={4}>
               <TextField
@@ -193,7 +226,7 @@ const ContractTemplateForm: React.FC<ContractTemplateFormProps> = ({
             </Grid>
 
             {/* Active Switch */}
-            <Grid item xs={12} sm={2}>
+            <Grid item xs={12} sm={8}>
               <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
                 <FormControlLabel
                   control={

@@ -1205,6 +1205,8 @@ export interface ContractTemplate {
   name: string;
   template_type: 'preamble' | 'service_standard' | 'service_managed' | 'service_custom' |
                  'payment_thailand' | 'payment_international' | 'activation';
+  pdf_format: 'standard' | 'corporate_master' | 'participation';
+  pdf_format_display?: string;
   content: string;
   is_default: boolean;
   is_active: boolean;

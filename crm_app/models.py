@@ -1011,9 +1011,21 @@ class ContractTemplate(models.Model):
         ('activation', 'Activation Terms'),
     ]
 
+    PDF_FORMAT_CHOICES = [
+        ('standard', 'Standard Contract'),
+        ('corporate_master', 'Corporate Master Agreement'),
+        ('participation', 'Participation Agreement'),
+    ]
+
     name = models.CharField(max_length=100)
-    template_type = models.CharField(max_length=30, choices=TEMPLATE_TYPE_CHOICES)
+    template_type = models.CharField(max_length=30, choices=TEMPLATE_TYPE_CHOICES, default='preamble')
     content = models.TextField(help_text="Template text with {{variables}} for substitution")
+    pdf_format = models.CharField(
+        max_length=20,
+        choices=PDF_FORMAT_CHOICES,
+        default='standard',
+        help_text='Which PDF structure to use when generating contracts'
+    )
     is_default = models.BooleanField(default=False, help_text="Auto-select for new contracts")
     is_active = models.BooleanField(default=True)
     version = models.CharField(max_length=20, default='1.0')
@@ -1021,12 +1033,12 @@ class ContractTemplate(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ['template_type', 'name']
+        ordering = ['name']
         verbose_name = "Contract Template"
         verbose_name_plural = "Contract Templates"
 
     def __str__(self):
-        return f"{self.name} ({self.get_template_type_display()})"
+        return self.name
 
 
 class ServicePackageItem(models.Model):
