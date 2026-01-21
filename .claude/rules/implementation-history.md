@@ -2,6 +2,20 @@
 
 ## January 2026
 
+### Jan 21, 2026 - Zones Table Position Fix
+
+**Problem**: When `{{zones_table}}` in template, zones appeared after signatures (at end of PDF)
+**Solution**: Split template at `{{zones_table}}` marker, insert proper Table flowable
+
+**Implementation**:
+- Created `_build_zones_table()` helper method (reusable Table flowable)
+- Template splits at `{{zones_table}}` - renders before content, inserts table, renders after
+- Backwards compatible: if no marker, table appends at end
+
+**User Action**: Add `{{zones_table}}` between clause 2 and 3 in templates
+
+---
+
 ### Jan 21, 2026 - Contract Template System Complete
 
 **Key Insight**: Templates contain ENTIRE contract structure (not just preamble snippets)
