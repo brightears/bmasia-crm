@@ -7,10 +7,6 @@ import {
   Button,
   TextField,
   GridLegacy as Grid,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   FormControlLabel,
   Switch,
   Box,
@@ -41,19 +37,8 @@ interface FormData {
   template_type: string;
   version: string;
   content: string;
-  is_default: boolean;
   is_active: boolean;
 }
-
-const TEMPLATE_TYPES = [
-  { value: 'preamble', label: 'Preamble / Introduction' },
-  { value: 'payment_thailand', label: 'Payment Terms - Thailand' },
-  { value: 'payment_international', label: 'Payment Terms - International' },
-  { value: 'activation', label: 'Activation Terms' },
-  { value: 'service_standard', label: 'Service Package - Standard' },
-  { value: 'service_managed', label: 'Service Package - Managed' },
-  { value: 'service_custom', label: 'Service Package - Custom' },
-];
 
 // Available variables for contract templates
 const TEMPLATE_VARIABLES = [
@@ -82,10 +67,9 @@ const TEMPLATE_VARIABLES = [
 
 const initialFormData: FormData = {
   name: '',
-  template_type: 'preamble',
+  template_type: 'preamble', // Default type, not shown in UI
   version: '1.0',
   content: '',
-  is_default: false,
   is_active: true,
 };
 
@@ -107,7 +91,6 @@ const ContractTemplateForm: React.FC<ContractTemplateFormProps> = ({
         template_type: template.template_type || 'preamble',
         version: template.version || '1.0',
         content: template.content || '',
-        is_default: template.is_default || false,
         is_active: template.is_active ?? true,
       });
     } else {
@@ -194,12 +177,12 @@ const ContractTemplateForm: React.FC<ContractTemplateFormProps> = ({
                 value={formData.name}
                 onChange={(e) => handleChange('name', e.target.value)}
                 required
-                placeholder="e.g., Standard Preamble - International"
+                placeholder="e.g., SYB Thailand - Standard Contract"
               />
             </Grid>
 
             {/* Version */}
-            <Grid item xs={12} sm={6}>
+            <Grid item xs={12} sm={4}>
               <TextField
                 fullWidth
                 label="Version"
@@ -209,27 +192,9 @@ const ContractTemplateForm: React.FC<ContractTemplateFormProps> = ({
               />
             </Grid>
 
-            {/* Template Type */}
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth>
-                <InputLabel>Template Type</InputLabel>
-                <Select
-                  value={formData.template_type}
-                  onChange={(e) => handleChange('template_type', e.target.value)}
-                  label="Template Type"
-                >
-                  {TEMPLATE_TYPES.map((type) => (
-                    <MenuItem key={type.value} value={type.value}>
-                      {type.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-
-            {/* Switches */}
-            <Grid item xs={12} sm={6}>
-              <Box sx={{ display: 'flex', gap: 2, mt: 1 }}>
+            {/* Active Switch */}
+            <Grid item xs={12} sm={2}>
+              <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
                 <FormControlLabel
                   control={
                     <Switch
@@ -239,16 +204,6 @@ const ContractTemplateForm: React.FC<ContractTemplateFormProps> = ({
                     />
                   }
                   label="Active"
-                />
-                <FormControlLabel
-                  control={
-                    <Switch
-                      checked={formData.is_default}
-                      onChange={(e) => handleChange('is_default', e.target.checked)}
-                      color="primary"
-                    />
-                  }
-                  label="Default"
                 />
               </Box>
             </Grid>
@@ -294,7 +249,9 @@ const ContractTemplateForm: React.FC<ContractTemplateFormProps> = ({
                 multiline
                 rows={12}
                 required
-                placeholder="Enter the contract template text here. Use {{variable_name}} for dynamic content."
+                placeholder="Enter the contract template text here. Use {{variable_name}} for dynamic content.
+
+Formatting: Use <b>bold</b>, <i>italic</i>, <br/> for line breaks."
                 sx={{
                   '& .MuiInputBase-input': {
                     fontFamily: 'monospace',

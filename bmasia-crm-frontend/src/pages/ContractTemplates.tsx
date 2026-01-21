@@ -45,21 +45,6 @@ import { ContractTemplate, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import ContractTemplateForm from '../components/ContractTemplateForm';
 
-const TEMPLATE_TYPES = [
-  { value: 'preamble', label: 'Preamble' },
-  { value: 'payment_thailand', label: 'Payment - Thailand' },
-  { value: 'payment_international', label: 'Payment - International' },
-  { value: 'activation', label: 'Activation' },
-  { value: 'service_standard', label: 'Service - Standard' },
-  { value: 'service_managed', label: 'Service - Managed' },
-  { value: 'service_custom', label: 'Service - Custom' },
-];
-
-const getTypeLabel = (type: string): string => {
-  const found = TEMPLATE_TYPES.find(t => t.value === type);
-  return found ? found.label : type;
-};
-
 const ContractTemplates: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [templates, setTemplates] = useState<ContractTemplate[]>([]);
@@ -67,7 +52,6 @@ const ContractTemplates: React.FC = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [search, setSearch] = useState('');
-  const [templateTypeFilter, setTemplateTypeFilter] = useState('');
   const [activeFilter, setActiveFilter] = useState('');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
@@ -95,7 +79,6 @@ const ContractTemplates: React.FC = () => {
       };
 
       if (search) params.search = search;
-      if (templateTypeFilter) params.template_type = templateTypeFilter;
       if (activeFilter) params.is_active = activeFilter === 'true';
 
       const response: ApiResponse<ContractTemplate> = await ApiService.getContractTemplates(params);
@@ -109,7 +92,7 @@ const ContractTemplates: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, rowsPerPage, search, templateTypeFilter, activeFilter]);
+  }, [page, rowsPerPage, search, activeFilter]);
 
   // Handle query param for opening create dialog
   useEffect(() => {
@@ -177,7 +160,6 @@ const ContractTemplates: React.FC = () => {
         template_type: template.template_type,
         content: template.content,
         version: template.version,
-        is_default: false,
         is_active: template.is_active,
       };
       await ApiService.createContractTemplate(duplicateData);
@@ -263,7 +245,7 @@ const ContractTemplates: React.FC = () => {
       {/* Filters */}
       <Paper sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} sm={4}>
+          <Grid item xs={12} sm={6}>
             <TextField
               fullWidth
               size="small"
@@ -279,27 +261,7 @@ const ContractTemplates: React.FC = () => {
               }}
             />
           </Grid>
-          <Grid item xs={12} sm={3}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Template Type</InputLabel>
-              <Select
-                value={templateTypeFilter}
-                label="Template Type"
-                onChange={(e) => {
-                  setTemplateTypeFilter(e.target.value);
-                  setPage(0);
-                }}
-              >
-                <MenuItem value="">All Types</MenuItem>
-                {TEMPLATE_TYPES.map((type) => (
-                  <MenuItem key={type.value} value={type.value}>
-                    {type.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={3}>
+          <Grid item xs={12} sm={4}>
             <FormControl fullWidth size="small">
               <InputLabel>Status</InputLabel>
               <Select
@@ -342,9 +304,7 @@ const ContractTemplates: React.FC = () => {
               <TableHead>
                 <TableRow>
                   <TableCell>Name</TableCell>
-                  <TableCell>Type</TableCell>
                   <TableCell>Version</TableCell>
-                  <TableCell align="center">Default</TableCell>
                   <TableCell align="center">Status</TableCell>
                   <TableCell>Updated</TableCell>
                   <TableCell align="right">Actions</TableCell>
@@ -358,19 +318,7 @@ const ContractTemplates: React.FC = () => {
                         {template.name}
                       </Typography>
                     </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={getTypeLabel(template.template_type)}
-                        size="small"
-                        variant="outlined"
-                      />
-                    </TableCell>
                     <TableCell>{template.version}</TableCell>
-                    <TableCell align="center">
-                      {template.is_default && (
-                        <Chip label="Default" size="small" color="primary" />
-                      )}
-                    </TableCell>
                     <TableCell align="center">
                       <Chip
                         label={template.is_active ? 'Active' : 'Inactive'}
