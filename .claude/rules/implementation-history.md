@@ -2,16 +2,24 @@
 
 ## January 2026
 
-### Jan 21, 2026 - Contract Template Simplification (Complete)
+### Jan 21, 2026 - Contract Template System Complete
 
-**Key Insight**: Templates can contain ENTIRE contract structure (not just snippets)
-- User created full contract template with all clauses, signature blocks in HTML format
+**Key Insight**: Templates contain ENTIRE contract structure (not just preamble snippets)
+- User creates full contract template with all clauses, signature blocks in HTML format
 - Templates now determine PDF format (Standard, Corporate Master, Participation)
+- PDF renders ONLY template content - no duplicate hardcoded clauses
+
+**PDF Generation Fix**:
+- When template exists: renders template content only, skips hardcoded clauses
+- When no template: uses existing hardcoded clause structure (backwards compatible)
+- Added `{{zones_table}}` special variable for inline zone list insertion
+- Zones table appended after template if `{{zones_table}}` not used
+- Signature section always renders normally
 
 **PDF Format on Templates**:
 - Added `pdf_format` field to ContractTemplate model
 - Choices: `standard`, `corporate_master`, `participation`
-- PDF generation uses template's `pdf_format` instead of contract's `contract_category`
+- PDF routing uses template's `pdf_format` instead of contract's `contract_category`
 - Backwards compatible: falls back to `contract_category` if no template
 
 **ContractForm Simplification**:
@@ -23,13 +31,17 @@
 
 **ContractTemplateForm Updates**:
 - Added PDF Format dropdown (Standard, Corporate Master, Participation)
+- Added `{{zones_table}}` to variable guide
 - Removed Template Type dropdown (not needed)
 - Removed Default switch (just Active/Inactive)
 
-**Backend Variables Added** (earlier in day):
-- `{{client_address}}`, `{{venue_names}}`, `{{number_of_zones}}`
-- `{{agreement_date}}`, `{{client_signatory_name}}`, `{{client_signatory_title}}`
-- `{{contact_name}}`, `{{contact_email}}`, `{{billing_frequency}}`, `{{payment_terms}}`
+**Template Variables Available**:
+- Company: `{{company_name}}`, `{{legal_entity_name}}`, `{{client_address}}`
+- Contact: `{{contact_name}}`, `{{contact_email}}`
+- Contract: `{{contract_number}}`, `{{start_date}}`, `{{end_date}}`, `{{agreement_date}}`
+- Financial: `{{value}}`, `{{currency}}`, `{{billing_frequency}}`, `{{payment_terms}}`
+- Zones: `{{venue_names}}`, `{{number_of_zones}}`, `{{zones_table}}`
+- Signatories: `{{client_signatory_name}}`, `{{client_signatory_title}}`
 
 **Migration**: `0055_contracttemplate_pdf_format.py`
 
