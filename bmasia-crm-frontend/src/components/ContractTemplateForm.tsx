@@ -77,6 +77,7 @@ const TEMPLATE_VARIABLES = [
   // Signatories
   { name: 'client_signatory_name', description: 'Client signatory name' },
   { name: 'client_signatory_title', description: 'Client signatory title' },
+  { name: 'signature_blocks', description: 'Two-column signature table (BMAsia + Client)' },
 ];
 
 const initialFormData: FormData = {

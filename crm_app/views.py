@@ -1037,6 +1037,113 @@ class ContractViewSet(BaseModelViewSet):
         zone_table.setStyle(TableStyle(zone_style_list))
         return zone_table
 
+    def _build_signature_blocks_table(self, contract, billing_entity, entity_name):
+        """Build a styled two-column signature blocks Table flowable for template insertion"""
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import Table, TableStyle, Paragraph, Spacer, Image
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER
+        from django.conf import settings
+        from datetime import datetime
+        import os
+
+        company = contract.company
+
+        # Text styles for signature blocks
+        sig_line_style = ParagraphStyle('SigLine', alignment=TA_CENTER, fontSize=10)
+        sig_name_style = ParagraphStyle('SigName', alignment=TA_CENTER, fontSize=11, fontName='Helvetica-Bold')
+        sig_title_style = ParagraphStyle('SigTitle', alignment=TA_CENTER, fontSize=10)
+        sig_company_style = ParagraphStyle('SigCompany', alignment=TA_CENTER, fontSize=10, fontName='Helvetica-Bold')
+        sig_date_style = ParagraphStyle('SigDate', alignment=TA_CENTER, fontSize=9)
+
+        # Get signatory info
+        bmasia_signatory = contract.bmasia_signatory_name or 'Chris Andrews'
+        bmasia_title = contract.bmasia_signatory_title or 'Director'
+        customer_signatory = contract.customer_signatory_name or 'Authorized Representative'
+        customer_title = contract.customer_signatory_title or 'Authorized Representative'
+        bmasia_date = datetime.now().strftime('%d %B %Y')
+
+        # Load signature and stamp images
+        signature_img = None
+        stamp_img = None
+        try:
+            sig_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'Chris Signature.png')
+            if os.path.exists(sig_path):
+                signature_img = Image(sig_path, width=2.2*inch, height=0.9*inch)
+
+            # Select stamp based on billing entity
+            if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+                stamp_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'BMAsia Thai Stamp.png')
+            else:
+                stamp_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'BMAsia Stamp.png')
+
+            if os.path.exists(stamp_path):
+                stamp_img = Image(stamp_path, width=1.3*inch, height=1.3*inch)
+        except Exception:
+            pass
+
+        # === BMAsia signature block (left column) ===
+        bmasia_sig_content = []
+
+        # Signature + stamp side by side
+        if signature_img or stamp_img:
+            sig_stamp_data = [[signature_img or '', stamp_img or '']]
+            sig_stamp_table = Table(sig_stamp_data, colWidths=[2.2*inch, 1.3*inch])
+            sig_stamp_table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), -20),
+                ('LEFTPADDING', (0, 0), (0, 0), 25),
+            ]))
+            bmasia_sig_content.append(sig_stamp_table)
+
+        bmasia_sig_content.append(Paragraph('_' * 35, sig_line_style))
+        bmasia_sig_content.append(Paragraph(f"<b>{bmasia_signatory}</b>", sig_name_style))
+        bmasia_sig_content.append(Paragraph(bmasia_title, sig_title_style))
+        bmasia_sig_content.append(Paragraph(f"<b>{entity_name}</b>", sig_company_style))
+        bmasia_sig_content.append(Spacer(1, 0.1*inch))
+        bmasia_sig_content.append(Paragraph(f'Date: <u>{bmasia_date}</u>', sig_date_style))
+
+        # === Customer signature block (right column) ===
+        customer_sig_content = []
+
+        # Primary customer signatory
+        customer_sig_content.append(Spacer(1, 0.85*inch))  # Space for signature
+        customer_sig_content.append(Paragraph('_' * 35, sig_line_style))
+        customer_sig_content.append(Paragraph(f"<b>{customer_signatory}</b>", sig_name_style))
+        customer_sig_content.append(Paragraph(customer_title, sig_title_style))
+        customer_sig_content.append(Paragraph(f"<b>{company.legal_entity_name or company.name}</b>", sig_company_style))
+        customer_sig_content.append(Spacer(1, 0.1*inch))
+        customer_sig_content.append(Paragraph('Date: _________________', sig_date_style))
+
+        # Additional customer signatories
+        additional_signatories = contract.additional_customer_signatories or []
+        for signatory in additional_signatories:
+            if signatory.get('name') or signatory.get('title'):
+                customer_sig_content.append(Spacer(1, 0.3*inch))
+                customer_sig_content.append(Spacer(1, 0.6*inch))  # Space for signature
+                customer_sig_content.append(Paragraph('_' * 35, sig_line_style))
+                customer_sig_content.append(Paragraph(f"<b>{signatory.get('name', 'Authorized Representative')}</b>", sig_name_style))
+                customer_sig_content.append(Paragraph(signatory.get('title', ''), sig_title_style))
+                customer_sig_content.append(Paragraph(f"<b>{company.legal_entity_name or company.name}</b>", sig_company_style))
+                customer_sig_content.append(Spacer(1, 0.1*inch))
+                customer_sig_content.append(Paragraph('Date: _________________', sig_date_style))
+
+        # Build two-column table
+        bmasia_cell = Table([[item] for item in bmasia_sig_content], colWidths=[3.4*inch])
+        bmasia_cell.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER')]))
+        customer_cell = Table([[item] for item in customer_sig_content], colWidths=[3.4*inch])
+        customer_cell.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER')]))
+
+        signature_table = Table([[bmasia_cell, customer_cell]], colWidths=[3.45*inch, 3.45*inch])
+        signature_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ]))
+
+        return signature_table
+
     def _format_company_address(self, company):
         """Format company address as single line"""
         if not company:
@@ -1292,39 +1399,57 @@ class ContractViewSet(BaseModelViewSet):
             template_content = contract.preamble_template.content
             zones = contract.get_active_zones()
 
-            # Handle {{zones_table}} special variable
-            if '{{zones_table}}' in template_content:
-                # SPLIT at {{zones_table}} and insert proper Table flowable
-                parts = template_content.split('{{zones_table}}')
+            # Helper function to render template segments with special variable handling
+            def render_segment(segment):
+                """Recursively render template segment, handling special variables"""
+                # Check for {{zones_table}}
+                if '{{zones_table}}' in segment:
+                    parts = segment.split('{{zones_table}}', 1)
+                    # Render content before {{zones_table}}
+                    before = self._substitute_template_variables(parts[0], contract)
+                    if before.strip():
+                        elements.append(Paragraph(before, body_style))
+                    # Insert zones table
+                    if zones.exists():
+                        zone_table = self._build_zones_table(contract, zones)
+                        elements.append(zone_table)
+                        elements.append(Spacer(1, 0.15*inch))
+                    # Process content after {{zones_table}} (may contain other special vars)
+                    if len(parts) > 1 and parts[1].strip():
+                        render_segment(parts[1])
+                    return
 
-                # Substitute variables in first part and render
-                before_content = self._substitute_template_variables(parts[0], contract)
-                if before_content.strip():
-                    elements.append(Paragraph(before_content, body_style))
-
-                # Insert proper zones Table (if zones exist)
-                if zones.exists():
-                    zone_table = self._build_zones_table(contract, zones)
-                    elements.append(zone_table)
-                    elements.append(Spacer(1, 0.15*inch))
-
-                # Substitute variables in second part and render
-                if len(parts) > 1 and parts[1].strip():
-                    after_content = self._substitute_template_variables(parts[1], contract)
-                    elements.append(Paragraph(after_content, body_style))
+                # Check for {{signature_blocks}}
+                if '{{signature_blocks}}' in segment:
+                    parts = segment.split('{{signature_blocks}}', 1)
+                    # Render content before {{signature_blocks}}
+                    before = self._substitute_template_variables(parts[0], contract)
+                    if before.strip():
+                        elements.append(Paragraph(before, body_style))
+                    # Insert signature blocks table
+                    sig_table = self._build_signature_blocks_table(contract, billing_entity, entity_name)
+                    elements.append(sig_table)
                     elements.append(Spacer(1, 0.2*inch))
-            else:
-                # No {{zones_table}} - render as single paragraph
-                template_content = self._substitute_template_variables(template_content, contract)
-                elements.append(Paragraph(template_content, body_style))
+                    # Process content after {{signature_blocks}} (may contain other special vars)
+                    if len(parts) > 1 and parts[1].strip():
+                        render_segment(parts[1])
+                    return
+
+                # No special variables - render as paragraph
+                content = self._substitute_template_variables(segment, contract)
+                if content.strip():
+                    elements.append(Paragraph(content, body_style))
+                    elements.append(Spacer(1, 0.2*inch))
+
+            # Render the template content (handles all special variables)
+            render_segment(template_content)
+
+            # If zones exist but {{zones_table}} wasn't in template, append at end
+            if zones.exists() and '{{zones_table}}' not in contract.preamble_template.content:
+                elements.append(Paragraph("<b>Locations for provision of services:</b>", clause_style))
+                zone_table = self._build_zones_table(contract, zones)
+                elements.append(zone_table)
                 elements.append(Spacer(1, 0.2*inch))
-
-                # Append zones table at end if zones exist
-                if zones.exists():
-                    elements.append(Paragraph("<b>Locations for provision of services:</b>", clause_style))
-                    zone_table = self._build_zones_table(contract, zones)
-                    elements.append(zone_table)
-                    elements.append(Spacer(1, 0.2*inch))
 
             # Template mode: Skip Additional Terms, Status Indicator, and Signatures
             # (template already contains complete contract with signatures)
