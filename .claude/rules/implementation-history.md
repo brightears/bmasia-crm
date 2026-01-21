@@ -2,22 +2,36 @@
 
 ## January 2026
 
-### Jan 21, 2026 - Contract Template Simplification (In Progress)
+### Jan 21, 2026 - Contract Template Simplification (Complete)
 
 **Key Insight**: Templates can contain ENTIRE contract structure (not just snippets)
 - User created full contract template with all clauses, signature blocks in HTML format
-- Proposed: Remove Contract Category, use templates as complete contracts
-- Discussion ongoing about simplifying PDF generation to just render template content
+- Templates now determine PDF format (Standard, Corporate Master, Participation)
 
-**Backend Variables Added**:
+**PDF Format on Templates**:
+- Added `pdf_format` field to ContractTemplate model
+- Choices: `standard`, `corporate_master`, `participation`
+- PDF generation uses template's `pdf_format` instead of contract's `contract_category`
+- Backwards compatible: falls back to `contract_category` if no template
+
+**ContractForm Simplification**:
+- Removed Contract Category dropdown
+- Template selection now required and determines PDF structure
+- When template selected, auto-sets `contract_category` from template's `pdf_format`
+- Master Contract dropdown shows for participation templates
+- Custom Terms shows for corporate master templates
+
+**ContractTemplateForm Updates**:
+- Added PDF Format dropdown (Standard, Corporate Master, Participation)
+- Removed Template Type dropdown (not needed)
+- Removed Default switch (just Active/Inactive)
+
+**Backend Variables Added** (earlier in day):
 - `{{client_address}}`, `{{venue_names}}`, `{{number_of_zones}}`
 - `{{agreement_date}}`, `{{client_signatory_name}}`, `{{client_signatory_title}}`
 - `{{contact_name}}`, `{{contact_email}}`, `{{billing_frequency}}`, `{{payment_terms}}`
 
-**Form Simplified**:
-- Removed Template Type dropdown (not needed)
-- Removed Default switch (just Active/Inactive)
-- Removed Type column and filter from list page
+**Migration**: `0055_contracttemplate_pdf_format.py`
 
 ### Jan 15, 2026 - Contract Template Management
 
