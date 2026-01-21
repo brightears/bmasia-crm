@@ -1093,7 +1093,7 @@ class ContractViewSet(BaseModelViewSet):
             sig_stamp_table.setStyle(TableStyle([
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), -20),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), -35),  # Adjusted to bring signature closer to line
                 ('LEFTPADDING', (0, 0), (0, 0), 25),
             ]))
             bmasia_sig_content.append(sig_stamp_table)
@@ -1132,9 +1132,15 @@ class ContractViewSet(BaseModelViewSet):
 
         # Build two-column table
         bmasia_cell = Table([[item] for item in bmasia_sig_content], colWidths=[3.4*inch])
-        bmasia_cell.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER')]))
+        bmasia_cell.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
         customer_cell = Table([[item] for item in customer_sig_content], colWidths=[3.4*inch])
-        customer_cell.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER')]))
+        customer_cell.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
 
         signature_table = Table([[bmasia_cell, customer_cell]], colWidths=[3.45*inch, 3.45*inch])
         signature_table.setStyle(TableStyle([
@@ -1409,11 +1415,10 @@ class ContractViewSet(BaseModelViewSet):
                     before = self._substitute_template_variables(parts[0], contract)
                     if before.strip():
                         elements.append(Paragraph(before, body_style))
-                    # Insert zones table
+                    # Insert zones table wrapped in KeepTogether to prevent page splits
                     if zones.exists():
                         zone_table = self._build_zones_table(contract, zones)
-                        elements.append(zone_table)
-                        elements.append(Spacer(1, 0.15*inch))
+                        elements.append(KeepTogether([zone_table, Spacer(1, 0.15*inch)]))
                     # Process content after {{zones_table}} (may contain other special vars)
                     if len(parts) > 1 and parts[1].strip():
                         render_segment(parts[1])
