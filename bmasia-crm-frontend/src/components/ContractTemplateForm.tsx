@@ -73,6 +73,7 @@ const TEMPLATE_VARIABLES = [
   // Venue & Zones
   { name: 'venue_names', description: 'Venue/property names (comma-separated)' },
   { name: 'number_of_zones', description: 'Total number of zones' },
+  { name: 'zones_table', description: 'Zone list (auto-generated table)' },
   // Signatories
   { name: 'client_signatory_name', description: 'Client signatory name' },
   { name: 'client_signatory_title', description: 'Client signatory title' },

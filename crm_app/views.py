@@ -971,6 +971,14 @@ class ContractViewSet(BaseModelViewSet):
             content = content.replace(var, str(value))
         return content
 
+    def _generate_zones_text(self, contract, zones):
+        """Generate zones as HTML text for inline template substitution"""
+        company = contract.company
+        zone_lines = []
+        for idx, zone in enumerate(zones, 1):
+            zone_lines.append(f"Zone {idx}: {zone.name}")
+        return "<br/>".join(zone_lines) if zone_lines else ""
+
     def _format_company_address(self, company):
         """Format company address as single line"""
         if not company:
@@ -1219,285 +1227,354 @@ class ContractViewSet(BaseModelViewSet):
         elements.append(from_bill_table)
         elements.append(Spacer(1, 0.25*inch))
 
-        # Preamble Section
-        if contract.preamble_custom:
-            preamble_text = contract.preamble_custom
-        elif contract.preamble_template:
-            preamble_text = contract.preamble_template.content
+        # Check if we have a full template (skip hardcoded clauses)
+        if contract.preamble_template:
+            # FULL TEMPLATE MODE: Template contains complete contract text
+            # Skip all hardcoded clauses and render only template content
+            template_content = contract.preamble_template.content
+
+            # Handle {{zones_table}} special variable
+            zones = contract.get_active_zones()
+            if '{{zones_table}}' in template_content:
+                if zones.exists():
+                    # Generate zones as simple text table for inline insertion
+                    zones_text = self._generate_zones_text(contract, zones)
+                    template_content = template_content.replace('{{zones_table}}', zones_text)
+                else:
+                    template_content = template_content.replace('{{zones_table}}', '')
+
+            # Substitute all template variables
+            template_content = self._substitute_template_variables(template_content, contract)
+
+            # Render the full template content
+            elements.append(Paragraph(template_content, body_style))
+            elements.append(Spacer(1, 0.2*inch))
+
+            # If zones exist but {{zones_table}} wasn't in template, append a zones table
+            if zones.exists() and '{{zones_table}}' not in contract.preamble_template.content:
+                elements.append(Paragraph("<b>Locations for provision of services:</b>", clause_style))
+                # Build zone table
+                zone_header = ['Property', 'Zone']
+                if contract.show_zone_pricing_detail and contract.price_per_zone:
+                    zone_header.append('Price/Zone')
+
+                zone_data = [zone_header]
+                zone_count = zones.count()
+                for idx, zone in enumerate(zones, 1):
+                    property_name = company.name if idx == 1 else ''
+                    row = [property_name, f"Zone {idx}: {zone.name}"]
+                    if contract.show_zone_pricing_detail and contract.price_per_zone:
+                        row.append(f"{contract.currency} {contract.price_per_zone:,.2f}")
+                    zone_data.append(row)
+
+                zone_col_widths = [2.5*inch, 3.0*inch] if not (contract.show_zone_pricing_detail and contract.price_per_zone) else [2.0*inch, 2.5*inch, 2.4*inch]
+                zone_table = Table(zone_data, colWidths=zone_col_widths)
+
+                zone_style_list = [
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
+                    ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#424242')),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#fafafa')),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 6),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+                ]
+
+                if zone_count > 1:
+                    zone_style_list.append(('SPAN', (0, 1), (0, zone_count)))
+                    zone_style_list.append(('VALIGN', (0, 1), (0, zone_count), 'MIDDLE'))
+
+                zone_table.setStyle(TableStyle(zone_style_list))
+                elements.append(zone_table)
+                elements.append(Spacer(1, 0.2*inch))
+
+            # Skip directly to Additional Terms and Signatures (jump to line ~1502)
+
         else:
-            # Default preamble
-            preamble_text = f"""
+            # NO TEMPLATE: Use default preamble and hardcoded clause structure
+            if contract.preamble_custom:
+                preamble_text = contract.preamble_custom
+            else:
+                # Default preamble
+                preamble_text = f"""
 This agreement is made on {contract.start_date.strftime('%d %B %Y') if contract.start_date else '[date]'} between:<br/><br/>
 <b>{entity_name}</b>, with registered address at {entity_address} (BMA),<br/><br/>
 and<br/><br/>
 <b>{company.legal_entity_name or company.name}</b>, with registered address at {self._format_company_address(company)} (Client).<br/><br/>
 (Together "The Parties")<br/><br/>
 <b>Whereas</b> BMA is a certified legal reseller of Soundtrack Your Brand (SYB) and provides music design and management services to hospitality and commercial clients.
-            """
+                """
 
-        # Substitute template variables
-        preamble_text = self._substitute_template_variables(preamble_text, contract)
-        elements.append(Paragraph(preamble_text, body_style))
-        elements.append(Spacer(1, 0.2*inch))
+            # Substitute template variables
+            preamble_text = self._substitute_template_variables(preamble_text, contract)
+            elements.append(Paragraph(preamble_text, body_style))
+            elements.append(Spacer(1, 0.2*inch))
 
-        # NUMBERED CLAUSES STRUCTURE
-        clause_num = 1
+            # NUMBERED CLAUSES STRUCTURE (only when no template)
+            clause_num = 1
 
-        # Clause 1: Agreement Structure
-        elements.append(Paragraph(
-            f"<b>{clause_num}.</b> These principal terms and the standard terms &amp; conditions comprise together the entire agreement between the parties.",
-            clause_style
-        ))
-        clause_num += 1
-
-        # Clause 2: Locations for provision of services (Zones)
-        zones = contract.get_active_zones()
-        if zones.exists():
+            # Clause 1: Agreement Structure
             elements.append(Paragraph(
-                f"<b>{clause_num}.</b> Locations for provision of services:",
+                f"<b>{clause_num}.</b> These principal terms and the standard terms &amp; conditions comprise together the entire agreement between the parties.",
                 clause_style
             ))
+            clause_num += 1
 
-            # Build zone table with proper header styling (property name shown only once)
-            zone_header = ['Property', 'Zone']
-            if contract.show_zone_pricing_detail and contract.price_per_zone:
-                zone_header.append('Price/Zone')
+            # Clause 2: Locations for provision of services (Zones)
+            zones = contract.get_active_zones()
+            if zones.exists():
+                elements.append(Paragraph(
+                    f"<b>{clause_num}.</b> Locations for provision of services:",
+                    clause_style
+                ))
 
-            zone_data = [zone_header]
-            zone_count = zones.count()
-            for idx, zone in enumerate(zones, 1):
-                # Only show property name in first data row, empty for rest
-                property_name = company.name if idx == 1 else ''
-                row = [property_name, f"Zone {idx}: {zone.name}"]
+                # Build zone table with proper header styling (property name shown only once)
+                zone_header = ['Property', 'Zone']
                 if contract.show_zone_pricing_detail and contract.price_per_zone:
-                    row.append(f"{contract.currency} {contract.price_per_zone:,.2f}")
-                zone_data.append(row)
+                    zone_header.append('Price/Zone')
 
-            zone_col_widths = [2.5*inch, 3.0*inch] if not (contract.show_zone_pricing_detail and contract.price_per_zone) else [2.0*inch, 2.5*inch, 2.4*inch]
-            zone_table = Table(zone_data, colWidths=zone_col_widths)
+                zone_data = [zone_header]
+                zone_count = zones.count()
+                for idx, zone in enumerate(zones, 1):
+                    # Only show property name in first data row, empty for rest
+                    property_name = company.name if idx == 1 else ''
+                    row = [property_name, f"Zone {idx}: {zone.name}"]
+                    if contract.show_zone_pricing_detail and contract.price_per_zone:
+                        row.append(f"{contract.currency} {contract.price_per_zone:,.2f}")
+                    zone_data.append(row)
 
-            zone_style = [
-                # Header row - orange accent
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
-                # Data rows
-                ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
-                ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#424242')),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#fafafa')),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                ('LEFTPADDING', (0, 0), (-1, -1), 8),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
-            ]
+                zone_col_widths = [2.5*inch, 3.0*inch] if not (contract.show_zone_pricing_detail and contract.price_per_zone) else [2.0*inch, 2.5*inch, 2.4*inch]
+                zone_table = Table(zone_data, colWidths=zone_col_widths)
 
-            # Merge property name cell across all data rows if more than one zone
-            if zone_count > 1:
-                zone_style.append(('SPAN', (0, 1), (0, zone_count)))
-                zone_style.append(('VALIGN', (0, 1), (0, zone_count), 'MIDDLE'))
+                zone_style = [
+                    # Header row - orange accent
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
+                    # Data rows
+                    ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#424242')),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#fafafa')),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 6),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+                ]
 
-            zone_table.setStyle(TableStyle(zone_style))
-            elements.append(zone_table)
-            clause_num += 1
-        else:
+                # Merge property name cell across all data rows if more than one zone
+                if zone_count > 1:
+                    zone_style.append(('SPAN', (0, 1), (0, zone_count)))
+                    zone_style.append(('VALIGN', (0, 1), (0, zone_count), 'MIDDLE'))
+
+                zone_table.setStyle(TableStyle(zone_style))
+                elements.append(zone_table)
+                clause_num += 1
+            else:
+                elements.append(Paragraph(
+                    f"<b>{clause_num}.</b> Locations for provision of services: As specified in attached schedule.",
+                    clause_style
+                ))
+                clause_num += 1
+
+            # Clause 3: Commencement Date
             elements.append(Paragraph(
-                f"<b>{clause_num}.</b> Locations for provision of services: As specified in attached schedule.",
+                f"<b>{clause_num}.</b> Commencement Date: {contract.start_date.strftime('%d %B %Y') if contract.start_date else '[Date]'}",
                 clause_style
             ))
             clause_num += 1
 
-        # Clause 3: Commencement Date
-        elements.append(Paragraph(
-            f"<b>{clause_num}.</b> Commencement Date: {contract.start_date.strftime('%d %B %Y') if contract.start_date else '[Date]'}",
-            clause_style
-        ))
-        clause_num += 1
+            # Clause 4: Duration
+            if contract.start_date and contract.end_date:
+                months = ((contract.end_date.year - contract.start_date.year) * 12 +
+                         (contract.end_date.month - contract.start_date.month))
+                if contract.end_date.day >= contract.start_date.day:
+                    months += 1
+                elements.append(Paragraph(
+                    f"<b>{clause_num}.</b> Duration: {months} months from {contract.start_date.strftime('%d %B %Y')} to {contract.end_date.strftime('%d %B %Y')}",
+                    clause_style
+                ))
+            else:
+                elements.append(Paragraph(
+                    f"<b>{clause_num}.</b> Duration: As specified in schedule",
+                    clause_style
+                ))
+            clause_num += 1
 
-        # Clause 4: Duration
-        if contract.start_date and contract.end_date:
-            months = ((contract.end_date.year - contract.start_date.year) * 12 +
-                     (contract.end_date.month - contract.start_date.month))
-            if contract.end_date.day >= contract.start_date.day:
-                months += 1
+            # Clause 5: Service Packages
             elements.append(Paragraph(
-                f"<b>{clause_num}.</b> Duration: {months} months from {contract.start_date.strftime('%d %B %Y')} to {contract.end_date.strftime('%d %B %Y')}",
+                f"<b>{clause_num}.</b> Service Packages - Music Design &amp; Management",
                 clause_style
             ))
-        else:
+
+            # Build service items list
+            service_items_list = []
+
+            # Add M2M service items
+            for item in contract.service_items.all():
+                service_items_list.append(f"• {item.name}")
+                if item.description:
+                    service_items_list.append(f"  {item.description}")
+
+            # Add custom service items from JSON
+            if contract.custom_service_items:
+                for item in contract.custom_service_items:
+                    if isinstance(item, dict):
+                        service_items_list.append(f"• {item.get('name', '')}")
+                        if item.get('description'):
+                            service_items_list.append(f"  {item.get('description', '')}")
+
+            # If no service items, add default
+            if not service_items_list:
+                service_items_list = [
+                    "• Assistance to design playlists and schedules on the SYB platform",
+                    "• Remote on-line activation assistance",
+                    "• Monthly refresh of music content",
+                    "• Special event playlists as needed",
+                    "• First Line Technical Support"
+                ]
+
+            # Add pricing if available
+            if contract.show_zone_pricing_detail and contract.price_per_zone:
+                service_items_list.append(f"• <b>Price:</b> {contract.currency} {contract.price_per_zone:,.2f} per zone per year + 7% VAT")
+
+            for item_text in service_items_list:
+                elements.append(Paragraph(item_text, bullet_style))
+
+            clause_num += 1
+
+            # Clause 6: Total Cost
+            tax_rate = 7.0 if billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 0.0
+            total_before_tax = float(contract.value) if contract.value else 0.0
+            tax_amount = total_before_tax * (tax_rate / 100)
+            total_with_tax = total_before_tax + tax_amount
+
             elements.append(Paragraph(
-                f"<b>{clause_num}.</b> Duration: As specified in schedule",
+                f"<b>{clause_num}.</b> Total Cost: {contract.currency} {total_before_tax:,.2f} for {contract.get_zone_count()} zone{'s' if contract.get_zone_count() != 1 else ''} + {tax_rate}% VAT ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}</b>",
                 clause_style
             ))
-        clause_num += 1
+            clause_num += 1
 
-        # Clause 5: Service Packages
-        elements.append(Paragraph(
-            f"<b>{clause_num}.</b> Service Packages - Music Design &amp; Management",
-            clause_style
-        ))
+            # Clause 7: Terms of Payment
+            if contract.payment_custom:
+                payment_text = contract.payment_custom
+            elif contract.payment_template:
+                payment_text = contract.payment_template.content
+            else:
+                payment_text = payment_terms_default
 
-        # Build service items list
-        service_items_list = []
+            payment_text = self._substitute_template_variables(payment_text, contract)
+            elements.append(Paragraph(
+                f"<b>{clause_num}.</b> Terms of payment: {payment_text}",
+                clause_style
+            ))
+            clause_num += 1
 
-        # Add M2M service items
-        for item in contract.service_items.all():
-            service_items_list.append(f"• {item.name}")
-            if item.description:
-                service_items_list.append(f"  {item.description}")
+            # Bank Details (sub-section under payment) - styled card
+            elements.append(Spacer(1, 0.1*inch))
 
-        # Add custom service items from JSON
-        if contract.custom_service_items:
-            for item in contract.custom_service_items:
-                if isinstance(item, dict):
-                    service_items_list.append(f"• {item.get('name', '')}")
-                    if item.get('description'):
-                        service_items_list.append(f"  {item.get('description', '')}")
+            bank_header_style = ParagraphStyle(
+                'BankHeader',
+                parent=styles['Normal'],
+                fontSize=8,
+                textColor=colors.HexColor('#888888'),
+                spaceAfter=4,
+                fontName='Helvetica-Bold'
+            )
 
-        # If no service items, add default
-        if not service_items_list:
-            service_items_list = [
-                "• Assistance to design playlists and schedules on the SYB platform",
-                "• Remote on-line activation assistance",
-                "• Monthly refresh of music content",
-                "• Special event playlists as needed",
-                "• First Line Technical Support"
+            bank_content_style = ParagraphStyle(
+                'BankContent',
+                parent=styles['Normal'],
+                fontSize=9,
+                leading=13,
+                textColor=colors.HexColor('#333333'),
+            )
+
+            # Create styled bank details card (adjusted widths to fit page)
+            bank_data = [
+                ['Beneficiary', 'Bank', 'SWIFT', 'Account No.'],
+                [entity_name, entity_bank, entity_swift, entity_account]
             ]
 
-        # Add pricing if available
-        if contract.show_zone_pricing_detail and contract.price_per_zone:
-            service_items_list.append(f"• <b>Price:</b> {contract.currency} {contract.price_per_zone:,.2f} per zone per year + 7% VAT")
+            # Total width ~6.5 inches (page width minus margins)
+            bank_table = Table(bank_data, colWidths=[1.6*inch, 2.3*inch, 1.0*inch, 1.5*inch])
+            bank_table.setStyle(TableStyle([
+                # Header row - subtle gray
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f0f0f0')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#666666')),
+                ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 8),
+                ('ALIGN', (0, 0), (-1, 0), 'LEFT'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                ('TOPPADDING', (0, 0), (-1, 0), 6),
 
-        for item_text in service_items_list:
-            elements.append(Paragraph(item_text, bullet_style))
+                # Data row
+                ('BACKGROUND', (0, 1), (-1, 1), colors.HexColor('#fafafa')),
+                ('FONT', (0, 1), (-1, 1), 'Helvetica', 8),
+                ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#333333')),
+                ('ALIGN', (0, 1), (-1, 1), 'LEFT'),
+                ('TOPPADDING', (0, 1), (-1, 1), 8),
+                ('BOTTOMPADDING', (0, 1), (-1, 1), 8),
 
-        clause_num += 1
+                # Padding and borders - with column separators
+                ('LEFTPADDING', (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+                ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+                ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#FFA500')),
+                ('LINEBEFORE', (1, 0), (1, -1), 0.5, colors.HexColor('#e0e0e0')),
+                ('LINEBEFORE', (2, 0), (2, -1), 0.5, colors.HexColor('#e0e0e0')),
+                ('LINEBEFORE', (3, 0), (3, -1), 0.5, colors.HexColor('#e0e0e0')),
+            ]))
+            elements.append(bank_table)
+            elements.append(Spacer(1, 0.2*inch))
 
-        # Clause 6: Total Cost
-        tax_rate = 7.0 if billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 0.0
-        total_before_tax = float(contract.value) if contract.value else 0.0
-        tax_amount = total_before_tax * (tax_rate / 100)
-        total_with_tax = total_before_tax + tax_amount
+            # Clause 8: Activation Date
+            if contract.activation_custom:
+                activation_text = contract.activation_custom
+            elif contract.activation_template:
+                activation_text = contract.activation_template.content
+            else:
+                activation_text = "Music service will be activated within 3 business days of receipt of payment and completion of account setup."
 
-        elements.append(Paragraph(
-            f"<b>{clause_num}.</b> Total Cost: {contract.currency} {total_before_tax:,.2f} for {contract.get_zone_count()} zone{'s' if contract.get_zone_count() != 1 else ''} + {tax_rate}% VAT ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}</b>",
-            clause_style
-        ))
-        clause_num += 1
+            activation_text = self._substitute_template_variables(activation_text, contract)
+            elements.append(Paragraph(
+                f"<b>{clause_num}.</b> Activation Date: {activation_text}",
+                clause_style
+            ))
+            clause_num += 1
 
-        # Clause 7: Terms of Payment
-        if contract.payment_custom:
-            payment_text = contract.payment_custom
-        elif contract.payment_template:
-            payment_text = contract.payment_template.content
-        else:
-            payment_text = payment_terms_default
+            # Clause 9: Contacts
+            elements.append(Paragraph(
+                f"<b>{clause_num}.</b> Contacts:",
+                clause_style
+            ))
 
-        payment_text = self._substitute_template_variables(payment_text, contract)
-        elements.append(Paragraph(
-            f"<b>{clause_num}.</b> Terms of payment: {payment_text}",
-            clause_style
-        ))
-        clause_num += 1
+            # BMAsia contact
+            bmasia_contact = contract.bmasia_contact_name or "Norbert Platzer"
+            bmasia_email = contract.bmasia_contact_email or "norbert@bmasiamusic.com"
+            bmasia_title = contract.bmasia_contact_title or "Managing Director"
 
-        # Bank Details (sub-section under payment) - styled card
-        elements.append(Spacer(1, 0.1*inch))
+            # Customer contact
+            customer_contact = contract.customer_contact_name or "[Customer Contact Name]"
+            customer_email = contract.customer_contact_email or "[Customer Email]"
+            customer_title = contract.customer_contact_title or "[Title]"
 
-        bank_header_style = ParagraphStyle(
-            'BankHeader',
-            parent=styles['Normal'],
-            fontSize=8,
-            textColor=colors.HexColor('#888888'),
-            spaceAfter=4,
-            fontName='Helvetica-Bold'
-        )
+            contacts_text = f"""
+            <b>BMA:</b> {bmasia_contact}, {bmasia_title}<br/>
+            E: {bmasia_email}<br/>
+            <br/>
+            <b>Client:</b> {customer_contact}, {customer_title}<br/>
+            E: {customer_email}
+            """
+            elements.append(Paragraph(contacts_text, body_style))
+            elements.append(Spacer(1, 0.3*inch))
 
-        bank_content_style = ParagraphStyle(
-            'BankContent',
-            parent=styles['Normal'],
-            fontSize=9,
-            leading=13,
-            textColor=colors.HexColor('#333333'),
-        )
-
-        # Create styled bank details card (adjusted widths to fit page)
-        bank_data = [
-            ['Beneficiary', 'Bank', 'SWIFT', 'Account No.'],
-            [entity_name, entity_bank, entity_swift, entity_account]
-        ]
-
-        # Total width ~6.5 inches (page width minus margins)
-        bank_table = Table(bank_data, colWidths=[1.6*inch, 2.3*inch, 1.0*inch, 1.5*inch])
-        bank_table.setStyle(TableStyle([
-            # Header row - subtle gray
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f0f0f0')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#666666')),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 8),
-            ('ALIGN', (0, 0), (-1, 0), 'LEFT'),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-            ('TOPPADDING', (0, 0), (-1, 0), 6),
-
-            # Data row
-            ('BACKGROUND', (0, 1), (-1, 1), colors.HexColor('#fafafa')),
-            ('FONT', (0, 1), (-1, 1), 'Helvetica', 8),
-            ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#333333')),
-            ('ALIGN', (0, 1), (-1, 1), 'LEFT'),
-            ('TOPPADDING', (0, 1), (-1, 1), 8),
-            ('BOTTOMPADDING', (0, 1), (-1, 1), 8),
-
-            # Padding and borders - with column separators
-            ('LEFTPADDING', (0, 0), (-1, -1), 6),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
-            ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
-            ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#FFA500')),
-            ('LINEBEFORE', (1, 0), (1, -1), 0.5, colors.HexColor('#e0e0e0')),
-            ('LINEBEFORE', (2, 0), (2, -1), 0.5, colors.HexColor('#e0e0e0')),
-            ('LINEBEFORE', (3, 0), (3, -1), 0.5, colors.HexColor('#e0e0e0')),
-        ]))
-        elements.append(bank_table)
-        elements.append(Spacer(1, 0.2*inch))
-
-        # Clause 8: Activation Date
-        if contract.activation_custom:
-            activation_text = contract.activation_custom
-        elif contract.activation_template:
-            activation_text = contract.activation_template.content
-        else:
-            activation_text = "Music service will be activated within 3 business days of receipt of payment and completion of account setup."
-
-        activation_text = self._substitute_template_variables(activation_text, contract)
-        elements.append(Paragraph(
-            f"<b>{clause_num}.</b> Activation Date: {activation_text}",
-            clause_style
-        ))
-        clause_num += 1
-
-        # Clause 9: Contacts
-        elements.append(Paragraph(
-            f"<b>{clause_num}.</b> Contacts:",
-            clause_style
-        ))
-
-        # BMAsia contact
-        bmasia_contact = contract.bmasia_contact_name or "Norbert Platzer"
-        bmasia_email = contract.bmasia_contact_email or "norbert@bmasiamusic.com"
-        bmasia_title = contract.bmasia_contact_title or "Managing Director"
-
-        # Customer contact
-        customer_contact = contract.customer_contact_name or "[Customer Contact Name]"
-        customer_email = contract.customer_contact_email or "[Customer Email]"
-        customer_title = contract.customer_contact_title or "[Title]"
-
-        contacts_text = f"""
-        <b>BMA:</b> {bmasia_contact}, {bmasia_title}<br/>
-        E: {bmasia_email}<br/>
-        <br/>
-        <b>Client:</b> {customer_contact}, {customer_title}<br/>
-        E: {customer_email}
-        """
-        elements.append(Paragraph(contacts_text, body_style))
-        elements.append(Spacer(1, 0.3*inch))
+        # END OF ELSE BLOCK - Hardcoded clauses only run when no template
 
         # Additional Terms and Conditions
         if contract.notes:
