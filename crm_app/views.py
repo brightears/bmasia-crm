@@ -1070,7 +1070,7 @@ class ContractViewSet(BaseModelViewSet):
         try:
             sig_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'Chris Signature.png')
             if os.path.exists(sig_path):
-                signature_img = Image(sig_path, width=2.2*inch, height=0.9*inch)
+                signature_img = Image(sig_path, width=2.8*inch, height=1.1*inch)
 
             # Select stamp based on billing entity
             if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
@@ -1079,7 +1079,7 @@ class ContractViewSet(BaseModelViewSet):
                 stamp_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'BMAsia Stamp.png')
 
             if os.path.exists(stamp_path):
-                stamp_img = Image(stamp_path, width=1.3*inch, height=1.3*inch)
+                stamp_img = Image(stamp_path, width=1.6*inch, height=1.6*inch)
         except Exception:
             pass
 
@@ -1089,7 +1089,7 @@ class ContractViewSet(BaseModelViewSet):
         # Signature + stamp side by side
         if signature_img or stamp_img:
             sig_stamp_data = [[signature_img or '', stamp_img or '']]
-            sig_stamp_table = Table(sig_stamp_data, colWidths=[2.2*inch, 1.3*inch])
+            sig_stamp_table = Table(sig_stamp_data, colWidths=[2.8*inch, 1.6*inch])
             sig_stamp_table.setStyle(TableStyle([
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
@@ -1873,7 +1873,7 @@ and<br/><br/>
             sig_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'Chris Signature.png')
             if os.path.exists(sig_path):
                 # Larger signature
-                signature_img = Image(sig_path, width=2.2*inch, height=0.9*inch)
+                signature_img = Image(sig_path, width=2.8*inch, height=1.1*inch)
 
             # Select stamp based on billing entity
             if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
@@ -1882,7 +1882,7 @@ and<br/><br/>
                 stamp_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'BMAsia Stamp.png')
 
             if os.path.exists(stamp_path):
-                stamp_img = Image(stamp_path, width=1.3*inch, height=1.3*inch)
+                stamp_img = Image(stamp_path, width=1.6*inch, height=1.6*inch)
         except Exception as e:
             # If images fail to load, continue without them
             pass
@@ -1905,7 +1905,7 @@ and<br/><br/>
         if signature_img or stamp_img:
             sig_stamp_data = [[signature_img or '', stamp_img or '']]
             # Signature + stamp table - shifted right with left padding
-            sig_stamp_table = Table(sig_stamp_data, colWidths=[2.2*inch, 1.3*inch])
+            sig_stamp_table = Table(sig_stamp_data, colWidths=[2.8*inch, 1.6*inch])
             sig_stamp_table.setStyle(TableStyle([
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
