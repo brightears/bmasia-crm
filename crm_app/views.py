@@ -1094,7 +1094,7 @@ class ContractViewSet(BaseModelViewSet):
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), -35),  # Adjusted to bring signature closer to line
-                ('LEFTPADDING', (0, 0), (0, 0), 50),  # Shift signature right to center over line
+                ('LEFTPADDING', (0, 0), (0, 0), 75),  # Shift signature right to center over line
             ]))
             bmasia_sig_content.append(sig_stamp_table)
 
