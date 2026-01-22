@@ -1413,18 +1413,34 @@ class ContractViewSet(BaseModelViewSet):
                     parts = segment.split('{{zones_table}}', 1)
                     before = self._substitute_template_variables(parts[0], contract)
 
-                    # Build elements to keep together (heading + zones table)
-                    keep_together_items = []
-                    if before.strip():
-                        keep_together_items.append(Paragraph(before, body_style))
-                    if zones.exists():
-                        zone_table = self._build_zones_table(contract, zones)
-                        keep_together_items.append(zone_table)
-                        keep_together_items.append(Spacer(1, 0.15*inch))
+                    # Split "before" at last <br/><br/> to separate bulk from heading
+                    # This allows bulk content to flow naturally while keeping heading with zones table
+                    if '<br/><br/>' in before:
+                        last_break = before.rfind('<br/><br/>')
+                        bulk_content = before[:last_break]
+                        heading_content = before[last_break + len('<br/><br/>'):]
 
-                    # Wrap heading and zones table together to prevent page splits
-                    if keep_together_items:
-                        elements.append(KeepTogether(keep_together_items))
+                        # Render bulk content normally (allows page breaks)
+                        if bulk_content.strip():
+                            elements.append(Paragraph(bulk_content, body_style))
+
+                        # Wrap heading + zones table together in KeepTogether
+                        keep_together_items = []
+                        if heading_content.strip():
+                            keep_together_items.append(Paragraph(heading_content, body_style))
+                        if zones.exists():
+                            zone_table = self._build_zones_table(contract, zones)
+                            keep_together_items.append(zone_table)
+                            keep_together_items.append(Spacer(1, 0.15*inch))
+                        if keep_together_items:
+                            elements.append(KeepTogether(keep_together_items))
+                    else:
+                        # No <br/><br/> found - just wrap zones table in KeepTogether
+                        if before.strip():
+                            elements.append(Paragraph(before, body_style))
+                        if zones.exists():
+                            zone_table = self._build_zones_table(contract, zones)
+                            elements.append(KeepTogether([zone_table, Spacer(1, 0.15*inch)]))
 
                     # Process content after {{zones_table}} (may contain other special vars)
                     if len(parts) > 1 and parts[1].strip():
