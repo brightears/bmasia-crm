@@ -1094,7 +1094,7 @@ class ContractViewSet(BaseModelViewSet):
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), -35),  # Adjusted to bring signature closer to line
-                ('LEFTPADDING', (0, 0), (0, 0), 120),  # Shift signature right to center over line
+                ('LEFTPADDING', (0, 0), (0, 0), 140),  # Shift signature right to center over line
             ]))
             bmasia_sig_content.append(sig_stamp_table)
 
@@ -1463,11 +1463,15 @@ class ContractViewSet(BaseModelViewSet):
                 # Check for {{signature_blocks}}
                 if '{{signature_blocks}}' in segment:
                     parts = segment.split('{{signature_blocks}}', 1)
-                    # Render content before {{signature_blocks}}
+                    # Render content before {{signature_blocks}} - strip trailing breaks to reduce gap
                     before = self._substitute_template_variables(parts[0], contract)
+                    # Remove trailing <br/> tags to tighten spacing before signature
+                    before = before.rstrip()
+                    while before.endswith('<br/>') or before.endswith('<br />'):
+                        before = before[:-5].rstrip() if before.endswith('<br/>') else before[:-6].rstrip()
                     if before.strip():
                         elements.append(Paragraph(before, body_style))
-                    # Insert signature blocks table
+                    # Insert signature blocks table (minimal gap)
                     sig_table = self._build_signature_blocks_table(contract, billing_entity, entity_name)
                     elements.append(sig_table)
                     elements.append(Spacer(1, 0.2*inch))
