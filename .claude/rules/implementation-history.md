@@ -2,6 +2,17 @@
 
 ## January 2026
 
+### Jan 21, 2026 - PDF Layout Fixes
+
+**Zones Table Page Split**:
+- Wrapped zones table in `KeepTogether()` to prevent header/data splitting across pages
+
+**Signature Blocks Alignment**:
+- Added `VALIGN: TOP` to inner cell tables for proper vertical alignment
+- Adjusted signature `BOTTOMPADDING` from -20 to -35 for better line overlap
+
+---
+
 ### Jan 21, 2026 - Signature Blocks Template Variable
 
 **Feature**: `{{signature_blocks}}` for side-by-side signatures in contract PDFs
