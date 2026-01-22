@@ -2,10 +2,15 @@
 
 ## January 2026
 
-### Jan 22, 2026 - Zones Table KeepTogether with Heading
+### Jan 22, 2026 - Zones Table KeepTogether (Refined)
 
-**Fix**: Heading "2. Locations for Provision of Services:" was splitting from zones table across pages
-**Solution**: Wrap both the heading Paragraph AND zones Table in a single `KeepTogether()` block
+**Problem**: Previous fix wrapped ENTIRE "before" content in KeepTogether, causing page 1 to be empty
+
+**Solution**: Split "before" content at last `<br/><br/>`:
+- Bulk content renders normally (allows page breaks, fills page 1)
+- Only heading "2. Locations for Provision of Services:" + zones table wrapped in KeepTogether
+
+**Result**: Page 1 has content, heading stays with zones table
 
 ---
 
