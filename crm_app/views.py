@@ -1411,14 +1411,21 @@ class ContractViewSet(BaseModelViewSet):
                 # Check for {{zones_table}}
                 if '{{zones_table}}' in segment:
                     parts = segment.split('{{zones_table}}', 1)
-                    # Render content before {{zones_table}}
                     before = self._substitute_template_variables(parts[0], contract)
+
+                    # Build elements to keep together (heading + zones table)
+                    keep_together_items = []
                     if before.strip():
-                        elements.append(Paragraph(before, body_style))
-                    # Insert zones table wrapped in KeepTogether to prevent page splits
+                        keep_together_items.append(Paragraph(before, body_style))
                     if zones.exists():
                         zone_table = self._build_zones_table(contract, zones)
-                        elements.append(KeepTogether([zone_table, Spacer(1, 0.15*inch)]))
+                        keep_together_items.append(zone_table)
+                        keep_together_items.append(Spacer(1, 0.15*inch))
+
+                    # Wrap heading and zones table together to prevent page splits
+                    if keep_together_items:
+                        elements.append(KeepTogether(keep_together_items))
+
                     # Process content after {{zones_table}} (may contain other special vars)
                     if len(parts) > 1 and parts[1].strip():
                         render_segment(parts[1])
