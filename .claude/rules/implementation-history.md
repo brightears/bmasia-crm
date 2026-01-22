@@ -2,11 +2,29 @@
 
 ## January 2026
 
-### Jan 22, 2026 - Signature Position Adjustment
+### Jan 22, 2026 - Signature Block Enhancements
 
-**Change**: Moved Chris Andrews signature image more to the right to center over signature line
+**Image Size Increase**:
+- Signature: 2.2×0.9 → 2.8×1.1 inches
+- Stamp: 1.3×1.3 → 1.6×1.6 inches
+- Table column widths updated to match
 
-**Fix**: Increased `LEFTPADDING` from 25 to 50 in `_build_signature_blocks_table()` method
+**Position & Alignment Tuning**:
+- `LEFTPADDING`: 25 → 140 (iterative adjustments to center signature over line)
+- Customer spacer: 0.85 → 1.15 inch (align both signature lines horizontally)
+
+**Gap Reduction**:
+- Strip trailing `<br/>` tags before `{{signature_blocks}}` to reduce whitespace
+- Prevents extra empty page at end of contract
+
+**Final Values** (`_build_signature_blocks_table()`):
+| Setting | Value |
+|---------|-------|
+| Signature size | 2.8×1.1 inch |
+| Stamp size | 1.6×1.6 inch |
+| LEFTPADDING | 140 |
+| BOTTOMPADDING | -35 |
+| Customer spacer | 1.15 inch |
 
 ---
 
