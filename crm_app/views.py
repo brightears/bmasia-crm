@@ -1417,8 +1417,21 @@ class ContractViewSet(BaseModelViewSet):
                     # This allows bulk content to flow naturally while keeping heading with zones table
                     if '<br/><br/>' in before:
                         last_break = before.rfind('<br/><br/>')
-                        bulk_content = before[:last_break]
                         heading_content = before[last_break + len('<br/><br/>'):]
+
+                        # If heading is empty, the actual heading is BEFORE the last break
+                        # Find second-to-last break to capture the heading
+                        if not heading_content.strip():
+                            second_last = before.rfind('<br/><br/>', 0, last_break)
+                            if second_last != -1:
+                                bulk_content = before[:second_last]
+                                heading_content = before[second_last + len('<br/><br/>'):]
+                            else:
+                                # Only one <br/><br/>, just wrap zones table
+                                bulk_content = before[:last_break]
+                                heading_content = ''
+                        else:
+                            bulk_content = before[:last_break]
 
                         # Render bulk content normally (allows page breaks)
                         if bulk_content.strip():
