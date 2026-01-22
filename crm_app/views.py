@@ -1109,7 +1109,7 @@ class ContractViewSet(BaseModelViewSet):
         customer_sig_content = []
 
         # Primary customer signatory
-        customer_sig_content.append(Spacer(1, 1.0*inch))  # Space for signature (matches BMAsia sig+stamp height)
+        customer_sig_content.append(Spacer(1, 0.88*inch))  # Space for signature (tuned to align with BMAsia sig line)
         customer_sig_content.append(Paragraph('_' * 35, sig_line_style))
         customer_sig_content.append(Paragraph(f"<b>{customer_signatory}</b>", sig_name_style))
         customer_sig_content.append(Paragraph(customer_title, sig_title_style))
