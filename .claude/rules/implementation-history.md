@@ -2,6 +2,14 @@
 
 ## January 2026
 
+### Jan 22, 2026 - Signature Position Adjustment
+
+**Change**: Moved Chris Andrews signature image more to the right to center over signature line
+
+**Fix**: Increased `LEFTPADDING` from 25 to 50 in `_build_signature_blocks_table()` method
+
+---
+
 ### Jan 22, 2026 - Zones Table KeepTogether (Final Fix)
 
 **Problem**: When template has `<br/><br/>` right before `{{zones_table}}`, splitting at last break left heading in bulk_content
