@@ -2,6 +2,13 @@
 
 ## January 2026
 
+### Jan 22, 2026 - Zones Table KeepTogether with Heading
+
+**Fix**: Heading "2. Locations for Provision of Services:" was splitting from zones table across pages
+**Solution**: Wrap both the heading Paragraph AND zones Table in a single `KeepTogether()` block
+
+---
+
 ### Jan 21, 2026 - PDF Layout Fixes
 
 **Zones Table Page Split**:
