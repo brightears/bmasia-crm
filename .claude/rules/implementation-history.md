@@ -2,15 +2,20 @@
 
 ## January 2026
 
-### Jan 22, 2026 - Zones Table KeepTogether (Refined)
+### Jan 22, 2026 - Zones Table KeepTogether (Final Fix)
 
-**Problem**: Previous fix wrapped ENTIRE "before" content in KeepTogether, causing page 1 to be empty
+**Problem**: When template has `<br/><br/>` right before `{{zones_table}}`, splitting at last break left heading in bulk_content
 
-**Solution**: Split "before" content at last `<br/><br/>`:
-- Bulk content renders normally (allows page breaks, fills page 1)
-- Only heading "2. Locations for Provision of Services:" + zones table wrapped in KeepTogether
+**Solution**: If `heading_content` is empty after split, use second-to-last `<br/><br/>` to capture actual heading
 
-**Result**: Page 1 has content, heading stays with zones table
+**Template structure handled**:
+```
+...clause 1...<br/><br/>
+2. Locations for Provision of Services:<br/><br/>
+{{zones_table}}
+```
+
+**Result**: Heading "2. Locations for Provision of Services:" now stays with zones table on same page
 
 ---
 
