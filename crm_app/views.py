@@ -76,6 +76,24 @@ def convert_uuids_to_strings(obj):
     return obj
 
 
+def format_address_multiline(company):
+    """Format company address as multi-line HTML for PDF BILL TO sections.
+    Builds line-by-line from individual fields to avoid splitting commas within values.
+    Filters out 'Other' country (dropdown catch-all value)."""
+    if not company:
+        return ''
+    parts = [
+        company.address_line1,
+        company.address_line2,
+        company.city,
+        company.state,
+        company.postal_code,
+    ]
+    if company.country and company.country != 'Other':
+        parts.append(company.country)
+    return '<br/>'.join(filter(None, parts))
+
+
 class BaseModelViewSet(viewsets.ModelViewSet):
     """Base viewset with common functionality"""
     permission_classes = [AllowAny]  # Disabled auth for development
@@ -1151,13 +1169,13 @@ class ContractViewSet(BaseModelViewSet):
         return signature_table
 
     def _format_company_address(self, company):
-        """Format company address as single line"""
+        """Format company address as single line (for contract preambles etc.)"""
         if not company:
             return ''
-        # Use full_address property if available, otherwise build from parts
-        if hasattr(company, 'full_address') and company.full_address:
-            return company.full_address
-        parts = [company.address_line1, company.address_line2, company.city, company.state, company.postal_code, company.country]
+        parts = [company.address_line1, company.address_line2, company.city,
+                 company.state, company.postal_code]
+        if company.country and company.country != 'Other':
+            parts.append(company.country)
         return ', '.join(filter(None, parts))
 
     def _generate_principal_terms_pdf(self, contract):
@@ -1370,7 +1388,7 @@ class ContractViewSet(BaseModelViewSet):
         # Create card-style BILL TO section
         bill_to_content = Paragraph(f"""
             <b>{company.legal_entity_name or company.name}</b><br/>
-            {company.full_address.replace(', ', '<br/>') if company.full_address else (company.country or '')}
+            {format_address_multiline(company)}
         """, from_content_style)
 
         bill_card_data = [
@@ -2144,7 +2162,7 @@ and<br/><br/>
                 """, body_style),
                 Paragraph(f"""
                 <b>{company.legal_entity_name or company.name}</b><br/>
-                {company.full_address.replace(', ', '<br/>') if company.full_address else (company.country or '')}
+                {format_address_multiline(company)}
                 """, body_style)
             ]
         ]
@@ -2443,7 +2461,7 @@ and<br/><br/>
                 """, body_style),
                 Paragraph(f"""
                 <b>{company.legal_entity_name or company.name}</b><br/>
-                {company.full_address.replace(', ', '<br/>') if company.full_address else (company.country or '')}
+                {format_address_multiline(company)}
                 """, body_style)
             ]
         ]
@@ -3748,7 +3766,7 @@ class InvoiceViewSet(BaseModelViewSet):
         # Create card-style BILL TO section
         bill_to_content = Paragraph(f"""
             <b>{company.legal_entity_name or company.name}</b><br/>
-            {company.full_address.replace(', ', '<br/>') if company.full_address else (company.country or '')}
+            {format_address_multiline(company)}
         """, from_content_style)
 
         bill_card_data = [
@@ -4323,7 +4341,7 @@ class QuoteViewSet(BaseModelViewSet):
                 """, body_style),
                 Paragraph(f"""
                 <b>{quote.company.legal_entity_name or quote.company.name}</b><br/>
-                {quote.company.full_address.replace(', ', '<br/>') if quote.company.full_address else (quote.company.country or '')}
+                {format_address_multiline(quote.company)}
                 {f"<br/><br/><b>Contact:</b> {quote.contact.name}" if quote.contact else ""}
                 {f"<br/>Email: {quote.contact.email}" if quote.contact and quote.contact.email else ""}
                 {f"<br/>Phone: {quote.contact.phone}" if quote.contact and quote.contact.phone else ""}
