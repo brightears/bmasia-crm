@@ -1002,10 +1002,14 @@ class ContractViewSet(BaseModelViewSet):
         Groups zones by platform (Soundtrack / Beat Breeze) with Service column."""
         from reportlab.lib import colors
         from reportlab.lib.units import inch
-        from reportlab.platypus import Table, TableStyle
+        from reportlab.platypus import Table, TableStyle, Paragraph
+        from reportlab.lib.styles import ParagraphStyle
 
         company = contract.company
         has_pricing = contract.show_zone_pricing_detail and contract.price_per_zone
+
+        # Style for property name (enables word-wrap for long names)
+        prop_style = ParagraphStyle('ZoneProp', fontName='Helvetica', fontSize=9, textColor=colors.HexColor('#424242'))
 
         # Build header
         zone_header = ['Property', 'Service', 'Zone']
@@ -1032,7 +1036,7 @@ class ContractViewSet(BaseModelViewSet):
                 continue
             group_start = row_idx + 1  # +1 for header row
             for idx, zone in enumerate(platform_zones, 1):
-                property_name = company.name if row_idx == 0 else ''
+                property_name = Paragraph(company.name, prop_style) if row_idx == 0 else ''
                 service_name = platform_labels[platform_key] if idx == 1 else ''
                 row = [property_name, service_name, f"Zone {idx}: {str(zone)}"]
                 if has_pricing:
