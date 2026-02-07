@@ -2,6 +2,22 @@
 
 ## February 2026
 
+### Feb 7, 2026 - HK Stamp Aspect Ratio Fix
+
+**Problem**: HK stamp (`BMAsia Stamp.png`) is 854x772px (not square). Rendered at fixed 1.6x1.6 inches, it appeared stretched/distorted. Thai stamp (`BMAsia Thai Stamp.png`) is 1000x1000px and rendered correctly.
+
+**Fix** (`crm_app/views.py`): After loading stamp image, auto-detect aspect ratio and adjust height:
+```python
+iw, ih = stamp_img.imageWidth, stamp_img.imageHeight
+if iw and ih and iw != ih:
+    ratio = ih / iw
+    stamp_img = Image(stamp_path, width=1.6*inch, height=1.6*inch * ratio)
+```
+
+Applied to both stamp locations: `_build_signature_blocks_table()` and master agreement signature section.
+
+---
+
 ### Feb 7, 2026 - Differentiate Soundtrack vs Beat Breeze Zones in Contract PDFs
 
 **Problem**: Contract PDF zones table showed all zones as generic "Zone 1, Zone 2..." without distinguishing Soundtrack from Beat Breeze. They have different licensing and pricing.
