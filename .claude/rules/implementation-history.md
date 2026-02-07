@@ -1,5 +1,69 @@
 # Implementation History - BMAsia CRM
 
+## February 2026
+
+### Feb 7, 2026 - Differentiate Soundtrack vs Beat Breeze Zones in Contract PDFs
+
+**Problem**: Contract PDF zones table showed all zones as generic "Zone 1, Zone 2..." without distinguishing Soundtrack from Beat Breeze. They have different licensing and pricing.
+
+**Solution**: Added "Service" column to zones table (`_build_zones_table()` in `crm_app/views.py`):
+- Zones grouped by platform: Soundtrack first, then Beat Breeze
+- "Service" column shows "Soundtrack" or "Beat Breeze" per group
+- Zone numbering restarts per service group
+- Service name merged vertically when a platform has multiple zones
+- Property name merged across all rows (existing behavior)
+
+**Table format**:
+```
+Property    | Service     | Zone
+Bright Ears | Soundtrack  | Zone 1: Pool Bar
+            | Beat Breeze | Zone 1: Gym
+            |             | Zone 2: Lobby
+```
+
+**Column widths**: Property 2.0", Service 1.3", Zone 2.2" (without pricing) / Property 1.7", Service 1.2", Zone 1.8", Price 1.7" (with pricing)
+
+**Code consolidation**: Replaced hardcoded zone table (~lines 1590-1631) with call to shared `_build_zones_table()` helper - single source of truth for all contract PDF zone tables.
+
+**Participation agreement**: Cleaned up labels from raw "SOUNDTRACK"/"BEATBREEZE" to "Soundtrack"/"Beat Breeze", renamed "Platform" column to "Service".
+
+**Note**: Quotes and invoices do NOT render zone tables - only contracts do.
+
+---
+
+### Feb 7, 2026 - Company Address Form Consolidation & PDF Address Fix
+
+**Problem**: Company form had overlapping address fields in two sections (City/Country in Basic Info + Address Line 1/2, State, Postal Code in a separate section). Filling both caused duplication in PDFs. Also, PDF address rendering split commas within field values and showed "Other" country.
+
+**Company Form Reorganization** (`CompanyForm.tsx`):
+- Removed old "Address Information" section and City from Basic Information
+- Created single "Company Address" section: Address Line 1, Address Line 2, City, State/Province, Postal Code
+- Country stays in Basic Information (drives billing entity auto-selection + seasonal campaigns)
+- Each field appears exactly once - no duplication
+
+**Form section order**:
+1. Basic Information (Name, Legal Entity, Industry, Country, Billing Entity, Website)
+2. Corporate Structure
+3. Contact Information (Phone, Email)
+4. Company Address (Address Line 1/2, City, State/Province, Postal Code)
+5. Integration & Settings
+6. Communication Preferences
+7. Additional Notes
+
+**PDF Address Fix** (`crm_app/views.py`):
+- Added `format_address_multiline(company)` standalone function (line ~79)
+- Builds address line-by-line from individual fields instead of `full_address.replace(', ', '<br/>')`
+- Prevents commas within field values from being split into separate lines
+- Filters out "Other" country (dropdown catch-all value) from professional documents
+- Applied to all 5 PDF locations: Contract (3 types), Invoice, Quote
+- Updated `_format_company_address()` to also filter "Other" for contract preambles
+
+**CompanyDetail.tsx**: "Full Address" display only shows when it contains data beyond city+country
+
+**No backend model/migration changes** - frontend-only form reorganization + backend PDF rendering fix
+
+---
+
 ## January 2026
 
 ### Jan 22, 2026 - Signature Block Enhancements
