@@ -1127,6 +1127,11 @@ class ContractViewSet(BaseModelViewSet):
 
             if os.path.exists(stamp_path):
                 stamp_img = Image(stamp_path, width=1.6*inch, height=1.6*inch)
+                # Preserve aspect ratio for non-square stamp images
+                iw, ih = stamp_img.imageWidth, stamp_img.imageHeight
+                if iw and ih and iw != ih:
+                    ratio = ih / iw
+                    stamp_img = Image(stamp_path, width=1.6*inch, height=1.6*inch * ratio)
         except Exception:
             pass
 
@@ -1895,6 +1900,11 @@ and<br/><br/>
 
             if os.path.exists(stamp_path):
                 stamp_img = Image(stamp_path, width=1.6*inch, height=1.6*inch)
+                # Preserve aspect ratio for non-square stamp images
+                iw, ih = stamp_img.imageWidth, stamp_img.imageHeight
+                if iw and ih and iw != ih:
+                    ratio = ih / iw
+                    stamp_img = Image(stamp_path, width=1.6*inch, height=1.6*inch * ratio)
         except Exception as e:
             # If images fail to load, continue without them
             pass
