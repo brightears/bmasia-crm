@@ -563,55 +563,6 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
 
           <Divider sx={{ width: '100%', my: 2 }} />
 
-          {/* Address Information */}
-          <Grid item xs={12}>
-            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-              Address Information
-            </Typography>
-          </Grid>
-
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Address Line 1"
-              value={formData.address_line1}
-              onChange={(e) => handleFieldChange('address_line1', e.target.value)}
-              placeholder="Street address, building number"
-            />
-          </Grid>
-
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Address Line 2"
-              value={formData.address_line2}
-              onChange={(e) => handleFieldChange('address_line2', e.target.value)}
-              placeholder="Apartment, suite, unit, building, floor"
-            />
-          </Grid>
-
-          <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              label="State/Province"
-              value={formData.state}
-              onChange={(e) => handleFieldChange('state', e.target.value)}
-              placeholder="e.g., Bangkok, Selangor"
-            />
-          </Grid>
-
-          <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              label="Postal Code"
-              value={formData.postal_code}
-              onChange={(e) => handleFieldChange('postal_code', e.target.value)}
-              placeholder="e.g., 10110, 50450"
-            />
-          </Grid>
-
-          <Divider sx={{ width: '100%', my: 2 }} />
-
           {/* Integration & Settings */}
           <Grid item xs={12}>
             <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>

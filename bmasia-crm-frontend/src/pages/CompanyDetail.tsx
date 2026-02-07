@@ -346,7 +346,7 @@ const CompanyDetail: React.FC = () => {
                     </Box>
                   </Box>
                 </Grid>
-                {company.full_address && (
+                {company.full_address && company.full_address !== [company.city, company.country].filter(Boolean).join(', ') && (
                   <Grid item xs={12}>
                     <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
                       <LocationOn sx={{ mr: 1, color: 'text.secondary', mt: 0.5 }} />
