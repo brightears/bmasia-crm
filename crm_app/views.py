@@ -998,34 +998,58 @@ class ContractViewSet(BaseModelViewSet):
         return "<br/>".join(zone_lines) if zone_lines else ""
 
     def _build_zones_table(self, contract, zones):
-        """Build a styled zones Table flowable for PDF insertion"""
+        """Build a styled zones Table flowable for PDF insertion.
+        Groups zones by platform (Soundtrack / Beat Breeze) with Service column."""
         from reportlab.lib import colors
         from reportlab.lib.units import inch
         from reportlab.platypus import Table, TableStyle
 
         company = contract.company
+        has_pricing = contract.show_zone_pricing_detail and contract.price_per_zone
 
         # Build header
-        zone_header = ['Property', 'Zone']
-        if contract.show_zone_pricing_detail and contract.price_per_zone:
+        zone_header = ['Property', 'Service', 'Zone']
+        if has_pricing:
             zone_header.append('Price/Zone')
 
-        # Build data rows
+        # Group zones by platform (Soundtrack first, then Beat Breeze)
+        zone_list = list(zones)
+        soundtrack_zones = [z for z in zone_list if z.platform == 'soundtrack']
+        beatbreeze_zones = [z for z in zone_list if z.platform == 'beatbreeze']
+
+        platform_labels = {'soundtrack': 'Soundtrack', 'beatbreeze': 'Beat Breeze'}
+
+        # Build data rows grouped by platform
         zone_data = [zone_header]
-        zone_count = zones.count()
-        for idx, zone in enumerate(zones, 1):
-            # Only show property name in first data row
-            property_name = company.name if idx == 1 else ''
-            row = [property_name, f"Zone {idx}: {zone.name}"]
-            if contract.show_zone_pricing_detail and contract.price_per_zone:
-                row.append(f"{contract.currency} {contract.price_per_zone:,.2f}")
-            zone_data.append(row)
+        row_idx = 0
+        service_spans = []  # Track (start_row, end_row) for Service column merging
+
+        for platform_zones, platform_key in [
+            (soundtrack_zones, 'soundtrack'),
+            (beatbreeze_zones, 'beatbreeze'),
+        ]:
+            if not platform_zones:
+                continue
+            group_start = row_idx + 1  # +1 for header row
+            for idx, zone in enumerate(platform_zones, 1):
+                property_name = company.name if row_idx == 0 else ''
+                service_name = platform_labels[platform_key] if idx == 1 else ''
+                row = [property_name, service_name, f"Zone {idx}: {zone.name}"]
+                if has_pricing:
+                    row.append(f"{contract.currency} {contract.price_per_zone:,.2f}")
+                zone_data.append(row)
+                row_idx += 1
+            group_end = row_idx  # Last data row index (1-based for table)
+            if len(platform_zones) > 1:
+                service_spans.append((group_start, group_end))
+
+        zone_count = row_idx
 
         # Set column widths
-        if contract.show_zone_pricing_detail and contract.price_per_zone:
-            zone_col_widths = [2.0*inch, 2.5*inch, 2.4*inch]
+        if has_pricing:
+            zone_col_widths = [1.7*inch, 1.2*inch, 1.8*inch, 1.7*inch]
         else:
-            zone_col_widths = [2.5*inch, 3.0*inch]
+            zone_col_widths = [2.0*inch, 1.3*inch, 2.2*inch]
 
         zone_table = Table(zone_data, colWidths=zone_col_widths)
 
@@ -1047,10 +1071,15 @@ class ContractViewSet(BaseModelViewSet):
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
         ]
 
-        # Merge property cells if multiple zones
+        # Merge Property cells across all data rows
         if zone_count > 1:
             zone_style_list.append(('SPAN', (0, 1), (0, zone_count)))
             zone_style_list.append(('VALIGN', (0, 1), (0, zone_count), 'MIDDLE'))
+
+        # Merge Service cells per platform group
+        for start, end in service_spans:
+            zone_style_list.append(('SPAN', (1, start), (1, end)))
+            zone_style_list.append(('VALIGN', (1, start), (1, end), 'MIDDLE'))
 
         zone_table.setStyle(TableStyle(zone_style_list))
         return zone_table
@@ -1587,47 +1616,8 @@ and<br/><br/>
                     clause_style
                 ))
 
-                # Build zone table with proper header styling (property name shown only once)
-                zone_header = ['Property', 'Zone']
-                if contract.show_zone_pricing_detail and contract.price_per_zone:
-                    zone_header.append('Price/Zone')
-
-                zone_data = [zone_header]
-                zone_count = zones.count()
-                for idx, zone in enumerate(zones, 1):
-                    # Only show property name in first data row, empty for rest
-                    property_name = company.name if idx == 1 else ''
-                    row = [property_name, f"Zone {idx}: {zone.name}"]
-                    if contract.show_zone_pricing_detail and contract.price_per_zone:
-                        row.append(f"{contract.currency} {contract.price_per_zone:,.2f}")
-                    zone_data.append(row)
-
-                zone_col_widths = [2.5*inch, 3.0*inch] if not (contract.show_zone_pricing_detail and contract.price_per_zone) else [2.0*inch, 2.5*inch, 2.4*inch]
-                zone_table = Table(zone_data, colWidths=zone_col_widths)
-
-                zone_style = [
-                    # Header row - orange accent
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                    ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
-                    # Data rows
-                    ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
-                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#424242')),
-                    ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#fafafa')),
-                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                    ('TOPPADDING', (0, 0), (-1, -1), 6),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 8),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
-                ]
-
-                # Merge property name cell across all data rows if more than one zone
-                if zone_count > 1:
-                    zone_style.append(('SPAN', (0, 1), (0, zone_count)))
-                    zone_style.append(('VALIGN', (0, 1), (0, zone_count), 'MIDDLE'))
-
-                zone_table.setStyle(TableStyle(zone_style))
+                # Build zone table (reuse shared helper with platform grouping)
+                zone_table = self._build_zones_table(contract, zones)
                 elements.append(zone_table)
                 clause_num += 1
             else:
@@ -2481,11 +2471,12 @@ and<br/><br/>
         if zones.exists():
             elements.append(Paragraph("ZONES COVERED BY THIS AGREEMENT", heading_style))
 
-            zone_data = [['Zone Name', 'Platform', 'Status']]
+            platform_labels = {'soundtrack': 'Soundtrack', 'beatbreeze': 'Beat Breeze'}
+            zone_data = [['Zone Name', 'Service', 'Status']]
             for zone in zones:
                 zone_data.append([
                     zone.name,
-                    zone.platform.upper() if zone.platform else 'N/A',
+                    platform_labels.get(zone.platform, 'N/A'),
                     'Active' if zone.is_active else 'Inactive'
                 ])
 
