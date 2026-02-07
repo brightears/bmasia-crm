@@ -24,6 +24,7 @@ import {
   SelectAll,
   Deselect,
   Add,
+  CloudDownload,
 } from '@mui/icons-material';
 import { Zone, PreviewZone } from '../types';
 import ApiService from '../services/api';
@@ -53,63 +54,46 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [newBeatbreezeName, setNewBeatbreezeName] = useState('');
   const [addingZone, setAddingZone] = useState(false);
+  const [newSoundtrackName, setNewSoundtrackName] = useState('');
+  const [addingSoundtrackZone, setAddingSoundtrackZone] = useState(false);
+  const [importingFromApi, setImportingFromApi] = useState(false);
+  const [importComplete, setImportComplete] = useState(false);
 
   // Split selected zones by platform
   const selectedSoundtrack = selectedZones.filter(z => z.platform === 'soundtrack');
   const selectedBeatbreeze = selectedZones.filter(z => z.platform === 'beatbreeze');
 
+  // Calculate how many preview zones are not yet in DB
+  const unimportedPreviewZones = previewZones.filter(pz => {
+    return !soundtrackZones.some(
+      sz => sz.soundtrack_zone_id === pz.id || sz.name === pz.name
+    );
+  });
+
   const loadZones = useCallback(async (compId: string) => {
     setLoading(true);
     setLoadError(null);
     try {
-      // If we have preview zones, convert them to Zone format for Soundtrack section
-      if (previewZones.length > 0) {
-        // Convert PreviewZone to Zone format (temporary zones, not yet in database)
-        const convertedPreviewZones: Zone[] = previewZones.map(pz => ({
-          id: pz.id, // Use preview zone ID temporarily
-          company: compId,
-          name: pz.name,
-          platform: 'soundtrack' as const,
-          status: pz.status,
-          device_name: pz.device_name,
-          soundtrack_zone_id: pz.id,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }));
+      // Always load zones from database (real DB zones with proper UUIDs)
+      const zones = await ApiService.getZonesByCompany(compId);
+      const stZones = zones.filter(z => z.platform === 'soundtrack');
+      const bbZones = zones.filter(z => z.platform === 'beatbreeze');
 
-        // Still load Beat Breeze zones from database
-        const zones = await ApiService.getZonesByCompany(compId);
-        const bbZones = zones.filter(z => z.platform === 'beatbreeze');
+      setSoundtrackZones(stZones);
+      setBeatbreezeZones(bbZones);
 
-        setSoundtrackZones(convertedPreviewZones);
-        setBeatbreezeZones(bbZones);
-
-        // Auto-select all preview Soundtrack zones for NEW contracts only
-        if (mode === 'create' && convertedPreviewZones.length > 0 && selectedZones.length === 0) {
-          onChange(convertedPreviewZones);
-        }
-      } else {
-        // Fallback to loading zones from database (original behavior)
-        const zones = await ApiService.getZonesByCompany(compId);
-        const stZones = zones.filter(z => z.platform === 'soundtrack');
-        const bbZones = zones.filter(z => z.platform === 'beatbreeze');
-
-        setSoundtrackZones(stZones);
-        setBeatbreezeZones(bbZones);
-
-        // Auto-select all Soundtrack zones for NEW contracts only
-        if (mode === 'create' && stZones.length > 0 && selectedZones.length === 0) {
-          onChange(stZones);
-        }
+      // Auto-select all Soundtrack zones for NEW contracts only
+      if (mode === 'create' && stZones.length > 0 && selectedZones.length === 0) {
+        onChange(stZones);
       }
     } catch (err) {
-      setLoadError('Failed to load zones. Please sync with Soundtrack first.');
+      setLoadError('Failed to load zones.');
       setSoundtrackZones([]);
       setBeatbreezeZones([]);
     } finally {
       setLoading(false);
     }
-  }, [mode, onChange, selectedZones.length, previewZones]);
+  }, [mode, onChange, selectedZones.length]);
 
   useEffect(() => {
     if (companyId) {
@@ -119,6 +103,11 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
       setBeatbreezeZones([]);
     }
   }, [companyId, loadZones]);
+
+  // Reset import state when preview zones change
+  useEffect(() => {
+    setImportComplete(false);
+  }, [previewZones.length]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -189,6 +178,73 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
     onChange([...currentST, ...newValue]);
   };
 
+  // Add new Soundtrack zone (manual)
+  const handleAddNewSoundtrack = async () => {
+    if (!newSoundtrackName.trim() || !companyId) return;
+
+    setAddingSoundtrackZone(true);
+    try {
+      const newZone = await ApiService.createZone({
+        company: companyId,
+        name: newSoundtrackName.trim(),
+        platform: 'soundtrack',
+        status: 'pending',
+      });
+
+      // Add to available and selected lists
+      setSoundtrackZones(prev => [...prev, newZone]);
+      const currentST = selectedZones.filter(z => z.platform === 'soundtrack');
+      const currentBB = selectedZones.filter(z => z.platform === 'beatbreeze');
+      onChange([...currentST, newZone, ...currentBB]);
+
+      setNewSoundtrackName('');
+    } catch (err) {
+      console.error('Failed to create Soundtrack zone:', err);
+    } finally {
+      setAddingSoundtrackZone(false);
+    }
+  };
+
+  // Import all zones from Soundtrack API
+  const handleImportFromApi = async () => {
+    if (!companyId || unimportedPreviewZones.length === 0) return;
+
+    setImportingFromApi(true);
+    try {
+      const importedZones: Zone[] = [];
+
+      for (const pz of unimportedPreviewZones) {
+        const newZone = await ApiService.createZone({
+          company: companyId,
+          name: pz.name,
+          platform: 'soundtrack',
+          status: pz.status || 'pending',
+          soundtrack_zone_id: pz.id,
+          device_name: pz.device_name || '',
+        });
+        importedZones.push(newZone);
+      }
+
+      // Update available zones (add newly imported, keep existing)
+      setSoundtrackZones(prev => {
+        const existingIds = new Set(prev.map(z => z.id));
+        const newOnes = importedZones.filter(z => !existingIds.has(z.id));
+        return [...prev, ...newOnes];
+      });
+
+      // Auto-select all imported zones + keep existing Beat Breeze selection
+      const allSoundtrack = [...selectedSoundtrack, ...importedZones];
+      const currentBB = selectedZones.filter(z => z.platform === 'beatbreeze');
+      onChange([...allSoundtrack, ...currentBB]);
+
+      setImportComplete(true);
+    } catch (err) {
+      console.error('Failed to import zones from API:', err);
+    } finally {
+      setImportingFromApi(false);
+    }
+  };
+
   // Add new Beat Breeze zone
   const handleAddNewBeatbreeze = async () => {
     if (!newBeatbreezeName.trim() || !companyId) return;
@@ -255,14 +311,6 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
             <Typography variant="subtitle1" fontWeight={600} color="primary">
               Soundtrack Zones
             </Typography>
-            {previewZones.length > 0 && (
-              <Chip
-                size="small"
-                label="Live Preview"
-                color="success"
-                variant="outlined"
-              />
-            )}
             {hasSoundtrackZones && (
               <Chip
                 size="small"
@@ -295,7 +343,7 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
           )}
         </Box>
 
-        {hasSoundtrackZones ? (
+        {hasSoundtrackZones && (
           <Autocomplete
             multiple
             options={soundtrackZones}
@@ -350,14 +398,86 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
               sx: { maxHeight: 250 },
             }}
           />
-        ) : (
-          <Alert severity="info" variant="outlined">
-            {previewZones.length > 0
-              ? 'Enter a Soundtrack Account ID above to preview available zones.'
-              : 'No Soundtrack zones found. Sync zones from the Zone Status page or the company\'s Soundtrack Account ID is not set.'
-            }
-          </Alert>
         )}
+
+        {/* Import from Soundtrack API */}
+        {previewZones.length > 0 && (
+          <Box sx={{ mt: hasSoundtrackZones ? 2 : 0 }}>
+            {importComplete && unimportedPreviewZones.length === 0 ? (
+              <Alert severity="success" variant="outlined" sx={{ py: 0.5 }}>
+                All {previewZones.length} zones imported from Soundtrack API
+              </Alert>
+            ) : (
+              <Alert
+                severity="info"
+                variant="outlined"
+                sx={{ py: 0.5 }}
+                action={
+                  <Button
+                    size="small"
+                    startIcon={importingFromApi ? <CircularProgress size={16} color="inherit" /> : <CloudDownload />}
+                    onClick={handleImportFromApi}
+                    disabled={disabled || importingFromApi || unimportedPreviewZones.length === 0}
+                    variant="contained"
+                    sx={{ whiteSpace: 'nowrap' }}
+                  >
+                    {importingFromApi ? 'Importing...' : `Import ${unimportedPreviewZones.length} Zone${unimportedPreviewZones.length !== 1 ? 's' : ''}`}
+                  </Button>
+                }
+              >
+                {unimportedPreviewZones.length} zone{unimportedPreviewZones.length !== 1 ? 's' : ''} found via Soundtrack API
+              </Alert>
+            )}
+          </Box>
+        )}
+
+        {/* Add New Soundtrack Zone (manual) */}
+        <Divider sx={{ my: 2 }}>
+          <Typography variant="caption" color="text.secondary">
+            Add New Zone
+          </Typography>
+        </Divider>
+
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <TextField
+            size="small"
+            fullWidth
+            placeholder="Enter new Soundtrack zone name..."
+            value={newSoundtrackName}
+            onChange={(e) => setNewSoundtrackName(e.target.value)}
+            disabled={disabled || addingSoundtrackZone}
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleAddNewSoundtrack();
+              }
+            }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <MusicNote sx={{ color: '#1976d2', fontSize: 20 }} />
+                </InputAdornment>
+              ),
+            }}
+          />
+          <Button
+            variant="contained"
+            onClick={handleAddNewSoundtrack}
+            disabled={disabled || addingSoundtrackZone || !newSoundtrackName.trim()}
+            sx={{
+              minWidth: 'auto',
+              px: 2,
+              backgroundColor: '#1976d2',
+              '&:hover': { backgroundColor: '#1565c0' },
+            }}
+          >
+            {addingSoundtrackZone ? <CircularProgress size={20} color="inherit" /> : <Add />}
+          </Button>
+        </Box>
+
+        <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+          Add zones manually when Soundtrack account is not yet set up
+        </Typography>
       </Paper>
 
       {/* Beat Breeze Zones Section */}
