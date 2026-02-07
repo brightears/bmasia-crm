@@ -1034,7 +1034,7 @@ class ContractViewSet(BaseModelViewSet):
             for idx, zone in enumerate(platform_zones, 1):
                 property_name = company.name if row_idx == 0 else ''
                 service_name = platform_labels[platform_key] if idx == 1 else ''
-                row = [property_name, service_name, f"Zone {idx}: {zone.name}"]
+                row = [property_name, service_name, f"Zone {idx}: {str(zone)}"]
                 if has_pricing:
                     row.append(f"{contract.currency} {contract.price_per_zone:,.2f}")
                 zone_data.append(row)
