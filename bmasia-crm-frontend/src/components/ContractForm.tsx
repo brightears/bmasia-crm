@@ -1113,6 +1113,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
                 onChange={setSelectedZones}
                 disabled={!formData.company}
                 mode={mode}
+                contractId={contract?.id}
               />
             </Box>
 

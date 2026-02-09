@@ -29,6 +29,13 @@ import {
 import { Zone, PreviewZone } from '../types';
 import ApiService from '../services/api';
 
+interface ZoneOverlap {
+  zone_id: string;
+  zone_name: string;
+  conflicting_contract_id: string;
+  conflicting_contract_number: string;
+}
+
 interface EnhancedZonePickerProps {
   companyId: string | null;
   soundtrackAccountId?: string;
@@ -37,6 +44,7 @@ interface EnhancedZonePickerProps {
   onChange: (zones: Zone[]) => void;
   disabled?: boolean;
   mode: 'create' | 'edit';
+  contractId?: string;
 }
 
 const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
@@ -47,6 +55,7 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
   onChange,
   disabled = false,
   mode,
+  contractId,
 }) => {
   const [soundtrackZones, setSoundtrackZones] = useState<Zone[]>([]);
   const [beatbreezeZones, setBeatbreezeZones] = useState<Zone[]>([]);
@@ -58,6 +67,28 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
   const [addingSoundtrackZone, setAddingSoundtrackZone] = useState(false);
   const [importingFromApi, setImportingFromApi] = useState(false);
   const [importComplete, setImportComplete] = useState(false);
+  const [overlaps, setOverlaps] = useState<ZoneOverlap[]>([]);
+
+  // Check for zone overlaps when selection changes (debounced)
+  useEffect(() => {
+    const zoneIds = selectedZones.map(z => z.id);
+    if (zoneIds.length === 0) {
+      setOverlaps([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const conflicts = await ApiService.checkZoneOverlaps(zoneIds, contractId);
+        setOverlaps(conflicts || []);
+      } catch {
+        // Silently fail — overlap check is non-critical
+        setOverlaps([]);
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timer);
+  }, [selectedZones, contractId]);
 
   // Split selected zones by platform
   const selectedSoundtrack = selectedZones.filter(z => z.platform === 'soundtrack');
@@ -596,6 +627,23 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
           Beat Breeze zones are managed manually (no API sync)
         </Typography>
       </Paper>
+
+      {/* Overlap Warning */}
+      {overlaps.length > 0 && (
+        <Alert severity="warning" variant="outlined">
+          <Typography variant="body2" fontWeight={500} sx={{ mb: 0.5 }}>
+            Zone overlap detected
+          </Typography>
+          {overlaps.map((o, i) => (
+            <Typography key={i} variant="body2">
+              "{o.zone_name}" is already on active contract <strong>{o.conflicting_contract_number}</strong>
+            </Typography>
+          ))}
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+            This may be expected for renewals. Proceed if intentional.
+          </Typography>
+        </Alert>
+      )}
 
       {/* Summary */}
       {totalZones > 0 && (

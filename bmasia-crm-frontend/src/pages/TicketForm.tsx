@@ -58,11 +58,13 @@ const TicketForm: React.FC = () => {
   const [assignedTo, setAssignedTo] = useState<string | null>(null);
   const [dueDate, setDueDate] = useState<Date | null>(addDays(new Date(), 3));
   const [tags, setTags] = useState('');
+  const [zone, setZone] = useState<string | null>(null);
 
   // Data state
   const [companies, setCompanies] = useState<Company[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [zones, setZones] = useState<any[]>([]);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
 
   // UI state
@@ -82,12 +84,15 @@ const TicketForm: React.FC = () => {
     loadUsers();
   }, []);
 
-  // Load contacts when company changes
+  // Load contacts and zones when company changes
   useEffect(() => {
     if (company) {
       loadContacts(company);
+      loadZones(company);
     } else {
       setContacts([]);
+      setZones([]);
+      setZone(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [company]);
@@ -139,6 +144,24 @@ const TicketForm: React.FC = () => {
     }
   };
 
+  const loadZones = async (companyId: string) => {
+    try {
+      const response = await ApiService.getZones({ company: companyId, page_size: 200 });
+      setZones(response.results || []);
+
+      // Auto-select zone from query param (e.g., /tickets/new?company=uuid&zone=uuid)
+      const preselectedZoneId = searchParams.get('zone');
+      if (preselectedZoneId && !isEditMode && !zone) {
+        const found = (response.results || []).find((z: any) => z.id === preselectedZoneId);
+        if (found) {
+          setZone(found.id);
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to load zones:', err);
+    }
+  };
+
   const loadTicket = async () => {
     try {
       setInitialLoading(true);
@@ -154,6 +177,7 @@ const TicketForm: React.FC = () => {
       setAssignedTo(ticket.assigned_to);
       setDueDate(ticket.due_date ? new Date(ticket.due_date) : null);
       setTags(ticket.tags || '');
+      setZone(ticket.zone || null);
 
       // Set selected company for autocomplete
       const companyObj = companies.find(c => c.id === ticket.company);
@@ -219,6 +243,7 @@ const TicketForm: React.FC = () => {
         assigned_to: assignedTo || null,
         due_date: dueDate ? dueDate.toISOString() : null,
         tags,
+        zone: zone || null,
       };
 
       if (isEditMode && id) {
@@ -248,6 +273,7 @@ const TicketForm: React.FC = () => {
     setSelectedCompany(value);
     setCompany(value?.id || '');
     setContact(null); // Reset contact when company changes
+    setZone(null); // Reset zone when company changes
   };
 
   const getPriorityChip = (value: string) => {
@@ -442,6 +468,39 @@ const TicketForm: React.FC = () => {
                   </MenuItem>
                 ))}
               </Select>
+            </FormControl>
+          </Grid>
+
+          {/* Related Zone - Optional */}
+          <Grid item xs={12} sm={6}>
+            <FormControl fullWidth disabled={!company || loading}>
+              <InputLabel>Related Zone</InputLabel>
+              <Select
+                value={zone || ''}
+                onChange={(e) => setZone(e.target.value || null)}
+                label="Related Zone"
+              >
+                <MenuItem value="">
+                  <em>None</em>
+                </MenuItem>
+                {zones.map((z: any) => (
+                  <MenuItem key={z.id} value={z.id}>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Typography variant="body1">{z.name}</Typography>
+                      <Chip
+                        label={z.platform === 'soundtrack' ? 'Soundtrack' : 'Beat Breeze'}
+                        size="small"
+                        color={z.platform === 'soundtrack' ? 'primary' : 'secondary'}
+                      />
+                    </Box>
+                  </MenuItem>
+                ))}
+              </Select>
+              {!company && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
+                  Select a company first
+                </Typography>
+              )}
             </FormControl>
           </Grid>
 

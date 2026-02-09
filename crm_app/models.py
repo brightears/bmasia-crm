@@ -2662,6 +2662,14 @@ class Ticket(TimestampedModel):
         related_name='tickets',
         help_text="Contact who submitted the ticket"
     )
+    zone = models.ForeignKey(
+        'Zone',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tickets',
+        help_text="Music zone related to this ticket (optional)"
+    )
 
     # Assignment
     assigned_to = models.ForeignKey(

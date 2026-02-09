@@ -1105,6 +1105,18 @@ class ApiService {
     await authApi.delete(`/zones/${id}/hard-delete/`);
   }
 
+  async getZoneHealthSummary(params?: any): Promise<any> {
+    const response = await authApi.get('/zones/health-summary/', { params });
+    return response.data;
+  }
+
+  async checkZoneOverlaps(zoneIds: string[], excludeContract?: string): Promise<any> {
+    const params: any = { zone_ids: zoneIds.join(',') };
+    if (excludeContract) params.exclude_contract = excludeContract;
+    const response = await authApi.get('/zones/check-overlaps/', { params });
+    return response.data;
+  }
+
   // Device Management
   async getDevices(params?: Record<string, string>): Promise<Device[]> {
     const response = await authApi.get<Device[]>('/devices/', { params });

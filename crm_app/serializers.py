@@ -1334,6 +1334,8 @@ class TicketSerializer(serializers.ModelSerializer):
     """Serializer for Ticket model with nested comments and attachments"""
     company_name = serializers.CharField(source='company.name', read_only=True)
     contact_name = serializers.CharField(source='contact.name', read_only=True, allow_null=True)
+    zone_name = serializers.CharField(source='zone.name', read_only=True, allow_null=True, default=None)
+    zone_platform = serializers.CharField(source='zone.platform', read_only=True, allow_null=True, default=None)
     assigned_to_name = serializers.CharField(source='assigned_to.get_full_name', read_only=True, allow_null=True)
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True, allow_null=True)
 
@@ -1356,6 +1358,7 @@ class TicketSerializer(serializers.ModelSerializer):
             'id', 'ticket_number', 'subject', 'description',
             'status', 'priority', 'category',
             'company', 'company_name', 'contact', 'contact_name',
+            'zone', 'zone_name', 'zone_platform',
             'assigned_to', 'assigned_to_name', 'assigned_team',
             'created_by', 'created_by_name',
             'first_response_at', 'resolved_at', 'closed_at', 'due_date',
@@ -1366,7 +1369,8 @@ class TicketSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'id', 'ticket_number', 'company_name', 'contact_name',
-            'assigned_to_name', 'created_by_name', 'first_response_at',
+            'assigned_to_name', 'created_by_name',
+            'zone_name', 'zone_platform', 'first_response_at',
             'resolved_at', 'closed_at', 'first_response_time_hours',
             'resolution_time_hours', 'is_overdue', 'comments_count',
             'internal_notes_count', 'created_at', 'updated_at'

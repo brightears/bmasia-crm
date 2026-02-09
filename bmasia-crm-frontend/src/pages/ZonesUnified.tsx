@@ -212,6 +212,11 @@ const ZonesUnified: React.FC = () => {
   });
 
   // Calculate statistics
+  const now = new Date();
+  const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const soundtrackZones = zones.filter(z => z.platform === 'soundtrack');
+  const syncedRecently = soundtrackZones.filter(z => z.last_api_sync && new Date(z.last_api_sync) >= last24h).length;
+
   const stats = {
     total: zones.length,
     online: zones.filter(z => z.status === 'online').length,
@@ -219,6 +224,7 @@ const ZonesUnified: React.FC = () => {
     noDevice: zones.filter(z => z.status === 'no_device').length,
     pending: zones.filter(z => z.status === 'pending').length,
     orphaned: zones.filter(z => z.is_orphaned).length,
+    syncHealth: soundtrackZones.length > 0 ? Math.round((syncedRecently / soundtrackZones.length) * 100) : 100,
   };
 
   // Pagination
@@ -355,6 +361,21 @@ const ZonesUnified: React.FC = () => {
                 Orphaned
               </Typography>
               <Typography variant="h4" color="error.dark">{stats.orphaned}</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={2}>
+          <Card sx={{ borderLeft: 4, borderColor: stats.syncHealth >= 80 ? 'info.main' : 'warning.main' }}>
+            <CardContent>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Sync Health
+              </Typography>
+              <Typography variant="h4" color={stats.syncHealth >= 80 ? 'info.main' : 'warning.main'}>
+                {stats.syncHealth}%
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {syncedRecently}/{soundtrackZones.length} synced &lt;24h
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
@@ -581,7 +602,7 @@ const ZonesUnified: React.FC = () => {
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <ScheduleIcon fontSize="small" color="action" />
                           <Typography variant="body2" color="text.secondary">
-                            {formatTimestamp(zone.updated_at)}
+                            {formatTimestamp(zone.last_api_sync || zone.updated_at)}
                           </Typography>
                         </Box>
                       </TableCell>

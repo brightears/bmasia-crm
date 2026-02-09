@@ -17,6 +17,12 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
 } from '@mui/material';
 import {
   LocationOn,
@@ -28,11 +34,13 @@ import {
   Notes as NotesIcon,
   CalendarMonth,
   Assignment,
+  SupportAgent,
+  Sync as SyncIcon,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Zone, ContractZone } from '../types';
+import { Zone, ContractZone, Ticket } from '../types';
 import ApiService from '../services/api';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -60,6 +68,7 @@ const ZoneDetail: React.FC = () => {
   const navigate = useNavigate();
   const [zone, setZone] = useState<Zone | null>(null);
   const [contracts, setContracts] = useState<ContractZone[]>([]);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tabValue, setTabValue] = useState(0);
@@ -79,14 +88,16 @@ const ZoneDetail: React.FC = () => {
       setLoading(true);
       setError('');
 
-      // Load zone and contracts in parallel
-      const [zoneData, contractsData] = await Promise.all([
+      // Load zone, contracts, and tickets in parallel
+      const [zoneData, contractsData, ticketsData] = await Promise.all([
         ApiService.getZone(id),
         ApiService.getZoneContracts(id),
+        ApiService.getTickets({ zone: id, page_size: 50 }).catch(() => ({ results: [] })),
       ]);
 
       setZone(zoneData);
       setContracts(contractsData);
+      setTickets(ticketsData.results || []);
     } catch (err: any) {
       console.error('Zone load error:', err);
       setError('Failed to load zone details');
@@ -224,6 +235,7 @@ const ZoneDetail: React.FC = () => {
         <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)}>
           <Tab label="Overview" />
           <Tab label={`Contract History (${contracts.length})`} />
+          <Tab label={`Support Tickets (${tickets.length})`} />
         </Tabs>
 
         {/* Overview Tab */}
@@ -359,6 +371,30 @@ const ZoneDetail: React.FC = () => {
                           ? format(new Date(zone.updated_at), 'MMM dd, yyyy')
                           : '-'}
                       </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        <SyncIcon sx={{ fontSize: 14, mr: 0.5, verticalAlign: 'middle' }} />
+                        Last API Sync
+                      </Typography>
+                      {zone.platform === 'beatbreeze' ? (
+                        <Typography variant="body2" color="text.secondary">
+                          N/A — manual platform
+                        </Typography>
+                      ) : zone.last_api_sync ? (
+                        <Box>
+                          <Typography variant="body1">
+                            {formatDistanceToNow(new Date(zone.last_api_sync), { addSuffix: true })}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {format(new Date(zone.last_api_sync), 'MMM dd, yyyy HH:mm')}
+                          </Typography>
+                        </Box>
+                      ) : (
+                        <Typography variant="body2" color="warning.main">
+                          Never synced
+                        </Typography>
+                      )}
                     </Box>
                   </Box>
                 </CardContent>
@@ -537,6 +573,103 @@ const ZoneDetail: React.FC = () => {
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                   Contracts can be linked to zones from the contract management page
+                </Typography>
+              </Box>
+            )}
+          </Box>
+        </TabPanel>
+
+        {/* Support Tickets Tab */}
+        <TabPanel value={tabValue} index={2}>
+          <Box sx={{ mb: 3 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Box>
+                <Typography variant="h6" gutterBottom>
+                  <SupportAgent sx={{ mr: 1, verticalAlign: 'bottom' }} />
+                  Support Tickets
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Tickets linked to this zone
+                </Typography>
+              </Box>
+              <Button
+                variant="contained"
+                size="small"
+                onClick={() => navigate(`/tickets/new?company=${zone.company}&zone=${zone.id}`)}
+                sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
+              >
+                New Ticket
+              </Button>
+            </Box>
+
+            {tickets.length > 0 ? (
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Ticket #</TableCell>
+                      <TableCell>Subject</TableCell>
+                      <TableCell>Status</TableCell>
+                      <TableCell>Priority</TableCell>
+                      <TableCell>Created</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {tickets.map((ticket) => (
+                      <TableRow
+                        key={ticket.id}
+                        hover
+                        sx={{ cursor: 'pointer' }}
+                        onClick={() => navigate(`/tickets/${ticket.id}`)}
+                      >
+                        <TableCell>
+                          <Typography variant="body2" color="primary.main" fontWeight={500}>
+                            {ticket.ticket_number}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>{ticket.subject}</TableCell>
+                        <TableCell>
+                          <Chip
+                            label={ticket.status}
+                            size="small"
+                            color={
+                              ticket.status === 'resolved' || ticket.status === 'closed' ? 'success' :
+                              ticket.status === 'in_progress' ? 'info' :
+                              ticket.status === 'new' ? 'warning' : 'default'
+                            }
+                            sx={{ textTransform: 'capitalize' }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={ticket.priority}
+                            size="small"
+                            color={
+                              ticket.priority === 'urgent' ? 'error' :
+                              ticket.priority === 'high' ? 'warning' :
+                              ticket.priority === 'medium' ? 'info' : 'default'
+                            }
+                            sx={{ textTransform: 'capitalize' }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" color="text.secondary">
+                            {ticket.created_at ? format(new Date(ticket.created_at), 'MMM dd, yyyy') : '-'}
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            ) : (
+              <Box sx={{ textAlign: 'center', py: 4 }}>
+                <SupportAgent sx={{ fontSize: 60, color: 'text.disabled', mb: 2 }} />
+                <Typography variant="body1" color="text.secondary">
+                  No tickets linked to this zone
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                  Create a ticket and select this zone as the related zone
                 </Typography>
               </Box>
             )}

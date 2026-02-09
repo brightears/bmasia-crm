@@ -6275,7 +6275,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     queryset = Ticket.objects.all()
     serializer_class = TicketSerializer
     permission_classes = [IsAuthenticated]
-    filterset_fields = ['status', 'priority', 'category', 'company', 'assigned_to']
+    filterset_fields = ['status', 'priority', 'category', 'company', 'assigned_to', 'zone']
     search_fields = ['ticket_number', 'subject', 'description', 'company__name']
     ordering_fields = ['created_at', 'priority', 'status', 'due_date']
     ordering = ['-created_at']
@@ -6308,7 +6308,7 @@ class TicketViewSet(viewsets.ModelViewSet):
 
         # Optimize with select_related and prefetch_related
         queryset = queryset.select_related(
-            'company', 'contact', 'assigned_to', 'created_by'
+            'company', 'contact', 'zone', 'assigned_to', 'created_by'
         ).prefetch_related('comments', 'attachments')
 
         return queryset
@@ -7183,6 +7183,105 @@ class ZoneViewSet(viewsets.ModelViewSet):
             'message': f'Successfully deleted orphaned zone: {zone_name}',
             'zone_id': zone_id
         })
+
+    @action(detail=False, methods=['get'], url_path='health-summary')
+    def health_summary(self, request):
+        """
+        Get aggregated zone health metrics.
+
+        GET /api/v1/zones/health-summary/?company=<uuid>
+
+        Returns: status counts, sync health, companies with offline zones
+        """
+        from django.db.models import Count, Q, Min
+        from django.utils import timezone as tz
+        import datetime
+
+        queryset = Zone.objects.all()
+        company_id = request.query_params.get('company')
+        if company_id:
+            queryset = queryset.filter(company_id=company_id)
+
+        now = tz.now()
+        last_24h = now - datetime.timedelta(hours=24)
+
+        # Status counts
+        status_counts = dict(queryset.values_list('status').annotate(count=Count('id')).values_list('status', 'count'))
+
+        # Sync health
+        total_soundtrack = queryset.filter(platform='soundtrack').count()
+        synced_last_24h = queryset.filter(platform='soundtrack', last_api_sync__gte=last_24h).count()
+        never_synced = queryset.filter(platform='soundtrack', last_api_sync__isnull=True).count()
+        oldest_sync = queryset.filter(platform='soundtrack', last_api_sync__isnull=False).aggregate(
+            oldest=Min('last_api_sync')
+        )['oldest']
+
+        # Companies with offline zones
+        companies_with_offline = queryset.filter(
+            status='offline'
+        ).values('company').distinct().count()
+
+        # Orphaned count
+        orphaned_count = queryset.filter(is_orphaned=True).count()
+
+        return Response({
+            'status_counts': {
+                'online': status_counts.get('online', 0),
+                'offline': status_counts.get('offline', 0),
+                'no_device': status_counts.get('no_device', 0),
+                'expired': status_counts.get('expired', 0),
+                'pending': status_counts.get('pending', 0),
+                'cancelled': status_counts.get('cancelled', 0),
+            },
+            'total': queryset.count(),
+            'sync_health': {
+                'total_soundtrack': total_soundtrack,
+                'synced_last_24h': synced_last_24h,
+                'never_synced': never_synced,
+                'oldest_sync': oldest_sync.isoformat() if oldest_sync else None,
+            },
+            'companies_with_offline': companies_with_offline,
+            'orphaned_count': orphaned_count,
+        })
+
+    @action(detail=False, methods=['get'], url_path='check-overlaps')
+    def check_overlaps(self, request):
+        """
+        Check if zones are already assigned to other active contracts.
+
+        GET /api/v1/zones/check-overlaps/?zone_ids=uuid1,uuid2&exclude_contract=uuid
+
+        Returns: list of conflicting zone assignments
+        """
+        zone_ids_param = request.query_params.get('zone_ids', '')
+        exclude_contract = request.query_params.get('exclude_contract', '')
+
+        if not zone_ids_param:
+            return Response([])
+
+        zone_ids = [z.strip() for z in zone_ids_param.split(',') if z.strip()]
+
+        conflicts = []
+        for zone_id in zone_ids:
+            # Find active ContractZone assignments for this zone
+            active_assignments = ContractZone.objects.filter(
+                zone_id=zone_id,
+                is_active=True,
+                contract__status__in=['Active', 'Pending']
+            ).select_related('contract', 'zone')
+
+            if exclude_contract:
+                active_assignments = active_assignments.exclude(contract_id=exclude_contract)
+
+            for assignment in active_assignments:
+                conflicts.append({
+                    'zone_id': str(assignment.zone_id),
+                    'zone_name': assignment.zone.name,
+                    'conflicting_contract_id': str(assignment.contract_id),
+                    'conflicting_contract_number': assignment.contract.contract_number,
+                })
+
+        return Response(conflicts)
 
 
 class StaticDocumentViewSet(viewsets.ModelViewSet):

@@ -2,11 +2,48 @@
 
 ## February 2026
 
+### Feb 9, 2026 - Tech Support Improvements (Keith's Feedback)
+
+**Context**: IT team feedback on the Tech Support section — 3 items: KB category/tag management, client support integration with sales, company dropdown only showing ~20 entries.
+
+**1. KB Settings Page** (`KBSettings.tsx`, route: `/knowledge-base/settings`):
+- New admin page for managing KB categories and tags (full CRUD)
+- Categories: hierarchical (parent/child), name, description, active toggle, article count
+- Tags: flat with color picker (8 preset colors), article count
+- Delete protection when items have articles
+- "Settings" button added to Knowledge Base page header
+- API methods added: `createKBCategory`, `updateKBCategory`, `deleteKBCategory`, `createKBTag`, `updateKBTag`, `deleteKBTag`
+- Backend already supported full CRUD — only frontend UI was missing
+
+**2. Support Tab on CompanyDetail** (360-degree customer view):
+- 6th tab: "Support (N)" showing open ticket count
+- Ticket list table: Number, Subject, Status, Priority, Assigned To, Created
+- Clickable rows → navigate to TicketDetail
+- "New Ticket" button → `/tickets/new?company={id}` (pre-fills company)
+- "Create Ticket" added to Quick Actions sidebar
+- Loads via `ApiService.getTickets({ company: companyId })`
+
+**3. Bidirectional Navigation**:
+- TicketForm reads `?company=` query param → auto-selects company in Autocomplete
+- TicketDetail company name clickable → navigates to CompanyDetail
+- Flow: CompanyDetail → Create Ticket → TicketDetail → Back to CompanyDetail
+
+**4. Company Dropdown Fix** (TicketForm):
+- Was: `ApiService.getCompanies()` (no params, ~20 results)
+- Now: `ApiService.getCompanies({ page_size: 1000, ordering: 'name' })`
+- Same bug pattern as Invoices page
+
+**Build fix**: KBSettings.tsx initially used `Grid` directly — changed to `GridLegacy as Grid` for MUI v6 compat (same pattern as rest of codebase).
+
+**Files modified**: `KBSettings.tsx` (new), `App.tsx` (route), `KnowledgeBase.tsx` (settings link), `CompanyDetail.tsx` (Support tab), `TicketForm.tsx` (company fix + query param), `TicketDetail.tsx` (company link), `api.ts` (6 KB CRUD methods)
+
+---
+
 ### Feb 9, 2026 - Filter Bar Consistency (All List Pages)
 
 **Problem**: Each list page had inconsistent filter bars — date pickers that were clunky and often non-functional (backend didn't support the date range params sent by frontend), no sort dropdowns, and some misleading columns.
 
-**Solution**: Standardized all 4 list pages with the same pattern:
+**Solution**: Standardized all 5 list pages with the same pattern:
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -22,8 +59,9 @@
 | **Contacts** | From Date, To Date, Clear btn, Last Contact column | Sort dropdown (6 options) | Status only shows "Inactive" chip; fixed `is_active` filter |
 | **Contracts** | Start Date, End Date, Clear btn | Sort dropdown (6 options) | Renamed "Renewal Date" → "Renewal" |
 | **Quotes** | Valid From, Valid Until, Clear btn | Sort dropdown (6 options) | — |
+| **Invoices** | Start Date, End Date, Clear btn | Sort dropdown (5 options) | Fixed Company filter (`contract__company`), added `payment_method` to filterset_fields |
 
-**Backend** (`crm_app/views.py`): Added `updated_at`, `company__name` to ordering_fields for ContactViewSet, ContractViewSet, and QuoteViewSet. Also added `contract_number` for ContractViewSet.
+**Backend** (`crm_app/views.py`): Added `updated_at`, `company__name` to ordering_fields for ContactViewSet, ContractViewSet, QuoteViewSet, and InvoiceViewSet. Also added `contract_number` for ContractViewSet. Fixed InvoiceViewSet: added `payment_method` and `contract__company` to filterset_fields (both dropdown filters were silently broken — Invoice has no direct company FK, only through Contract).
 
 **Frontend pattern** (all pages):
 - Flex layout (`display: 'flex', gap: 2`) replaces Grid
@@ -37,8 +75,9 @@
 - **Contacts**: Name A-Z/Z-A, Newest/Oldest, Recently Updated, Company
 - **Contracts**: Start Date Newest/Oldest, Ending Soonest, Highest Value, Company, Contract Number
 - **Quotes**: Newest/Oldest, Expiring Soonest, Highest Value, Quote Number, Company
+- **Invoices**: Newest/Oldest (Issue Date), Due Date Soonest, Highest Amount, Company
 
-**Removed dependencies**: `DatePicker`, `LocalizationProvider`, `AdapterDateFns`, `GridLegacy` from Contacts/Contracts/Quotes pages.
+**Removed dependencies**: `DatePicker`, `LocalizationProvider`, `AdapterDateFns`, `GridLegacy` from Contacts/Contracts/Quotes/Invoices pages.
 
 ---
 

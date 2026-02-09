@@ -556,6 +556,27 @@ const TicketDetail: React.FC = () => {
                     <Typography variant="body2">{ticket.contact_name}</Typography>
                   </Box>
                 )}
+                {ticket.zone && (
+                  <Box>
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                      Related Zone
+                    </Typography>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Typography
+                        variant="body2"
+                        sx={{ color: 'primary.main', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+                        onClick={() => navigate(`/zones/${ticket.zone}`)}
+                      >
+                        {ticket.zone_name}
+                      </Typography>
+                      <Chip
+                        label={ticket.zone_platform === 'soundtrack' ? 'Soundtrack' : 'Beat Breeze'}
+                        size="small"
+                        color={ticket.zone_platform === 'soundtrack' ? 'primary' : 'secondary'}
+                      />
+                    </Box>
+                  </Box>
+                )}
                 <Box>
                   <Typography variant="body2" color="text.secondary" gutterBottom>
                     Category

@@ -998,6 +998,9 @@ export interface Ticket {
   company_name: string;
   contact: string | null;
   contact_name: string | null;
+  zone?: string | null;
+  zone_name?: string | null;
+  zone_platform?: string | null;
   assigned_to: string | null;
   assigned_to_name: string | null;
   assigned_team: string;
