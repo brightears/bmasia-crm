@@ -146,7 +146,7 @@ const unifiedNavigation = [
       { text: 'Quotes', icon: <DescriptionIcon />, path: '/quotes' },
       { text: 'Contracts', icon: <AssignmentIcon />, path: '/contracts' },
       { text: 'Invoices', icon: <ReceiptIcon />, path: '/invoices' },
-      { text: 'Targets', icon: <TrackChangesIcon />, path: '/targets' },
+      { text: 'Performance', icon: <TrackChangesIcon />, path: '/targets' },
       { text: 'Tasks', icon: <CheckCircleIcon />, path: '/tasks' },
     ],
   },

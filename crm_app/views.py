@@ -700,7 +700,7 @@ class ContractViewSet(BaseModelViewSet):
     search_fields = ['contract_number', 'company__name']
     ordering_fields = ['created_at', 'start_date', 'end_date', 'value', 'updated_at', 'company__name', 'contract_number']
     ordering = ['-start_date']
-    filterset_fields = ['company', 'contract_type', 'status', 'auto_renew', 'is_active', 'contract_category']
+    filterset_fields = ['company', 'contract_type', 'status', 'auto_renew', 'is_active', 'contract_category', 'opportunity']
     
     @action(detail=False, methods=['get'])
     def expiring_soon(self, request):
@@ -4051,6 +4051,45 @@ class QuoteViewSet(BaseModelViewSet):
             )
 
         return queryset
+
+    def perform_create(self, serializer):
+        """Auto-create or link Opportunity when a Quote is created without one."""
+        instance = serializer.save(created_by=self.request.user)
+
+        # If the quote already has an opportunity linked, just log and return
+        if instance.opportunity:
+            self.log_action('CREATE', instance)
+            return
+
+        # Look for an existing active opportunity for this company in early stages
+        existing_opp = Opportunity.objects.filter(
+            company=instance.company,
+            is_active=True,
+            stage__in=['Contacted', 'Quotation Sent']
+        ).order_by('-created_at').first()
+
+        if existing_opp:
+            # Link quote to existing opportunity and advance stage if needed
+            instance.opportunity = existing_opp
+            instance.save(update_fields=['opportunity'])
+            if existing_opp.stage == 'Contacted':
+                existing_opp.stage = 'Quotation Sent'
+                existing_opp.save(update_fields=['stage', 'updated_at'])
+        else:
+            # Auto-create a new opportunity
+            new_opp = Opportunity.objects.create(
+                company=instance.company,
+                name=f"Quote {instance.quote_number}",
+                stage='Quotation Sent',
+                owner=self.request.user,
+                expected_value=instance.total_value or 0,
+                probability=25,
+                lead_source='Other',
+            )
+            instance.opportunity = new_opp
+            instance.save(update_fields=['opportunity'])
+
+        self.log_action('CREATE', instance)
 
     @action(detail=False, methods=['get'])
     def expiring_soon(self, request):

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -18,10 +18,8 @@ import {
   Alert,
   CircularProgress,
   FormControl,
-  InputLabel,
   Select,
   MenuItem,
-  GridLegacy as Grid,
   Tabs,
   Tab,
   Menu,
@@ -37,7 +35,7 @@ import {
   Edit,
   Visibility,
   Delete,
-  FilterList,
+  Sort,
   MoreVert,
   TableView,
   ViewKanban,
@@ -48,10 +46,7 @@ import {
   Business,
   Schedule,
 } from '@mui/icons-material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Opportunity, ApiResponse, User } from '../types';
 import ApiService from '../services/api';
 import OpportunityForm from '../components/OpportunityForm';
@@ -92,9 +87,20 @@ const stageOptions = [
   { value: 'Lost', label: 'Lost', color: '#f44336' },
 ];
 
+const sortOptions = [
+  { value: '-created_at', label: 'Newest First' },
+  { value: 'created_at', label: 'Oldest First' },
+  { value: '-expected_value', label: 'Highest Value' },
+  { value: 'expected_value', label: 'Lowest Value' },
+  { value: '-probability', label: 'Highest Probability' },
+  { value: 'expected_close_date', label: 'Close Date (Soonest)' },
+  { value: '-last_contact_date', label: 'Last Contacted' },
+];
+
 const Opportunities: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -110,9 +116,7 @@ const Opportunities: React.FC = () => {
   // Filters
   const [stageFilter, setStageFilter] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('');
-  const [startDate, setStartDate] = useState<Date | null>(null);
-  const [endDate, setEndDate] = useState<Date | null>(null);
-  const [leadSourceFilter, setLeadSourceFilter] = useState('');
+  const [sortBy, setSortBy] = useState('-created_at');
 
   // Form state
   const [formOpen, setFormOpen] = useState(false);
@@ -129,7 +133,6 @@ const Opportunities: React.FC = () => {
       setSelectedOpportunity(null);
       setFormMode('create');
       setFormOpen(true);
-      // Clear the query param to avoid re-opening on refresh
       searchParams.delete('new');
       setSearchParams(searchParams, { replace: true });
     }
@@ -138,7 +141,7 @@ const Opportunities: React.FC = () => {
   useEffect(() => {
     loadOpportunities();
     loadUsers();
-  }, [page, rowsPerPage, search, stageFilter, ownerFilter, startDate, endDate, leadSourceFilter]);
+  }, [page, rowsPerPage, search, stageFilter, ownerFilter, sortBy]);
 
   const loadOpportunities = async () => {
     try {
@@ -146,14 +149,12 @@ const Opportunities: React.FC = () => {
       const params: any = {
         page: page + 1,
         page_size: rowsPerPage,
+        ordering: sortBy,
       };
 
       if (search) params.search = search;
       if (stageFilter) params.stage = stageFilter;
       if (ownerFilter) params.owner = ownerFilter;
-      if (leadSourceFilter) params.lead_source = leadSourceFilter;
-      if (startDate) params.created_after = startDate.toISOString().split('T')[0];
-      if (endDate) params.created_before = endDate.toISOString().split('T')[0];
 
       const response: ApiResponse<Opportunity> = await ApiService.getOpportunities(params);
       setOpportunities(response.results);
@@ -175,10 +176,25 @@ const Opportunities: React.FC = () => {
     }
   };
 
-  const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(event.target.value);
     setPage(0);
-  };
+  }, []);
+
+  const handleStageChange = useCallback((event: any) => {
+    setStageFilter(event.target.value);
+    setPage(0);
+  }, []);
+
+  const handleOwnerChange = useCallback((event: any) => {
+    setOwnerFilter(event.target.value);
+    setPage(0);
+  }, []);
+
+  const handleSortChange = useCallback((event: any) => {
+    setSortBy(event.target.value);
+    setPage(0);
+  }, []);
 
   const handleChangePage = (event: unknown, newPage: number) => {
     setPage(newPage);
@@ -206,6 +222,11 @@ const Opportunities: React.FC = () => {
     setActionMenuAnchor(null);
   };
 
+  const handleViewOpportunity = (opportunity: Opportunity) => {
+    setActionMenuAnchor(null);
+    navigate(`/opportunities/${opportunity.id}`);
+  };
+
   const handleDeleteOpportunity = async (opportunity: Opportunity) => {
     if (window.confirm(`Are you sure you want to delete "${opportunity.name}"?`)) {
       try {
@@ -228,7 +249,6 @@ const Opportunities: React.FC = () => {
       }
     });
 
-    // If we're in create mode, increment total count
     if (formMode === 'create') {
       setTotalCount(prev => prev + 1);
     }
@@ -250,6 +270,7 @@ const Opportunities: React.FC = () => {
     setActionMenuOpportunity(null);
   };
 
+  // TODO: Support THB/USD based on company billing entity
   const formatCurrency = (value: number): string => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -268,127 +289,86 @@ const Opportunities: React.FC = () => {
     return stageOptions.find(s => s.value === stage)?.color || '#2196f3';
   };
 
-  const clearFilters = () => {
-    setStageFilter('');
-    setOwnerFilter('');
-    setStartDate(null);
-    setEndDate(null);
-    setLeadSourceFilter('');
-    setSearch('');
-    setPage(0);
-  };
-
   const renderFilters = () => (
-    <Paper sx={{ p: 2, mb: 2 }}>
-      <Grid container spacing={2} alignItems="center">
-        <Grid item xs={12} sm={6} md={3}>
-          <TextField
-            fullWidth
-            size="small"
-            placeholder="Search opportunities..."
-            value={search}
-            onChange={handleSearchChange}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <Search />
-                </InputAdornment>
-              ),
-            }}
-          />
-        </Grid>
+    <Paper sx={{ mb: 2 }}>
+      <Box sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+        <TextField
+          placeholder="Search opportunities..."
+          value={search}
+          onChange={handleSearchChange}
+          size="small"
+          sx={{ flex: 1, minWidth: 200 }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <Search />
+              </InputAdornment>
+            ),
+          }}
+        />
 
-        <Grid item xs={12} sm={6} md={2}>
-          <FormControl fullWidth size="small">
-            <InputLabel>Stage</InputLabel>
-            <Select
-              value={stageFilter}
-              onChange={(e) => setStageFilter(e.target.value)}
-              label="Stage"
-            >
-              {stageOptions.map((stage) => (
-                <MenuItem key={stage.value} value={stage.value}>
-                  {stage.value && (
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Box
-                        sx={{
-                          width: 12,
-                          height: 12,
-                          borderRadius: '50%',
-                          backgroundColor: stage.color,
-                          mr: 1,
-                        }}
-                      />
-                    </Box>
-                  )}
-                  {stage.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={2}>
-          <FormControl fullWidth size="small">
-            <InputLabel>Owner</InputLabel>
-            <Select
-              value={ownerFilter}
-              onChange={(e) => setOwnerFilter(e.target.value)}
-              label="Owner"
-            >
-              <MenuItem value="">All Owners</MenuItem>
-              {users.map((user) => (
-                <MenuItem key={user.id} value={user.id}>
-                  {user.first_name} {user.last_name}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={2}>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
-            <DatePicker
-              label="Start Date"
-              value={startDate}
-              onChange={setStartDate}
-              slotProps={{
-                textField: {
-                  size: 'small',
-                  fullWidth: true,
-                },
-              }}
-            />
-          </LocalizationProvider>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={2}>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
-            <DatePicker
-              label="End Date"
-              value={endDate}
-              onChange={setEndDate}
-              slotProps={{
-                textField: {
-                  size: 'small',
-                  fullWidth: true,
-                },
-              }}
-            />
-          </LocalizationProvider>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={1}>
-          <Button
-            variant="outlined"
-            onClick={clearFilters}
-            size="small"
-            sx={{ minWidth: 'auto' }}
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <Select
+            value={stageFilter}
+            onChange={handleStageChange}
+            displayEmpty
+            renderValue={(value) => value || 'All Stages'}
           >
-            Clear
-          </Button>
-        </Grid>
-      </Grid>
+            {stageOptions.map((stage) => (
+              <MenuItem key={stage.value} value={stage.value}>
+                {stage.value && (
+                  <Box
+                    sx={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: '50%',
+                      backgroundColor: stage.color,
+                      mr: 1,
+                      display: 'inline-block',
+                    }}
+                  />
+                )}
+                {stage.label}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <FormControl size="small" sx={{ minWidth: 140 }}>
+          <Select
+            value={ownerFilter}
+            onChange={handleOwnerChange}
+            displayEmpty
+            renderValue={(value) => {
+              if (!value) return 'All Owners';
+              const user = users.find(u => u.id === value);
+              return user ? `${user.first_name} ${user.last_name}` : 'All Owners';
+            }}
+          >
+            <MenuItem value="">All Owners</MenuItem>
+            {users.map((user) => (
+              <MenuItem key={user.id} value={user.id}>
+                {user.first_name} {user.last_name}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <FormControl size="small" sx={{ minWidth: 170 }}>
+          <Select
+            value={sortBy}
+            onChange={handleSortChange}
+            startAdornment={<Sort sx={{ mr: 0.5, ml: -0.5, color: 'text.secondary', fontSize: 20 }} />}
+            sx={{ '& .MuiSelect-select': { display: 'flex', alignItems: 'center' } }}
+          >
+            {sortOptions.map((option) => (
+              <MenuItem key={option.value} value={option.value}>
+                {option.label}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Box>
     </Paper>
   );
 
@@ -434,7 +414,7 @@ const Opportunities: React.FC = () => {
               </TableRow>
             ) : (
               opportunities.map((opportunity) => (
-                <TableRow key={opportunity.id} hover>
+                <TableRow key={opportunity.id} hover sx={{ cursor: 'pointer' }} onClick={() => navigate(`/opportunities/${opportunity.id}`)}>
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
                       <Business sx={{ mr: 1, color: 'text.secondary' }} />
@@ -501,7 +481,7 @@ const Opportunities: React.FC = () => {
                   <TableCell>
                     <IconButton
                       size="small"
-                      onClick={(e) => handleActionMenuOpen(e, opportunity)}
+                      onClick={(e) => { e.stopPropagation(); handleActionMenuOpen(e, opportunity); }}
                     >
                       <MoreVert />
                     </IconButton>
@@ -525,103 +505,101 @@ const Opportunities: React.FC = () => {
   );
 
   return (
-    <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Box>
-        {/* Header */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h4" component="h1">
-            Opportunities
-          </Typography>
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={handleCreateOpportunity}
-            size={isMobile ? "small" : "medium"}
-          >
-            New Opportunity
-          </Button>
-        </Box>
-
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
-            {error}
-          </Alert>
-        )}
-
-        {/* Tabs */}
-        <Paper sx={{ mb: 3 }}>
-          <Tabs
-            value={currentTab}
-            onChange={handleTabChange}
-            variant={isMobile ? "fullWidth" : "standard"}
-          >
-            <Tab
-              icon={<TableView />}
-              label="List View"
-              iconPosition="start"
-            />
-            <Tab
-              icon={<ViewKanban />}
-              label="Pipeline"
-              iconPosition="start"
-            />
-          </Tabs>
-        </Paper>
-
-        {/* Tab Panels */}
-        <TabPanel value={currentTab} index={0}>
-          {renderTableView()}
-        </TabPanel>
-
-        <TabPanel value={currentTab} index={1}>
-          <OpportunityPipeline
-            opportunities={opportunities}
-            onOpportunityUpdate={handleOpportunityUpdate}
-            onOpportunityEdit={handleEditOpportunity}
-            loading={loading}
-          />
-        </TabPanel>
-
-        {/* Opportunity Form */}
-        <OpportunityForm
-          open={formOpen}
-          onClose={() => setFormOpen(false)}
-          onSave={handleOpportunitySave}
-          opportunity={selectedOpportunity}
-          mode={formMode}
-        />
-
-        {/* Action Menu */}
-        <Menu
-          anchorEl={actionMenuAnchor}
-          open={Boolean(actionMenuAnchor)}
-          onClose={handleActionMenuClose}
+    <Box>
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h4" component="h1">
+          Opportunities
+        </Typography>
+        <Button
+          variant="contained"
+          startIcon={<Add />}
+          onClick={handleCreateOpportunity}
+          size={isMobile ? "small" : "medium"}
         >
-          <MenuItem onClick={() => handleEditOpportunity(actionMenuOpportunity!)}>
-            <ListItemIcon>
-              <Edit fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Edit</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={() => {}/* Handle view details */}>
-            <ListItemIcon>
-              <Visibility fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>View Details</ListItemText>
-          </MenuItem>
-          <Divider />
-          <MenuItem
-            onClick={() => handleDeleteOpportunity(actionMenuOpportunity!)}
-            sx={{ color: 'error.main' }}
-          >
-            <ListItemIcon>
-              <Delete fontSize="small" sx={{ color: 'error.main' }} />
-            </ListItemIcon>
-            <ListItemText>Delete</ListItemText>
-          </MenuItem>
-        </Menu>
+          New Opportunity
+        </Button>
       </Box>
-    </LocalizationProvider>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Tabs */}
+      <Paper sx={{ mb: 3 }}>
+        <Tabs
+          value={currentTab}
+          onChange={handleTabChange}
+          variant={isMobile ? "fullWidth" : "standard"}
+        >
+          <Tab
+            icon={<TableView />}
+            label="List View"
+            iconPosition="start"
+          />
+          <Tab
+            icon={<ViewKanban />}
+            label="Pipeline"
+            iconPosition="start"
+          />
+        </Tabs>
+      </Paper>
+
+      {/* Tab Panels */}
+      <TabPanel value={currentTab} index={0}>
+        {renderTableView()}
+      </TabPanel>
+
+      <TabPanel value={currentTab} index={1}>
+        <OpportunityPipeline
+          opportunities={opportunities}
+          onOpportunityUpdate={handleOpportunityUpdate}
+          onOpportunityEdit={handleEditOpportunity}
+          loading={loading}
+        />
+      </TabPanel>
+
+      {/* Opportunity Form */}
+      <OpportunityForm
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        onSave={handleOpportunitySave}
+        opportunity={selectedOpportunity}
+        mode={formMode}
+      />
+
+      {/* Action Menu */}
+      <Menu
+        anchorEl={actionMenuAnchor}
+        open={Boolean(actionMenuAnchor)}
+        onClose={handleActionMenuClose}
+      >
+        <MenuItem onClick={() => handleEditOpportunity(actionMenuOpportunity!)}>
+          <ListItemIcon>
+            <Edit fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Edit</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleViewOpportunity(actionMenuOpportunity!)}>
+          <ListItemIcon>
+            <Visibility fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>View Details</ListItemText>
+        </MenuItem>
+        <Divider />
+        <MenuItem
+          onClick={() => handleDeleteOpportunity(actionMenuOpportunity!)}
+          sx={{ color: 'error.main' }}
+        >
+          <ListItemIcon>
+            <Delete fontSize="small" sx={{ color: 'error.main' }} />
+          </ListItemIcon>
+          <ListItemText>Delete</ListItemText>
+        </MenuItem>
+      </Menu>
+    </Box>
   );
 };
 

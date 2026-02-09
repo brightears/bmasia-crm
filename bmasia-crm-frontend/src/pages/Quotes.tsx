@@ -118,14 +118,27 @@ const Quotes: React.FC = () => {
   const [emailQuote, setEmailQuote] = useState<Quote | null>(null);
   const [emailContacts, setEmailContacts] = useState<Contact[]>([]);
 
-  // Handle query param for opening create dialog from dashboard
+  // Handle query params for opening create dialog (from dashboard or OpportunityDetail)
   useEffect(() => {
     if (searchParams.get('new') === 'true') {
-      setSelectedQuote(null);
+      const opportunityId = searchParams.get('opportunity') || '';
+      const companyId = searchParams.get('company') || '';
+
+      // Pre-fill a partial quote with opportunity and company from query params
+      if (opportunityId || companyId) {
+        setSelectedQuote({
+          opportunity: opportunityId,
+          company: companyId,
+        } as any);
+      } else {
+        setSelectedQuote(null);
+      }
       setFormMode('create');
       setFormOpen(true);
-      // Clear the query param to avoid re-opening on refresh
+      // Clear query params to avoid re-opening on refresh
       searchParams.delete('new');
+      searchParams.delete('opportunity');
+      searchParams.delete('company');
       setSearchParams(searchParams, { replace: true });
     }
   }, [searchParams, setSearchParams]);

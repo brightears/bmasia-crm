@@ -194,10 +194,24 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
         const random = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
         const quoteNumber = `Q-${year}-${month}${day}-${random}`;
 
+        // Pre-fill company and opportunity from query params (via quote prop)
+        const prefillCompany = quote?.company || '';
+        const prefillOpportunity = quote?.opportunity || '';
+
         setFormData(prev => ({
           ...prev,
           quote_number: quoteNumber,
+          company: prefillCompany,
+          opportunity: prefillOpportunity,
         }));
+
+        // Set company country for Mini PC visibility
+        if (prefillCompany) {
+          const prefillComp = companies.find(c => c.id === prefillCompany);
+          if (prefillComp) {
+            setSelectedCompanyCountry(prefillComp.country || '');
+          }
+        }
       }
     }
   }, [open, mode, quote, companies]);

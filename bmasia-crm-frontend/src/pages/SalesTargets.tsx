@@ -3,620 +3,431 @@ import {
   Box,
   Paper,
   Typography,
-  Tabs,
-  Tab,
-  Button,
   GridLegacy as Grid,
   Card,
   CardContent,
-  Chip,
   Alert,
+  CircularProgress,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
   SelectChangeEvent,
-  Menu,
-  ListItemIcon,
-  ListItemText,
-  IconButton,
-  Snackbar,
+  ToggleButtonGroup,
+  ToggleButton,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Chip,
 } from '@mui/material';
 import {
-  Add as AddIcon,
   TrendingUp as TrendingUpIcon,
-  Group as GroupIcon,
-  Person as PersonIcon,
-  Analytics as AnalyticsIcon,
-  Warning as WarningIcon,
-  FileDownload as FileDownloadIcon,
-  MoreVert as MoreVertIcon,
+  CheckCircle as CheckCircleIcon,
+  AttachMoney as AttachMoneyIcon,
+  ShowChart as ShowChartIcon,
 } from '@mui/icons-material';
-import { SalesTarget, TargetAnalytics } from '../types';
-import LoadingSkeleton from '../components/LoadingSkeleton';
-import TargetForm from '../components/TargetForm';
-import TargetDetail from '../components/TargetDetail';
-import TargetProgressGauge from '../components/TargetProgressGauge';
-import TargetTrendChart from '../components/TargetTrendChart';
-import TeamPerformanceChart from '../components/TeamPerformanceChart';
-import TargetHeatMap from '../components/TargetHeatMap';
-import TargetLeaderboard from '../components/TargetLeaderboard';
-import TargetPredictiveAnalysis from '../components/TargetPredictiveAnalysis';
-import { useAuth } from '../contexts/AuthContext';
-import { exportTargetsReport } from '../utils/exportUtils';
+import { useNavigate } from 'react-router-dom';
+import { Opportunity, ApiResponse } from '../types';
+import ApiService from '../services/api';
 
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
+interface PeriodData {
+  period: string;
+  dealsWon: number;
+  totalValue: number;
+  avgValue: number;
 }
 
-const TabPanel: React.FC<TabPanelProps> = ({ children, value, index }) => (
-  <div hidden={value !== index} style={{ width: '100%' }}>
-    {value === index && <Box sx={{ py: 3 }}>{children}</Box>}
-  </div>
-);
-
-const SalesTargets: React.FC = () => {
-  const { user } = useAuth();
-  const [targets, setTargets] = useState<SalesTarget[]>([]);
-  const [analytics, setAnalytics] = useState<TargetAnalytics | null>(null);
+const SalesPerformance: React.FC = () => {
+  const navigate = useNavigate();
+  const [wonOpportunities, setWonOpportunities] = useState<Opportunity[]>([]);
+  const [lostOpportunities, setLostOpportunities] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState(0);
-  const [selectedTarget, setSelectedTarget] = useState<SalesTarget | null>(null);
-  const [showTargetForm, setShowTargetForm] = useState(false);
-  const [editingTarget, setEditingTarget] = useState<SalesTarget | null>(null);
-  const [filterPeriod, setFilterPeriod] = useState<'all' | 'Monthly' | 'Quarterly' | 'Yearly'>('all');
-  const [filterType, setFilterType] = useState<'all' | 'Revenue' | 'Units' | 'Customers' | 'Contracts'>('all');
-  const [exportMenuAnchor, setExportMenuAnchor] = useState<null | HTMLElement>(null);
-  const [exportLoading, setExportLoading] = useState(false);
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
-  const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+  const [periodType, setPeriodType] = useState<'monthly' | 'quarterly'>('monthly');
+
+  // Generate year options (current year and previous 2 years)
+  const currentYear = new Date().getFullYear();
+  const yearOptions = [currentYear, currentYear - 1, currentYear - 2];
 
   useEffect(() => {
     loadData();
-  }, [filterPeriod, filterType]);
+  }, [selectedYear]);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      // TODO: Replace with actual API calls
-      await generateMockData();
+      setError('');
+
+      const yearStart = `${selectedYear}-01-01`;
+
+      // Load Won opportunities
+      const wonResponse: ApiResponse<Opportunity> = await ApiService.getOpportunities({
+        stage: 'Won',
+        page_size: 500,
+        created_after: yearStart,
+      });
+
+      // Load Lost opportunities for win rate calculation
+      const lostResponse: ApiResponse<Opportunity> = await ApiService.getOpportunities({
+        stage: 'Lost',
+        page_size: 500,
+        created_after: yearStart,
+      });
+
+      setWonOpportunities(wonResponse.results);
+      setLostOpportunities(lostResponse.results);
     } catch (err: any) {
-      setError('Failed to load sales targets data');
-      console.error('Sales targets error:', err);
+      setError('Failed to load sales performance data');
+      console.error('Sales performance error:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const generateMockData = async () => {
-    // Generate mock targets for demonstration
-    const mockTargets: SalesTarget[] = [
-      {
-        id: '1',
-        name: 'Q4 2024 Revenue Target',
-        period_type: 'Quarterly',
-        period_start: '2024-10-01',
-        period_end: '2024-12-31',
-        target_type: 'Revenue',
-        target_value: 250000,
-        stretch_target: 300000,
-        currency: 'USD',
-        assigned_to: user?.id || '1',
-        assigned_to_name: user?.first_name + ' ' + user?.last_name || 'John Doe',
-        team_target: false,
-        status: 'Active',
-        current_value: 180000,
-        achievement_percentage: 72,
-        stretch_achievement_percentage: 60,
-        is_on_track: true,
-        forecasted_value: 240000,
-        forecasted_achievement: 96,
-        risk_level: 'Low',
-        notes: 'Strong pipeline, on track to exceed target',
-        created_by: user?.id || '1',
-        created_by_name: user?.first_name + ' ' + user?.last_name || 'John Doe',
-        created_at: '2024-09-01T00:00:00Z',
-        updated_at: '2024-09-29T00:00:00Z',
-        days_remaining: 92,
-        days_total: 92,
-        expected_daily_progress: 2717,
-        actual_daily_progress: 3000,
-        variance_from_plan: 283,
-        previous_period_value: 220000,
-        previous_period_achievement: 88,
-        year_over_year_growth: 15.2,
-      },
-      {
-        id: '2',
-        name: 'Team Sales - New Customers',
-        period_type: 'Monthly',
-        period_start: '2024-09-01',
-        period_end: '2024-09-30',
-        target_type: 'Customers',
-        target_value: 25,
-        currency: 'USD',
-        unit_type: 'customers',
-        team_target: true,
-        team_name: 'Sales Team A',
-        status: 'Active',
-        current_value: 18,
-        achievement_percentage: 72,
-        is_on_track: true,
-        forecasted_value: 24,
-        forecasted_achievement: 96,
-        risk_level: 'Low',
-        notes: 'Good progress on customer acquisition',
-        created_by: user?.id || '1',
-        created_by_name: user?.first_name + ' ' + user?.last_name || 'John Doe',
-        created_at: '2024-09-01T00:00:00Z',
-        updated_at: '2024-09-29T00:00:00Z',
-        days_remaining: 1,
-        days_total: 30,
-        expected_daily_progress: 0.83,
-        actual_daily_progress: 0.9,
-        variance_from_plan: 0.07,
-        previous_period_value: 22,
-        previous_period_achievement: 88,
-        year_over_year_growth: 20.5,
-      },
-    ];
-
-    const mockAnalytics: TargetAnalytics = {
-      total_targets: 12,
-      active_targets: 8,
-      achieved_targets: 3,
-      at_risk_targets: 2,
-      overall_achievement_rate: 78.5,
-      revenue_targets: {
-        total_target: 1200000,
-        current_value: 850000,
-        achievement_percentage: 70.8,
-        targets_count: 5,
-        at_risk_count: 1,
-      },
-      unit_targets: {
-        total_target: 150,
-        current_value: 120,
-        achievement_percentage: 80,
-        targets_count: 3,
-        at_risk_count: 0,
-      },
-      customer_targets: {
-        total_target: 75,
-        current_value: 58,
-        achievement_percentage: 77.3,
-        targets_count: 2,
-        at_risk_count: 1,
-      },
-      contract_targets: {
-        total_target: 30,
-        current_value: 22,
-        achievement_percentage: 73.3,
-        targets_count: 2,
-        at_risk_count: 0,
-      },
-      team_performance: [],
-      individual_performance: [],
-      monthly_trends: [],
-      predictions: [],
-    };
-
-    setTargets(mockTargets);
-    setAnalytics(mockAnalytics);
+  const handleYearChange = (event: SelectChangeEvent<number>) => {
+    setSelectedYear(event.target.value as number);
   };
 
-  const getFilteredTargets = () => {
-    return targets.filter(target => {
-      if (filterPeriod !== 'all' && target.period_type !== filterPeriod) return false;
-      if (filterType !== 'all' && target.target_type !== filterType) return false;
-      return true;
-    });
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Active': return 'primary';
-      case 'Completed': return 'success';
-      case 'Cancelled': return 'error';
-      case 'Draft': return 'default';
-      default: return 'default';
+  const handlePeriodTypeChange = (_: React.MouseEvent<HTMLElement>, newValue: 'monthly' | 'quarterly' | null) => {
+    if (newValue !== null) {
+      setPeriodType(newValue);
     }
   };
 
-  const getRiskColor = (risk: string) => {
-    switch (risk) {
-      case 'Low': return 'success';
-      case 'Medium': return 'warning';
-      case 'High': return 'error';
-      default: return 'default';
-    }
+  // Calculate KPIs
+  const totalWonValue = wonOpportunities.reduce((sum, opp) => sum + (opp.expected_value || 0), 0);
+  const dealsWon = wonOpportunities.length;
+  const avgDealSize = dealsWon > 0 ? totalWonValue / dealsWon : 0;
+  const totalDeals = wonOpportunities.length + lostOpportunities.length;
+  const winRate = totalDeals > 0 ? (wonOpportunities.length / totalDeals) * 100 : 0;
+
+  // Format currency helper
+  const formatCurrency = (value: number): string => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(value);
   };
 
-  const handleTabChange = (_: React.SyntheticEvent, newValue: number) => {
-    setActiveTab(newValue);
-  };
+  // Get month/quarter from opportunity date
+  const getOpportunityPeriod = (opp: Opportunity): string => {
+    const date = new Date(opp.actual_close_date || opp.updated_at);
+    const month = date.getMonth(); // 0-11
 
-  const handleFilterPeriodChange = (event: SelectChangeEvent) => {
-    setFilterPeriod(event.target.value as any);
-  };
-
-  const handleFilterTypeChange = (event: SelectChangeEvent) => {
-    setFilterType(event.target.value as any);
-  };
-
-  const handleCreateTarget = () => {
-    setEditingTarget(null);
-    setShowTargetForm(true);
-  };
-
-  const handleEditTarget = (target: SalesTarget) => {
-    setEditingTarget(target);
-    setShowTargetForm(true);
-  };
-
-  const handleTargetSave = (target: SalesTarget) => {
-    if (editingTarget) {
-      setTargets(prev => prev.map(t => t.id === target.id ? target : t));
+    if (periodType === 'monthly') {
+      return new Date(date.getFullYear(), month, 1).toLocaleDateString('en-US', { month: 'short' });
     } else {
-      setTargets(prev => [...prev, { ...target, id: Date.now().toString() }]);
+      const quarter = Math.floor(month / 3) + 1;
+      return `Q${quarter}`;
     }
-    setShowTargetForm(false);
-    setEditingTarget(null);
   };
 
-  const handleTargetFormClose = () => {
-    setShowTargetForm(false);
-    setEditingTarget(null);
-  };
+  // Group opportunities by period
+  const getPeriodBreakdown = (): PeriodData[] => {
+    const periodMap = new Map<string, Opportunity[]>();
 
-  const handleExportClick = (event: React.MouseEvent<HTMLElement>) => {
-    setExportMenuAnchor(event.currentTarget);
-  };
+    // Initialize all periods
+    if (periodType === 'monthly') {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      months.forEach(month => periodMap.set(month, []));
+    } else {
+      ['Q1', 'Q2', 'Q3', 'Q4'].forEach(quarter => periodMap.set(quarter, []));
+    }
 
-  const handleExportClose = () => {
-    setExportMenuAnchor(null);
-  };
+    // Group opportunities
+    wonOpportunities.forEach(opp => {
+      const period = getOpportunityPeriod(opp);
+      const existing = periodMap.get(period) || [];
+      periodMap.set(period, [...existing, opp]);
+    });
 
-  const handleExport = async (format: 'pdf' | 'excel' | 'png') => {
-    try {
-      setExportLoading(true);
-      setExportMenuAnchor(null);
+    // Calculate totals for each period
+    const periodData: PeriodData[] = [];
+    periodMap.forEach((opps, period) => {
+      const totalValue = opps.reduce((sum, opp) => sum + (opp.expected_value || 0), 0);
+      const dealsWon = opps.length;
+      const avgValue = dealsWon > 0 ? totalValue / dealsWon : 0;
 
-      const filteredTargets = getFilteredTargets();
-      const timestamp = new Date().toISOString().slice(0, 10);
-      const filename = `sales-targets-${timestamp}`;
-
-      await exportTargetsReport(filteredTargets, {
-        format,
-        filename,
-        title: 'Sales Targets Report',
-        subtitle: `Generated on ${new Date().toLocaleDateString()} • ${filteredTargets.length} targets`,
-        includeCharts: format === 'pdf',
+      periodData.push({
+        period,
+        dealsWon,
+        totalValue,
+        avgValue,
       });
+    });
 
-      setSnackbarMessage(`Report exported successfully as ${format.toUpperCase()}`);
-      setSnackbarOpen(true);
-    } catch (error) {
-      console.error('Export failed:', error);
-      setSnackbarMessage('Export failed. Please try again.');
-      setSnackbarOpen(true);
-    } finally {
-      setExportLoading(false);
-    }
+    return periodData;
   };
+
+  // Get top 5 won deals
+  const getTopDeals = (): Opportunity[] => {
+    return [...wonOpportunities]
+      .sort((a, b) => (b.expected_value || 0) - (a.expected_value || 0))
+      .slice(0, 5);
+  };
+
+  const periodBreakdown = getPeriodBreakdown();
+  const topDeals = getTopDeals();
+
+  // Calculate totals
+  const totals = periodBreakdown.reduce(
+    (acc, period) => ({
+      dealsWon: acc.dealsWon + period.dealsWon,
+      totalValue: acc.totalValue + period.totalValue,
+      avgValue: 0, // Will be calculated after
+    }),
+    { dealsWon: 0, totalValue: 0, avgValue: 0 }
+  );
+  totals.avgValue = totals.dealsWon > 0 ? totals.totalValue / totals.dealsWon : 0;
 
   if (loading) {
-    return <LoadingSkeleton variant="dashboard" />;
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+        <CircularProgress />
+      </Box>
+    );
   }
 
   if (error) {
     return (
-      <Alert severity="error" sx={{ mb: 2 }}>
-        {error}
-      </Alert>
+      <Box>
+        <Typography variant="h4" component="h1" sx={{ mb: 3 }}>
+          Sales Performance
+        </Typography>
+        <Alert severity="error">{error}</Alert>
+      </Box>
     );
   }
 
-  const filteredTargets = getFilteredTargets();
+  if (wonOpportunities.length === 0) {
+    return (
+      <Box>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Typography variant="h4" component="h1">
+            Sales Performance
+          </Typography>
+          <FormControl size="small" sx={{ minWidth: 150 }}>
+            <InputLabel>Year</InputLabel>
+            <Select value={selectedYear} onChange={handleYearChange} label="Year">
+              {yearOptions.map(year => (
+                <MenuItem key={year} value={year}>
+                  {year}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
+        <Alert severity="info">No won deals found for {selectedYear}</Alert>
+      </Box>
+    );
+  }
 
   return (
-    <Box data-export="targets-page">
+    <Box>
+      {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4" component="h1">
-          Sales Targets
+          Sales Performance
         </Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <IconButton
-            onClick={handleExportClick}
-            disabled={exportLoading}
-            sx={{ mr: 1 }}
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <ToggleButtonGroup
+            value={periodType}
+            exclusive
+            onChange={handlePeriodTypeChange}
+            size="small"
           >
-            <MoreVertIcon />
-          </IconButton>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={handleCreateTarget}
-          >
-            Create Target
-          </Button>
+            <ToggleButton value="monthly" sx={{ whiteSpace: 'nowrap' }}>
+              Monthly
+            </ToggleButton>
+            <ToggleButton value="quarterly" sx={{ whiteSpace: 'nowrap' }}>
+              Quarterly
+            </ToggleButton>
+          </ToggleButtonGroup>
+          <FormControl size="small" sx={{ minWidth: 150 }}>
+            <InputLabel>Year</InputLabel>
+            <Select value={selectedYear} onChange={handleYearChange} label="Year">
+              {yearOptions.map(year => (
+                <MenuItem key={year} value={year}>
+                  {year}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
         </Box>
       </Box>
 
-      {/* Quick Stats Overview */}
-      {analytics && (
-        <Grid container spacing={3} sx={{ mb: 4 }}>
-          <Grid item xs={12} sm={6} md={3}>
-            <Card>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                  <TrendingUpIcon sx={{ color: 'primary.main', mr: 1 }} />
-                  <Typography variant="h6">
-                    {analytics.active_targets}
-                  </Typography>
-                </Box>
-                <Typography variant="body2" color="text.secondary">
-                  Active Targets
+      {/* KPI Cards */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ bgcolor: 'success.light', color: 'success.contrastText' }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <TrendingUpIcon sx={{ mr: 1, fontSize: 32 }} />
+                <Typography variant="h5" component="div">
+                  {formatCurrency(totalWonValue)}
                 </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Card>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                  <AnalyticsIcon sx={{ color: 'success.main', mr: 1 }} />
-                  <Typography variant="h6">
-                    {analytics.overall_achievement_rate.toFixed(1)}%
-                  </Typography>
-                </Box>
-                <Typography variant="body2" color="text.secondary">
-                  Overall Achievement
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Card>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                  <GroupIcon sx={{ color: 'info.main', mr: 1 }} />
-                  <Typography variant="h6">
-                    {analytics.achieved_targets}
-                  </Typography>
-                </Box>
-                <Typography variant="body2" color="text.secondary">
-                  Achieved Targets
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Card>
-              <CardContent>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                  <WarningIcon sx={{ color: 'warning.main', mr: 1 }} />
-                  <Typography variant="h6">
-                    {analytics.at_risk_targets}
-                  </Typography>
-                </Box>
-                <Typography variant="body2" color="text.secondary">
-                  At Risk Targets
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
+              </Box>
+              <Typography variant="body2">Total Won Value</Typography>
+            </CardContent>
+          </Card>
         </Grid>
-      )}
 
-      {/* Filters */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>Period</InputLabel>
-            <Select
-              value={filterPeriod}
-              onChange={handleFilterPeriodChange}
-              label="Period"
-            >
-              <MenuItem value="all">All Periods</MenuItem>
-              <MenuItem value="Monthly">Monthly</MenuItem>
-              <MenuItem value="Quarterly">Quarterly</MenuItem>
-              <MenuItem value="Yearly">Yearly</MenuItem>
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>Type</InputLabel>
-            <Select
-              value={filterType}
-              onChange={handleFilterTypeChange}
-              label="Type"
-            >
-              <MenuItem value="all">All Types</MenuItem>
-              <MenuItem value="Revenue">Revenue</MenuItem>
-              <MenuItem value="Units">Units</MenuItem>
-              <MenuItem value="Customers">Customers</MenuItem>
-              <MenuItem value="Contracts">Contracts</MenuItem>
-            </Select>
-          </FormControl>
-          <Typography variant="body2" color="text.secondary">
-            Showing {filteredTargets.length} of {targets.length} targets
-          </Typography>
-        </Box>
-      </Paper>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ bgcolor: 'info.light', color: 'info.contrastText' }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <CheckCircleIcon sx={{ mr: 1, fontSize: 32 }} />
+                <Typography variant="h5" component="div">
+                  {dealsWon}
+                </Typography>
+              </Box>
+              <Typography variant="body2">Deals Won</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
 
-      <Paper sx={{ width: '100%' }}>
-        <Tabs value={activeTab} onChange={handleTabChange} sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tab label="Overview" />
-          <Tab label="Analytics" />
-          <Tab label="Team Performance" />
-          <Tab label="Individual Performance" />
-          <Tab label="Predictions" />
-        </Tabs>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ bgcolor: 'warning.light', color: 'warning.contrastText' }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <AttachMoneyIcon sx={{ mr: 1, fontSize: 32 }} />
+                <Typography variant="h5" component="div">
+                  {formatCurrency(avgDealSize)}
+                </Typography>
+              </Box>
+              <Typography variant="body2">Average Deal Size</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
 
-        <TabPanel value={activeTab} index={0}>
-          {/* Targets List with Progress Gauges */}
-          <Grid container spacing={3}>
-            {filteredTargets.map((target) => (
-              <Grid item xs={12} md={6} lg={4} key={target.id}>
-                <Card
-                  sx={{
-                    cursor: 'pointer',
-                    '&:hover': { boxShadow: 4 }
-                  }}
-                  onClick={() => setSelectedTarget(target)}
-                >
-                  <CardContent>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                      <Typography variant="h6" noWrap>
-                        {target.name}
-                      </Typography>
-                      <Box sx={{ display: 'flex', gap: 1 }}>
-                        <Chip
-                          size="small"
-                          label={target.status}
-                          color={getStatusColor(target.status) as any}
-                        />
-                        <Chip
-                          size="small"
-                          label={target.risk_level}
-                          color={getRiskColor(target.risk_level) as any}
-                        />
-                      </Box>
-                    </Box>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card sx={{ bgcolor: 'secondary.light', color: 'secondary.contrastText' }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <ShowChartIcon sx={{ mr: 1, fontSize: 32 }} />
+                <Typography variant="h5" component="div">
+                  {winRate.toFixed(1)}%
+                </Typography>
+              </Box>
+              <Typography variant="body2">Win Rate</Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
 
-                    <TargetProgressGauge
-                      target={target}
-                      size="small"
-                    />
+      {/* Main Content */}
+      <Grid container spacing={3}>
+        {/* Period Breakdown Table */}
+        <Grid item xs={12} md={8}>
+          <Paper sx={{ p: 3 }}>
+            <Typography variant="h6" sx={{ mb: 2 }}>
+              {periodType === 'monthly' ? 'Monthly' : 'Quarterly'} Breakdown
+            </Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>
+                      <strong>Period</strong>
+                    </TableCell>
+                    <TableCell align="right">
+                      <strong>Deals Won</strong>
+                    </TableCell>
+                    <TableCell align="right">
+                      <strong>Total Value</strong>
+                    </TableCell>
+                    <TableCell align="right">
+                      <strong>Avg Value</strong>
+                    </TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {periodBreakdown.map((period) => (
+                    <TableRow key={period.period} hover>
+                      <TableCell>{period.period}</TableCell>
+                      <TableCell align="right">{period.dealsWon}</TableCell>
+                      <TableCell align="right">{formatCurrency(period.totalValue)}</TableCell>
+                      <TableCell align="right">{formatCurrency(period.avgValue)}</TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow sx={{ bgcolor: 'grey.100' }}>
+                    <TableCell>
+                      <strong>Total</strong>
+                    </TableCell>
+                    <TableCell align="right">
+                      <strong>{totals.dealsWon}</strong>
+                    </TableCell>
+                    <TableCell align="right">
+                      <strong>{formatCurrency(totals.totalValue)}</strong>
+                    </TableCell>
+                    <TableCell align="right">
+                      <strong>{formatCurrency(totals.avgValue)}</strong>
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+        </Grid>
 
-                    <Box sx={{ mt: 2, display: 'flex', justify: 'space-between' }}>
-                      <Typography variant="body2" color="text.secondary">
-                        {target.team_target ? (
-                          <>
-                            <GroupIcon sx={{ fontSize: 16, mr: 0.5 }} />
-                            Team Target
-                          </>
-                        ) : (
-                          <>
-                            <PersonIcon sx={{ fontSize: 16, mr: 0.5 }} />
-                            Individual
-                          </>
-                        )}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {target.days_remaining} days left
-                      </Typography>
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
-
-          {filteredTargets.length === 0 && (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <Typography variant="body1" color="text.secondary">
-                No targets found matching your filters.
+        {/* Top Won Deals */}
+        <Grid item xs={12} md={4}>
+          <Paper sx={{ p: 3 }}>
+            <Typography variant="h6" sx={{ mb: 2 }}>
+              Top Won Deals
+            </Typography>
+            {topDeals.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                No deals to display
               </Typography>
-              <Button
-                variant="outlined"
-                startIcon={<AddIcon />}
-                onClick={handleCreateTarget}
-                sx={{ mt: 2 }}
-              >
-                Create First Target
-              </Button>
-            </Box>
-          )}
-        </TabPanel>
-
-        <TabPanel value={activeTab} index={1}>
-          {analytics && (
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                <TargetTrendChart targets={filteredTargets} />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TargetHeatMap targets={filteredTargets} />
-              </Grid>
-            </Grid>
-          )}
-        </TabPanel>
-
-        <TabPanel value={activeTab} index={2}>
-          <TeamPerformanceChart targets={filteredTargets.filter(t => t.team_target)} />
-        </TabPanel>
-
-        <TabPanel value={activeTab} index={3}>
-          <TargetLeaderboard targets={filteredTargets.filter(t => !t.team_target)} />
-        </TabPanel>
-
-        <TabPanel value={activeTab} index={4}>
-          {analytics && (
-            <TargetPredictiveAnalysis targets={filteredTargets} analytics={analytics} />
-          )}
-        </TabPanel>
-      </Paper>
-
-      {/* Target Form Dialog */}
-      {showTargetForm && (
-        <TargetForm
-          open={showTargetForm}
-          target={editingTarget}
-          onSave={handleTargetSave}
-          onClose={handleTargetFormClose}
-        />
-      )}
-
-      {/* Target Detail Dialog */}
-      {selectedTarget && (
-        <TargetDetail
-          open={Boolean(selectedTarget)}
-          target={selectedTarget}
-          onEdit={handleEditTarget}
-          onClose={() => setSelectedTarget(null)}
-        />
-      )}
-
-      {/* Export Menu */}
-      <Menu
-        anchorEl={exportMenuAnchor}
-        open={Boolean(exportMenuAnchor)}
-        onClose={handleExportClose}
-      >
-        <MenuItem onClick={() => handleExport('pdf')} disabled={exportLoading}>
-          <ListItemIcon>
-            <FileDownloadIcon />
-          </ListItemIcon>
-          <ListItemText primary="Export as PDF" />
-        </MenuItem>
-        <MenuItem onClick={() => handleExport('excel')} disabled={exportLoading}>
-          <ListItemIcon>
-            <FileDownloadIcon />
-          </ListItemIcon>
-          <ListItemText primary="Export as Excel" />
-        </MenuItem>
-        <MenuItem onClick={() => handleExport('png')} disabled={exportLoading}>
-          <ListItemIcon>
-            <FileDownloadIcon />
-          </ListItemIcon>
-          <ListItemText primary="Export as PNG" />
-        </MenuItem>
-      </Menu>
-
-      {/* Success/Error Snackbar */}
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={4000}
-        onClose={() => setSnackbarOpen(false)}
-        message={snackbarMessage}
-      />
+            ) : (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {topDeals.map((deal) => (
+                  <Card
+                    key={deal.id}
+                    sx={{
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      '&:hover': {
+                        boxShadow: 3,
+                        transform: 'translateY(-2px)',
+                      },
+                    }}
+                    onClick={() => navigate(`/opportunities/${deal.id}`)}
+                  >
+                    <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                      <Typography variant="subtitle2" noWrap sx={{ mb: 0.5 }}>
+                        {deal.company_name}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" noWrap sx={{ mb: 1 }}>
+                        {deal.name}
+                      </Typography>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Chip
+                          label={formatCurrency(deal.expected_value || 0)}
+                          size="small"
+                          color="success"
+                        />
+                        <Typography variant="caption" color="text.secondary">
+                          {deal.owner_name}
+                        </Typography>
+                      </Box>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Box>
+            )}
+          </Paper>
+        </Grid>
+      </Grid>
     </Box>
   );
 };
 
-export default SalesTargets;
+export default SalesPerformance;
