@@ -631,7 +631,7 @@ class OpportunityViewSet(BaseModelViewSet):
     search_fields = ['name', 'company__name', 'notes']
     ordering_fields = ['created_at', 'expected_value', 'expected_close_date', 'stage']
     ordering = ['-expected_value', 'expected_close_date']
-    filterset_fields = ['company', 'stage', 'owner', 'lead_source', 'is_active']
+    filterset_fields = ['company', 'company__billing_entity', 'stage', 'owner', 'lead_source', 'is_active']
     
     def get_queryset(self):
         """Filter opportunities based on user role"""

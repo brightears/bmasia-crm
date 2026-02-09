@@ -260,6 +260,7 @@ export interface Opportunity {
   id: string;
   company: string;
   company_name: string;
+  company_billing_entity?: string;
   name: string;
   stage: 'Contacted' | 'Quotation Sent' | 'Contract Sent' | 'Won' | 'Lost';
   expected_value?: number;

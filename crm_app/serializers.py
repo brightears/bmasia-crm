@@ -404,17 +404,18 @@ class OpportunityActivitySerializer(serializers.ModelSerializer):
 class OpportunitySerializer(serializers.ModelSerializer):
     """Serializer for Opportunity model with analytics"""
     company_name = serializers.CharField(source='company.name', read_only=True)
+    company_billing_entity = serializers.CharField(source='company.billing_entity', read_only=True)
     owner_name = serializers.CharField(source='owner.get_full_name', read_only=True)
     weighted_value = serializers.ReadOnlyField()
     days_in_stage = serializers.ReadOnlyField()
     is_overdue = serializers.ReadOnlyField()
     activities = OpportunityActivitySerializer(many=True, read_only=True)
     recent_activities = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = Opportunity
         fields = [
-            'id', 'company', 'company_name', 'name', 'stage', 'expected_value',
+            'id', 'company', 'company_name', 'company_billing_entity', 'name', 'stage', 'expected_value',
             'probability', 'owner', 'owner_name', 'lead_source', 'contact_method',
             'last_contact_date', 'follow_up_date', 'expected_close_date',
             'actual_close_date', 'notes', 'is_active', 'competitors',
