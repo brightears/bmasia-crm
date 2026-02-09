@@ -679,8 +679,184 @@ class OpportunityViewSet(BaseModelViewSet):
             
             return Response({'message': f'Opportunity advanced to {opportunity.stage}'})
         
-        return Response({'error': 'Opportunity is already at final stage'}, 
+        return Response({'error': 'Opportunity is already at final stage'},
                        status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['get'], url_path='export/pdf')
+    def export_pdf(self, request):
+        """
+        GET /api/v1/opportunities/export/pdf/?stage=Won&company__billing_entity=BMAsia+Limited&search=...&owner=...&ordering=-expected_value
+
+        Export filtered opportunities list as PDF.
+        """
+        from crm_app.services.sales_export_service import SalesExportService
+
+        # Apply same filters as list view (no pagination)
+        queryset = self.filter_queryset(self.get_queryset()).select_related('company', 'owner')
+
+        # Lightweight data extraction (skip full serializer with activities)
+        opportunities = []
+        for opp in queryset[:500]:
+            opportunities.append({
+                'company_name': opp.company.name if opp.company else '',
+                'company_billing_entity': opp.company.billing_entity if opp.company else '',
+                'name': opp.name,
+                'stage': opp.stage,
+                'expected_value': float(opp.expected_value or 0),
+                'probability': opp.probability,
+                'owner_name': opp.owner.get_full_name() if opp.owner else '',
+                'expected_close_date': opp.expected_close_date.strftime('%Y-%m-%d') if opp.expected_close_date else '',
+            })
+
+        # Build filter description for header
+        filters_applied = {}
+        if request.query_params.get('stage'):
+            filters_applied['Stage'] = request.query_params['stage']
+        if request.query_params.get('company__billing_entity'):
+            entity_val = request.query_params['company__billing_entity']
+            filters_applied['Entity'] = entity_val
+            filters_applied['_entity_raw'] = entity_val
+        if request.query_params.get('search'):
+            filters_applied['Search'] = request.query_params['search']
+        if request.query_params.get('owner'):
+            try:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                owner = User.objects.get(id=request.query_params['owner'])
+                filters_applied['Owner'] = owner.get_full_name()
+            except Exception:
+                filters_applied['Owner'] = request.query_params['owner']
+
+        # Calculate summary
+        total_count = len(opportunities)
+        total_value = sum(opp['expected_value'] for opp in opportunities)
+        avg_value = total_value / total_count if total_count > 0 else 0
+        summary = {
+            'total_count': total_count,
+            'total_value': total_value,
+            'avg_value': avg_value,
+        }
+
+        export_service = SalesExportService()
+        pdf_buffer = export_service.generate_opportunities_pdf(
+            opportunities, filters_applied, summary
+        )
+
+        from datetime import datetime as dt
+        today = dt.now().strftime('%Y-%m-%d')
+        filename = f"Opportunities_{today}.pdf"
+
+        response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    @action(detail=False, methods=['get'], url_path='export/sales-performance-pdf')
+    def export_sales_performance_pdf(self, request):
+        """
+        GET /api/v1/opportunities/export/sales-performance-pdf/?year=2026&entity=BMAsia+Limited&period_type=monthly
+
+        Export sales performance summary as PDF.
+        """
+        from crm_app.services.sales_export_service import SalesExportService
+        from datetime import datetime as dt
+        from collections import defaultdict
+
+        year = int(request.query_params.get('year', dt.now().year))
+        entity_filter = request.query_params.get('entity', 'all')
+        period_type = request.query_params.get('period_type', 'monthly')
+
+        # Query won opportunities for the year
+        won_qs = self.get_queryset().filter(
+            stage='Won',
+            created_at__year=year,
+        ).select_related('company', 'owner')
+
+        if entity_filter and entity_filter != 'all':
+            won_qs = won_qs.filter(company__billing_entity=entity_filter)
+
+        # Lost opportunities for win rate
+        lost_qs = self.get_queryset().filter(
+            stage='Lost',
+            created_at__year=year,
+        )
+        if entity_filter and entity_filter != 'all':
+            lost_qs = lost_qs.filter(company__billing_entity=entity_filter)
+
+        won_opps = list(won_qs)
+        lost_count = lost_qs.count()
+
+        # KPIs
+        total_won_value = sum(float(opp.expected_value or 0) for opp in won_opps)
+        deals_won = len(won_opps)
+        avg_deal_size = total_won_value / deals_won if deals_won > 0 else 0
+        total_deals = deals_won + lost_count
+        win_rate = (deals_won / total_deals * 100) if total_deals > 0 else 0
+
+        kpis = {
+            'total_won_value': total_won_value,
+            'deals_won': deals_won,
+            'avg_deal_size': avg_deal_size,
+            'win_rate': round(win_rate, 1),
+        }
+
+        # Period breakdown
+        if period_type == 'monthly':
+            month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                           'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+            period_map = {m: {'period': m, 'deals_won': 0, 'total_value': 0, 'avg_value': 0} for m in month_names}
+
+            for opp in won_opps:
+                date = opp.actual_close_date or opp.updated_at
+                if hasattr(date, 'month'):
+                    month_idx = date.month - 1
+                    key = month_names[month_idx]
+                    period_map[key]['deals_won'] += 1
+                    period_map[key]['total_value'] += float(opp.expected_value or 0)
+
+            period_breakdown = []
+            for m in month_names:
+                p = period_map[m]
+                p['avg_value'] = p['total_value'] / p['deals_won'] if p['deals_won'] > 0 else 0
+                period_breakdown.append(p)
+        else:
+            quarters = ['Q1', 'Q2', 'Q3', 'Q4']
+            period_map = {q: {'period': q, 'deals_won': 0, 'total_value': 0, 'avg_value': 0} for q in quarters}
+
+            for opp in won_opps:
+                date = opp.actual_close_date or opp.updated_at
+                if hasattr(date, 'month'):
+                    quarter_idx = (date.month - 1) // 3
+                    key = quarters[quarter_idx]
+                    period_map[key]['deals_won'] += 1
+                    period_map[key]['total_value'] += float(opp.expected_value or 0)
+
+            period_breakdown = []
+            for q in quarters:
+                p = period_map[q]
+                p['avg_value'] = p['total_value'] / p['deals_won'] if p['deals_won'] > 0 else 0
+                period_breakdown.append(p)
+
+        # Top 5 deals
+        top_opps = sorted(won_opps, key=lambda o: float(o.expected_value or 0), reverse=True)[:5]
+        top_deals = []
+        for opp in top_opps:
+            top_deals.append({
+                'company_name': opp.company.name if opp.company else '',
+                'company_billing_entity': opp.company.billing_entity if opp.company else '',
+                'name': opp.name,
+                'expected_value': float(opp.expected_value or 0),
+                'owner_name': opp.owner.get_full_name() if opp.owner else '',
+            })
+
+        export_service = SalesExportService()
+        pdf_buffer = export_service.generate_sales_performance_pdf(
+            kpis, period_breakdown, top_deals, year, entity_filter, period_type
+        )
+
+        filename = f"Sales_Performance_{year}.pdf"
+        response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
 
 
 class OpportunityActivityViewSet(BaseModelViewSet):

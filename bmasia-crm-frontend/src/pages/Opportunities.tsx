@@ -37,6 +37,7 @@ import {
   Delete,
   Sort,
   MoreVert,
+  PictureAsPdf as PdfIcon,
   TableView,
   ViewKanban,
   Handshake,
@@ -97,6 +98,13 @@ const sortOptions = [
   { value: '-last_contact_date', label: 'Last Contacted' },
 ];
 
+type EntityFilter = 'all' | 'BMAsia Limited' | 'BMAsia (Thailand) Co., Ltd.';
+
+const ENTITY_CURRENCY: Record<string, { currency: string; locale: string }> = {
+  'BMAsia Limited': { currency: 'USD', locale: 'en-US' },
+  'BMAsia (Thailand) Co., Ltd.': { currency: 'THB', locale: 'th-TH' },
+};
+
 const Opportunities: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -116,12 +124,16 @@ const Opportunities: React.FC = () => {
   // Filters
   const [stageFilter, setStageFilter] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('');
+  const [entityFilter, setEntityFilter] = useState<EntityFilter>('all');
   const [sortBy, setSortBy] = useState('-created_at');
 
   // Form state
   const [formOpen, setFormOpen] = useState(false);
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const [formMode, setFormMode] = useState<'create' | 'edit'>('create');
+
+  // Export
+  const [exporting, setExporting] = useState(false);
 
   // Action menu
   const [actionMenuAnchor, setActionMenuAnchor] = useState<null | HTMLElement>(null);
@@ -141,7 +153,7 @@ const Opportunities: React.FC = () => {
   useEffect(() => {
     loadOpportunities();
     loadUsers();
-  }, [page, rowsPerPage, search, stageFilter, ownerFilter, sortBy]);
+  }, [page, rowsPerPage, search, stageFilter, ownerFilter, entityFilter, sortBy]);
 
   const loadOpportunities = async () => {
     try {
@@ -155,6 +167,7 @@ const Opportunities: React.FC = () => {
       if (search) params.search = search;
       if (stageFilter) params.stage = stageFilter;
       if (ownerFilter) params.owner = ownerFilter;
+      if (entityFilter && entityFilter !== 'all') params.company__billing_entity = entityFilter;
 
       const response: ApiResponse<Opportunity> = await ApiService.getOpportunities(params);
       setOpportunities(response.results);
@@ -188,6 +201,11 @@ const Opportunities: React.FC = () => {
 
   const handleOwnerChange = useCallback((event: any) => {
     setOwnerFilter(event.target.value);
+    setPage(0);
+  }, []);
+
+  const handleEntityChange = useCallback((event: any) => {
+    setEntityFilter(event.target.value as EntityFilter);
     setPage(0);
   }, []);
 
@@ -225,6 +243,44 @@ const Opportunities: React.FC = () => {
   const handleViewOpportunity = (opportunity: Opportunity) => {
     setActionMenuAnchor(null);
     navigate(`/opportunities/${opportunity.id}`);
+  };
+
+  const handleExportPDF = async () => {
+    setExporting(true);
+    try {
+      const token = localStorage.getItem('bmasia_access_token') || sessionStorage.getItem('bmasia_access_token');
+      const baseUrl = process.env.REACT_APP_API_URL || '';
+      const params = new URLSearchParams();
+
+      if (search) params.append('search', search);
+      if (stageFilter) params.append('stage', stageFilter);
+      if (ownerFilter) params.append('owner', ownerFilter);
+      if (entityFilter && entityFilter !== 'all') params.append('company__billing_entity', entityFilter);
+      params.append('ordering', sortBy);
+
+      const response = await fetch(
+        `${baseUrl}/api/v1/opportunities/export/pdf/?${params.toString()}`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (!response.ok) throw new Error('Export failed');
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const today = new Date().toISOString().split('T')[0];
+      a.download = `Opportunities_${today}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('Export error:', err);
+      setError('Failed to export PDF');
+    } finally {
+      setExporting(false);
+    }
   };
 
   const handleDeleteOpportunity = async (opportunity: Opportunity) => {
@@ -270,11 +326,13 @@ const Opportunities: React.FC = () => {
     setActionMenuOpportunity(null);
   };
 
-  // TODO: Support THB/USD based on company billing entity
-  const formatCurrency = (value: number): string => {
-    return new Intl.NumberFormat('en-US', {
+  const formatCurrency = (value: number, entity?: string): string => {
+    const config = entity ? ENTITY_CURRENCY[entity] : undefined;
+    const currency = config?.currency || 'USD';
+    const locale = config?.locale || 'en-US';
+    return new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: 'USD',
+      currency,
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(value);
@@ -354,6 +412,23 @@ const Opportunities: React.FC = () => {
           </Select>
         </FormControl>
 
+        <FormControl size="small" sx={{ minWidth: 180 }}>
+          <Select
+            value={entityFilter}
+            onChange={handleEntityChange}
+            displayEmpty
+            renderValue={(value) => {
+              if (value === 'all') return 'All Entities';
+              if (value === 'BMAsia Limited') return 'BMAsia Ltd (USD)';
+              return 'BMAsia Thai (THB)';
+            }}
+          >
+            <MenuItem value="all">All Entities</MenuItem>
+            <MenuItem value="BMAsia Limited">BMAsia Limited (USD)</MenuItem>
+            <MenuItem value="BMAsia (Thailand) Co., Ltd.">BMAsia Thailand (THB)</MenuItem>
+          </Select>
+        </FormControl>
+
         <FormControl size="small" sx={{ minWidth: 170 }}>
           <Select
             value={sortBy}
@@ -407,7 +482,7 @@ const Opportunities: React.FC = () => {
                       No opportunities found
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      {search || stageFilter || ownerFilter ? 'Try adjusting your filters' : 'Start by creating your first opportunity'}
+                      {search || stageFilter || ownerFilter || entityFilter !== 'all' ? 'Try adjusting your filters' : 'Start by creating your first opportunity'}
                     </Typography>
                   </Box>
                 </TableCell>
@@ -443,7 +518,7 @@ const Opportunities: React.FC = () => {
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
                       <AttachMoney sx={{ fontSize: 16, color: 'text.secondary' }} />
                       <Typography variant="body2">
-                        {formatCurrency(opportunity.expected_value || 0)}
+                        {formatCurrency(opportunity.expected_value || 0, opportunity.company_billing_entity)}
                       </Typography>
                     </Box>
                   </TableCell>
@@ -511,14 +586,25 @@ const Opportunities: React.FC = () => {
         <Typography variant="h4" component="h1">
           Opportunities
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={handleCreateOpportunity}
-          size={isMobile ? "small" : "medium"}
-        >
-          New Opportunity
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            startIcon={exporting ? <CircularProgress size={16} /> : <PdfIcon />}
+            onClick={handleExportPDF}
+            disabled={exporting || loading}
+            size={isMobile ? "small" : "medium"}
+          >
+            Export PDF
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={handleCreateOpportunity}
+            size={isMobile ? "small" : "medium"}
+          >
+            New Opportunity
+          </Button>
+        </Box>
       </Box>
 
       {error && (

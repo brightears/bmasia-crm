@@ -22,12 +22,14 @@ import {
   TableHead,
   TableRow,
   Chip,
+  Button,
 } from '@mui/material';
 import {
   TrendingUp as TrendingUpIcon,
   CheckCircle as CheckCircleIcon,
   AttachMoney as AttachMoneyIcon,
   ShowChart as ShowChartIcon,
+  PictureAsPdf as PdfIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { Opportunity, ApiResponse } from '../types';
@@ -56,6 +58,7 @@ const SalesPerformance: React.FC = () => {
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [periodType, setPeriodType] = useState<'monthly' | 'quarterly'>('monthly');
   const [entityFilter, setEntityFilter] = useState<EntityFilter>('all');
+  const [exporting, setExporting] = useState(false);
 
   // Generate year options (current year and previous 2 years)
   const currentYear = new Date().getFullYear();
@@ -116,6 +119,41 @@ const SalesPerformance: React.FC = () => {
   const handleEntityChange = useCallback((event: SelectChangeEvent<EntityFilter>) => {
     setEntityFilter(event.target.value as EntityFilter);
   }, []);
+
+  const handleExportPDF = async () => {
+    setExporting(true);
+    try {
+      const token = localStorage.getItem('bmasia_access_token') || sessionStorage.getItem('bmasia_access_token');
+      const baseUrl = process.env.REACT_APP_API_URL || '';
+      const params = new URLSearchParams();
+
+      params.append('year', selectedYear.toString());
+      params.append('period_type', periodType);
+      if (entityFilter !== 'all') params.append('entity', entityFilter);
+
+      const response = await fetch(
+        `${baseUrl}/api/v1/opportunities/export/sales-performance-pdf/?${params.toString()}`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+
+      if (!response.ok) throw new Error('Export failed');
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Sales_Performance_${selectedYear}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error('Export error:', err);
+      setError('Failed to export PDF');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Calculate KPIs
   const totalWonValue = wonOpportunities.reduce((sum, opp) => sum + (opp.expected_value || 0), 0);
@@ -221,6 +259,16 @@ const SalesPerformance: React.FC = () => {
   // Shared filter controls
   const renderFilters = () => (
     <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+      <Button
+        variant="outlined"
+        size="small"
+        startIcon={exporting ? <CircularProgress size={16} /> : <PdfIcon />}
+        onClick={handleExportPDF}
+        disabled={exporting || loading || wonOpportunities.length === 0}
+        sx={{ whiteSpace: 'nowrap' }}
+      >
+        PDF
+      </Button>
       <ToggleButtonGroup
         value={periodType}
         exclusive
