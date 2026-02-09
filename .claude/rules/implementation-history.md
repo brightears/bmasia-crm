@@ -2,6 +2,92 @@
 
 ## February 2026
 
+### Feb 9, 2026 - Filter Bar Consistency (All List Pages)
+
+**Problem**: Each list page had inconsistent filter bars — date pickers that were clunky and often non-functional (backend didn't support the date range params sent by frontend), no sort dropdowns, and some misleading columns.
+
+**Solution**: Standardized all 4 list pages with the same pattern:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  🔍 Search...  [Filter1 ▼]  [Filter2 ▼]  [Sort: Option ▼]   │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Changes per page:**
+
+| Page | Removed | Added | Other |
+|------|---------|-------|-------|
+| **Companies** | — | Sort dropdown (6 options) | Already done Feb 7 |
+| **Contacts** | From Date, To Date, Clear btn, Last Contact column | Sort dropdown (6 options) | Status only shows "Inactive" chip; fixed `is_active` filter |
+| **Contracts** | Start Date, End Date, Clear btn | Sort dropdown (6 options) | Renamed "Renewal Date" → "Renewal" |
+| **Quotes** | Valid From, Valid Until, Clear btn | Sort dropdown (6 options) | — |
+
+**Backend** (`crm_app/views.py`): Added `updated_at`, `company__name` to ordering_fields for ContactViewSet, ContractViewSet, and QuoteViewSet. Also added `contract_number` for ContractViewSet.
+
+**Frontend pattern** (all pages):
+- Flex layout (`display: 'flex', gap: 2`) replaces Grid
+- `useCallback` for data loading functions
+- `ordering: sortBy` param sent to API
+- Sort dropdown uses `Sort` icon as startAdornment (no label)
+- Page resets to 0 on filter/sort change
+
+**Sort options per page:**
+- **Companies**: Name A-Z/Z-A, Newest/Oldest, Recently Updated, Country
+- **Contacts**: Name A-Z/Z-A, Newest/Oldest, Recently Updated, Company
+- **Contracts**: Start Date Newest/Oldest, Ending Soonest, Highest Value, Company, Contract Number
+- **Quotes**: Newest/Oldest, Expiring Soonest, Highest Value, Quote Number, Company
+
+**Removed dependencies**: `DatePicker`, `LocalizationProvider`, `AdapterDateFns`, `GridLegacy` from Contacts/Contracts/Quotes pages.
+
+---
+
+### Feb 7, 2026 - Company List Sorting
+
+**Problem**: Companies page only listed alphabetically by name with a search bar. Sales requested: "Can we sort company entries by creation date?"
+
+**Backend** (`crm_app/views.py`): Added `updated_at` to CompanyViewSet ordering_fields:
+```python
+ordering_fields = ['name', 'created_at', 'updated_at', 'industry', 'country']
+```
+
+**Frontend** (`Companies.tsx`): Added sort dropdown next to search bar with 6 options:
+- Name A-Z (`name`) — default
+- Name Z-A (`-name`)
+- Newest First (`-created_at`)
+- Oldest First (`created_at`)
+- Recently Updated (`-updated_at`)
+- Country (`country`)
+
+Passes `ordering` param to API. Sort change resets pagination to page 0. No new API methods needed — `getCompanies()` already passes through all params.
+
+---
+
+### Feb 7, 2026 - Zone Table PDF Improvements
+
+**Problem 1**: Zone names from Soundtrack API include the full property prefix (e.g., "Paradise Island Resort Maldives - Bageecha") causing overflow in the Zone column since property is already shown in its own column.
+
+**Fix**: Use `str(zone)` instead of `zone.name` in `_build_zones_table()`. Zone model's `__str__()` strips the prefix after `" - "` (e.g., "Bageecha").
+
+**Problem 2**: Long company names (e.g., "Paradise Island Resort & Spa") overflow the Property column into Service.
+
+**Fix**: Wrap property name in ReportLab `Paragraph` object (instead of plain string) to enable automatic word-wrap within the cell.
+
+---
+
+### Feb 7, 2026 - Manual Zone Creation for Contracts
+
+**Problem**: Soundtrack zones could only be added via API dropdown - no manual creation. When Soundtrack Account ID didn't exist yet (account created after contract signing), users couldn't add any Soundtrack zones. Also, API preview zones had non-DB IDs that failed when saving to contracts.
+
+**Solution** (`EnhancedZonePicker.tsx`):
+1. **Manual "Add New Zone" for Soundtrack**: Text input + button (mirrors Beat Breeze pattern). Creates Zone in DB with `platform: 'soundtrack'`.
+2. **"Import from Soundtrack API" button**: When preview zones found via API, one-click bulk-creates them as DB zones and auto-selects them.
+3. **Fixed zone loading**: Dropdown always shows DB zones (proper UUIDs). Preview zones shown separately with Import action, not mixed into dropdown.
+
+**No backend changes needed** - `POST /api/v1/zones/` already supported creating zones with any platform.
+
+---
+
 ### Feb 7, 2026 - HK Stamp Aspect Ratio Fix
 
 **Problem**: HK stamp (`BMAsia Stamp.png`) is 854x772px (not square). Rendered at fixed 1.6x1.6 inches, it appeared stretched/distorted. Thai stamp (`BMAsia Thai Stamp.png`) is 1000x1000px and rendered correctly.

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -21,13 +21,10 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  GridLegacy as Grid,
   Menu,
   ListItemIcon,
   ListItemText,
   Divider,
-  useTheme,
-  useMediaQuery,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -53,10 +50,8 @@ import {
   CheckCircle,
   Cancel,
   Pending,
+  Sort,
 } from '@mui/icons-material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Invoice, ApiResponse, Company, Contract } from '../types';
 import ApiService from '../services/api';
 import InvoiceForm from '../components/InvoiceForm';
@@ -83,10 +78,15 @@ const paymentMethods = [
   { value: 'Other', label: 'Other' },
 ];
 
-const Invoices: React.FC = () => {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+const sortOptions = [
+  { value: '-issue_date', label: 'Newest (Issue Date)' },
+  { value: 'issue_date', label: 'Oldest (Issue Date)' },
+  { value: 'due_date', label: 'Due Date Soonest' },
+  { value: '-total_amount', label: 'Highest Amount' },
+  { value: 'contract__company__name', label: 'Company' },
+];
 
+const Invoices: React.FC = () => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
@@ -102,8 +102,7 @@ const Invoices: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [companyFilter, setCompanyFilter] = useState('');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState('');
-  const [startDate, setStartDate] = useState<Date | null>(null);
-  const [endDate, setEndDate] = useState<Date | null>(null);
+  const [sortBy, setSortBy] = useState('-issue_date');
 
   // Form state
   const [formOpen, setFormOpen] = useState(false);
@@ -121,26 +120,18 @@ const Invoices: React.FC = () => {
   const [transactionId, setTransactionId] = useState('');
   const [paymentNotes, setPaymentNotes] = useState('');
 
-  useEffect(() => {
-    loadInvoices();
-    loadCompanies();
-    loadContracts();
-  }, [page, rowsPerPage, search, statusFilter, companyFilter, paymentMethodFilter, startDate, endDate]);
-
-  const loadInvoices = async () => {
+  const loadInvoices = useCallback(async () => {
     try {
       setLoading(true);
       const params: any = {
         page: page + 1,
         page_size: rowsPerPage,
+        search: search || undefined,
+        status: statusFilter || undefined,
+        contract__company: companyFilter || undefined,
+        payment_method: paymentMethodFilter || undefined,
+        ordering: sortBy,
       };
-
-      if (search) params.search = search;
-      if (statusFilter) params.status = statusFilter;
-      if (companyFilter) params.company = companyFilter;
-      if (paymentMethodFilter) params.payment_method = paymentMethodFilter;
-      if (startDate) params.issue_date_after = startDate.toISOString().split('T')[0];
-      if (endDate) params.issue_date_before = endDate.toISOString().split('T')[0];
 
       const response: ApiResponse<Invoice> = await ApiService.getInvoices(params);
       setInvoices(response.results);
@@ -151,11 +142,11 @@ const Invoices: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, rowsPerPage, search, statusFilter, companyFilter, paymentMethodFilter, sortBy]);
 
   const loadCompanies = async () => {
     try {
-      const response = await ApiService.getCompanies({ page_size: 100 });
+      const response = await ApiService.getCompanies({ page_size: 1000, ordering: 'name' });
       setCompanies(response.results);
     } catch (err) {
       console.error('Failed to load companies:', err);
@@ -171,8 +162,22 @@ const Invoices: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    loadInvoices();
+  }, [loadInvoices]);
+
+  useEffect(() => {
+    loadCompanies();
+    loadContracts();
+  }, []);
+
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(event.target.value);
+    setPage(0);
+  };
+
+  const handleSortChange = (event: any) => {
+    setSortBy(event.target.value);
     setPage(0);
   };
 
@@ -313,24 +318,33 @@ const Invoices: React.FC = () => {
     return statusOptions.find(s => s.value === status)?.color || '#2196f3';
   };
 
+  return (
+    <Box>
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h4" component="h1">
+          Invoices
+        </Typography>
+        <Button
+          variant="contained"
+          startIcon={<Add />}
+          onClick={handleCreateInvoice}
+        >
+          New Invoice
+        </Button>
+      </Box>
 
-  const clearFilters = () => {
-    setStatusFilter('');
-    setCompanyFilter('');
-    setPaymentMethodFilter('');
-    setStartDate(null);
-    setEndDate(null);
-    setSearch('');
-    setPage(0);
-  };
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
+          {error}
+        </Alert>
+      )}
 
-  const renderFilters = () => (
-    <Paper sx={{ p: 2, mb: 2 }}>
-      <Grid container spacing={2} alignItems="center">
-        <Grid item xs={12} sm={6} md={3}>
+      {/* Search and Filters */}
+      <Paper sx={{ mb: 2 }}>
+        <Box sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
           <TextField
             fullWidth
-            size="small"
             placeholder="Search invoices..."
             value={search}
             onChange={handleSearchChange}
@@ -342,14 +356,11 @@ const Invoices: React.FC = () => {
               ),
             }}
           />
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={2}>
-          <FormControl fullWidth size="small">
+          <FormControl size="small" sx={{ minWidth: 140 }}>
             <InputLabel>Status</InputLabel>
             <Select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => { setStatusFilter(e.target.value); setPage(0); }}
               label="Status"
             >
               {statusOptions.map((status) => (
@@ -366,14 +377,11 @@ const Invoices: React.FC = () => {
               ))}
             </Select>
           </FormControl>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={2}>
-          <FormControl fullWidth size="small">
+          <FormControl size="small" sx={{ minWidth: 180 }}>
             <InputLabel>Company</InputLabel>
             <Select
               value={companyFilter}
-              onChange={(e) => setCompanyFilter(e.target.value)}
+              onChange={(e) => { setCompanyFilter(e.target.value); setPage(0); }}
               label="Company"
             >
               <MenuItem value="">All Companies</MenuItem>
@@ -384,15 +392,12 @@ const Invoices: React.FC = () => {
               ))}
             </Select>
           </FormControl>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={2}>
-          <FormControl fullWidth size="small">
-            <InputLabel>Payment Method</InputLabel>
+          <FormControl size="small" sx={{ minWidth: 180 }}>
+            <InputLabel>Payment</InputLabel>
             <Select
               value={paymentMethodFilter}
-              onChange={(e) => setPaymentMethodFilter(e.target.value)}
-              label="Payment Method"
+              onChange={(e) => { setPaymentMethodFilter(e.target.value); setPage(0); }}
+              label="Payment"
             >
               {paymentMethods.map((method) => (
                 <MenuItem key={method.value} value={method.value}>
@@ -401,329 +406,274 @@ const Invoices: React.FC = () => {
               ))}
             </Select>
           </FormControl>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={1.5}>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
-            <DatePicker
-              label="Start Date"
-              value={startDate}
-              onChange={setStartDate}
-              slotProps={{
-                textField: {
-                  size: 'small',
-                  fullWidth: true,
-                },
-              }}
-            />
-          </LocalizationProvider>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={1.5}>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
-            <DatePicker
-              label="End Date"
-              value={endDate}
-              onChange={setEndDate}
-              slotProps={{
-                textField: {
-                  size: 'small',
-                  fullWidth: true,
-                },
-              }}
-            />
-          </LocalizationProvider>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={1}>
-          <Button
-            variant="outlined"
-            onClick={clearFilters}
-            size="small"
-            sx={{ minWidth: 'auto' }}
-          >
-            Clear
-          </Button>
-        </Grid>
-      </Grid>
-    </Paper>
-  );
-
-  return (
-    <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Box>
-        {/* Header */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h4" component="h1">
-            Invoices
-          </Typography>
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={handleCreateInvoice}
-            size={isMobile ? "small" : "medium"}
-          >
-            New Invoice
-          </Button>
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <Select
+              value={sortBy}
+              onChange={handleSortChange}
+              startAdornment={<Sort sx={{ mr: 0.5, ml: -0.5, color: 'text.secondary', fontSize: 20 }} />}
+              sx={{ '& .MuiSelect-select': { display: 'flex', alignItems: 'center' } }}
+            >
+              {sortOptions.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
         </Box>
+      </Paper>
 
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
-            {error}
-          </Alert>
-        )}
-
-        {renderFilters()}
-
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
+      <TableContainer component={Paper}>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>Invoice Number</TableCell>
+              <TableCell>Company</TableCell>
+              <TableCell>Amount</TableCell>
+              <TableCell>Issue Date</TableCell>
+              <TableCell>Due Date</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell>Payment Method</TableCell>
+              <TableCell>Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {loading ? (
               <TableRow>
-                <TableCell>Invoice Number</TableCell>
-                <TableCell>Company</TableCell>
-                <TableCell>Amount</TableCell>
-                <TableCell>Issue Date</TableCell>
-                <TableCell>Due Date</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Payment Method</TableCell>
-                <TableCell>Actions</TableCell>
+                <TableCell colSpan={8} align="center">
+                  <CircularProgress />
+                </TableCell>
               </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={8} align="center">
-                    <CircularProgress />
+            ) : invoices.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={8} align="center">
+                  <Box sx={{ py: 4 }}>
+                    <Receipt sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                    <Typography variant="h6" color="text.secondary">
+                      No invoices found
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {search || statusFilter || companyFilter || paymentMethodFilter ?
+                        'Try adjusting your filters' :
+                        'Start by creating your first invoice'
+                      }
+                    </Typography>
+                  </Box>
+                </TableCell>
+              </TableRow>
+            ) : (
+              invoices.map((invoice) => (
+                <TableRow key={invoice.id} hover>
+                  <TableCell>
+                    <Typography variant="body2" fontWeight="medium">
+                      {invoice.invoice_number}
+                    </Typography>
                   </TableCell>
-                </TableRow>
-              ) : invoices.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} align="center">
-                    <Box sx={{ py: 4 }}>
-                      <Receipt sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                      <Typography variant="h6" color="text.secondary">
-                        No invoices found
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {search || statusFilter || companyFilter ? 'Try adjusting your filters' : 'Start by creating your first invoice'}
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <Business sx={{ mr: 1, color: 'text.secondary', fontSize: 16 }} />
+                      <Typography variant="body2">
+                        {invoice.company_name}
                       </Typography>
                     </Box>
                   </TableCell>
-                </TableRow>
-              ) : (
-                invoices.map((invoice) => (
-                  <TableRow key={invoice.id} hover>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight="medium">
-                        {invoice.invoice_number}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Business sx={{ mr: 1, color: 'text.secondary', fontSize: 16 }} />
-                        <Typography variant="body2">
-                          {invoice.company_name}
-                        </Typography>
-                      </Box>
-                    </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <AttachMoney sx={{ fontSize: 16, color: 'text.secondary' }} />
-                        <Typography variant="body2">
-                          {formatCurrency(invoice.total_amount)}
-                        </Typography>
-                      </Box>
-                    </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Schedule sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
-                        <Typography variant="body2">
-                          {formatDate(invoice.issue_date)}
-                        </Typography>
-                      </Box>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" sx={{
-                        color: invoice.is_overdue ? 'error.main' : 'text.primary'
-                      }}>
-                        {formatDate(invoice.due_date)}
-                        {invoice.is_overdue && (
-                          <Typography variant="caption" sx={{ color: 'error.main', display: 'block' }}>
-                            {invoice.days_overdue} days overdue
-                          </Typography>
-                        )}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={invoice.status}
-                        size="small"
-                        sx={{
-                          backgroundColor: getStatusColor(invoice.status),
-                          color: 'white',
-                          fontWeight: 600
-                        }}
-                      />
-                    </TableCell>
-                    <TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <AttachMoney sx={{ fontSize: 16, color: 'text.secondary' }} />
                       <Typography variant="body2">
-                        {invoice.payment_method || '-'}
+                        {formatCurrency(invoice.total_amount)}
                       </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <IconButton
-                        size="small"
-                        onClick={(e) => handleActionMenuOpen(e, invoice)}
-                      >
-                        <MoreVert />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-          <TablePagination
-            rowsPerPageOptions={[10, 25, 50, 100]}
-            component="div"
-            count={totalCount}
-            rowsPerPage={rowsPerPage}
-            page={page}
-            onPageChange={handleChangePage}
-            onRowsPerPageChange={handleChangeRowsPerPage}
-          />
-        </TableContainer>
+                    </Box>
+                  </TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <Schedule sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
+                      <Typography variant="body2">
+                        {formatDate(invoice.issue_date)}
+                      </Typography>
+                    </Box>
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="body2" sx={{
+                      color: invoice.is_overdue ? 'error.main' : 'text.primary'
+                    }}>
+                      {formatDate(invoice.due_date)}
+                      {invoice.is_overdue && (
+                        <Typography variant="caption" sx={{ color: 'error.main', display: 'block' }}>
+                          {invoice.days_overdue} days overdue
+                        </Typography>
+                      )}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={invoice.status}
+                      size="small"
+                      sx={{
+                        backgroundColor: getStatusColor(invoice.status),
+                        color: 'white',
+                        fontWeight: 600
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="body2">
+                      {invoice.payment_method || '-'}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <IconButton
+                      size="small"
+                      onClick={(e) => handleActionMenuOpen(e, invoice)}
+                    >
+                      <MoreVert />
+                    </IconButton>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+        <TablePagination
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          component="div"
+          count={totalCount}
+          rowsPerPage={rowsPerPage}
+          page={page}
+          onPageChange={handleChangePage}
+          onRowsPerPageChange={handleChangeRowsPerPage}
+        />
+      </TableContainer>
 
-        {/* Action Menu */}
-        <Menu
-          anchorEl={actionMenuAnchor}
-          open={Boolean(actionMenuAnchor)}
-          onClose={handleActionMenuClose}
+      {/* Action Menu */}
+      <Menu
+        anchorEl={actionMenuAnchor}
+        open={Boolean(actionMenuAnchor)}
+        onClose={handleActionMenuClose}
+      >
+        <MenuItem onClick={() => handleViewInvoice(actionMenuInvoice!)}>
+          <ListItemIcon>
+            <Visibility fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>View Details</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleEditInvoice(actionMenuInvoice!)}>
+          <ListItemIcon>
+            <Edit fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Edit</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleDownloadPDF(actionMenuInvoice!)}>
+          <ListItemIcon>
+            <GetApp fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Download PDF</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleSendInvoice(actionMenuInvoice!)}>
+          <ListItemIcon>
+            <Send fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Send</ListItemText>
+        </MenuItem>
+        {actionMenuInvoice?.status !== 'Paid' && (
+          <MenuItem onClick={() => handleMarkAsPaid(actionMenuInvoice!)}>
+            <ListItemIcon>
+              <Payment fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Mark as Paid</ListItemText>
+          </MenuItem>
+        )}
+        <Divider />
+        <MenuItem
+          onClick={() => handleDeleteInvoice(actionMenuInvoice!)}
+          sx={{ color: 'error.main' }}
         >
-          <MenuItem onClick={() => handleViewInvoice(actionMenuInvoice!)}>
-            <ListItemIcon>
-              <Visibility fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>View Details</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={() => handleEditInvoice(actionMenuInvoice!)}>
-            <ListItemIcon>
-              <Edit fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Edit</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={() => handleDownloadPDF(actionMenuInvoice!)}>
-            <ListItemIcon>
-              <GetApp fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Download PDF</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={() => handleSendInvoice(actionMenuInvoice!)}>
-            <ListItemIcon>
-              <Send fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Send</ListItemText>
-          </MenuItem>
-          {actionMenuInvoice?.status !== 'Paid' && (
-            <MenuItem onClick={() => handleMarkAsPaid(actionMenuInvoice!)}>
-              <ListItemIcon>
-                <Payment fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>Mark as Paid</ListItemText>
-            </MenuItem>
-          )}
-          <Divider />
-          <MenuItem
-            onClick={() => handleDeleteInvoice(actionMenuInvoice!)}
-            sx={{ color: 'error.main' }}
+          <ListItemIcon>
+            <Delete fontSize="small" sx={{ color: 'error.main' }} />
+          </ListItemIcon>
+          <ListItemText>Delete</ListItemText>
+        </MenuItem>
+      </Menu>
+
+      {/* Invoice Form */}
+      <InvoiceForm
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        onSave={handleInvoiceSave}
+        invoice={selectedInvoice}
+        mode={formMode}
+        companies={companies}
+        contracts={contracts}
+      />
+
+      {/* Invoice Detail */}
+      <InvoiceDetail
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        invoice={selectedInvoice}
+        onInvoiceUpdate={loadInvoices}
+      />
+
+      {/* Payment Dialog */}
+      <Dialog open={paymentDialogOpen} onClose={() => setPaymentDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Mark Invoice as Paid</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 1 }}>
+            <FormControl fullWidth sx={{ mb: 2 }}>
+              <InputLabel>Payment Method</InputLabel>
+              <Select
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(e.target.value)}
+                label="Payment Method"
+              >
+                {paymentMethods.slice(1).map((method) => (
+                  <MenuItem key={method.value} value={method.value}>
+                    {method.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <TextField
+              fullWidth
+              label="Transaction ID"
+              value={transactionId}
+              onChange={(e) => setTransactionId(e.target.value)}
+              sx={{ mb: 2 }}
+            />
+            <TextField
+              fullWidth
+              label="Notes"
+              value={paymentNotes}
+              onChange={(e) => setPaymentNotes(e.target.value)}
+              multiline
+              rows={3}
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPaymentDialogOpen(false)}>Cancel</Button>
+          <Button
+            onClick={handlePaymentSubmit}
+            variant="contained"
+            disabled={!paymentMethod}
           >
-            <ListItemIcon>
-              <Delete fontSize="small" sx={{ color: 'error.main' }} />
-            </ListItemIcon>
-            <ListItemText>Delete</ListItemText>
-          </MenuItem>
-        </Menu>
+            Mark as Paid
+          </Button>
+        </DialogActions>
+      </Dialog>
 
-        {/* Invoice Form */}
-        <InvoiceForm
-          open={formOpen}
-          onClose={() => setFormOpen(false)}
-          onSave={handleInvoiceSave}
-          invoice={selectedInvoice}
-          mode={formMode}
-          companies={companies}
-          contracts={contracts}
-        />
-
-        {/* Invoice Detail */}
-        <InvoiceDetail
-          open={detailOpen}
-          onClose={() => setDetailOpen(false)}
-          invoice={selectedInvoice}
-          onInvoiceUpdate={loadInvoices}
-        />
-
-        {/* Payment Dialog */}
-        <Dialog open={paymentDialogOpen} onClose={() => setPaymentDialogOpen(false)} maxWidth="sm" fullWidth>
-          <DialogTitle>Mark Invoice as Paid</DialogTitle>
-          <DialogContent>
-            <Box sx={{ pt: 1 }}>
-              <FormControl fullWidth sx={{ mb: 2 }}>
-                <InputLabel>Payment Method</InputLabel>
-                <Select
-                  value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                  label="Payment Method"
-                >
-                  {paymentMethods.slice(1).map((method) => (
-                    <MenuItem key={method.value} value={method.value}>
-                      {method.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <TextField
-                fullWidth
-                label="Transaction ID"
-                value={transactionId}
-                onChange={(e) => setTransactionId(e.target.value)}
-                sx={{ mb: 2 }}
-              />
-              <TextField
-                fullWidth
-                label="Notes"
-                value={paymentNotes}
-                onChange={(e) => setPaymentNotes(e.target.value)}
-                multiline
-                rows={3}
-              />
-            </Box>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setPaymentDialogOpen(false)}>Cancel</Button>
-            <Button
-              onClick={handlePaymentSubmit}
-              variant="contained"
-              disabled={!paymentMethod}
-            >
-              Mark as Paid
-            </Button>
-          </DialogActions>
-        </Dialog>
-
-        {/* Success Snackbar */}
-        <Snackbar
-          open={!!success}
-          autoHideDuration={6000}
-          onClose={() => setSuccess('')}
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-        >
-          <Alert onClose={() => setSuccess('')} severity="success">
-            {success}
-          </Alert>
-        </Snackbar>
-      </Box>
-    </LocalizationProvider>
+      {/* Success Snackbar */}
+      <Snackbar
+        open={!!success}
+        autoHideDuration={6000}
+        onClose={() => setSuccess('')}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setSuccess('')} severity="success">
+          {success}
+        </Alert>
+      </Snackbar>
+    </Box>
   );
 };
 

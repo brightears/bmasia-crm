@@ -3513,9 +3513,9 @@ class InvoiceViewSet(BaseModelViewSet):
     queryset = Invoice.objects.all()
     serializer_class = InvoiceSerializer
     search_fields = ['invoice_number', 'contract__company__name']
-    ordering_fields = ['created_at', 'issue_date', 'due_date', 'total_amount']
+    ordering_fields = ['created_at', 'issue_date', 'due_date', 'total_amount', 'updated_at', 'contract__company__name']
     ordering = ['-issue_date']
-    filterset_fields = ['contract', 'status', 'issue_date', 'due_date']
+    filterset_fields = ['contract', 'status', 'issue_date', 'due_date', 'payment_method', 'contract__company']
 
     @action(detail=False, methods=['get'])
     def overdue(self, request):
