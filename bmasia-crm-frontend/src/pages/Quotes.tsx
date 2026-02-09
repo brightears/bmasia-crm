@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -21,7 +21,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  GridLegacy as Grid,
   Menu,
   ListItemIcon,
   ListItemText,
@@ -49,13 +48,10 @@ import {
   FileCopy,
   CheckCircle,
   Cancel,
-  Pending,
   Warning,
   Assignment,
+  Sort,
 } from '@mui/icons-material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useSearchParams } from 'react-router-dom';
 import { Quote, ApiResponse, Company, Contact, Opportunity } from '../types';
 import ApiService, { EmailSendData } from '../services/api';
@@ -70,6 +66,15 @@ const statusOptions = [
   { value: 'Accepted', label: 'Accepted', color: '#4caf50', icon: <CheckCircle fontSize="small" /> },
   { value: 'Rejected', label: 'Rejected', color: '#f44336', icon: <Cancel fontSize="small" /> },
   { value: 'Expired', label: 'Expired', color: '#ff9800', icon: <Warning fontSize="small" /> },
+];
+
+const sortOptions = [
+  { value: '-created_at', label: 'Newest First' },
+  { value: 'created_at', label: 'Oldest First' },
+  { value: 'valid_until', label: 'Expiring Soonest' },
+  { value: '-total_value', label: 'Highest Value' },
+  { value: 'quote_number', label: 'Quote Number' },
+  { value: 'company__name', label: 'Company' },
 ];
 
 const Quotes: React.FC = () => {
@@ -92,8 +97,7 @@ const Quotes: React.FC = () => {
   // Filters
   const [statusFilter, setStatusFilter] = useState('');
   const [companyFilter, setCompanyFilter] = useState('');
-  const [startDate, setStartDate] = useState<Date | null>(null);
-  const [endDate, setEndDate] = useState<Date | null>(null);
+  const [sortBy, setSortBy] = useState('-created_at');
 
   // Form state
   const [formOpen, setFormOpen] = useState(false);
@@ -126,26 +130,18 @@ const Quotes: React.FC = () => {
     }
   }, [searchParams, setSearchParams]);
 
-  useEffect(() => {
-    loadQuotes();
-    loadCompanies();
-    loadContacts();
-    loadOpportunities();
-  }, [page, rowsPerPage, search, statusFilter, companyFilter, startDate, endDate]);
-
-  const loadQuotes = async () => {
+  const loadQuotes = useCallback(async () => {
     try {
       setLoading(true);
       const params: any = {
         page: page + 1,
         page_size: rowsPerPage,
+        ordering: sortBy,
       };
 
       if (search) params.search = search;
       if (statusFilter) params.status = statusFilter;
       if (companyFilter) params.company = companyFilter;
-      if (startDate) params.valid_from_after = startDate.toISOString().split('T')[0];
-      if (endDate) params.valid_until_before = endDate.toISOString().split('T')[0];
 
       const response: ApiResponse<Quote> = await ApiService.getQuotes(params);
       setQuotes(response.results);
@@ -156,7 +152,7 @@ const Quotes: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, rowsPerPage, search, statusFilter, companyFilter, sortBy]);
 
   const loadCompanies = async () => {
     try {
@@ -185,8 +181,23 @@ const Quotes: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    loadQuotes();
+  }, [loadQuotes]);
+
+  useEffect(() => {
+    loadCompanies();
+    loadContacts();
+    loadOpportunities();
+  }, []);
+
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(event.target.value);
+    setPage(0);
+  };
+
+  const handleSortChange = (event: any) => {
+    setSortBy(event.target.value);
     setPage(0);
   };
 
@@ -358,22 +369,34 @@ const Quotes: React.FC = () => {
     return statusOptions.find(s => s.value === status)?.color || '#2196f3';
   };
 
-  const clearFilters = () => {
-    setStatusFilter('');
-    setCompanyFilter('');
-    setStartDate(null);
-    setEndDate(null);
-    setSearch('');
-    setPage(0);
-  };
+  return (
+    <Box>
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h4" component="h1">
+          Quotes
+        </Typography>
+        <Button
+          variant="contained"
+          startIcon={<Add />}
+          onClick={handleCreateQuote}
+          size={isMobile ? "small" : "medium"}
+        >
+          New Quote
+        </Button>
+      </Box>
 
-  const renderFilters = () => (
-    <Paper sx={{ p: 2, mb: 2 }}>
-      <Grid container spacing={2} alignItems="center">
-        <Grid item xs={12} sm={6} md={3}>
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Filters */}
+      <Paper sx={{ mb: 2 }}>
+        <Box sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
           <TextField
             fullWidth
-            size="small"
             placeholder="Search quotes..."
             value={search}
             onChange={handleSearchChange}
@@ -385,20 +408,17 @@ const Quotes: React.FC = () => {
               ),
             }}
           />
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={2}>
-          <FormControl fullWidth size="small">
+          <FormControl size="small" sx={{ minWidth: 150 }}>
             <InputLabel>Status</InputLabel>
             <Select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => { setStatusFilter(e.target.value); setPage(0); }}
               label="Status"
             >
               {statusOptions.map((status) => (
                 <MenuItem key={status.value} value={status.value}>
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    {status.value && (
+                    {status.value && status.icon && (
                       <Box sx={{ mr: 1, color: status.color }}>
                         {status.icon}
                       </Box>
@@ -409,14 +429,11 @@ const Quotes: React.FC = () => {
               ))}
             </Select>
           </FormControl>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={2}>
-          <FormControl fullWidth size="small">
+          <FormControl size="small" sx={{ minWidth: 180 }}>
             <InputLabel>Company</InputLabel>
             <Select
               value={companyFilter}
-              onChange={(e) => setCompanyFilter(e.target.value)}
+              onChange={(e) => { setCompanyFilter(e.target.value); setPage(0); }}
               label="Company"
             >
               <MenuItem value="">All Companies</MenuItem>
@@ -427,329 +444,271 @@ const Quotes: React.FC = () => {
               ))}
             </Select>
           </FormControl>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={2}>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
-            <DatePicker
-              label="Valid From"
-              value={startDate}
-              onChange={setStartDate}
-              slotProps={{
-                textField: {
-                  size: 'small',
-                  fullWidth: true,
-                },
-              }}
-            />
-          </LocalizationProvider>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={2}>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
-            <DatePicker
-              label="Valid Until"
-              value={endDate}
-              onChange={setEndDate}
-              slotProps={{
-                textField: {
-                  size: 'small',
-                  fullWidth: true,
-                },
-              }}
-            />
-          </LocalizationProvider>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={1}>
-          <Button
-            variant="outlined"
-            onClick={clearFilters}
-            size="small"
-            sx={{ minWidth: 'auto' }}
-          >
-            Clear
-          </Button>
-        </Grid>
-      </Grid>
-    </Paper>
-  );
-
-  return (
-    <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Box>
-        {/* Header */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h4" component="h1">
-            Quotes
-          </Typography>
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={handleCreateQuote}
-            size={isMobile ? "small" : "medium"}
-          >
-            New Quote
-          </Button>
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <Select
+              value={sortBy}
+              onChange={handleSortChange}
+              startAdornment={<Sort sx={{ mr: 0.5, ml: -0.5, color: 'text.secondary', fontSize: 20 }} />}
+              sx={{ '& .MuiSelect-select': { display: 'flex', alignItems: 'center' } }}
+            >
+              {sortOptions.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
         </Box>
+      </Paper>
 
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
-            {error}
-          </Alert>
-        )}
-
-        {renderFilters()}
-
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
+      <TableContainer component={Paper}>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>Quote Number</TableCell>
+              <TableCell>Company</TableCell>
+              <TableCell>Contact</TableCell>
+              <TableCell>Total Value</TableCell>
+              <TableCell>Valid Until</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell>Created Date</TableCell>
+              <TableCell>Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {loading ? (
               <TableRow>
-                <TableCell>Quote Number</TableCell>
-                <TableCell>Company</TableCell>
-                <TableCell>Contact</TableCell>
-                <TableCell>Total Value</TableCell>
-                <TableCell>Valid Until</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Created Date</TableCell>
-                <TableCell>Actions</TableCell>
+                <TableCell colSpan={8} align="center">
+                  <CircularProgress />
+                </TableCell>
               </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={8} align="center">
-                    <CircularProgress />
+            ) : quotes.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={8} align="center">
+                  <Box sx={{ py: 4 }}>
+                    <RequestQuote sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                    <Typography variant="h6" color="text.secondary">
+                      No quotes found
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {search || statusFilter || companyFilter ? 'Try adjusting your filters' : 'Start by creating your first quote'}
+                    </Typography>
+                  </Box>
+                </TableCell>
+              </TableRow>
+            ) : (
+              quotes.map((quote) => (
+                <TableRow key={quote.id} hover>
+                  <TableCell>
+                    <Typography variant="body2" fontWeight="medium">
+                      {quote.quote_number}
+                    </Typography>
                   </TableCell>
-                </TableRow>
-              ) : quotes.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} align="center">
-                    <Box sx={{ py: 4 }}>
-                      <RequestQuote sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                      <Typography variant="h6" color="text.secondary">
-                        No quotes found
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {search || statusFilter || companyFilter ? 'Try adjusting your filters' : 'Start by creating your first quote'}
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <Business sx={{ mr: 1, color: 'text.secondary', fontSize: 16 }} />
+                      <Typography variant="body2">
+                        {quote.company_name}
                       </Typography>
                     </Box>
                   </TableCell>
+                  <TableCell>
+                    <Typography variant="body2">
+                      {quote.contact_name || '-'}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="body2">
+                      {formatCurrency(quote.total_value, quote.currency)}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="body2" sx={{
+                      color: quote.is_expired ? 'error.main' : 'text.primary'
+                    }}>
+                      {formatDate(quote.valid_until)}
+                      {quote.is_expired && (
+                        <Typography variant="caption" sx={{ color: 'error.main', display: 'block' }}>
+                          Expired
+                        </Typography>
+                      )}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={quote.status}
+                      size="small"
+                      sx={{
+                        backgroundColor: getStatusColor(quote.status),
+                        color: 'white',
+                        fontWeight: 600
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <Schedule sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
+                      <Typography variant="body2">
+                        {formatDate(quote.created_at)}
+                      </Typography>
+                    </Box>
+                  </TableCell>
+                  <TableCell>
+                    <IconButton
+                      size="small"
+                      onClick={(e) => handleActionMenuOpen(e, quote)}
+                    >
+                      <MoreVert />
+                    </IconButton>
+                  </TableCell>
                 </TableRow>
-              ) : (
-                quotes.map((quote) => (
-                  <TableRow key={quote.id} hover>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight="medium">
-                        {quote.quote_number}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Business sx={{ mr: 1, color: 'text.secondary', fontSize: 16 }} />
-                        <Typography variant="body2">
-                          {quote.company_name}
-                        </Typography>
-                      </Box>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">
-                        {quote.contact_name || '-'}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">
-                        {formatCurrency(quote.total_value, quote.currency)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" sx={{
-                        color: quote.is_expired ? 'error.main' : 'text.primary'
-                      }}>
-                        {formatDate(quote.valid_until)}
-                        {quote.is_expired && (
-                          <Typography variant="caption" sx={{ color: 'error.main', display: 'block' }}>
-                            Expired
-                          </Typography>
-                        )}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={quote.status}
-                        size="small"
-                        sx={{
-                          backgroundColor: getStatusColor(quote.status),
-                          color: 'white',
-                          fontWeight: 600
-                        }}
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Schedule sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
-                        <Typography variant="body2">
-                          {formatDate(quote.created_at)}
-                        </Typography>
-                      </Box>
-                    </TableCell>
-                    <TableCell>
-                      <IconButton
-                        size="small"
-                        onClick={(e) => handleActionMenuOpen(e, quote)}
-                      >
-                        <MoreVert />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-          <TablePagination
-            rowsPerPageOptions={[10, 25, 50, 100]}
-            component="div"
-            count={totalCount}
-            rowsPerPage={rowsPerPage}
-            page={page}
-            onPageChange={handleChangePage}
-            onRowsPerPageChange={handleChangeRowsPerPage}
-          />
-        </TableContainer>
-
-        {/* Action Menu */}
-        <Menu
-          anchorEl={actionMenuAnchor}
-          open={Boolean(actionMenuAnchor)}
-          onClose={handleActionMenuClose}
-        >
-          <MenuItem onClick={() => handleViewQuote(actionMenuQuote!)}>
-            <ListItemIcon>
-              <Visibility fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>View Details</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={() => handleEditQuote(actionMenuQuote!)}>
-            <ListItemIcon>
-              <Edit fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Edit</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={() => handleDownloadPDF(actionMenuQuote!)}>
-            <ListItemIcon>
-              <GetApp fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Download PDF</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={() => handleSendQuote(actionMenuQuote!)}>
-            <ListItemIcon>
-              <Send fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Send Quote</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={() => handleDuplicateQuote(actionMenuQuote!)}>
-            <ListItemIcon>
-              <FileCopy fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Duplicate</ListItemText>
-          </MenuItem>
-          {actionMenuQuote?.status === 'Accepted' && (
-            <MenuItem onClick={() => handleConvertToContract(actionMenuQuote!)}>
-              <ListItemIcon>
-                <Assignment fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>Convert to Contract</ListItemText>
-            </MenuItem>
-          )}
-          <Divider />
-          <MenuItem
-            onClick={() => handleDeleteQuote(actionMenuQuote!)}
-            sx={{ color: 'error.main' }}
-          >
-            <ListItemIcon>
-              <Delete fontSize="small" sx={{ color: 'error.main' }} />
-            </ListItemIcon>
-            <ListItemText>Delete</ListItemText>
-          </MenuItem>
-        </Menu>
-
-        {/* Quote Form */}
-        <QuoteForm
-          open={formOpen}
-          onClose={() => setFormOpen(false)}
-          onSave={handleQuoteSave}
-          quote={selectedQuote}
-          mode={formMode}
-          companies={companies}
-          contacts={contacts}
-          opportunities={opportunities}
+              ))
+            )}
+          </TableBody>
+        </Table>
+        <TablePagination
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          component="div"
+          count={totalCount}
+          rowsPerPage={rowsPerPage}
+          page={page}
+          onPageChange={handleChangePage}
+          onRowsPerPageChange={handleChangeRowsPerPage}
         />
+      </TableContainer>
 
-        {/* Quote Detail */}
-        <QuoteDetail
-          open={detailOpen}
-          onClose={() => setDetailOpen(false)}
-          quote={selectedQuote}
-          onQuoteUpdate={loadQuotes}
-        />
-
-        {/* Email Send Dialog */}
-        {emailQuote && (
-          <EmailSendDialog
-            open={emailDialogOpen}
-            onClose={() => setEmailDialogOpen(false)}
-            documentType="quote"
-            documentId={emailQuote.id}
-            documentNumber={emailQuote.quote_number}
-            companyName={emailQuote.company_name}
-            contacts={emailContacts}
-            onSendSuccess={handleEmailSuccess}
-            onSendEmail={handleEmailSend}
-            documentDetails={{
-              currency: emailQuote.currency,
-              totalValue: emailQuote.total_value,
-              validUntil: emailQuote.valid_until,
-            }}
-          />
+      {/* Action Menu */}
+      <Menu
+        anchorEl={actionMenuAnchor}
+        open={Boolean(actionMenuAnchor)}
+        onClose={handleActionMenuClose}
+      >
+        <MenuItem onClick={() => handleViewQuote(actionMenuQuote!)}>
+          <ListItemIcon>
+            <Visibility fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>View Details</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleEditQuote(actionMenuQuote!)}>
+          <ListItemIcon>
+            <Edit fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Edit</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleDownloadPDF(actionMenuQuote!)}>
+          <ListItemIcon>
+            <GetApp fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Download PDF</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleSendQuote(actionMenuQuote!)}>
+          <ListItemIcon>
+            <Send fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Send Quote</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleDuplicateQuote(actionMenuQuote!)}>
+          <ListItemIcon>
+            <FileCopy fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Duplicate</ListItemText>
+        </MenuItem>
+        {actionMenuQuote?.status === 'Accepted' && (
+          <MenuItem onClick={() => handleConvertToContract(actionMenuQuote!)}>
+            <ListItemIcon>
+              <Assignment fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Convert to Contract</ListItemText>
+          </MenuItem>
         )}
-
-        {/* Convert to Contract Dialog */}
-        <Dialog open={convertDialogOpen} onClose={() => setConvertDialogOpen(false)} maxWidth="sm" fullWidth>
-          <DialogTitle>Convert Quote to Contract</DialogTitle>
-          <DialogContent>
-            <Typography variant="body1" sx={{ mb: 2 }}>
-              Are you sure you want to convert this quote to a contract? This action will:
-            </Typography>
-            <Box component="ul" sx={{ pl: 2, mb: 2 }}>
-              <li>Create a new contract with the quote details</li>
-              <li>Set the quote status to "Converted"</li>
-              <li>Link the contract to the original quote</li>
-            </Box>
-            <Typography variant="body2" color="text.secondary">
-              Quote: <strong>{convertingQuote?.quote_number}</strong>
-            </Typography>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setConvertDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleConvertConfirm} variant="contained">
-              Convert to Contract
-            </Button>
-          </DialogActions>
-        </Dialog>
-
-        {/* Success Snackbar */}
-        <Snackbar
-          open={!!success}
-          autoHideDuration={6000}
-          onClose={() => setSuccess('')}
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        <Divider />
+        <MenuItem
+          onClick={() => handleDeleteQuote(actionMenuQuote!)}
+          sx={{ color: 'error.main' }}
         >
-          <Alert onClose={() => setSuccess('')} severity="success">
-            {success}
-          </Alert>
-        </Snackbar>
-      </Box>
-    </LocalizationProvider>
+          <ListItemIcon>
+            <Delete fontSize="small" sx={{ color: 'error.main' }} />
+          </ListItemIcon>
+          <ListItemText>Delete</ListItemText>
+        </MenuItem>
+      </Menu>
+
+      {/* Quote Form */}
+      <QuoteForm
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        onSave={handleQuoteSave}
+        quote={selectedQuote}
+        mode={formMode}
+        companies={companies}
+        contacts={contacts}
+        opportunities={opportunities}
+      />
+
+      {/* Quote Detail */}
+      <QuoteDetail
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        quote={selectedQuote}
+        onQuoteUpdate={loadQuotes}
+      />
+
+      {/* Email Send Dialog */}
+      {emailQuote && (
+        <EmailSendDialog
+          open={emailDialogOpen}
+          onClose={() => setEmailDialogOpen(false)}
+          documentType="quote"
+          documentId={emailQuote.id}
+          documentNumber={emailQuote.quote_number}
+          companyName={emailQuote.company_name}
+          contacts={emailContacts}
+          onSendSuccess={handleEmailSuccess}
+          onSendEmail={handleEmailSend}
+          documentDetails={{
+            currency: emailQuote.currency,
+            totalValue: emailQuote.total_value,
+            validUntil: emailQuote.valid_until,
+          }}
+        />
+      )}
+
+      {/* Convert to Contract Dialog */}
+      <Dialog open={convertDialogOpen} onClose={() => setConvertDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Convert Quote to Contract</DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" sx={{ mb: 2 }}>
+            Are you sure you want to convert this quote to a contract? This action will:
+          </Typography>
+          <Box component="ul" sx={{ pl: 2, mb: 2 }}>
+            <li>Create a new contract with the quote details</li>
+            <li>Set the quote status to "Converted"</li>
+            <li>Link the contract to the original quote</li>
+          </Box>
+          <Typography variant="body2" color="text.secondary">
+            Quote: <strong>{convertingQuote?.quote_number}</strong>
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConvertDialogOpen(false)}>Cancel</Button>
+          <Button onClick={handleConvertConfirm} variant="contained">
+            Convert to Contract
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Success Snackbar */}
+      <Snackbar
+        open={!!success}
+        autoHideDuration={6000}
+        onClose={() => setSuccess('')}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={() => setSuccess('')} severity="success">
+          {success}
+        </Alert>
+      </Snackbar>
+    </Box>
   );
 };
 

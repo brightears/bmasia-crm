@@ -4031,7 +4031,7 @@ class QuoteViewSet(BaseModelViewSet):
     ).select_related('company', 'contact', 'opportunity', 'created_by')
     serializer_class = QuoteSerializer
     search_fields = ['quote_number', 'company__name', 'notes']
-    ordering_fields = ['created_at', 'quote_number', 'total_value', 'valid_until', 'status']
+    ordering_fields = ['created_at', 'quote_number', 'total_value', 'valid_until', 'status', 'updated_at', 'company__name']
     ordering = ['-created_at']
     filterset_fields = ['company', 'status', 'contact', 'opportunity', 'currency']
 
