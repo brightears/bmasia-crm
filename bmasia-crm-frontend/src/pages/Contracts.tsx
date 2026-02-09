@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -21,7 +21,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  GridLegacy as Grid,
   Menu,
   ListItemIcon,
   ListItemText,
@@ -35,7 +34,6 @@ import {
   Edit,
   Visibility,
   Delete,
-  FilterList,
   MoreVert,
   Business,
   CalendarToday,
@@ -46,10 +44,8 @@ import {
   GetApp,
   Email,
   Autorenew,
+  Sort,
 } from '@mui/icons-material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useSearchParams } from 'react-router-dom';
 import { Contract, ApiResponse, Contact } from '../types';
 import ApiService, { EmailSendData } from '../services/api';
@@ -73,6 +69,15 @@ const typeOptions = [
   { value: 'Custom', label: 'Custom' },
 ];
 
+const sortOptions = [
+  { value: '-start_date', label: 'Start Date (Newest)' },
+  { value: 'start_date', label: 'Start Date (Oldest)' },
+  { value: 'end_date', label: 'Ending Soonest' },
+  { value: '-value', label: 'Highest Value' },
+  { value: 'company__name', label: 'Company' },
+  { value: 'contract_number', label: 'Contract Number' },
+];
+
 const Contracts: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -90,8 +95,7 @@ const Contracts: React.FC = () => {
   // Filters
   const [statusFilter, setStatusFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
-  const [startDate, setStartDate] = useState<Date | null>(null);
-  const [endDate, setEndDate] = useState<Date | null>(null);
+  const [sortBy, setSortBy] = useState('-start_date');
 
   // Form state
   const [formOpen, setFormOpen] = useState(false);
@@ -123,23 +127,18 @@ const Contracts: React.FC = () => {
     }
   }, [searchParams, setSearchParams]);
 
-  useEffect(() => {
-    loadContracts();
-  }, [page, rowsPerPage, search, statusFilter, typeFilter, startDate, endDate]);
-
-  const loadContracts = async () => {
+  const loadContracts = useCallback(async () => {
     try {
       setLoading(true);
       const params: any = {
         page: page + 1,
         page_size: rowsPerPage,
+        ordering: sortBy,
       };
 
       if (search) params.search = search;
       if (statusFilter) params.status = statusFilter;
       if (typeFilter) params.contract_type = typeFilter;
-      if (startDate) params.start_date_after = startDate.toISOString().split('T')[0];
-      if (endDate) params.end_date_before = endDate.toISOString().split('T')[0];
 
       const response: ApiResponse<Contract> = await ApiService.getContracts(params);
       setContracts(response.results);
@@ -150,10 +149,19 @@ const Contracts: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, rowsPerPage, search, statusFilter, typeFilter, sortBy]);
+
+  useEffect(() => {
+    loadContracts();
+  }, [loadContracts]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(event.target.value);
+    setPage(0);
+  };
+
+  const handleSortChange = (event: any) => {
+    setSortBy(event.target.value);
     setPage(0);
   };
 
@@ -251,15 +259,6 @@ const Contracts: React.FC = () => {
     return colorMap[statusOption.color] || 'default';
   };
 
-  const clearFilters = () => {
-    setStatusFilter('');
-    setTypeFilter('');
-    setStartDate(null);
-    setEndDate(null);
-    setSearch('');
-    setPage(0);
-  };
-
   const handleSendEmail = async (contract: Contract) => {
     try {
       // Fetch full contract details with company contacts
@@ -319,13 +318,34 @@ const Contracts: React.FC = () => {
     setActionMenuAnchor(null);
   };
 
-  const renderFilters = () => (
-    <Paper sx={{ p: 2, mb: 2 }}>
-      <Grid container spacing={2} alignItems="center">
-        <Grid item xs={12} sm={6} md={3}>
+  return (
+    <Box>
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h4" component="h1">
+          Contracts
+        </Typography>
+        <Button
+          variant="contained"
+          startIcon={<Add />}
+          onClick={handleCreateContract}
+          size={isMobile ? "small" : "medium"}
+        >
+          New Contract
+        </Button>
+      </Box>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Filters */}
+      <Paper sx={{ mb: 2 }}>
+        <Box sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
           <TextField
             fullWidth
-            size="small"
             placeholder="Search contracts..."
             value={search}
             onChange={handleSearchChange}
@@ -337,44 +357,38 @@ const Contracts: React.FC = () => {
               ),
             }}
           />
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={2}>
-          <FormControl fullWidth size="small">
+          <FormControl size="small" sx={{ minWidth: 160 }}>
             <InputLabel>Status</InputLabel>
             <Select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => { setStatusFilter(e.target.value); setPage(0); }}
               label="Status"
             >
               {statusOptions.map((status) => (
                 <MenuItem key={status.value} value={status.value}>
-                  {status.value && status.color && (
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    {status.value && status.color && (
                       <Box
                         sx={{
-                          width: 12,
-                          height: 12,
+                          width: 10,
+                          height: 10,
                           borderRadius: '50%',
                           backgroundColor: status.color,
                           mr: 1,
                         }}
                       />
-                    </Box>
-                  )}
-                  {status.label}
+                    )}
+                    {status.label}
+                  </Box>
                 </MenuItem>
               ))}
             </Select>
           </FormControl>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={2}>
-          <FormControl fullWidth size="small">
+          <FormControl size="small" sx={{ minWidth: 140 }}>
             <InputLabel>Type</InputLabel>
             <Select
               value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
+              onChange={(e) => { setTypeFilter(e.target.value); setPage(0); }}
               label="Type"
             >
               {typeOptions.map((type) => (
@@ -384,307 +398,248 @@ const Contracts: React.FC = () => {
               ))}
             </Select>
           </FormControl>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={2}>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
-            <DatePicker
-              label="Start Date"
-              value={startDate}
-              onChange={setStartDate}
-              slotProps={{
-                textField: {
-                  size: 'small',
-                  fullWidth: true,
-                },
-              }}
-            />
-          </LocalizationProvider>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={2}>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
-            <DatePicker
-              label="End Date"
-              value={endDate}
-              onChange={setEndDate}
-              slotProps={{
-                textField: {
-                  size: 'small',
-                  fullWidth: true,
-                },
-              }}
-            />
-          </LocalizationProvider>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={1}>
-          <Button
-            variant="outlined"
-            onClick={clearFilters}
-            size="small"
-            sx={{ minWidth: 'auto' }}
-          >
-            Clear
-          </Button>
-        </Grid>
-      </Grid>
-    </Paper>
-  );
-
-  return (
-    <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Box>
-        {/* Header */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h4" component="h1">
-            Contracts
-          </Typography>
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={handleCreateContract}
-            size={isMobile ? "small" : "medium"}
-          >
-            New Contract
-          </Button>
+          <FormControl size="small" sx={{ minWidth: 220 }}>
+            <Select
+              value={sortBy}
+              onChange={handleSortChange}
+              startAdornment={<Sort sx={{ mr: 0.5, ml: -0.5, color: 'text.secondary', fontSize: 20 }} />}
+              sx={{ '& .MuiSelect-select': { display: 'flex', alignItems: 'center' } }}
+            >
+              {sortOptions.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
         </Box>
+      </Paper>
 
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
-            {error}
-          </Alert>
-        )}
-
-        {/* Filters */}
-        {renderFilters()}
-
-        {/* Contracts Table */}
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
+      {/* Contracts Table */}
+      <TableContainer component={Paper}>
+        <Table>
+          <TableHead>
+            <TableRow>
+              <TableCell>Contract Number</TableCell>
+              <TableCell>Company</TableCell>
+              <TableCell>Start Date</TableCell>
+              <TableCell>End Date</TableCell>
+              <TableCell>Value</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell>Type</TableCell>
+              <TableCell>Renewal</TableCell>
+              <TableCell>Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {loading ? (
               <TableRow>
-                <TableCell>Contract Number</TableCell>
-                <TableCell>Company</TableCell>
-                <TableCell>Start Date</TableCell>
-                <TableCell>End Date</TableCell>
-                <TableCell>Value</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Type</TableCell>
-                <TableCell>Renewal Date</TableCell>
-                <TableCell>Actions</TableCell>
+                <TableCell colSpan={9} align="center">
+                  <CircularProgress />
+                </TableCell>
               </TableRow>
-            </TableHead>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={9} align="center">
-                    <CircularProgress />
+            ) : contracts.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={9} align="center">
+                  <Box sx={{ py: 4 }}>
+                    <Assignment sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                    <Typography variant="h6" color="text.secondary">
+                      No contracts found
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {search || statusFilter || typeFilter ? 'Try adjusting your filters' : 'Start by creating your first contract'}
+                    </Typography>
+                  </Box>
+                </TableCell>
+              </TableRow>
+            ) : (
+              contracts.map((contract) => (
+                <TableRow key={contract.id} hover>
+                  <TableCell>
+                    <Typography variant="body2" fontWeight="medium">
+                      {contract.contract_number}
+                    </Typography>
                   </TableCell>
-                </TableRow>
-              ) : contracts.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={9} align="center">
-                    <Box sx={{ py: 4 }}>
-                      <Assignment sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                      <Typography variant="h6" color="text.secondary">
-                        No contracts found
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {search || statusFilter || typeFilter ? 'Try adjusting your filters' : 'Start by creating your first contract'}
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <Business sx={{ mr: 1, color: 'text.secondary' }} />
+                      <Typography variant="body2">
+                        {contract.company_name}
                       </Typography>
                     </Box>
                   </TableCell>
-                </TableRow>
-              ) : (
-                contracts.map((contract) => (
-                  <TableRow key={contract.id} hover>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight="medium">
-                        {contract.contract_number}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Business sx={{ mr: 1, color: 'text.secondary' }} />
-                        <Typography variant="body2">
-                          {contract.company_name}
-                        </Typography>
-                      </Box>
-                    </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <CalendarToday sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
-                        <Typography variant="body2">
-                          {formatDate(contract.start_date)}
-                        </Typography>
-                      </Box>
-                    </TableCell>
-                    <TableCell>
-                      <Typography
-                        variant="body2"
-                        sx={{
-                          color: contract.is_expiring_soon ? 'warning.main' : 'text.primary',
-                          display: 'flex',
-                          alignItems: 'center',
-                        }}
-                      >
-                        <CalendarToday sx={{ fontSize: 16, mr: 0.5 }} />
-                        {formatDate(contract.end_date)}
-                        {contract.is_expiring_soon && (
-                          <Warning sx={{ fontSize: 16, ml: 0.5, color: 'warning.main' }} />
-                        )}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <AttachMoney sx={{ fontSize: 16, color: 'text.secondary' }} />
-                        <Typography variant="body2">
-                          {formatCurrency(contract.value, contract.currency)}
-                        </Typography>
-                      </Box>
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={contract.status}
-                        size="small"
-                        color={getStatusColor(contract.status)}
-                      />
-                    </TableCell>
-                    <TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <CalendarToday sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
                       <Typography variant="body2">
-                        {contract.contract_type}
+                        {formatDate(contract.start_date)}
                       </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Refresh sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
-                        <Typography variant="body2">
-                          {contract.auto_renew ? 'Auto' : 'Manual'}
-                        </Typography>
-                      </Box>
-                    </TableCell>
-                    <TableCell>
-                      <IconButton
-                        size="small"
-                        onClick={(e) => handleActionMenuOpen(e, contract)}
-                      >
-                        <MoreVert />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-          <TablePagination
-            rowsPerPageOptions={[10, 25, 50, 100]}
-            component="div"
-            count={totalCount}
-            rowsPerPage={rowsPerPage}
-            page={page}
-            onPageChange={handleChangePage}
-            onRowsPerPageChange={handleChangeRowsPerPage}
-          />
-        </TableContainer>
-
-        {/* Contract Form */}
-        <ContractForm
-          open={formOpen}
-          onClose={() => setFormOpen(false)}
-          onSave={handleContractSave}
-          contract={selectedContract}
-          mode={formMode}
+                    </Box>
+                  </TableCell>
+                  <TableCell>
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        color: contract.is_expiring_soon ? 'warning.main' : 'text.primary',
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <CalendarToday sx={{ fontSize: 16, mr: 0.5 }} />
+                      {formatDate(contract.end_date)}
+                      {contract.is_expiring_soon && (
+                        <Warning sx={{ fontSize: 16, ml: 0.5, color: 'warning.main' }} />
+                      )}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <AttachMoney sx={{ fontSize: 16, color: 'text.secondary' }} />
+                      <Typography variant="body2">
+                        {formatCurrency(contract.value, contract.currency)}
+                      </Typography>
+                    </Box>
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={contract.status}
+                      size="small"
+                      color={getStatusColor(contract.status)}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="body2">
+                      {contract.contract_type}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <Refresh sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
+                      <Typography variant="body2">
+                        {contract.auto_renew ? 'Auto' : 'Manual'}
+                      </Typography>
+                    </Box>
+                  </TableCell>
+                  <TableCell>
+                    <IconButton
+                      size="small"
+                      onClick={(e) => handleActionMenuOpen(e, contract)}
+                    >
+                      <MoreVert />
+                    </IconButton>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+        <TablePagination
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          component="div"
+          count={totalCount}
+          rowsPerPage={rowsPerPage}
+          page={page}
+          onPageChange={handleChangePage}
+          onRowsPerPageChange={handleChangeRowsPerPage}
         />
+      </TableContainer>
 
-        {/* Contract Detail */}
-        <ContractDetail
-          open={detailOpen}
-          onClose={() => setDetailOpen(false)}
-          onEdit={handleEditContract}
-          contractId={detailContractId}
+      {/* Contract Form */}
+      <ContractForm
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        onSave={handleContractSave}
+        contract={selectedContract}
+        mode={formMode}
+      />
+
+      {/* Contract Detail */}
+      <ContractDetail
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        onEdit={handleEditContract}
+        contractId={detailContractId}
+      />
+
+      {/* Email Send Dialog */}
+      {emailContract && (
+        <EmailSendDialog
+          open={emailDialogOpen}
+          onClose={() => setEmailDialogOpen(false)}
+          documentType="contract"
+          documentId={emailContract.id}
+          documentNumber={emailContract.contract_number}
+          companyName={emailContract.company_name}
+          contacts={emailContacts}
+          onSendSuccess={handleEmailSuccess}
+          onSendEmail={handleEmailSend}
+          documentDetails={{
+            currency: emailContract.currency,
+            totalValue: emailContract.value,
+            startDate: emailContract.start_date,
+            endDate: emailContract.end_date,
+          }}
         />
+      )}
 
-        {/* Email Send Dialog */}
-        {emailContract && (
-          <EmailSendDialog
-            open={emailDialogOpen}
-            onClose={() => setEmailDialogOpen(false)}
-            documentType="contract"
-            documentId={emailContract.id}
-            documentNumber={emailContract.contract_number}
-            companyName={emailContract.company_name}
-            contacts={emailContacts}
-            onSendSuccess={handleEmailSuccess}
-            onSendEmail={handleEmailSend}
-            documentDetails={{
-              currency: emailContract.currency,
-              totalValue: emailContract.value,
-              startDate: emailContract.start_date,
-              endDate: emailContract.end_date,
-            }}
-          />
-        )}
-
-        {/* Action Menu */}
-        <Menu
-          anchorEl={actionMenuAnchor}
-          open={Boolean(actionMenuAnchor)}
-          onClose={handleActionMenuClose}
+      {/* Action Menu */}
+      <Menu
+        anchorEl={actionMenuAnchor}
+        open={Boolean(actionMenuAnchor)}
+        onClose={handleActionMenuClose}
+      >
+        <MenuItem onClick={() => handleViewContract(actionMenuContract!)}>
+          <ListItemIcon>
+            <Visibility fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>View Details</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleEditContract(actionMenuContract!)}>
+          <ListItemIcon>
+            <Edit fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Edit</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleSendEmail(actionMenuContract!)}>
+          <ListItemIcon>
+            <Email fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Send Email</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleDownloadPDF(actionMenuContract!)}>
+          <ListItemIcon>
+            <GetApp fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Download PDF</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => handleDuplicateForRenewal(actionMenuContract!)}
+          disabled={actionMenuContract?.status !== 'Active'}
         >
-          <MenuItem onClick={() => handleViewContract(actionMenuContract!)}>
-            <ListItemIcon>
-              <Visibility fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>View Details</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={() => handleEditContract(actionMenuContract!)}>
-            <ListItemIcon>
-              <Edit fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Edit</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={() => handleSendEmail(actionMenuContract!)}>
-            <ListItemIcon>
-              <Email fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Send Email</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={() => handleDownloadPDF(actionMenuContract!)}>
-            <ListItemIcon>
-              <GetApp fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Download PDF</ListItemText>
-          </MenuItem>
-          <MenuItem
-            onClick={() => handleDuplicateForRenewal(actionMenuContract!)}
-            disabled={actionMenuContract?.status !== 'Active'}
-          >
-            <ListItemIcon>
-              <Autorenew fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>Duplicate for Renewal</ListItemText>
-          </MenuItem>
-          <Divider />
-          <MenuItem
-            onClick={() => handleDeleteContract(actionMenuContract!)}
-            sx={{ color: 'error.main' }}
-          >
-            <ListItemIcon>
-              <Delete fontSize="small" sx={{ color: 'error.main' }} />
-            </ListItemIcon>
-            <ListItemText>Delete</ListItemText>
-          </MenuItem>
-        </Menu>
+          <ListItemIcon>
+            <Autorenew fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Duplicate for Renewal</ListItemText>
+        </MenuItem>
+        <Divider />
+        <MenuItem
+          onClick={() => handleDeleteContract(actionMenuContract!)}
+          sx={{ color: 'error.main' }}
+        >
+          <ListItemIcon>
+            <Delete fontSize="small" sx={{ color: 'error.main' }} />
+          </ListItemIcon>
+          <ListItemText>Delete</ListItemText>
+        </MenuItem>
+      </Menu>
 
-        {/* Success Snackbar */}
-        {success && (
-          <Alert severity="success" sx={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999 }}>
-            {success}
-          </Alert>
-        )}
-      </Box>
-    </LocalizationProvider>
+      {/* Success Snackbar */}
+      {success && (
+        <Alert severity="success" sx={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999 }}>
+          {success}
+        </Alert>
+      )}
+    </Box>
   );
 };
 

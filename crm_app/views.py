@@ -698,7 +698,7 @@ class ContractViewSet(BaseModelViewSet):
     queryset = Contract.objects.all()
     serializer_class = ContractSerializer
     search_fields = ['contract_number', 'company__name']
-    ordering_fields = ['created_at', 'start_date', 'end_date', 'value']
+    ordering_fields = ['created_at', 'start_date', 'end_date', 'value', 'updated_at', 'company__name', 'contract_number']
     ordering = ['-start_date']
     filterset_fields = ['company', 'contract_type', 'status', 'auto_renew', 'is_active', 'contract_category']
     
