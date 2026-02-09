@@ -571,7 +571,7 @@ class ContactViewSet(BaseModelViewSet):
     queryset = Contact.objects.all()
     serializer_class = ContactSerializer
     search_fields = ['name', 'email', 'phone', 'title', 'company__name']
-    ordering_fields = ['name', 'email', 'created_at', 'last_contacted']
+    ordering_fields = ['name', 'email', 'created_at', 'updated_at', 'last_contacted', 'company__name']
     ordering = ['name']
     filterset_fields = ['company', 'contact_type', 'is_primary', 'is_active']
 

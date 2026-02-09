@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -21,7 +21,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  GridLegacy as Grid,
   Tooltip,
   Avatar,
   Menu,
@@ -35,19 +34,26 @@ import {
   Delete,
   Visibility,
   Email,
-  Phone,
   MoreVert,
   People,
   Business,
   LinkedIn,
-  FilterList,
-  Clear,
+  Sort,
 } from '@mui/icons-material';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Contact, Company, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import ContactForm from '../components/ContactForm';
 import ContactDetail from '../components/ContactDetail';
+
+const sortOptions = [
+  { value: 'name', label: 'Name A-Z' },
+  { value: '-name', label: 'Name Z-A' },
+  { value: '-created_at', label: 'Newest First' },
+  { value: 'created_at', label: 'Oldest First' },
+  { value: '-updated_at', label: 'Recently Updated' },
+  { value: 'company__name', label: 'Company' },
+];
 
 const Contacts: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -64,8 +70,7 @@ const Contacts: React.FC = () => {
   // Filters
   const [selectedCompany, setSelectedCompany] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [sortBy, setSortBy] = useState('name');
 
   // Modals
   const [formOpen, setFormOpen] = useState(false);
@@ -89,12 +94,7 @@ const Contacts: React.FC = () => {
     }
   }, [searchParams, setSearchParams]);
 
-  useEffect(() => {
-    loadContacts();
-    loadCompanies();
-  }, [page, rowsPerPage, search, selectedCompany, selectedStatus, dateFrom, dateTo]);
-
-  const loadContacts = async () => {
+  const loadContacts = useCallback(async () => {
     try {
       setLoading(true);
       const params: any = {
@@ -102,10 +102,8 @@ const Contacts: React.FC = () => {
         page_size: rowsPerPage,
         search: search || undefined,
         company: selectedCompany || undefined,
-        status: selectedStatus || undefined,
-        created_after: dateFrom || undefined,
-        created_before: dateTo || undefined,
-        ordering: '-created_at',
+        is_active: selectedStatus === 'Active' ? true : selectedStatus === 'Inactive' ? false : undefined,
+        ordering: sortBy,
       };
 
       const response: ApiResponse<Contact> = await ApiService.getContacts(params);
@@ -117,7 +115,7 @@ const Contacts: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, rowsPerPage, search, selectedCompany, selectedStatus, sortBy]);
 
   const loadCompanies = async () => {
     try {
@@ -131,8 +129,21 @@ const Contacts: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    loadContacts();
+  }, [loadContacts]);
+
+  useEffect(() => {
+    loadCompanies();
+  }, []);
+
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(event.target.value);
+    setPage(0);
+  };
+
+  const handleSortChange = (event: any) => {
+    setSortBy(event.target.value);
     setPage(0);
   };
 
@@ -196,32 +207,6 @@ const Contacts: React.FC = () => {
     setMenuContact(null);
   };
 
-  const clearFilters = () => {
-    setSelectedCompany('');
-    setSelectedStatus('');
-    setDateFrom('');
-    setDateTo('');
-    setSearch('');
-    setPage(0);
-  };
-
-  const getStatusColor = (status: string) => {
-    return status === 'Active' ? 'success' : 'default';
-  };
-
-  const formatLastContacted = (date: string | undefined) => {
-    if (!date) return 'Never';
-    const contactDate = new Date(date);
-    const now = new Date();
-    const diffTime = Math.abs(now.getTime() - contactDate.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    if (diffDays === 1) return '1 day ago';
-    if (diffDays < 7) return `${diffDays} days ago`;
-    if (diffDays < 30) return `${Math.ceil(diffDays / 7)} weeks ago`;
-    return `${Math.ceil(diffDays / 30)} months ago`;
-  };
-
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -244,82 +229,63 @@ const Contacts: React.FC = () => {
       )}
 
       {/* Search and Filters */}
-      <Paper sx={{ mb: 2, p: 2 }}>
-        <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} md={4}>
-            <TextField
-              fullWidth
-              placeholder="Search contacts..."
-              value={search}
-              onChange={handleSearchChange}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search />
-                  </InputAdornment>
-                ),
-              }}
-            />
-          </Grid>
-          <Grid item xs={12} md={2}>
-            <FormControl fullWidth>
-              <InputLabel>Company</InputLabel>
-              <Select
-                value={selectedCompany}
-                onChange={(e) => setSelectedCompany(e.target.value)}
-                label="Company"
-              >
-                <MenuItem value="">All Companies</MenuItem>
-                {companies.map((company) => (
-                  <MenuItem key={company.id} value={company.id}>
-                    {company.name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} md={2}>
-            <FormControl fullWidth>
-              <InputLabel>Status</InputLabel>
-              <Select
-                value={selectedStatus}
-                onChange={(e) => setSelectedStatus(e.target.value)}
-                label="Status"
-              >
-                <MenuItem value="">All Status</MenuItem>
-                <MenuItem value="Active">Active</MenuItem>
-                <MenuItem value="Inactive">Inactive</MenuItem>
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} md={2}>
-            <TextField
-              fullWidth
-              type="date"
-              label="From Date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-            />
-          </Grid>
-          <Grid item xs={12} md={1}>
-            <TextField
-              fullWidth
-              type="date"
-              label="To Date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              InputLabelProps={{ shrink: true }}
-            />
-          </Grid>
-          <Grid item xs={12} md={1}>
-            <Tooltip title="Clear Filters">
-              <IconButton onClick={clearFilters} color="primary">
-                <Clear />
-              </IconButton>
-            </Tooltip>
-          </Grid>
-        </Grid>
+      <Paper sx={{ mb: 2 }}>
+        <Box sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
+          <TextField
+            fullWidth
+            placeholder="Search contacts..."
+            value={search}
+            onChange={handleSearchChange}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <Search />
+                </InputAdornment>
+              ),
+            }}
+          />
+          <FormControl size="small" sx={{ minWidth: 180 }}>
+            <InputLabel>Company</InputLabel>
+            <Select
+              value={selectedCompany}
+              onChange={(e) => { setSelectedCompany(e.target.value); setPage(0); }}
+              label="Company"
+            >
+              <MenuItem value="">All Companies</MenuItem>
+              {companies.map((company) => (
+                <MenuItem key={company.id} value={company.id}>
+                  {company.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 140 }}>
+            <InputLabel>Status</InputLabel>
+            <Select
+              value={selectedStatus}
+              onChange={(e) => { setSelectedStatus(e.target.value); setPage(0); }}
+              label="Status"
+            >
+              <MenuItem value="">All</MenuItem>
+              <MenuItem value="Active">Active</MenuItem>
+              <MenuItem value="Inactive">Inactive</MenuItem>
+            </Select>
+          </FormControl>
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <Select
+              value={sortBy}
+              onChange={handleSortChange}
+              startAdornment={<Sort sx={{ mr: 0.5, ml: -0.5, color: 'text.secondary', fontSize: 20 }} />}
+              sx={{ '& .MuiSelect-select': { display: 'flex', alignItems: 'center' } }}
+            >
+              {sortOptions.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
       </Paper>
 
       <TableContainer component={Paper}>
@@ -331,7 +297,6 @@ const Contacts: React.FC = () => {
               <TableCell>Company</TableCell>
               <TableCell>Email</TableCell>
               <TableCell>Phone</TableCell>
-              <TableCell>Last Contact</TableCell>
               <TableCell>Status</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
@@ -339,13 +304,13 @@ const Contacts: React.FC = () => {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={8} align="center">
+                <TableCell colSpan={7} align="center">
                   <CircularProgress />
                 </TableCell>
               </TableRow>
             ) : contacts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} align="center">
+                <TableCell colSpan={7} align="center">
                   <Box sx={{ py: 4 }}>
                     <People sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
                     <Typography variant="h6" color="text.secondary">
@@ -367,7 +332,6 @@ const Contacts: React.FC = () => {
                 const initials = nameParts.length >= 2
                   ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`
                   : contact.name.substring(0, 2);
-                const status = contact.is_active ? 'Active' : 'Inactive';
                 const isDecisionMaker = contact.contact_type === 'Decision Maker';
 
                 return (
@@ -411,16 +375,13 @@ const Contacts: React.FC = () => {
                       ) : '-'}
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2">
-                        {formatLastContacted(contact.last_contacted)}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Chip
-                        label={status}
-                        size="small"
-                        color={getStatusColor(status)}
-                      />
+                      {!contact.is_active && (
+                        <Chip
+                          label="Inactive"
+                          size="small"
+                          color="default"
+                        />
+                      )}
                     </TableCell>
                     <TableCell>
                       <Box sx={{ display: 'flex', alignItems: 'center' }}>
