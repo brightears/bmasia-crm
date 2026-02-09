@@ -540,7 +540,13 @@ const TicketDetail: React.FC = () => {
                   <Typography variant="body2" color="text.secondary" gutterBottom>
                     Company
                   </Typography>
-                  <Typography variant="body2">{ticket.company_name}</Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{ color: 'primary.main', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+                    onClick={() => navigate(`/companies/${ticket.company}`)}
+                  >
+                    {ticket.company_name}
+                  </Typography>
                 </Box>
                 {ticket.contact_name && (
                   <Box>

@@ -956,9 +956,37 @@ class ApiService {
     return response;
   }
 
+  async createKBCategory(data: Partial<any>): Promise<any> {
+    const response = await authApi.post('/kb/categories/', data);
+    return response.data;
+  }
+
+  async updateKBCategory(id: string, data: Partial<any>): Promise<any> {
+    const response = await authApi.patch(`/kb/categories/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteKBCategory(id: string): Promise<void> {
+    await authApi.delete(`/kb/categories/${id}/`);
+  }
+
   async getKBTags(): Promise<any> {
     const response = await authApi.get('/kb/tags/');
     return response;
+  }
+
+  async createKBTag(data: Partial<any>): Promise<any> {
+    const response = await authApi.post('/kb/tags/', data);
+    return response.data;
+  }
+
+  async updateKBTag(id: string, data: Partial<any>): Promise<any> {
+    const response = await authApi.patch(`/kb/tags/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteKBTag(id: string): Promise<void> {
+    await authApi.delete(`/kb/tags/${id}/`);
   }
 
   async getKBArticles(params?: {

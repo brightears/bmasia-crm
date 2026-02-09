@@ -35,6 +35,7 @@ import KnowledgeBase from './pages/KnowledgeBase';
 import KnowledgeBaseArticle from './pages/KnowledgeBaseArticle';
 import KBArticleNew from './pages/KBArticleNew';
 import KBArticleEdit from './pages/KBArticleEdit';
+import KBSettings from './pages/KBSettings';
 import ZonesUnified from './pages/ZonesUnified';
 import ZoneDetail from './pages/ZoneDetail';
 import ZoneNew from './pages/ZoneNew';
@@ -441,6 +442,14 @@ function App() {
           element={
             <ProtectedRoute requiredModule="tickets">
               <KBArticleEdit />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/knowledge-base/settings"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <KBSettings />
             </ProtectedRoute>
           }
         />

@@ -16,7 +16,7 @@ import {
   Select,
 } from '@mui/material';
 import { Cancel, Save } from '@mui/icons-material';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { addDays } from 'date-fns';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -45,6 +45,7 @@ const categoryOptions = [
 const TicketForm: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const isEditMode = Boolean(id);
 
   // Form state
@@ -101,8 +102,18 @@ const TicketForm: React.FC = () => {
 
   const loadCompanies = async () => {
     try {
-      const response = await ApiService.getCompanies();
+      const response = await ApiService.getCompanies({ page_size: 1000, ordering: 'name' });
       setCompanies(response.results);
+
+      // Auto-select company from query param (e.g., /tickets/new?company=uuid)
+      const preselectedCompanyId = searchParams.get('company');
+      if (preselectedCompanyId && !isEditMode) {
+        const found = response.results.find((c: Company) => c.id === preselectedCompanyId);
+        if (found) {
+          setSelectedCompany(found);
+          setCompany(found.id);
+        }
+      }
     } catch (err: any) {
       console.error('Failed to load companies:', err);
       setError('Failed to load companies');

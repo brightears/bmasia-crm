@@ -11,7 +11,7 @@ import {
   Button,
 } from '@mui/material';
 import { GridLegacy as Grid } from '@mui/material';
-import { Menu as MenuIcon, AddCircle } from '@mui/icons-material';
+import { Menu as MenuIcon, AddCircle, Settings as SettingsIcon } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { KBArticle, KBCategory, KBTag, ApiResponse } from '../types';
 import ApiService from '../services/api';
@@ -196,19 +196,30 @@ const KnowledgeBase: React.FC = () => {
             </Typography>
           </Box>
         </Box>
-        {canCreateArticles && (
-          <Button
-            variant="contained"
-            startIcon={<AddCircle />}
-            onClick={() => navigate('/knowledge-base/new')}
-            sx={{
-              bgcolor: '#FFA500',
-              '&:hover': { bgcolor: '#FF8C00' },
-            }}
-          >
-            New Article
-          </Button>
-        )}
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          {canCreateArticles && (
+            <Button
+              variant="outlined"
+              startIcon={<SettingsIcon />}
+              onClick={() => navigate('/knowledge-base/settings')}
+            >
+              Settings
+            </Button>
+          )}
+          {canCreateArticles && (
+            <Button
+              variant="contained"
+              startIcon={<AddCircle />}
+              onClick={() => navigate('/knowledge-base/new')}
+              sx={{
+                bgcolor: '#FFA500',
+                '&:hover': { bgcolor: '#FF8C00' },
+              }}
+            >
+              New Article
+            </Button>
+          )}
+        </Box>
       </Box>
 
       {/* Error Alert */}

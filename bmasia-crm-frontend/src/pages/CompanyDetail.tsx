@@ -48,9 +48,11 @@ import {
   Public,
   Category,
   Build,
+  SupportAgent,
+  ConfirmationNumber,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Company, Contact, Opportunity, Contract, Zone } from '../types';
+import { Company, Contact, Opportunity, Contract, Zone, Ticket } from '../types';
 import ApiService from '../services/api';
 import CompanyForm from '../components/CompanyForm';
 import ContactForm from '../components/ContactForm';
@@ -97,6 +99,7 @@ const CompanyDetail: React.FC = () => {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tabValue, setTabValue] = useState(0);
@@ -122,17 +125,19 @@ const CompanyDetail: React.FC = () => {
       setCompany(companyData);
 
       // Load related data
-      const [contactsResponse, opportunitiesResponse, contractsResponse, zonesResponse] = await Promise.all([
+      const [contactsResponse, opportunitiesResponse, contractsResponse, zonesResponse, ticketsResponse] = await Promise.all([
         ApiService.getContacts({ company: id }),
         ApiService.getOpportunities({ company: id }),
         ApiService.getContracts({ company: id }),
         ApiService.getZonesByCompany(id),
+        ApiService.getTickets({ company: id, page_size: 100 }),
       ]);
 
       setContacts(contactsResponse.results);
       setOpportunities(opportunitiesResponse.results);
       setContracts(contractsResponse.results);
       setZones(zonesResponse);
+      setTickets(ticketsResponse.results || []);
     } catch (err: any) {
       console.error('Company detail error:', err);
       setError('Failed to load company details');
@@ -400,6 +405,14 @@ const CompanyDetail: React.FC = () => {
                 </Button>
                 <Button
                   variant="outlined"
+                  startIcon={<SupportAgent />}
+                  onClick={() => navigate(`/tickets/new?company=${company.id}`)}
+                  fullWidth
+                >
+                  Create Ticket
+                </Button>
+                <Button
+                  variant="outlined"
                   startIcon={<PlaylistAdd />}
                   onClick={() => navigate(`/tasks/new?company=${company.id}`)}
                   fullWidth
@@ -419,7 +432,8 @@ const CompanyDetail: React.FC = () => {
           <Tab label={`Opportunities (${opportunities.length})`} {...a11yProps(1)} />
           <Tab label={`Contracts (${contracts.length})`} {...a11yProps(2)} />
           <Tab label={`Zones (${zones.length})`} {...a11yProps(3)} />
-          <Tab label="Subscription Plans" {...a11yProps(4)} />
+          <Tab label={`Support (${tickets.filter(t => !['resolved', 'closed'].includes(t.status)).length})`} {...a11yProps(4)} />
+          <Tab label="Subscription Plans" {...a11yProps(5)} />
         </Tabs>
 
         <TabPanel value={tabValue} index={0}>
@@ -819,6 +833,105 @@ const CompanyDetail: React.FC = () => {
         </TabPanel>
 
         <TabPanel value={tabValue} index={4}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+            <Typography variant="h6">
+              <SupportAgent sx={{ mr: 1, verticalAlign: 'bottom' }} />
+              Support Tickets
+            </Typography>
+            <Button
+              variant="contained"
+              size="small"
+              startIcon={<Add />}
+              onClick={() => navigate(`/tickets/new?company=${company.id}`)}
+              sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
+            >
+              New Ticket
+            </Button>
+          </Box>
+          {tickets.length > 0 ? (
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Ticket</TableCell>
+                    <TableCell>Subject</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell>Priority</TableCell>
+                    <TableCell>Assigned To</TableCell>
+                    <TableCell>Created</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {tickets.map((ticket) => (
+                    <TableRow
+                      key={ticket.id}
+                      hover
+                      sx={{ cursor: 'pointer' }}
+                      onClick={() => navigate(`/tickets/${ticket.id}`)}
+                    >
+                      <TableCell>
+                        <Typography variant="body2" fontWeight="medium">
+                          {ticket.ticket_number}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>{ticket.subject}</TableCell>
+                      <TableCell>
+                        <Chip
+                          label={ticket.status.replace('_', ' ')}
+                          size="small"
+                          color={
+                            ticket.status === 'resolved' || ticket.status === 'closed' ? 'success' :
+                            ticket.status === 'new' ? 'info' :
+                            ticket.status === 'in_progress' ? 'warning' :
+                            'default'
+                          }
+                          sx={{ textTransform: 'capitalize' }}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Chip
+                          label={ticket.priority}
+                          size="small"
+                          color={
+                            ticket.priority === 'urgent' ? 'error' :
+                            ticket.priority === 'high' ? 'warning' :
+                            ticket.priority === 'medium' ? 'info' :
+                            'default'
+                          }
+                          sx={{ textTransform: 'capitalize' }}
+                        />
+                      </TableCell>
+                      <TableCell>{ticket.assigned_to_name || 'Unassigned'}</TableCell>
+                      <TableCell>
+                        {new Date(ticket.created_at).toLocaleDateString()}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <SupportAgent sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+              <Typography variant="h6" color="text.secondary" gutterBottom>
+                No support tickets
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Create a support ticket when this company needs assistance
+              </Typography>
+              <Button
+                variant="contained"
+                startIcon={<Add />}
+                onClick={() => navigate(`/tickets/new?company=${company.id}`)}
+                sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
+              >
+                Create First Ticket
+              </Button>
+            </Box>
+          )}
+        </TabPanel>
+
+        <TabPanel value={tabValue} index={5}>
           {company.subscription_plans && company.subscription_plans.length > 0 ? (
             <Grid container spacing={2}>
               {company.subscription_plans.map((plan) => (
