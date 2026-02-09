@@ -22,6 +22,9 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
+  FormControl,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import {
   Add,
@@ -30,11 +33,21 @@ import {
   Visibility,
   Business,
   Delete,
+  Sort,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { Company, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import CompanyForm from '../components/CompanyForm';
+
+const sortOptions = [
+  { value: 'name', label: 'Name A-Z' },
+  { value: '-name', label: 'Name Z-A' },
+  { value: '-created_at', label: 'Newest First' },
+  { value: 'created_at', label: 'Oldest First' },
+  { value: '-updated_at', label: 'Recently Updated' },
+  { value: 'country', label: 'Country' },
+];
 
 const Companies: React.FC = () => {
   const navigate = useNavigate();
@@ -42,6 +55,7 @@ const Companies: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState('name');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [totalCount, setTotalCount] = useState(0);
@@ -59,26 +73,22 @@ const Companies: React.FC = () => {
         page: page + 1,
         page_size: rowsPerPage,
         search: search || undefined,
+        ordering: sortBy,
       };
 
-      console.log('Loading companies with params:', params);
       const response: ApiResponse<Company> = await ApiService.getCompanies(params);
-      console.log('Companies API response:', response);
-      console.log('Companies count:', response.count, 'Results:', response.results.length);
 
       setCompanies(response.results || []);
       setTotalCount(response.count || 0);
     } catch (err: any) {
-      console.error('Companies error - Full error object:', err);
-      console.error('Error response:', err.response);
-      console.error('Error message:', err.message);
+      console.error('Companies error:', err);
       setError(`Failed to load companies: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
       setCompanies([]);
       setTotalCount(0);
     } finally {
       setLoading(false);
     }
-  }, [page, rowsPerPage, search]);
+  }, [page, rowsPerPage, search, sortBy]);
 
   useEffect(() => {
     loadCompanies();
@@ -87,6 +97,11 @@ const Companies: React.FC = () => {
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(event.target.value);
     setPage(0); // Reset to first page when searching
+  };
+
+  const handleSortChange = (event: any) => {
+    setSortBy(event.target.value);
+    setPage(0); // Reset to first page when sorting
   };
 
   const handleChangePage = (event: unknown, newPage: number) => {
@@ -179,7 +194,7 @@ const Companies: React.FC = () => {
       )}
 
       <Paper sx={{ mb: 2 }}>
-        <Box sx={{ p: 2 }}>
+        <Box sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
           <TextField
             fullWidth
             placeholder="Search companies..."
@@ -193,6 +208,20 @@ const Companies: React.FC = () => {
               ),
             }}
           />
+          <FormControl size="small" sx={{ minWidth: 200 }}>
+            <Select
+              value={sortBy}
+              onChange={handleSortChange}
+              startAdornment={<Sort sx={{ mr: 0.5, ml: -0.5, color: 'text.secondary', fontSize: 20 }} />}
+              sx={{ '& .MuiSelect-select': { display: 'flex', alignItems: 'center' } }}
+            >
+              {sortOptions.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
         </Box>
       </Paper>
 
@@ -257,22 +286,22 @@ const Companies: React.FC = () => {
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    <Chip 
-                      label={company.opportunities_count} 
-                      size="small" 
+                    <Chip
+                      label={company.opportunities_count}
+                      size="small"
                       color={company.opportunities_count > 0 ? 'primary' : 'default'}
                     />
                   </TableCell>
                   <TableCell>
-                    <Chip 
-                      label={company.active_contracts_count} 
-                      size="small" 
+                    <Chip
+                      label={company.active_contracts_count}
+                      size="small"
                       color={company.active_contracts_count > 0 ? 'success' : 'default'}
                     />
                   </TableCell>
                   <TableCell>
-                    <Chip 
-                      label={company.is_active ? 'Active' : 'Inactive'} 
+                    <Chip
+                      label={company.is_active ? 'Active' : 'Inactive'}
                       size="small"
                       color={company.is_active ? 'success' : 'default'}
                     />

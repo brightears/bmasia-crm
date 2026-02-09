@@ -402,7 +402,7 @@ class CompanyViewSet(BaseModelViewSet):
     )
     serializer_class = CompanySerializer
     search_fields = ['name', 'website', 'notes', 'country']
-    ordering_fields = ['name', 'created_at', 'industry', 'country']
+    ordering_fields = ['name', 'created_at', 'updated_at', 'industry', 'country']
     ordering = ['name']
     # Inherits permission_classes = [AllowAny] from BaseModelViewSet for development
     filterset_fields = ['industry', 'is_active', 'country', 'is_corporate_parent', 'parent_company']
