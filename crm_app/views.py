@@ -4247,6 +4247,21 @@ class QuoteViewSet(BaseModelViewSet):
             self.log_action('CREATE', instance)
             return
 
+        # Infer service_type from quote line items
+        service_type = None
+        items = instance.line_items.all()
+        has_soundtrack = any('soundtrack' in (i.product_service or '').lower() for i in items)
+        has_beatbreeze = any('beat breeze' in (i.product_service or '').lower() for i in items)
+        if has_soundtrack and not has_beatbreeze:
+            service_type = 'soundtrack'
+        elif has_beatbreeze and not has_soundtrack:
+            service_type = 'beatbreeze'
+
+        # Build a meaningful opportunity name
+        service_labels = {'soundtrack': 'Soundtrack', 'beatbreeze': 'Beat Breeze'}
+        service_label = service_labels.get(service_type, 'New Deal')
+        opp_name = f"{instance.company.name} - {service_label}"
+
         # Look for an existing active opportunity for this company in early stages
         existing_opp = Opportunity.objects.filter(
             company=instance.company,
@@ -4261,16 +4276,21 @@ class QuoteViewSet(BaseModelViewSet):
             if existing_opp.stage == 'Contacted':
                 existing_opp.stage = 'Quotation Sent'
                 existing_opp.save(update_fields=['stage', 'updated_at'])
+            # Backfill service_type if the existing opportunity doesn't have one
+            if not existing_opp.service_type and service_type:
+                existing_opp.service_type = service_type
+                existing_opp.save(update_fields=['service_type', 'updated_at'])
         else:
             # Auto-create a new opportunity
             new_opp = Opportunity.objects.create(
                 company=instance.company,
-                name=f"Quote {instance.quote_number}",
+                name=opp_name,
                 stage='Quotation Sent',
                 owner=self.request.user,
                 expected_value=instance.total_value or 0,
                 probability=25,
                 lead_source='Other',
+                service_type=service_type,
             )
             instance.opportunity = new_opp
             instance.save(update_fields=['opportunity'])

@@ -2,6 +2,71 @@
 
 ## February 2026
 
+### Feb 10, 2026 - Service Type + Multi-Entity Pipeline Enhancement
+
+**Context**: BMAsia manages sales across a 2x2 matrix: 2 entities (Thailand THB / HK USD) x 2 services (Soundtrack / Beat Breeze). Previously tracked on 4 separate Google Sheets. CRM best practice research (Salesforce, HubSpot, Zoho, Pipedrive) confirmed: never mix currencies in pipeline totals; use a "Product/Service Line" field + filter dropdowns.
+
+**Backend — New `service_type` Field** (`crm_app/models.py`):
+- Added `SERVICE_TYPE_CHOICES`: `('soundtrack', 'Soundtrack')`, `('beatbreeze', 'Beat Breeze')`
+- `service_type = CharField(max_length=20, choices=..., blank=True, null=True)` — nullable for existing records
+- Index: `Index(fields=['service_type', 'stage'])`
+- Migration: `0057_opportunity_service_type.py`
+- Added to `OpportunitySerializer.Meta.fields`, `OpportunityViewSet.filterset_fields`, `OpportunityAdmin` (list_display, list_filter, fieldsets)
+
+**Remove "All Entities"** (Opportunities.tsx, SalesTargets.tsx):
+- Removed `'all'` option from entity dropdowns — mixing THB and USD is meaningless
+- Default entity: `'BMAsia Limited'` (from shared `DEFAULT_ENTITY` constant)
+- Entity param always sent to API (no conditional check)
+
+**Shared Constants** (`bmasia-crm-frontend/src/constants/entities.ts` — NEW):
+- `EntityFilter` type (no 'all'), `ServiceFilter` type ('all' | 'soundtrack' | 'beatbreeze')
+- `ENTITY_OPTIONS`, `SERVICE_OPTIONS`, `DEFAULT_ENTITY`, `ENTITY_CURRENCY`
+- Shared `formatCurrency(value, entity?)` and `getServiceLabel(serviceType)` functions
+- Eliminates 5+ duplicated formatCurrency functions across the codebase
+
+**Service Filter** (Opportunities.tsx, SalesTargets.tsx):
+- New dropdown: All Services / Soundtrack / Beat Breeze
+- Passes `service_type` param to API when not 'all'
+- Filter bar order: Search | Stage | Owner | Entity | **Service** | Sort
+
+**Move Filters Above Both Tabs** (Opportunities.tsx):
+- Previously filters only rendered inside Table view — Pipeline tab had NO filters
+- Moved `renderFilters()` call above `TabPanel` components — shared by List and Pipeline
+
+**Fix Hardcoded USD Currency** (OpportunityPipeline.tsx):
+- Removed ALL THREE local `formatCurrency` functions (hardcoded to USD)
+- Pipeline cards: use `opportunity.company_billing_entity` for per-card currency
+- Pipeline summary/stage totals: use `entityFilter` prop for aggregate currency
+- Added `entityFilter?: string` to `OpportunityPipelineProps`
+
+**Service Type on Pipeline Cards** (OpportunityPipeline.tsx):
+- Small outlined chip showing "Soundtrack" / "Beat Breeze" below company name
+
+**OpportunityForm** (OpportunityForm.tsx):
+- New "Service" dropdown (Soundtrack / Beat Breeze) — required for new opportunities
+- Currency formatting now derives from selected company's billing_entity
+
+**OpportunityDetail** (OpportunityDetail.tsx):
+- Fixed hardcoded USD formatCurrency (had existing TODO comment) — now uses shared import
+- Service type chip in header next to Stage chip
+- Service field in Overview tab Basic Information
+
+**Sales Performance** (SalesTargets.tsx):
+- Removed "All Entities" + mixed-currency warning Alert
+- Added Service dropdown
+- All formatCurrency calls use shared import with entityFilter
+
+**PDF Export Updates** (views.py, sales_export_service.py):
+- Both export endpoints accept `service_type` filter param
+- `generate_sales_performance_pdf()` accepts optional `service_type` kwarg, shows in subtitle
+- `generate_opportunities_pdf()` shows service filter in header
+
+**Files Modified** (14 files, 392 insertions, 170 deletions):
+- Backend: models.py, serializers.py, views.py, admin.py, sales_export_service.py, migration
+- Frontend: Opportunities.tsx, OpportunityPipeline.tsx, OpportunityForm.tsx, OpportunityDetail.tsx, SalesTargets.tsx, types/index.ts, constants/entities.ts (NEW)
+
+---
+
 ### Feb 10, 2026 - Entity Filter + PDF Export for Opportunities & Sales Performance
 
 **Context**: BMAsia operates two billing entities — BMAsia (Thailand) Co., Ltd. (THB) and BMAsia Limited (USD). Opportunities list showed all opportunities with no entity filtering, and all values were hardcoded to USD. Owners wanted downloadable reports. CRM best practice research (Salesforce, HubSpot, Zoho) confirmed PDF is the right format for executive summaries.
