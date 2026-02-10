@@ -704,7 +704,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
             {/* Payment Terms Text + Notes */}
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>
-                Additional Information
+                Payment Terms & Notes
               </Typography>
               <Grid container spacing={3}>
                 <Grid item xs={12}>
@@ -715,8 +715,8 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                     onChange={(e) => setPaymentTermsText(e.target.value)}
                     multiline
                     rows={3}
-                    placeholder="Detailed payment terms for the invoice PDF..."
-                    helperText="Auto-filled from entity defaults. Edit to customize."
+                    placeholder="Auto-filled from company defaults. Override with custom terms if needed..."
+                    helperText="Optional — leave blank to use default bank transfer instructions on PDF."
                   />
                 </Grid>
                 <Grid item xs={12}>

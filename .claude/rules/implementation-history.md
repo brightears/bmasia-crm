@@ -36,6 +36,42 @@
 
 ---
 
+### Feb 10, 2026 - Invoice Payment Terms Persistence + PDF Improvements
+
+**Problem**: Invoice PDF "Payment Terms" section showed unhelpful short labels like "Due on Receipt" and an unprofessional "Payment due today" status indicator. The detailed bank transfer instructions (hardcoded per entity in `views.py`) were used in contract PDFs but not invoices. Root cause: Invoice model had **no `payment_terms` field** — the frontend dropdown was local state only, sent to API but silently ignored.
+
+**Model Changes** (`crm_app/models.py`):
+- Added `payment_terms` CharField (max 50, default 'Net 30') — saves dropdown selection (Net 30, Net 60, etc.)
+- Added `payment_terms_text` TextField (blank) — stores detailed text rendered in PDF
+- Migration: `0061_invoice_payment_terms_fields.py`
+
+**Serializer** (`crm_app/serializers.py`):
+- Added `payment_terms` and `payment_terms_text` to `InvoiceSerializer.Meta.fields`
+
+**PDF Changes** (`crm_app/views.py`):
+- Payment terms now uses `invoice.payment_terms_text` with entity default fallback:
+  ```python
+  if invoice.payment_terms_text:
+      pt_text = invoice.payment_terms_text
+  else:
+      pt_text = payment_terms_default  # entity-specific bank instructions
+  ```
+- **Removed** "Payment due today" / "Payment due in X days" / "OVERDUE" status indicators — internal statuses, not for client-facing documents
+- "PAID" stamp retained (useful on receipts)
+
+**Frontend** (`InvoiceForm.tsx`):
+- Entity-specific default constants: `PAYMENT_TERMS_DEFAULTS` (Thailand = TMB bank, default = HSBC bank)
+- `getDefaultPaymentTermsText(country)` helper returns appropriate bank instructions
+- Auto-fills `paymentTermsText` when company is selected (via `handleCompanyChange`)
+- Editable `<TextField multiline>` in "Additional Information" section
+- Populates from `invoice.payment_terms_text` in edit mode
+- Sends `payment_terms_text` in submit payload
+
+**Types** (`types/index.ts`):
+- Added `payment_terms_text?: string` to Invoice interface
+
+---
+
 ### Feb 10, 2026 - Invoice Audit: Contract Auto-Fill, Smart VAT/Currency & Optional Contract
 
 **User feedback**: (1) Selecting a contract in invoice form should auto-fill fields (currently only currency, risk of mismatch). (2) Currency/VAT should match QuoteForm pattern (Thailand=THB+7% VAT, international=USD+0%). (3) Sometimes invoices are sent without a contract — make contract optional.
