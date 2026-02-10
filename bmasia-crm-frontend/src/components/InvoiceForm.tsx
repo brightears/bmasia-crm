@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -79,6 +79,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const dialogContentRef = useRef<HTMLDivElement>(null);
 
   // Form fields
   const [invoiceNumber, setInvoiceNumber] = useState('');
@@ -126,6 +127,13 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const getSmartTaxRate = (): number => {
     return selectedCompanyCountry === 'Thailand' ? 7 : 0;
   };
+
+  // Scroll to top when error appears so user can see it
+  useEffect(() => {
+    if (error && dialogContentRef.current) {
+      dialogContentRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [error]);
 
   useEffect(() => {
     if (open) {
@@ -258,7 +266,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
       // Auto-fill first line item from contract
       const smartTaxRate = getSmartTaxRate();
       const billingDesc = selectedContract.billing_frequency || 'Service';
-      const contractValue = selectedContract.value || 0;
+      const contractValue = parseFloat(String(selectedContract.value)) || 0;
       setLineItems([{
         description: `${selectedContract.contract_number} - ${billingDesc} Fee`,
         quantity: 1,
@@ -301,8 +309,8 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
 
   const calculateTotals = () => {
-    const subtotal = lineItems.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
-    const taxAmount = lineItems.reduce((sum, item) => sum + (item.quantity * item.unit_price * item.tax_rate / 100), 0);
+    const subtotal = lineItems.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unit_price)), 0);
+    const taxAmount = lineItems.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unit_price) * Number(item.tax_rate) / 100), 0);
     const total = subtotal + taxAmount - discountAmount;
 
     return {
@@ -378,7 +386,17 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
       onSave(savedInvoice);
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to save invoice');
+      console.error('Invoice save error:', err.response?.data || err.message);
+      // Parse DRF field-level errors (e.g. {"company": ["This field is required."]})
+      const data = err.response?.data;
+      if (data && typeof data === 'object' && !data.message) {
+        const messages = Object.entries(data)
+          .map(([field, errors]) => `${field}: ${Array.isArray(errors) ? errors.join(', ') : errors}`)
+          .join('; ');
+        setError(messages || 'Failed to save invoice');
+      } else {
+        setError(data?.message || data?.detail || 'Failed to save invoice');
+      }
     } finally {
       setLoading(false);
     }
@@ -408,7 +426,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
       onClose={onClose}
       maxWidth="lg"
       fullWidth
-      scroll="body"
+      scroll="paper"
     >
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -422,7 +440,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         </IconButton>
       </DialogTitle>
 
-      <DialogContent>
+      <DialogContent ref={dialogContentRef}>
         <LocalizationProvider dateAdapter={AdapterDateFns}>
           <Box sx={{ mt: 2 }}>
             {error && (
