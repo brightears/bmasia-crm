@@ -1288,13 +1288,13 @@ class InvoiceAdmin(admin.ModelAdmin):
         ])
 
         # Write data with optimized queries
-        invoices = queryset.select_related('contract', 'contract__company')
+        invoices = queryset.select_related('company', 'contract')
 
         for invoice in invoices:
             writer.writerow([
                 invoice.invoice_number,
-                invoice.contract.contract_number,
-                invoice.contract.company.name,
+                invoice.contract.contract_number if invoice.contract else '',
+                invoice.company.name,
                 invoice.get_status_display(),
                 invoice.issue_date.strftime('%Y-%m-%d'),
                 invoice.due_date.strftime('%Y-%m-%d'),
@@ -1344,12 +1344,12 @@ class InvoiceAdmin(admin.ModelAdmin):
             cell.alignment = header_alignment
 
         # Write data with optimized queries
-        invoices = queryset.select_related('contract', 'contract__company')
+        invoices = queryset.select_related('company', 'contract')
 
         for row, invoice in enumerate(invoices, 2):
             ws.cell(row=row, column=1, value=invoice.invoice_number)
-            ws.cell(row=row, column=2, value=invoice.contract.contract_number)
-            ws.cell(row=row, column=3, value=invoice.contract.company.name)
+            ws.cell(row=row, column=2, value=invoice.contract.contract_number if invoice.contract else '')
+            ws.cell(row=row, column=3, value=invoice.company.name)
             ws.cell(row=row, column=4, value=invoice.get_status_display())
             ws.cell(row=row, column=5, value=invoice.issue_date)
             ws.cell(row=row, column=6, value=invoice.due_date)

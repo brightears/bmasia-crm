@@ -83,7 +83,7 @@ const sortOptions = [
   { value: 'issue_date', label: 'Oldest (Issue Date)' },
   { value: 'due_date', label: 'Due Date Soonest' },
   { value: '-total_amount', label: 'Highest Amount' },
-  { value: 'contract__company__name', label: 'Company' },
+  { value: 'company__name', label: 'Company' },
 ];
 
 const Invoices: React.FC = () => {
@@ -128,7 +128,7 @@ const Invoices: React.FC = () => {
         page_size: rowsPerPage,
         search: search || undefined,
         status: statusFilter || undefined,
-        contract__company: companyFilter || undefined,
+        company: companyFilter || undefined,
         payment_method: paymentMethodFilter || undefined,
         ordering: sortBy,
       };

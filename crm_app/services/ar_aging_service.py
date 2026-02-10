@@ -197,7 +197,7 @@ class ARAgingService:
         for invoice in invoices:
             bucket = self.calculate_aging_bucket(invoice.due_date, as_of_date)
             days_overdue = max(0, (as_of_date - invoice.due_date).days)
-            company = invoice.contract.company
+            company = invoice.company
 
             # Update summary
             summary['total_ar'] += invoice.total_amount
@@ -314,15 +314,15 @@ class ARAgingService:
             result.append({
                 'invoice_id': str(invoice.id),
                 'invoice_number': invoice.invoice_number,
-                'company_name': invoice.contract.company.name,
-                'company_id': str(invoice.contract.company.id),
+                'company_name': invoice.company.name,
+                'company_id': str(invoice.company.id),
                 'due_date': invoice.due_date.isoformat(),
                 'amount': float(invoice.total_amount),
                 'currency': invoice.currency,
                 'days_overdue': days_overdue,
                 'aging_bucket': self.calculate_aging_bucket(invoice.due_date, as_of_date),
-                'contact_email': invoice.contract.company.email or '',
-                'contact_phone': invoice.contract.company.phone or ''
+                'contact_email': invoice.company.email or '',
+                'contact_phone': invoice.company.phone or ''
             })
 
         return result

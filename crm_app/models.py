@@ -1140,7 +1140,8 @@ class Invoice(TimestampedModel):
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    contract = models.ForeignKey(Contract, on_delete=models.CASCADE, related_name='invoices')
+    company = models.ForeignKey('Company', on_delete=models.CASCADE, related_name='invoices')
+    contract = models.ForeignKey(Contract, on_delete=models.SET_NULL, null=True, blank=True, related_name='invoices')
     invoice_number = models.CharField(max_length=50, unique=True)
     status = models.CharField(max_length=20, choices=INVOICE_STATUS_CHOICES, default='Draft')
     issue_date = models.DateField()
@@ -1169,7 +1170,7 @@ class Invoice(TimestampedModel):
         ]
     
     def __str__(self):
-        return f"{self.invoice_number} - {self.contract.company.name}"
+        return f"{self.invoice_number} - {self.company.name}"
     
     @property
     def days_overdue(self):

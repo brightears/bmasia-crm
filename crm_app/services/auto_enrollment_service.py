@@ -234,7 +234,7 @@ class AutoEnrollmentService:
 
                 # Get billing contact or primary contact
                 # Exclude contacts who have opted out of emails or payment emails specifically
-                company = invoice.contract.company
+                company = invoice.company
                 contact = company.contacts.filter(
                     is_active=True,
                     receives_notifications=True,

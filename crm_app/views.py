@@ -3802,10 +3802,10 @@ class InvoiceViewSet(BaseModelViewSet):
     """ViewSet for Invoice management"""
     queryset = Invoice.objects.all()
     serializer_class = InvoiceSerializer
-    search_fields = ['invoice_number', 'contract__company__name']
-    ordering_fields = ['created_at', 'issue_date', 'due_date', 'total_amount', 'updated_at', 'contract__company__name']
+    search_fields = ['invoice_number', 'company__name']
+    ordering_fields = ['created_at', 'issue_date', 'due_date', 'total_amount', 'updated_at', 'company__name']
     ordering = ['-issue_date']
-    filterset_fields = ['contract', 'status', 'issue_date', 'due_date', 'payment_method', 'contract__company']
+    filterset_fields = ['company', 'contract', 'status', 'issue_date', 'due_date', 'payment_method', 'contract__company']
 
     @action(detail=False, methods=['get'])
     def overdue(self, request):
@@ -3885,7 +3885,7 @@ class InvoiceViewSet(BaseModelViewSet):
         import os
 
         invoice = self.get_object()
-        company = invoice.contract.company
+        company = invoice.company
 
         # Get entity-specific details based on billing_entity
         billing_entity = company.billing_entity
@@ -4089,10 +4089,11 @@ class InvoiceViewSet(BaseModelViewSet):
         elements.append(from_bill_table)
         elements.append(Spacer(1, 0.25*inch))
 
-        # Contract reference
-        contract_text = f"<b>Contract:</b> {invoice.contract.contract_number}<br/>"
-        contract_text += f"<b>Service:</b> {invoice.contract.get_service_type_display() if invoice.contract.service_type else 'N/A'}"
-        elements.append(Paragraph(contract_text, body_style))
+        # Contract reference (only if invoice has a contract)
+        if invoice.contract:
+            contract_text = f"<b>Contract:</b> {invoice.contract.contract_number}<br/>"
+            contract_text += f"<b>Service:</b> {invoice.contract.get_service_type_display() if invoice.contract.service_type else 'N/A'}"
+            elements.append(Paragraph(contract_text, body_style))
         elements.append(Spacer(1, 0.3*inch))
 
         # Service description section
@@ -4107,10 +4108,13 @@ class InvoiceViewSet(BaseModelViewSet):
         ]
 
         # Add main service line
-        service_description = f"{invoice.contract.get_service_type_display() if invoice.contract.service_type else 'Professional Services'}"
-        if invoice.contract.service_type:
-            service_description += f"<br/><font size=8>Contract: {invoice.contract.contract_number}</font>"
-            service_description += f"<br/><font size=8>Period: {invoice.contract.start_date.strftime('%b %d, %Y')} - {invoice.contract.end_date.strftime('%b %d, %Y')}</font>"
+        if invoice.contract:
+            service_description = f"{invoice.contract.get_service_type_display() if invoice.contract.service_type else 'Professional Services'}"
+            if invoice.contract.service_type:
+                service_description += f"<br/><font size=8>Contract: {invoice.contract.contract_number}</font>"
+                service_description += f"<br/><font size=8>Period: {invoice.contract.start_date.strftime('%b %d, %Y')} - {invoice.contract.end_date.strftime('%b %d, %Y')}</font>"
+        else:
+            service_description = 'Professional Services'
 
         services_data.append([
             Paragraph(service_description, body_style),
@@ -4262,7 +4266,7 @@ class InvoiceViewSet(BaseModelViewSet):
         # Payment terms
         elements.append(Paragraph("Payment Terms:", heading_style))
         # Use contract payment terms if specified, otherwise use entity default
-        payment_terms_text = invoice.contract.payment_terms if invoice.contract.payment_terms else payment_terms_default
+        payment_terms_text = (invoice.contract.payment_terms if invoice.contract and invoice.contract.payment_terms else payment_terms_default)
         payment_terms_formatted = payment_terms_text.replace('\n', '<br/>')
         elements.append(Paragraph(payment_terms_formatted, body_style))
         elements.append(Spacer(1, 0.2*inch))
@@ -4983,7 +4987,7 @@ class DashboardViewSet(viewsets.ViewSet):
             opportunities = opportunities.filter(company__billing_entity=billing_entity)
             contracts = contracts.filter(company__billing_entity=billing_entity)
             tasks = tasks.filter(company__billing_entity=billing_entity)
-            invoices = invoices.filter(contract__company__billing_entity=billing_entity)
+            invoices = invoices.filter(company__billing_entity=billing_entity)
 
         # Apply role-based filtering
         if user.role == 'Sales':
@@ -5227,9 +5231,9 @@ class ActionCenterViewSet(viewsets.ViewSet):
         # --- OVERDUE INVOICES ---
         overdue_invoices = Invoice.objects.filter(
             status__in=['Sent', 'Overdue'], due_date__lt=today
-        ).select_related('contract__company')
+        ).select_related('company')
         for inv in overdue_invoices:
-            company = inv.contract.company if inv.contract else None
+            company = inv.company
             contact = self._get_primary_contact(company) if company else None
             items.append({
                 'id': str(inv.id), 'type': 'invoice', 'urgency': 'overdue',
@@ -5292,8 +5296,8 @@ class ActionCenterViewSet(viewsets.ViewSet):
         # --- INVOICES DUE THIS WEEK ---
         for inv in Invoice.objects.filter(
             status='Sent', due_date__gte=today, due_date__lte=week_end
-        ).select_related('contract__company'):
-            company = inv.contract.company if inv.contract else None
+        ).select_related('company'):
+            company = inv.company
             contact = self._get_primary_contact(company) if company else None
             days_until = (inv.due_date - today).days
             items.append({

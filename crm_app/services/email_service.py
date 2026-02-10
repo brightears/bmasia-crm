@@ -424,7 +424,7 @@ class EmailService:
             invoice.save()
             
             # Get billing contacts
-            contacts = invoice.contract.company.contacts.filter(
+            contacts = invoice.company.contacts.filter(
                 is_active=True,
                 receives_notifications=True,
                 unsubscribed=False
@@ -439,7 +439,7 @@ class EmailService:
                     'days_overdue': days_overdue,
                     'invoice_amount': f"{invoice.currency} {invoice.total_amount:,.2f}",
                     'due_date': invoice.due_date.strftime('%B %d, %Y'),
-                    'company_name': invoice.contract.company.name,
+                    'company_name': invoice.company.name,
                 }
                 
                 success, message = self.send_template_email(
@@ -1011,11 +1011,11 @@ class EmailService:
 
         # Get invoice
         try:
-            invoice = Invoice.objects.select_related('contract__company').get(id=invoice_id)
+            invoice = Invoice.objects.select_related('company', 'contract').get(id=invoice_id)
         except Invoice.DoesNotExist:
             return False, f"Invoice with ID {invoice_id} not found"
 
-        company = invoice.contract.company
+        company = invoice.company
 
         # Get recipients - prioritize billing contacts
         if not recipients:

@@ -96,6 +96,9 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
   // Filtered contracts based on selected company
   const [filteredContracts, setFilteredContracts] = useState<Contract[]>([]);
 
+  // Track company country for smart VAT/currency (same pattern as QuoteForm)
+  const [selectedCompanyCountry, setSelectedCompanyCountry] = useState('');
+
   // Helper function to get currency symbol
   const getCurrencySymbol = (currencyCode: string): string => {
     const symbols: Record<string, string> = {
@@ -105,6 +108,23 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
       'GBP': '£',
     };
     return symbols[currencyCode] || '$';
+  };
+
+  // Determine tax label based on company country (same as QuoteForm)
+  const getTaxLabel = (): string => {
+    const selectedCompany = companies.find(c => c.id === companyId);
+    if (selectedCompany) {
+      if (selectedCompanyCountry === 'Thailand' ||
+          selectedCompany.billing_entity?.includes('Thailand')) {
+        return 'VAT:';
+      }
+    }
+    return 'Tax:';
+  };
+
+  // Get smart tax rate based on company country
+  const getSmartTaxRate = (): number => {
+    return selectedCompanyCountry === 'Thailand' ? 7 : 0;
   };
 
   useEffect(() => {
@@ -155,21 +175,30 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     setLineItems([defaultLineItem]);
     setDiscountAmount(0);
     setSendEmail(false);
+    setCurrency('USD');
+    setSelectedCompanyCountry('');
     setError('');
   };
 
   const populateForm = (invoice: Invoice) => {
     setInvoiceNumber(invoice.invoice_number);
-    setCompanyId(invoice.company);
-    setContractId(invoice.contract);
+    setCompanyId(invoice.company || '');
+    setContractId(invoice.contract || '');
     setIssueDate(new Date(invoice.issue_date));
     setDueDate(invoice.due_date ? new Date(invoice.due_date) : null);
     setPaymentTerms(invoice.payment_terms || 'Net 30');
     setNotes(invoice.notes || '');
     setLineItems(invoice.line_items.length > 0 ? invoice.line_items : [defaultLineItem]);
     setDiscountAmount(invoice.discount_amount || 0);
+    setCurrency(invoice.currency || 'USD');
     setSendEmail(false);
     setError('');
+
+    // Set company country for smart VAT logic
+    const editCompany = companies.find(c => c.id === invoice.company);
+    if (editCompany) {
+      setSelectedCompanyCountry(editCompany.country || '');
+    }
   };
 
   const generateInvoiceNumber = async () => {
@@ -183,6 +212,60 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
       setInvoiceNumber(`INV-${year}${month}${day}-${random}`);
     } catch (err) {
       console.error('Failed to generate invoice number:', err);
+    }
+  };
+
+  // Handle company selection with smart currency default
+  const handleCompanyChange = (newCompanyId: string) => {
+    setCompanyId(newCompanyId);
+
+    const selectedCompany = companies.find(c => c.id === newCompanyId);
+    if (selectedCompany) {
+      const country = selectedCompany.country || '';
+      setSelectedCompanyCountry(country);
+
+      // Smart currency default based on country (same as QuoteForm)
+      const smartCurrency = country === 'Thailand' ? 'THB' : 'USD';
+      setCurrency(smartCurrency);
+
+      // Update existing line items' tax rates to match new country
+      const smartTaxRate = country === 'Thailand' ? 7 : 0;
+      setLineItems(prev => prev.map(item => ({
+        ...item,
+        tax_rate: smartTaxRate,
+        total: item.quantity * item.unit_price * (1 + smartTaxRate / 100),
+      })));
+    }
+  };
+
+  // Handle contract selection with auto-fill
+  const handleContractChange = (newContractId: string) => {
+    setContractId(newContractId);
+
+    if (!newContractId) return;
+
+    const selectedContract = filteredContracts.find(c => c.id === newContractId);
+    if (selectedContract) {
+      // Auto-fill currency from contract
+      setCurrency(selectedContract.currency);
+
+      // Auto-fill payment terms from contract
+      if (selectedContract.payment_terms) {
+        const matchedTerms = paymentTermsOptions.find(opt => opt.value === selectedContract.payment_terms);
+        setPaymentTerms(matchedTerms ? matchedTerms.value : 'Net 30');
+      }
+
+      // Auto-fill first line item from contract
+      const smartTaxRate = getSmartTaxRate();
+      const billingDesc = selectedContract.billing_frequency || 'Service';
+      const contractValue = selectedContract.value || 0;
+      setLineItems([{
+        description: `${selectedContract.contract_number} - ${billingDesc} Fee`,
+        quantity: 1,
+        unit_price: contractValue,
+        tax_rate: smartTaxRate,
+        total: contractValue * (1 + smartTaxRate / 100),
+      }]);
     }
   };
 
@@ -205,7 +288,9 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
 
   const addLineItem = () => {
-    setLineItems([...lineItems, { ...defaultLineItem }]);
+    // Smart tax rate default based on company country (same as QuoteForm)
+    const smartTaxRate = getSmartTaxRate();
+    setLineItems([...lineItems, { ...defaultLineItem, tax_rate: smartTaxRate }]);
   };
 
   const removeLineItem = (index: number) => {
@@ -241,10 +326,6 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         setError('Company is required');
         return;
       }
-      if (!contractId) {
-        setError('Contract is required');
-        return;
-      }
       if (!issueDate) {
         setError('Issue date is required');
         return;
@@ -263,7 +344,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
       const invoiceData = {
         invoice_number: invoiceNumber,
         company: companyId,
-        contract: contractId,
+        contract: contractId || null,
         issue_date: issueDate.toISOString().split('T')[0],
         due_date: dueDate.toISOString().split('T')[0],
         payment_terms: paymentTerms,
@@ -370,7 +451,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                     <InputLabel>Company</InputLabel>
                     <Select
                       value={companyId}
-                      onChange={(e) => setCompanyId(e.target.value)}
+                      onChange={(e) => handleCompanyChange(e.target.value)}
                       label="Company"
                     >
                       {companies.map((company) => (
@@ -382,23 +463,17 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                   </FormControl>
                 </Grid>
                 <Grid item xs={12} md={6}>
-                  <FormControl fullWidth required>
-                    <InputLabel>Contract</InputLabel>
+                  <FormControl fullWidth>
+                    <InputLabel>Contract (Optional)</InputLabel>
                     <Select
                       value={contractId}
-                      onChange={(e) => {
-                        const selectedContractId = e.target.value;
-                        setContractId(selectedContractId);
-
-                        // Get the selected contract's currency
-                        const selectedContract = filteredContracts.find(c => c.id === selectedContractId);
-                        if (selectedContract) {
-                          setCurrency(selectedContract.currency);
-                        }
-                      }}
-                      label="Contract"
+                      onChange={(e) => handleContractChange(e.target.value)}
+                      label="Contract (Optional)"
                       disabled={!companyId}
                     >
+                      <MenuItem value="">
+                        <em>No Contract (Standalone Invoice)</em>
+                      </MenuItem>
                       {filteredContracts.map((contract) => (
                         <MenuItem key={contract.id} value={contract.id}>
                           {contract.contract_number} - {formatCurrency(contract.value, contract.currency)}
@@ -475,7 +550,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                       <TableCell>Description</TableCell>
                       <TableCell width="100">Quantity</TableCell>
                       <TableCell width="120">Unit Price</TableCell>
-                      <TableCell width="100">Tax Rate (%)</TableCell>
+                      <TableCell width="100">{getTaxLabel().replace(':', '')} Rate (%)</TableCell>
                       <TableCell width="120">Total</TableCell>
                       <TableCell width="60">Actions</TableCell>
                     </TableRow>
@@ -570,7 +645,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                       <Typography variant="body2">{formatCurrency(totals.subtotal, currency)}</Typography>
                     </Box>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2">Tax:</Typography>
+                      <Typography variant="body2">{getTaxLabel()}</Typography>
                       <Typography variant="body2">{formatCurrency(totals.taxAmount, currency)}</Typography>
                     </Box>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>

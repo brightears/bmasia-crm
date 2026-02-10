@@ -448,15 +448,16 @@ class OpportunitySerializer(serializers.ModelSerializer):
 
 class InvoiceSerializer(serializers.ModelSerializer):
     """Serializer for Invoice model"""
-    contract_number = serializers.CharField(source='contract.contract_number', read_only=True)
-    company_name = serializers.CharField(source='contract.company.name', read_only=True)
+    company_name = serializers.CharField(source='company.name', read_only=True)
+    contract = serializers.PrimaryKeyRelatedField(queryset=Contract.objects.all(), required=False, allow_null=True)
+    contract_number = serializers.SerializerMethodField()
     days_overdue = serializers.ReadOnlyField()
     is_overdue = serializers.ReadOnlyField()
-    
+
     class Meta:
         model = Invoice
         fields = [
-            'id', 'contract', 'contract_number', 'company_name', 'invoice_number',
+            'id', 'company', 'company_name', 'contract', 'contract_number', 'invoice_number',
             'status', 'issue_date', 'due_date', 'paid_date', 'amount', 'tax_amount',
             'discount_amount', 'total_amount', 'currency', 'payment_method',
             'transaction_id', 'notes', 'days_overdue', 'is_overdue',
@@ -464,6 +465,9 @@ class InvoiceSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'total_amount', 'created_at', 'updated_at']
+
+    def get_contract_number(self, obj):
+        return obj.contract.contract_number if obj.contract else None
 
 
 class ContractZoneSerializer(serializers.ModelSerializer):

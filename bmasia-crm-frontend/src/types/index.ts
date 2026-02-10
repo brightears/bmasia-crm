@@ -396,8 +396,8 @@ export interface InvoicePayment {
 
 export interface Invoice {
   id: string;
-  contract: string;
-  contract_number: string;
+  contract: string | null;
+  contract_number: string | null;
   company: string;
   company_name: string;
   invoice_number: string;
