@@ -487,10 +487,16 @@ class Opportunity(TimestampedModel):
         ('Demo', 'Product Demo'),
         ('Presentation', 'Presentation'),
     ]
-    
+
+    SERVICE_TYPE_CHOICES = [
+        ('soundtrack', 'Soundtrack'),
+        ('beatbreeze', 'Beat Breeze'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='opportunities')
     name = models.CharField(max_length=255)
+    service_type = models.CharField(max_length=20, choices=SERVICE_TYPE_CHOICES, blank=True, null=True, help_text="Primary service/product for this opportunity")
     stage = models.CharField(max_length=50, choices=STAGE_CHOICES, default='Contacted')
     expected_value = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     probability = models.IntegerField(default=0, help_text="Probability of closing (0-100%)")
@@ -513,6 +519,7 @@ class Opportunity(TimestampedModel):
             models.Index(fields=['stage', 'owner']),
             models.Index(fields=['expected_close_date', 'stage']),
             models.Index(fields=['company', 'is_active']),
+            models.Index(fields=['service_type', 'stage']),
         ]
     
     def __str__(self):

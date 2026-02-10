@@ -415,7 +415,7 @@ class OpportunitySerializer(serializers.ModelSerializer):
     class Meta:
         model = Opportunity
         fields = [
-            'id', 'company', 'company_name', 'company_billing_entity', 'name', 'stage', 'expected_value',
+            'id', 'company', 'company_name', 'company_billing_entity', 'name', 'service_type', 'stage', 'expected_value',
             'probability', 'owner', 'owner_name', 'lead_source', 'contact_method',
             'last_contact_date', 'follow_up_date', 'expected_close_date',
             'actual_close_date', 'notes', 'is_active', 'competitors',

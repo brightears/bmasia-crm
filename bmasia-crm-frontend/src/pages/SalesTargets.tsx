@@ -34,6 +34,11 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { Opportunity, ApiResponse } from '../types';
 import ApiService from '../services/api';
+import {
+  EntityFilter, ServiceFilter, DEFAULT_ENTITY,
+  ENTITY_OPTIONS, SERVICE_OPTIONS,
+  formatCurrency as formatCurrencyFn, getServiceLabel,
+} from '../constants/entities';
 
 interface PeriodData {
   period: string;
@@ -41,13 +46,6 @@ interface PeriodData {
   totalValue: number;
   avgValue: number;
 }
-
-type EntityFilter = 'all' | 'BMAsia Limited' | 'BMAsia (Thailand) Co., Ltd.';
-
-const ENTITY_CURRENCY: Record<string, { currency: string; locale: string }> = {
-  'BMAsia Limited': { currency: 'USD', locale: 'en-US' },
-  'BMAsia (Thailand) Co., Ltd.': { currency: 'THB', locale: 'th-TH' },
-};
 
 const SalesPerformance: React.FC = () => {
   const navigate = useNavigate();
@@ -57,7 +55,8 @@ const SalesPerformance: React.FC = () => {
   const [error, setError] = useState('');
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [periodType, setPeriodType] = useState<'monthly' | 'quarterly'>('monthly');
-  const [entityFilter, setEntityFilter] = useState<EntityFilter>('all');
+  const [entityFilter, setEntityFilter] = useState<EntityFilter>(DEFAULT_ENTITY);
+  const [serviceFilter, setServiceFilter] = useState<ServiceFilter>('all');
   const [exporting, setExporting] = useState(false);
 
   // Generate year options (current year and previous 2 years)
@@ -66,7 +65,7 @@ const SalesPerformance: React.FC = () => {
 
   useEffect(() => {
     loadData();
-  }, [selectedYear, entityFilter]);
+  }, [selectedYear, entityFilter, serviceFilter]);
 
   const loadData = async () => {
     try {
@@ -78,10 +77,11 @@ const SalesPerformance: React.FC = () => {
       const baseParams: any = {
         page_size: 500,
         created_after: yearStart,
+        company__billing_entity: entityFilter,
       };
 
-      if (entityFilter !== 'all') {
-        baseParams.company__billing_entity = entityFilter;
+      if (serviceFilter !== 'all') {
+        baseParams.service_type = serviceFilter;
       }
 
       // Load Won opportunities
@@ -120,6 +120,10 @@ const SalesPerformance: React.FC = () => {
     setEntityFilter(event.target.value as EntityFilter);
   }, []);
 
+  const handleServiceChange = useCallback((event: SelectChangeEvent<ServiceFilter>) => {
+    setServiceFilter(event.target.value as ServiceFilter);
+  }, []);
+
   const handleExportPDF = async () => {
     setExporting(true);
     try {
@@ -129,7 +133,8 @@ const SalesPerformance: React.FC = () => {
 
       params.append('year', selectedYear.toString());
       params.append('period_type', periodType);
-      if (entityFilter !== 'all') params.append('entity', entityFilter);
+      params.append('entity', entityFilter);
+      if (serviceFilter !== 'all') params.append('service_type', serviceFilter);
 
       const response = await fetch(
         `${baseUrl}/api/v1/opportunities/export/sales-performance-pdf/?${params.toString()}`,
@@ -162,28 +167,6 @@ const SalesPerformance: React.FC = () => {
   const totalDeals = wonOpportunities.length + lostOpportunities.length;
   const winRate = totalDeals > 0 ? (wonOpportunities.length / totalDeals) * 100 : 0;
 
-  // Format currency based on entity filter
-  const formatCurrency = (value: number, entity?: string): string => {
-    const resolvedEntity = entity || (entityFilter !== 'all' ? entityFilter : undefined);
-    const config = resolvedEntity ? ENTITY_CURRENCY[resolvedEntity] : undefined;
-    const currency = config?.currency || 'USD';
-    const locale = config?.locale || 'en-US';
-
-    return new Intl.NumberFormat(locale, {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
-  };
-
-  // Get currency label for "All" mode
-  const getCurrencyLabel = (): string => {
-    if (entityFilter !== 'all') {
-      return ENTITY_CURRENCY[entityFilter]?.currency || 'USD';
-    }
-    return 'USD'; // Default for mixed view
-  };
 
   // Get month/quarter from opportunity date
   const getOpportunityPeriod = (opp: Opportunity): string => {
@@ -285,9 +268,17 @@ const SalesPerformance: React.FC = () => {
       <FormControl size="small" sx={{ minWidth: 180 }}>
         <InputLabel>Entity</InputLabel>
         <Select value={entityFilter} onChange={handleEntityChange} label="Entity">
-          <MenuItem value="all">All Entities (USD)</MenuItem>
-          <MenuItem value="BMAsia Limited">BMAsia Limited (USD)</MenuItem>
-          <MenuItem value="BMAsia (Thailand) Co., Ltd.">BMAsia Thailand (THB)</MenuItem>
+          {ENTITY_OPTIONS.map((opt) => (
+            <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+      <FormControl size="small" sx={{ minWidth: 150 }}>
+        <InputLabel>Service</InputLabel>
+        <Select value={serviceFilter} onChange={handleServiceChange} label="Service">
+          {SERVICE_OPTIONS.map((opt) => (
+            <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+          ))}
         </Select>
       </FormControl>
       <FormControl size="small" sx={{ minWidth: 100 }}>
@@ -331,12 +322,7 @@ const SalesPerformance: React.FC = () => {
           </Typography>
           {renderFilters()}
         </Box>
-        {entityFilter === 'all' && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            Values shown in USD. Select a specific entity for accurate currency display.
-          </Alert>
-        )}
-        <Alert severity="info">No won deals found for {selectedYear}{entityFilter !== 'all' ? ` (${entityFilter})` : ''}</Alert>
+        <Alert severity="info">No won deals found for {selectedYear} ({entityFilter})</Alert>
       </Box>
     );
   }
@@ -351,13 +337,6 @@ const SalesPerformance: React.FC = () => {
         {renderFilters()}
       </Box>
 
-      {/* Mixed currency warning */}
-      {entityFilter === 'all' && (
-        <Alert severity="warning" sx={{ mb: 3 }}>
-          Showing all entities — values displayed in USD. THB deals are shown at face value (not converted). Select a specific entity for accurate totals.
-        </Alert>
-      )}
-
       {/* KPI Cards */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} sm={6} md={3}>
@@ -366,7 +345,7 @@ const SalesPerformance: React.FC = () => {
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                 <TrendingUpIcon sx={{ mr: 1, fontSize: 32 }} />
                 <Typography variant="h5" component="div">
-                  {formatCurrency(totalWonValue)}
+                  {formatCurrencyFn(totalWonValue, entityFilter)}
                 </Typography>
               </Box>
               <Typography variant="body2">Total Won Value</Typography>
@@ -394,7 +373,7 @@ const SalesPerformance: React.FC = () => {
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                 <AttachMoneyIcon sx={{ mr: 1, fontSize: 32 }} />
                 <Typography variant="h5" component="div">
-                  {formatCurrency(avgDealSize)}
+                  {formatCurrencyFn(avgDealSize, entityFilter)}
                 </Typography>
               </Box>
               <Typography variant="body2">Average Deal Size</Typography>
@@ -423,7 +402,7 @@ const SalesPerformance: React.FC = () => {
         <Grid item xs={12} md={8}>
           <Paper sx={{ p: 3 }}>
             <Typography variant="h6" sx={{ mb: 2 }}>
-              {periodType === 'monthly' ? 'Monthly' : 'Quarterly'} Breakdown ({getCurrencyLabel()})
+              {periodType === 'monthly' ? 'Monthly' : 'Quarterly'} Breakdown
             </Typography>
             <TableContainer>
               <Table size="small">
@@ -448,8 +427,8 @@ const SalesPerformance: React.FC = () => {
                     <TableRow key={period.period} hover>
                       <TableCell>{period.period}</TableCell>
                       <TableCell align="right">{period.dealsWon}</TableCell>
-                      <TableCell align="right">{formatCurrency(period.totalValue)}</TableCell>
-                      <TableCell align="right">{formatCurrency(period.avgValue)}</TableCell>
+                      <TableCell align="right">{formatCurrencyFn(period.totalValue, entityFilter)}</TableCell>
+                      <TableCell align="right">{formatCurrencyFn(period.avgValue, entityFilter)}</TableCell>
                     </TableRow>
                   ))}
                   <TableRow sx={{ bgcolor: 'grey.100' }}>
@@ -460,10 +439,10 @@ const SalesPerformance: React.FC = () => {
                       <strong>{totals.dealsWon}</strong>
                     </TableCell>
                     <TableCell align="right">
-                      <strong>{formatCurrency(totals.totalValue)}</strong>
+                      <strong>{formatCurrencyFn(totals.totalValue, entityFilter)}</strong>
                     </TableCell>
                     <TableCell align="right">
-                      <strong>{formatCurrency(totals.avgValue)}</strong>
+                      <strong>{formatCurrencyFn(totals.avgValue, entityFilter)}</strong>
                     </TableCell>
                   </TableRow>
                 </TableBody>
@@ -506,7 +485,7 @@ const SalesPerformance: React.FC = () => {
                       </Typography>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Chip
-                          label={formatCurrency(deal.expected_value || 0, deal.company_billing_entity)}
+                          label={formatCurrencyFn(deal.expected_value || 0, deal.company_billing_entity)}
                           size="small"
                           color="success"
                         />

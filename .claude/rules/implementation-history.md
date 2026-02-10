@@ -2,6 +2,143 @@
 
 ## February 2026
 
+### Feb 10, 2026 - Entity Filter + PDF Export for Opportunities & Sales Performance
+
+**Context**: BMAsia operates two billing entities — BMAsia (Thailand) Co., Ltd. (THB) and BMAsia Limited (USD). Opportunities list showed all opportunities with no entity filtering, and all values were hardcoded to USD. Owners wanted downloadable reports. CRM best practice research (Salesforce, HubSpot, Zoho) confirmed PDF is the right format for executive summaries.
+
+**Entity Filter on Opportunities List** (`Opportunities.tsx`):
+- Added `EntityFilter` type + `ENTITY_CURRENCY` map (same pattern as SalesTargets)
+- Entity dropdown in filter bar (between Owner and Sort)
+- Passes `company__billing_entity` param to API when entity selected
+- Dynamic `formatCurrency(value, entity?)` — THB shows ฿, USD shows $, per-row currency
+
+**Entity Filter on Sales Performance** (`SalesTargets.tsx`):
+- Added Entity dropdown (All / BMAsia Ltd USD / BMAsia Thailand THB)
+- Dynamic currency formatting based on entity filter
+- Mixed currency warning when "All Entities" selected
+
+**Backend: Serializer + ViewSet** (`serializers.py`, `views.py`):
+- Added `company_billing_entity` field to OpportunitySerializer (`source='company.billing_entity'`)
+- Added `company__billing_entity` to OpportunityViewSet `filterset_fields`
+- Added `company_billing_entity` to Opportunity TypeScript interface
+
+**New SalesExportService** (`crm_app/services/sales_export_service.py` — NEW, 447 lines):
+- Separate from `FinanceExportService` (different domain, different entity name format)
+- Uses full entity names (`'BMAsia Limited'`, `'BMAsia (Thailand) Co., Ltd.'`) matching Company model
+- BMAsia branding: orange #FFA500 accents, logo, header/footer
+- `generate_opportunities_pdf()` — landscape, summary box + filtered table with per-row currency
+- `generate_sales_performance_pdf()` — KPI grid, period breakdown table, top 5 deals
+
+**Export Endpoints** (`crm_app/views.py` — OpportunityViewSet):
+- `GET /api/v1/opportunities/export/pdf/` — Opportunities list PDF (respects all filters)
+- `GET /api/v1/opportunities/export/sales-performance-pdf/` — Sales Performance summary PDF
+- Lightweight data extraction: `.select_related('company', 'owner')` + manual dict (avoids full serializer)
+
+**Frontend PDF Buttons** (`Opportunities.tsx`, `SalesTargets.tsx`):
+- "Export PDF" button on Opportunities list (next to "New Opportunity")
+- "PDF" button on Sales Performance page (in filter controls)
+- Pattern: `fetch()` with auth token → blob → link element download (same as ProfitLoss.tsx)
+
+**Key Design Decisions**:
+1. New `SalesExportService` vs extending `FinanceExportService`: New service — different entity name format (full names vs short codes)
+2. PDF only, no Excel: PDF right for owner summaries (Excel can be added later)
+3. Mixed currency "All Entities" mode: shows each row's own currency, summary notes "values not converted"
+
+---
+
+### Feb 9, 2026 - Opportunities Section Audit & Improvements
+
+**Context**: Full professional audit of the Opportunities section, benchmarked against Salesforce, HubSpot, and Zoho CRM. Overall grade: B-. Six phases implemented.
+
+**Phase 1: Filter Bar Consistency** (`Opportunities.tsx`):
+- Removed DatePicker, LocalizationProvider, AdapterDateFns imports
+- Removed startDate/endDate state variables
+- Replaced Grid layout with flex layout (consistent with other 6 list pages)
+- Added Sort dropdown with Sort icon startAdornment (7 options: Newest, Oldest, Highest/Lowest Value, Highest Probability, Close Date, Last Contacted)
+- Added `ordering` param to API calls
+
+**Phase 2: Fix Broken List View Actions** (`Opportunities.tsx`):
+- Wired up "View Details" action menu item (was no-op `onClick={() => {}}`)
+- Added clickable table rows with `stopPropagation` on action button
+- Added `useNavigate` and `handleViewOpportunity` handler
+
+**Phase 3: OpportunityDetail Page** (`OpportunityDetail.tsx` — full rewrite from 17-line stub):
+- Header: Back button, opportunity name, stage chip (color-coded), clickable company link, owner, Edit/Delete
+- KPI Cards: Expected Value, Weighted Value, Probability (%), Days in Stage
+- Stage Stepper: Horizontal MUI Stepper (Contacted → Quotation Sent → Contract Sent → Won/Lost)
+- 4 Tabs: Overview (two-column), Activities (ActivityTimeline + Log Activity), Quotes (linked via FK), Contracts (linked via FK)
+- "Create Quote" button → `/quotes?new=true&opportunity=${id}&company=${opportunity.company}`
+- Backend: Added `'opportunity'` to ContractViewSet `filterset_fields` (QuoteViewSet already had it)
+
+**Phase 4: Auto-Create Opportunity from Quote** (`crm_app/views.py`):
+- QuoteViewSet.perform_create() override:
+  - If quote has no opportunity: check for existing active opp in 'Contacted' or 'Quotation Sent' stage
+  - If found: link quote, advance stage to 'Quotation Sent' if still 'Contacted'
+  - If not found: create new Opportunity (name="Quote {number}", stage="Quotation Sent", probability=25)
+- Quotes.tsx: reads `?new=true&opportunity=&company=` query params, passes to QuoteForm
+- QuoteForm: pre-fills company and opportunity from query params in create mode
+
+**Phase 5: Minor Fixes** (`OpportunityForm.tsx`):
+- Company Autocomplete page_size: 100 → 1000 with `ordering: 'name'`
+
+**Phase 6: Sales Performance Page** (`SalesTargets.tsx` — full rewrite):
+- Replaced 100% mock data page with real Won opportunity metrics
+- Loads Won + Lost opportunities from API by selected year
+- KPI Cards: Total Won Value, Deals Won, Average Deal Size, Win Rate
+- Filters: Year selector + Monthly/Quarterly ToggleButtonGroup
+- Period breakdown table (groups Won opps by month/quarter with totals row)
+- Top 5 Won Deals sidebar (clickable cards → OpportunityDetail)
+- Layout.tsx: Sidebar renamed "Targets" → "Performance"
+
+**Key Audit Findings**:
+- OpportunityDetail was a stub (highest severity gap)
+- SalesTargets page was 100% mock data
+- Quote→Opportunity FKs existed but were never auto-populated
+- Filter bar used old Grid+DatePicker pattern (inconsistent)
+- "View Details" action menu was a no-op
+- Industry standard: Salesforce, HubSpot, Zoho all auto-link quotes to opportunities
+- Tasks↔Opportunities: frontend type defines `related_opportunity` but backend doesn't have FK (deferred)
+
+---
+
+### Feb 9, 2026 - Zone Management Improvements (Audit-Driven)
+
+**Context**: Professional audit of Zone management system rated it B+ (solid data architecture, gaps in operational/monitoring layer). Implemented top 4 priorities.
+
+**1. Zone-Ticket Linking**:
+- Added optional `zone` FK to Ticket model (`0056_ticket_zone_fk.py`)
+- TicketSerializer: added `zone`, `zone_name`, `zone_platform` fields
+- TicketViewSet: added `zone` to `filterset_fields` and `select_related`
+- TicketForm: "Related Zone" dropdown (filtered by company, disabled until company selected)
+- TicketForm: reads `?zone=` query param for pre-fill from ZoneDetail
+- TicketDetail: clickable zone display with platform chip (navigates to zone detail)
+
+**2. ZoneDetail Enhancements**:
+- Added "Last API Sync" to Important Dates card (relative + absolute time, "Never synced" warning, "N/A" for Beat Breeze)
+- Added 3rd tab "Support Tickets" showing tickets linked to this zone
+- "New Ticket" button pre-fills both company and zone query params
+
+**3. ZonesUnified Sync Health**:
+- Added 7th stat card "Sync Health" showing percentage of Soundtrack zones synced in last 24h
+- Fixed Last Sync column to use `last_api_sync` instead of `updated_at`
+
+**4. EnhancedZonePicker Overlap Warning**:
+- Debounced (500ms) overlap check via `check-overlaps` endpoint
+- Non-blocking warning Alert showing conflicting contract numbers
+- Passes `contractId` to exclude current contract in edit mode
+- Note about renewals: "This may be expected for renewals. Proceed if intentional."
+
+**Backend Endpoints Added**:
+- `GET /api/v1/zones/health-summary/` — aggregate status counts, sync health, companies with offline zones
+- `GET /api/v1/zones/check-overlaps/?zone_ids=...&exclude_contract=...` — detect zones on other active contracts
+
+**Soundtrack Account ID Hierarchy** (documented from audit):
+- Company.soundtrack_account_id → source of truth, used by zone sync
+- Contract.soundtrack_account_id → optional override (rare)
+- Zone.soundtrack_account_id → read-only property, inherits from Company
+
+---
+
 ### Feb 9, 2026 - Tech Support Improvements (Keith's Feedback)
 
 **Context**: IT team feedback on the Tech Support section — 3 items: KB category/tag management, client support integration with sales, company dropdown only showing ~20 entries.

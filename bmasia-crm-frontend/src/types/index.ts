@@ -262,6 +262,7 @@ export interface Opportunity {
   company_name: string;
   company_billing_entity?: string;
   name: string;
+  service_type?: 'soundtrack' | 'beatbreeze' | null;
   stage: 'Contacted' | 'Quotation Sent' | 'Contract Sent' | 'Won' | 'Lost';
   expected_value?: number;
   probability: number;

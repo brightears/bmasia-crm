@@ -834,8 +834,8 @@ class OpportunityActivityInline(admin.TabularInline):
 
 @admin.register(Opportunity)
 class OpportunityAdmin(admin.ModelAdmin):
-    list_display = ['name', 'company', 'stage', 'expected_value', 'probability', 'owner', 'expected_close_date']
-    list_filter = ['stage', 'lead_source', 'is_active', 'created_at']
+    list_display = ['name', 'company', 'stage', 'service_type', 'expected_value', 'probability', 'owner', 'expected_close_date']
+    list_filter = ['stage', 'service_type', 'lead_source', 'is_active', 'created_at']
     list_select_related = ['company', 'owner']
     search_fields = ['name', 'company__name', 'notes']
     readonly_fields = ['created_at', 'updated_at', 'weighted_value', 'days_in_stage']
@@ -843,7 +843,7 @@ class OpportunityAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('company', 'name', 'stage', 'owner', 'is_active')
+            'fields': ('company', 'name', 'service_type', 'stage', 'owner', 'is_active')
         }),
         ('Financial', {
             'fields': ('expected_value', 'probability', 'weighted_value')

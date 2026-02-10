@@ -32,12 +32,14 @@ import {
 } from '@mui/icons-material';
 import { Opportunity } from '../types';
 import ApiService from '../services/api';
+import { formatCurrency as formatCurrencyFn, getServiceLabel } from '../constants/entities';
 
 interface OpportunityPipelineProps {
   opportunities: Opportunity[];
   onOpportunityUpdate: (opportunity: Opportunity) => void;
   onOpportunityEdit: (opportunity: Opportunity) => void;
   loading?: boolean;
+  entityFilter?: string;
 }
 
 interface StageColumn {
@@ -71,15 +73,6 @@ const OpportunityDetailDialog: React.FC<OpportunityDetailDialogProps> = ({
   onEdit,
 }) => {
   if (!opportunity) return null;
-
-  const formatCurrency = (value: number): string => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
-  };
 
   const formatDate = (dateString: string | null | undefined): string => {
     if (!dateString) return 'Not set';
@@ -135,10 +128,10 @@ const OpportunityDetailDialog: React.FC<OpportunityDetailDialogProps> = ({
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                 <MoneyIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                <Typography><strong>Expected Value:</strong> {formatCurrency(opportunity.expected_value || 0)}</Typography>
+                <Typography><strong>Expected Value:</strong> {formatCurrencyFn(opportunity.expected_value || 0, opportunity.company_billing_entity)}</Typography>
               </Box>
               <Typography><strong>Probability:</strong> {opportunity.probability}%</Typography>
-              <Typography><strong>Weighted Value:</strong> {formatCurrency(opportunity.weighted_value)}</Typography>
+              <Typography><strong>Weighted Value:</strong> {formatCurrencyFn(opportunity.weighted_value, opportunity.company_billing_entity)}</Typography>
             </Box>
           </Grid>
 
@@ -205,15 +198,6 @@ const OpportunityCard: React.FC<{
 }> = ({ opportunity, onView, onEdit, onStageChange }) => {
   const theme = useTheme();
   const [draggedOver, setDraggedOver] = useState(false);
-
-  const formatCurrency = (value: number): string => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
-  };
 
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData('text/plain', JSON.stringify({
@@ -286,10 +270,19 @@ const OpportunityCard: React.FC<{
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
           {opportunity.company_name}
         </Typography>
-        
+
+        {opportunity.service_type && (
+          <Chip
+            label={getServiceLabel(opportunity.service_type)}
+            size="small"
+            variant="outlined"
+            sx={{ mb: 1, height: 18, fontSize: '0.65rem' }}
+          />
+        )}
+
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
           <Typography variant="body2" sx={{ fontWeight: 600, color: stageColor }}>
-            {formatCurrency(opportunity.expected_value || 0)}
+            {formatCurrencyFn(opportunity.expected_value || 0, opportunity.company_billing_entity)}
           </Typography>
           <Chip 
             label={`${opportunity.probability}%`} 
@@ -382,21 +375,13 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
   onOpportunityUpdate,
   onOpportunityEdit,
   loading = false,
+  entityFilter,
 }) => {
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
   const [draggedOver, setDraggedOver] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState('');
-
-  const formatCurrency = (value: number): string => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
-  };
 
   const organizeOpportunitiesByStage = (): StageColumn[] => {
     return stageConfig.map(stage => {
@@ -495,7 +480,7 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
           </Grid>
           <Grid item xs={12} sm={4}>
             <Typography variant="h4" color="primary">
-              {formatCurrency(totalPipelineValue)}
+              {formatCurrencyFn(totalPipelineValue, entityFilter)}
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Total Pipeline Value
@@ -503,7 +488,7 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
           </Grid>
           <Grid item xs={12} sm={4}>
             <Typography variant="h4" color="primary">
-              {formatCurrency(totalWeightedValue)}
+              {formatCurrencyFn(totalWeightedValue, entityFilter)}
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Weighted Pipeline Value
@@ -553,10 +538,10 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
               </Box>
               
               <Typography variant="body2" color="text.secondary">
-                {formatCurrency(stage.totalValue)} total
+                {formatCurrencyFn(stage.totalValue, entityFilter)} total
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                {formatCurrency(stage.weightedValue)} weighted
+                {formatCurrencyFn(stage.weightedValue, entityFilter)} weighted
               </Typography>
             </Box>
 

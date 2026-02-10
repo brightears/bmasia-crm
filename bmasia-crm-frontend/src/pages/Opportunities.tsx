@@ -52,6 +52,11 @@ import { Opportunity, ApiResponse, User } from '../types';
 import ApiService from '../services/api';
 import OpportunityForm from '../components/OpportunityForm';
 import OpportunityPipeline from '../components/OpportunityPipeline';
+import {
+  EntityFilter, ServiceFilter, DEFAULT_ENTITY,
+  ENTITY_OPTIONS, SERVICE_OPTIONS,
+  formatCurrency, getServiceLabel,
+} from '../constants/entities';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -98,13 +103,6 @@ const sortOptions = [
   { value: '-last_contact_date', label: 'Last Contacted' },
 ];
 
-type EntityFilter = 'all' | 'BMAsia Limited' | 'BMAsia (Thailand) Co., Ltd.';
-
-const ENTITY_CURRENCY: Record<string, { currency: string; locale: string }> = {
-  'BMAsia Limited': { currency: 'USD', locale: 'en-US' },
-  'BMAsia (Thailand) Co., Ltd.': { currency: 'THB', locale: 'th-TH' },
-};
-
 const Opportunities: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -124,7 +122,8 @@ const Opportunities: React.FC = () => {
   // Filters
   const [stageFilter, setStageFilter] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('');
-  const [entityFilter, setEntityFilter] = useState<EntityFilter>('all');
+  const [entityFilter, setEntityFilter] = useState<EntityFilter>(DEFAULT_ENTITY);
+  const [serviceFilter, setServiceFilter] = useState<ServiceFilter>('all');
   const [sortBy, setSortBy] = useState('-created_at');
 
   // Form state
@@ -153,7 +152,7 @@ const Opportunities: React.FC = () => {
   useEffect(() => {
     loadOpportunities();
     loadUsers();
-  }, [page, rowsPerPage, search, stageFilter, ownerFilter, entityFilter, sortBy]);
+  }, [page, rowsPerPage, search, stageFilter, ownerFilter, entityFilter, serviceFilter, sortBy]);
 
   const loadOpportunities = async () => {
     try {
@@ -167,7 +166,8 @@ const Opportunities: React.FC = () => {
       if (search) params.search = search;
       if (stageFilter) params.stage = stageFilter;
       if (ownerFilter) params.owner = ownerFilter;
-      if (entityFilter && entityFilter !== 'all') params.company__billing_entity = entityFilter;
+      params.company__billing_entity = entityFilter;
+      if (serviceFilter !== 'all') params.service_type = serviceFilter;
 
       const response: ApiResponse<Opportunity> = await ApiService.getOpportunities(params);
       setOpportunities(response.results);
@@ -206,6 +206,11 @@ const Opportunities: React.FC = () => {
 
   const handleEntityChange = useCallback((event: any) => {
     setEntityFilter(event.target.value as EntityFilter);
+    setPage(0);
+  }, []);
+
+  const handleServiceChange = useCallback((event: any) => {
+    setServiceFilter(event.target.value as ServiceFilter);
     setPage(0);
   }, []);
 
@@ -255,7 +260,8 @@ const Opportunities: React.FC = () => {
       if (search) params.append('search', search);
       if (stageFilter) params.append('stage', stageFilter);
       if (ownerFilter) params.append('owner', ownerFilter);
-      if (entityFilter && entityFilter !== 'all') params.append('company__billing_entity', entityFilter);
+      params.append('company__billing_entity', entityFilter);
+      if (serviceFilter !== 'all') params.append('service_type', serviceFilter);
       params.append('ordering', sortBy);
 
       const response = await fetch(
@@ -324,18 +330,6 @@ const Opportunities: React.FC = () => {
   const handleActionMenuClose = () => {
     setActionMenuAnchor(null);
     setActionMenuOpportunity(null);
-  };
-
-  const formatCurrency = (value: number, entity?: string): string => {
-    const config = entity ? ENTITY_CURRENCY[entity] : undefined;
-    const currency = config?.currency || 'USD';
-    const locale = config?.locale || 'en-US';
-    return new Intl.NumberFormat(locale, {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
   };
 
   const formatDate = (dateString: string | null | undefined): string => {
@@ -416,16 +410,29 @@ const Opportunities: React.FC = () => {
           <Select
             value={entityFilter}
             onChange={handleEntityChange}
-            displayEmpty
             renderValue={(value) => {
-              if (value === 'all') return 'All Entities';
-              if (value === 'BMAsia Limited') return 'BMAsia Ltd (USD)';
-              return 'BMAsia Thai (THB)';
+              const opt = ENTITY_OPTIONS.find(e => e.value === value);
+              return opt?.label || value;
             }}
           >
-            <MenuItem value="all">All Entities</MenuItem>
-            <MenuItem value="BMAsia Limited">BMAsia Limited (USD)</MenuItem>
-            <MenuItem value="BMAsia (Thailand) Co., Ltd.">BMAsia Thailand (THB)</MenuItem>
+            {ENTITY_OPTIONS.map((opt) => (
+              <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <Select
+            value={serviceFilter}
+            onChange={handleServiceChange}
+            renderValue={(value) => {
+              const opt = SERVICE_OPTIONS.find(s => s.value === value);
+              return opt?.label || 'All Services';
+            }}
+          >
+            {SERVICE_OPTIONS.map((opt) => (
+              <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+            ))}
           </Select>
         </FormControl>
 
@@ -449,14 +456,13 @@ const Opportunities: React.FC = () => {
 
   const renderTableView = () => (
     <>
-      {renderFilters()}
-
       <TableContainer component={Paper}>
         <Table>
           <TableHead>
             <TableRow>
               <TableCell>Company</TableCell>
               <TableCell>Opportunity Name</TableCell>
+              <TableCell>Service</TableCell>
               <TableCell>Stage</TableCell>
               <TableCell>Expected Value</TableCell>
               <TableCell>Probability</TableCell>
@@ -469,20 +475,20 @@ const Opportunities: React.FC = () => {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={9} align="center">
+                <TableCell colSpan={10} align="center">
                   <CircularProgress />
                 </TableCell>
               </TableRow>
             ) : opportunities.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} align="center">
+                <TableCell colSpan={10} align="center">
                   <Box sx={{ py: 4 }}>
                     <Handshake sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
                     <Typography variant="h6" color="text.secondary">
                       No opportunities found
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      {search || stageFilter || ownerFilter || entityFilter !== 'all' ? 'Try adjusting your filters' : 'Start by creating your first opportunity'}
+                      {search || stageFilter || ownerFilter || serviceFilter !== 'all' ? 'Try adjusting your filters' : 'Start by creating your first opportunity'}
                     </Typography>
                   </Box>
                 </TableCell>
@@ -502,6 +508,14 @@ const Opportunities: React.FC = () => {
                     <Typography variant="body2" fontWeight="medium">
                       {opportunity.name}
                     </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={getServiceLabel(opportunity.service_type)}
+                      size="small"
+                      variant="outlined"
+                      sx={{ fontSize: '0.75rem' }}
+                    />
                   </TableCell>
                   <TableCell>
                     <Chip
@@ -633,6 +647,9 @@ const Opportunities: React.FC = () => {
         </Tabs>
       </Paper>
 
+      {/* Filters — shared by both tabs */}
+      {renderFilters()}
+
       {/* Tab Panels */}
       <TabPanel value={currentTab} index={0}>
         {renderTableView()}
@@ -644,6 +661,7 @@ const Opportunities: React.FC = () => {
           onOpportunityUpdate={handleOpportunityUpdate}
           onOpportunityEdit={handleEditOpportunity}
           loading={loading}
+          entityFilter={entityFilter}
         />
       </TabPanel>
 

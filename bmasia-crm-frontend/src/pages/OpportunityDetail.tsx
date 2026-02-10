@@ -39,6 +39,7 @@ import { Opportunity, OpportunityActivity, Quote, Contract } from '../types';
 import OpportunityForm from '../components/OpportunityForm';
 import ActivityTimeline from '../components/ActivityTimeline';
 import ActivityForm from '../components/ActivityForm';
+import { formatCurrency, getServiceLabel } from '../constants/entities';
 
 const stageConfig = [
   { id: 'Contacted', label: 'Contacted', color: '#2196f3' },
@@ -125,16 +126,6 @@ const OpportunityDetail: React.FC = () => {
     loadTabData(1);
   };
 
-  // TODO: Support THB/USD based on company billing entity
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
-  };
-
   const formatDate = (dateString?: string | null) => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -192,6 +183,14 @@ const OpportunityDetail: React.FC = () => {
                 fontWeight: 600,
               }}
             />
+            {opportunity.service_type && (
+              <Chip
+                label={getServiceLabel(opportunity.service_type)}
+                size="small"
+                variant="outlined"
+                sx={{ fontWeight: 500 }}
+              />
+            )}
           </Box>
           <Box display="flex" alignItems="center" gap={3} flexWrap="wrap">
             <Box
@@ -230,7 +229,7 @@ const OpportunityDetail: React.FC = () => {
               Expected Value
             </Typography>
             <Typography variant="h5" fontWeight="bold">
-              {formatCurrency(opportunity.expected_value || 0)}
+              {formatCurrency(opportunity.expected_value || 0, opportunity?.company_billing_entity)}
             </Typography>
           </Paper>
         </Grid>
@@ -240,7 +239,7 @@ const OpportunityDetail: React.FC = () => {
               Weighted Value
             </Typography>
             <Typography variant="h5" fontWeight="bold">
-              {formatCurrency(opportunity.weighted_value || 0)}
+              {formatCurrency(opportunity.weighted_value || 0, opportunity?.company_billing_entity)}
             </Typography>
           </Paper>
         </Grid>
@@ -322,6 +321,10 @@ const OpportunityDetail: React.FC = () => {
                       <Typography variant="body2" color="text.secondary">Owner</Typography>
                       <Typography variant="body1">{opportunity.owner_name}</Typography>
                     </Grid>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" color="text.secondary">Service</Typography>
+                      <Typography variant="body1">{getServiceLabel(opportunity.service_type)}</Typography>
+                    </Grid>
                     {opportunity.lead_source && (
                       <Grid item xs={6}>
                         <Typography variant="body2" color="text.secondary">Lead Source</Typography>
@@ -368,11 +371,11 @@ const OpportunityDetail: React.FC = () => {
                   <Grid container spacing={2}>
                     <Grid item xs={6}>
                       <Typography variant="body2" color="text.secondary">Expected Value</Typography>
-                      <Typography variant="body1">{formatCurrency(opportunity.expected_value || 0)}</Typography>
+                      <Typography variant="body1">{formatCurrency(opportunity.expected_value || 0, opportunity?.company_billing_entity)}</Typography>
                     </Grid>
                     <Grid item xs={6}>
                       <Typography variant="body2" color="text.secondary">Weighted Value</Typography>
-                      <Typography variant="body1">{formatCurrency(opportunity.weighted_value || 0)}</Typography>
+                      <Typography variant="body1">{formatCurrency(opportunity.weighted_value || 0, opportunity?.company_billing_entity)}</Typography>
                     </Grid>
                     <Grid item xs={6}>
                       <Typography variant="body2" color="text.secondary">Probability</Typography>
@@ -479,7 +482,7 @@ const OpportunityDetail: React.FC = () => {
                               }
                             />
                           </TableCell>
-                          <TableCell align="right">{formatCurrency(quote.total_value || 0)}</TableCell>
+                          <TableCell align="right">{formatCurrency(quote.total_value || 0, opportunity?.company_billing_entity)}</TableCell>
                           <TableCell>{formatDate(quote.valid_from)}</TableCell>
                           <TableCell>{formatDate(quote.valid_until)}</TableCell>
                         </TableRow>
@@ -531,7 +534,7 @@ const OpportunityDetail: React.FC = () => {
                               }
                             />
                           </TableCell>
-                          <TableCell align="right">{formatCurrency(contract.value || 0)}</TableCell>
+                          <TableCell align="right">{formatCurrency(contract.value || 0, opportunity?.company_billing_entity)}</TableCell>
                           <TableCell>{formatDate(contract.start_date)}</TableCell>
                           <TableCell>{formatDate(contract.end_date)}</TableCell>
                         </TableRow>

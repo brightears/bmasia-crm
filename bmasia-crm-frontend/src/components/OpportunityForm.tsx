@@ -32,6 +32,7 @@ import { Opportunity, Company, User, OpportunityActivity } from '../types';
 import ApiService from '../services/api';
 import ActivityForm from './ActivityForm';
 import ActivityTimeline from './ActivityTimeline';
+import { formatCurrency as formatCurrencyFn } from '../constants/entities';
 
 interface OpportunityFormProps {
   open: boolean;
@@ -91,6 +92,7 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
     pain_points: '',
     expected_close_date: undefined,
     follow_up_date: undefined,
+    service_type: null,
   });
 
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -113,6 +115,7 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
           ...opportunity,
           expected_close_date: opportunity.expected_close_date || undefined,
           follow_up_date: opportunity.follow_up_date || undefined,
+          service_type: opportunity.service_type || null,
         });
         loadRecentActivities(opportunity.id);
       } else {
@@ -128,6 +131,7 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
           pain_points: '',
           expected_close_date: undefined,
           follow_up_date: undefined,
+          service_type: null,
         });
       }
       setError('');
@@ -181,6 +185,10 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
 
     if (!formData.owner) {
       newErrors.owner = 'Owner is required';
+    }
+
+    if (mode === 'create' && !formData.service_type) {
+      newErrors.service_type = 'Service type is required';
     }
 
     if (formData.probability !== undefined && (formData.probability < 0 || formData.probability > 100)) {
@@ -237,12 +245,10 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
   };
 
   const formatCurrency = (value: number): string => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
+    // Find the selected company for currency
+    const selectedCompany = companies.find(c => c.id === formData.company);
+    const entityForCurrency = selectedCompany?.billing_entity;
+    return formatCurrencyFn(value, entityForCurrency);
   };
 
   const getSelectedStage = () => {
@@ -343,6 +349,21 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
                 error={!!errors.name}
                 helperText={errors.name}
               />
+            </Grid>
+
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth required>
+                <InputLabel>Service</InputLabel>
+                <Select
+                  value={formData.service_type || ''}
+                  onChange={(e) => handleInputChange('service_type', e.target.value || null)}
+                  label="Service"
+                  error={!!errors.service_type}
+                >
+                  <MenuItem value="soundtrack">Soundtrack</MenuItem>
+                  <MenuItem value="beatbreeze">Beat Breeze</MenuItem>
+                </Select>
+              </FormControl>
             </Grid>
 
             <Grid item xs={12} sm={6}>

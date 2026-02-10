@@ -631,7 +631,7 @@ class OpportunityViewSet(BaseModelViewSet):
     search_fields = ['name', 'company__name', 'notes']
     ordering_fields = ['created_at', 'expected_value', 'expected_close_date', 'stage']
     ordering = ['-expected_value', 'expected_close_date']
-    filterset_fields = ['company', 'company__billing_entity', 'stage', 'owner', 'lead_source', 'is_active']
+    filterset_fields = ['company', 'company__billing_entity', 'stage', 'owner', 'lead_source', 'is_active', 'service_type']
     
     def get_queryset(self):
         """Filter opportunities based on user role"""
@@ -701,6 +701,7 @@ class OpportunityViewSet(BaseModelViewSet):
                 'company_name': opp.company.name if opp.company else '',
                 'company_billing_entity': opp.company.billing_entity if opp.company else '',
                 'name': opp.name,
+                'service_type': opp.service_type or '',
                 'stage': opp.stage,
                 'expected_value': float(opp.expected_value or 0),
                 'probability': opp.probability,
@@ -716,6 +717,9 @@ class OpportunityViewSet(BaseModelViewSet):
             entity_val = request.query_params['company__billing_entity']
             filters_applied['Entity'] = entity_val
             filters_applied['_entity_raw'] = entity_val
+        if request.query_params.get('service_type'):
+            svc = request.query_params['service_type']
+            filters_applied['Service'] = 'Soundtrack' if svc == 'soundtrack' else 'Beat Breeze'
         if request.query_params.get('search'):
             filters_applied['Search'] = request.query_params['search']
         if request.query_params.get('owner'):
@@ -762,8 +766,9 @@ class OpportunityViewSet(BaseModelViewSet):
         from collections import defaultdict
 
         year = int(request.query_params.get('year', dt.now().year))
-        entity_filter = request.query_params.get('entity', 'all')
+        entity_filter = request.query_params.get('entity', '')
         period_type = request.query_params.get('period_type', 'monthly')
+        service_type_filter = request.query_params.get('service_type', '')
 
         # Query won opportunities for the year
         won_qs = self.get_queryset().filter(
@@ -771,16 +776,20 @@ class OpportunityViewSet(BaseModelViewSet):
             created_at__year=year,
         ).select_related('company', 'owner')
 
-        if entity_filter and entity_filter != 'all':
+        if entity_filter:
             won_qs = won_qs.filter(company__billing_entity=entity_filter)
+        if service_type_filter:
+            won_qs = won_qs.filter(service_type=service_type_filter)
 
         # Lost opportunities for win rate
         lost_qs = self.get_queryset().filter(
             stage='Lost',
             created_at__year=year,
         )
-        if entity_filter and entity_filter != 'all':
+        if entity_filter:
             lost_qs = lost_qs.filter(company__billing_entity=entity_filter)
+        if service_type_filter:
+            lost_qs = lost_qs.filter(service_type=service_type_filter)
 
         won_opps = list(won_qs)
         lost_count = lost_qs.count()
@@ -850,7 +859,8 @@ class OpportunityViewSet(BaseModelViewSet):
 
         export_service = SalesExportService()
         pdf_buffer = export_service.generate_sales_performance_pdf(
-            kpis, period_breakdown, top_deals, year, entity_filter, period_type
+            kpis, period_breakdown, top_deals, year, entity_filter, period_type,
+            service_type=service_type_filter or None
         )
 
         filename = f"Sales_Performance_{year}.pdf"

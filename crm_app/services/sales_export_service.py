@@ -294,7 +294,7 @@ class SalesExportService:
     # =========================================================================
 
     def generate_sales_performance_pdf(self, kpis, period_breakdown, top_deals,
-                                        year, entity_filter, period_type):
+                                        year, entity_filter, period_type, service_type=None):
         """
         Generate PDF for Sales Performance summary.
 
@@ -305,6 +305,7 @@ class SalesExportService:
             year: int
             entity_filter: str (full entity name or 'all')
             period_type: 'monthly' or 'quarterly'
+            service_type: str or None ('soundtrack', 'beatbreeze')
         Returns:
             BytesIO PDF buffer
         """
@@ -318,7 +319,7 @@ class SalesExportService:
         elements = []
 
         # Determine currency
-        entity_info = ENTITY_INFO.get(entity_filter) if entity_filter != 'all' else None
+        entity_info = ENTITY_INFO.get(entity_filter) if entity_filter and entity_filter != 'all' else None
         currency_label = entity_info['currency'] if entity_info else 'USD'
         entity_name = entity_info['name'] if entity_info else 'All Entities'
 
@@ -329,19 +330,14 @@ class SalesExportService:
             'Currency': currency_label,
             'View': 'Monthly' if period_type == 'monthly' else 'Quarterly',
         }
+        if service_type:
+            subtitle['Service'] = 'Soundtrack' if service_type == 'soundtrack' else 'Beat Breeze'
         self._add_pdf_header(elements, "SALES PERFORMANCE REPORT", subtitle)
-
-        if entity_filter == 'all':
-            elements.append(Paragraph(
-                "<i>Note: Showing all entities. Values in USD (THB amounts shown at face value, not converted).</i>",
-                self.small_style
-            ))
-            elements.append(Spacer(1, 0.1 * inch))
 
         # KPI Section
         elements.append(Paragraph("Key Performance Indicators", self.heading_style))
 
-        billing_entity_for_fmt = entity_filter if entity_filter != 'all' else None
+        billing_entity_for_fmt = entity_filter if entity_filter and entity_filter != 'all' else None
 
         kpi_data = [
             ['Total Won Value', 'Deals Won', 'Avg Deal Size', 'Win Rate'],
