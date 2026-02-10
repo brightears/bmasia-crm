@@ -1152,6 +1152,8 @@ class Invoice(TimestampedModel):
     discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2)
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
+    payment_terms = models.CharField(max_length=50, blank=True, default='Net 30')
+    payment_terms_text = models.TextField(blank=True)
     payment_method = models.CharField(max_length=50, blank=True)
     transaction_id = models.CharField(max_length=100, blank=True)
     notes = models.TextField(blank=True)

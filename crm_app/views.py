@@ -4238,54 +4238,14 @@ class InvoiceViewSet(BaseModelViewSet):
         payment_section.append(bank_table)
         payment_section.append(Spacer(1, 0.15*inch))
 
-        # Payment status indicator
-        if invoice.status == 'Paid':
-            paid_style = ParagraphStyle(
-                'PaidStamp',
-                parent=styles['Normal'],
-                fontSize=16,
-                textColor=colors.HexColor('#2e7d32'),
-                alignment=TA_CENTER,
-                spaceBefore=12,
-                spaceAfter=12
-            )
-            payment_section.append(Paragraph("<b>PAID</b>", paid_style))
-            if invoice.paid_date:
-                payment_section.append(Paragraph(f"Payment received on {invoice.paid_date.strftime('%B %d, %Y')}", body_style))
-        elif invoice.is_overdue:
-            overdue_style = ParagraphStyle(
-                'OverdueStamp',
-                parent=styles['Normal'],
-                fontSize=14,
-                textColor=colors.HexColor('#c62828'),
-                alignment=TA_CENTER,
-                spaceBefore=12,
-                spaceAfter=12
-            )
-            payment_section.append(Paragraph(f"<b>OVERDUE - {invoice.days_overdue} days past due</b>", overdue_style))
-        else:
-            pending_style = ParagraphStyle(
-                'PendingStamp',
-                parent=styles['Normal'],
-                fontSize=12,
-                textColor=colors.HexColor('#f57c00'),
-                alignment=TA_CENTER,
-                spaceBefore=12,
-                spaceAfter=12
-            )
-            days_until_due = (invoice.due_date - timezone.now().date()).days
-            if days_until_due > 0:
-                payment_section.append(Paragraph(f"Payment due in {days_until_due} days", pending_style))
-            else:
-                payment_section.append(Paragraph("Payment due today", pending_style))
-
-        payment_section.append(Spacer(1, 0.2*inch))
-
-        # Payment terms
+        # Payment terms — use stored text, fall back to entity default
         payment_section.append(Paragraph("Payment Terms:", heading_style))
-        payment_terms_text = (invoice.contract.payment_terms if invoice.contract and invoice.contract.payment_terms else payment_terms_default)
-        payment_terms_formatted = payment_terms_text.replace('\n', '<br/>')
-        payment_section.append(Paragraph(payment_terms_formatted, body_style))
+        if invoice.payment_terms_text:
+            pt_text = invoice.payment_terms_text
+        else:
+            pt_text = payment_terms_default
+        pt_formatted = pt_text.replace('\n', '<br/>')
+        payment_section.append(Paragraph(pt_formatted, body_style))
 
         elements.append(KeepTogether(payment_section))
         elements.append(Spacer(1, 0.2*inch))

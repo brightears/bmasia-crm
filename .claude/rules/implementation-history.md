@@ -2,6 +2,40 @@
 
 ## February 2026
 
+### Feb 10, 2026 - Invoice Line Items Persistence, PDF Fixes & Edit Fix
+
+**3 Issues Found by User**:
+1. Invoice PDF page breaks split payment details section across pages
+2. PDF description shows "Professional Services" instead of actual line item descriptions
+3. Clicking Edit on an invoice opens a blank white page
+
+**Root Cause**: Invoice line items were frontend-only — never persisted to DB. The PDF fell back to generic "Professional Services", and the edit form crashed on `undefined.length` when `line_items` wasn't returned by the API.
+
+**InvoiceLineItem Model** (`crm_app/models.py`):
+- New model following `QuoteLineItem` pattern: FK to Invoice, description, quantity, unit_price, tax_rate, line_total (auto-calculated)
+- Migration: `0060_invoice_line_items.py`
+- Django admin: `InvoiceLineItemInline` on `InvoiceAdmin`
+
+**Serializer** (`crm_app/serializers.py`):
+- New `InvoiceLineItemSerializer` (same pattern as `QuoteLineItemSerializer`)
+- `InvoiceSerializer` updated: nested `line_items` field, `create()` and `update()` overrides for nested writes (delete-recreate pattern)
+- Removed `total_amount` from `read_only_fields` (can now be set from frontend)
+
+**PDF Page Breaks** (`crm_app/views.py`):
+- Added `KeepTogether` import to Invoice PDF method
+- Bank Details + Payment Status + Payment Terms wrapped in single `KeepTogether` block
+- Notes section also wrapped in `KeepTogether`
+
+**PDF Line Items from DB** (`crm_app/views.py`):
+- New invoices: renders actual line items with Description/Qty/Unit Price/Amount columns
+- Legacy invoices (no line items): falls back to contract service_type or "Professional Services"
+
+**Edit Blank Page Fix** (`InvoiceForm.tsx`):
+- Changed `invoice.line_items.length` to `invoice.line_items?.length` (optional chaining)
+- Prevents TypeError crash when line_items is undefined
+
+---
+
 ### Feb 10, 2026 - Invoice Audit: Contract Auto-Fill, Smart VAT/Currency & Optional Contract
 
 **User feedback**: (1) Selecting a contract in invoice form should auto-fill fields (currently only currency, risk of mismatch). (2) Currency/VAT should match QuoteForm pattern (Thailand=THB+7% VAT, international=USD+0%). (3) Sometimes invoices are sent without a contract — make contract optional.

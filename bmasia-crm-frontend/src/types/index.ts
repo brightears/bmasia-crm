@@ -412,6 +412,7 @@ export interface Invoice {
   currency: string;
   payment_method?: string;
   payment_terms?: string;
+  payment_terms_text?: string;
   transaction_id?: string;
   notes?: string;
   days_overdue: number;

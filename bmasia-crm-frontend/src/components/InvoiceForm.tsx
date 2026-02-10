@@ -60,6 +60,16 @@ const paymentTermsOptions = [
   { value: 'Custom', label: 'Custom' },
 ];
 
+// Entity-specific default payment terms text (same as contract PDFs)
+const PAYMENT_TERMS_DEFAULTS: Record<string, string> = {
+  'Thailand': "by bank transfer on a net received, paid in full basis, with no offset to BMA's TMB-Thanachart Bank, Bangkok, Thailand due immediately on invoicing to activate the music subscription. All outbound and inbound bank transfer fees are borne by the Client in remitting payments as invoiced less Withholding Tax required by Thai Law.",
+  'default': "by bank transfer on a net received, paid in full basis, with no offset to BMA's HSBC Bank, Hong Kong due immediately as invoiced to activate the music subscription. All Bank transfer fees, and all taxes are borne by the Client in remitting payments as invoiced.",
+};
+
+const getDefaultPaymentTermsText = (country: string): string => {
+  return PAYMENT_TERMS_DEFAULTS[country] || PAYMENT_TERMS_DEFAULTS['default'];
+};
+
 const defaultLineItem: InvoiceLineItem = {
   description: '',
   quantity: 1,
@@ -88,6 +98,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [issueDate, setIssueDate] = useState<Date | null>(new Date());
   const [dueDate, setDueDate] = useState<Date | null>(null);
   const [paymentTerms, setPaymentTerms] = useState('Net 30');
+  const [paymentTermsText, setPaymentTermsText] = useState('');
   const [notes, setNotes] = useState('');
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([defaultLineItem]);
   const [discountAmount, setDiscountAmount] = useState(0);
@@ -179,6 +190,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     setIssueDate(new Date());
     setDueDate(null);
     setPaymentTerms('Net 30');
+    setPaymentTermsText('');
     setNotes('');
     setLineItems([defaultLineItem]);
     setDiscountAmount(0);
@@ -195,6 +207,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     setIssueDate(new Date(invoice.issue_date));
     setDueDate(invoice.due_date ? new Date(invoice.due_date) : null);
     setPaymentTerms(invoice.payment_terms || 'Net 30');
+    setPaymentTermsText(invoice.payment_terms_text || '');
     setNotes(invoice.notes || '');
     setLineItems(invoice.line_items?.length > 0 ? invoice.line_items : [defaultLineItem]);
     setDiscountAmount(invoice.discount_amount || 0);
@@ -235,6 +248,9 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
       // Smart currency default based on country (same as QuoteForm)
       const smartCurrency = country === 'Thailand' ? 'THB' : 'USD';
       setCurrency(smartCurrency);
+
+      // Auto-fill payment terms text from entity defaults
+      setPaymentTermsText(getDefaultPaymentTermsText(country));
 
       // Update existing line items' tax rates to match new country
       const smartTaxRate = country === 'Thailand' ? 7 : 0;
@@ -356,6 +372,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         issue_date: issueDate.toISOString().split('T')[0],
         due_date: dueDate.toISOString().split('T')[0],
         payment_terms: paymentTerms,
+        payment_terms_text: paymentTermsText,
         notes,
         line_items: lineItems.filter(item => item.description.trim()),
         amount: Math.round(totals.subtotal * 100) / 100,
@@ -684,7 +701,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
               </Grid>
             </Paper>
 
-            {/* Notes and Options */}
+            {/* Payment Terms Text + Notes */}
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>
                 Additional Information
@@ -693,12 +710,24 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                 <Grid item xs={12}>
                   <TextField
                     fullWidth
+                    label="Payment Terms (shown on PDF)"
+                    value={paymentTermsText}
+                    onChange={(e) => setPaymentTermsText(e.target.value)}
+                    multiline
+                    rows={3}
+                    placeholder="Detailed payment terms for the invoice PDF..."
+                    helperText="Auto-filled from entity defaults. Edit to customize."
+                  />
+                </Grid>
+                <Grid item xs={12}>
+                  <TextField
+                    fullWidth
                     label="Notes"
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     multiline
                     rows={3}
-                    placeholder="Additional notes or terms..."
+                    placeholder="Additional notes..."
                   />
                 </Grid>
                 <Grid item xs={12}>

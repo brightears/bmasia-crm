@@ -477,8 +477,8 @@ class InvoiceSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'company', 'company_name', 'contract', 'contract_number', 'invoice_number',
             'status', 'issue_date', 'due_date', 'paid_date', 'amount', 'tax_amount',
-            'discount_amount', 'total_amount', 'currency', 'payment_method',
-            'transaction_id', 'notes', 'days_overdue', 'is_overdue',
+            'discount_amount', 'total_amount', 'currency', 'payment_terms', 'payment_terms_text',
+            'payment_method', 'transaction_id', 'notes', 'days_overdue', 'is_overdue',
             'first_reminder_sent', 'second_reminder_sent', 'final_notice_sent',
             'line_items', 'created_at', 'updated_at'
         ]
