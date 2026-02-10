@@ -13,7 +13,6 @@ import {
   ListItemIcon,
   ListItemText,
   useTheme,
-  Badge,
   Card,
   CardContent,
   CardActions,
@@ -318,10 +317,11 @@ const KanbanColumn: React.FC<{
             <Typography variant="subtitle2" fontWeight="bold">
               {column.title}
             </Typography>
-            <Badge
-              badgeContent={tasks.length}
-              color={isOverLimit ? 'error' : 'primary'}
-              max={99}
+            <Chip
+              label={tasks.length}
+              size="small"
+              color={isOverLimit ? 'error' : 'default'}
+              sx={{ height: 20, fontSize: '0.75rem', fontWeight: 'bold' }}
             />
           </Box>
           {column.limit && (
