@@ -2,6 +2,82 @@
 
 ## February 2026
 
+### Feb 10, 2026 - Invoice Audit: Contract Auto-Fill, Smart VAT/Currency & Optional Contract
+
+**User feedback**: (1) Selecting a contract in invoice form should auto-fill fields (currently only currency, risk of mismatch). (2) Currency/VAT should match QuoteForm pattern (Thailand=THB+7% VAT, international=USD+0%). (3) Sometimes invoices are sent without a contract — make contract optional.
+
+**Research** (Xero, FreshBooks, Zoho Invoice, HubSpot, QuickBooks): Industry standard = "copy from source" (auto-populate but editable). Currency/tax always entity-driven. All major platforms support standalone invoices.
+
+**Key discovery**: Invoice model had NO direct company FK — derived from `contract.company`. Making contract optional required adding company FK.
+
+**Backend changes**:
+- Added `company` FK to Invoice model (always required, on_delete=CASCADE)
+- Made `contract` FK optional (null=True, blank=True, on_delete=SET_NULL)
+- Migration `0059_invoice_optional_contract.py`: add company, backfill from contract.company, make contract nullable
+- Updated InvoiceSerializer: company writable, contract optional with `allow_null=True`, `get_contract_number` SerializerMethodField
+- Updated InvoiceViewSet: `filterset_fields` + `search_fields` use direct `company` FK
+- Updated ALL `invoice.contract.company` references → `invoice.company` across:
+  - `views.py` (PDF generation, Dashboard, Action Center)
+  - `admin.py` (CSV/Excel export)
+  - `email_service.py` (overdue reminders, invoice sending)
+  - `ar_aging_service.py` (AR aging report)
+  - `auto_enrollment_service.py` (auto-enrollment)
+
+**Frontend changes** (InvoiceForm.tsx):
+- **Contract auto-fill**: Selecting contract populates first line item (description + amount from contract), payment terms, tax rate
+- **Smart currency**: Company selection auto-sets THB (Thailand) or USD (international) — same as QuoteForm
+- **Smart tax rate**: New line items default to 7% (Thailand) or 0% (international)
+- **VAT:/Tax: label**: `getTaxLabel()` mirrors QuoteForm pattern
+- **Optional contract**: "No Contract (Standalone Invoice)" dropdown option, removed `required` attribute
+- **Submit**: Sends `contract: contractId || null` and `company: companyId`
+
+**Invoices.tsx**: Updated filter from `contract__company` → `company`, sort from `contract__company__name` → `company__name`
+**types/index.ts**: Made `contract` and `contract_number` nullable on Invoice type
+
+**Bug fixes** (post-deploy):
+- **Error display**: DRF returns field-level errors (`{"tax_amount": ["..."]}`) not `{"message": "..."}`. Fixed error parsing to show all field errors. Added `scroll="paper"` + `useRef` to auto-scroll dialog to top on error.
+- **Decimal rounding**: `tax_amount` of `29906.54 * 7% = 2093.4578` rejected by `DecimalField(decimal_places=2)`. Fixed by rounding `amount`, `tax_amount`, `discount_amount` to 2 decimal places with `Math.round(x * 100) / 100` before submitting.
+- **String coercion**: DRF serializes DecimalField as string — `contract.value` arrives as `"29906.54"` not `29906.54`. Fixed with `parseFloat(String(value))` and `Number()` in calculations.
+
+**Migration**: `0059_invoice_optional_contract.py`
+
+---
+
+### Feb 10, 2026 - Dashboard v2: Entity Filter, Revenue Breakdown & Churn Tracking
+
+**User feedback**: Dashboard mixes THB and USD into a single USD number (misleading), only shows "the bright side" (no churn/cancellation visibility), and doesn't distinguish new revenue from renewals.
+
+**Research** (Baremetrics, ChartMogul, ProfitWell, Zoho, HubSpot, Pipedrive): Industry standard for multi-currency = entity toggle (not separate dashboards). Revenue composition = 4 metrics: New MRR, Renewal MRR, Churned MRR, Net MRR. Revenue waterfall is standard even for small teams.
+
+**Phase 1 — Entity Filter** (`crm_app/views.py`, `Dashboard.tsx`):
+- Backend: Optional `billing_entity` query param filters ALL querysets (companies, opportunities, contracts, tasks, invoices)
+- Filter paths: `company__billing_entity` (direct), `contract__company__billing_entity` (invoices)
+- Revenue trend loop also respects entity filter (was bypassing with fresh `Contract.objects.filter`)
+- Frontend: EntityFilter dropdown in header, `formatCurrency(amount, entityFilter)` from `constants/entities.ts`
+- API updated: `getDashboardStats(params?)` accepts optional params object
+
+**Phase 2 — Revenue Breakdown** (`crm_app/views.py`, `crm_app/serializers.py`):
+- `_classify_lifecycle(contract)` helper: checks `lifecycle_type` field → `renewed_from` FK → older company contracts → defaults 'new'
+- Churn detection: contracts with `end_date` in current month + `status` in ('Expired', 'Cancelled') + NOT in `renewed_contract_ids` set
+- New stats fields: `new_revenue`, `renewal_revenue`, `churned_revenue`, `churned_count`, `net_revenue`
+- Serializer: 5 new fields with `default=0` (backward compatible)
+- Frontend: Revenue Breakdown row (4 compact boxes: New/Renewals/Churned/Net) between KPI cards and Pipeline
+
+**Phase 3 — Revenue Trend Enhancement**:
+- Each month in `revenue_trend` now includes: `new_revenue`, `renewal_revenue`, `churned_revenue`, `net_revenue` (plus backward-compat `revenue`)
+- Pre-computes `renewed_contract_ids` set (single query) for efficient churn detection across 6 months
+- Frontend: Recharts stacked AreaChart (green=new, blue=renewals) + red dashed line (churn) + orange line (net) + Legend
+
+**Bonus — Renewal Window Expansion** (`crm_app/models.py`):
+- `is_expiring_soon` changed from 30 to 60 days (industry best practice: 60-90 day lead time)
+- Affects Dashboard Pending Renewals KPI + Action Center contract expiring items
+
+**Files changed**: `crm_app/views.py`, `crm_app/models.py`, `crm_app/serializers.py`, `api.ts`, `types/index.ts`, `Dashboard.tsx` (7 files, 394 added, 85 deleted)
+
+**No new models. No migrations. All changes additive and backward-compatible.**
+
+---
+
 ### Feb 10, 2026 - Dashboard Redesign: Business Health Snapshot
 
 **Research**: Audited Dashboard against HubSpot, Pipedrive, Close.io, monday.com, Explo, Breakcold. Found 3 major problems: (1) Kitchen-sink layout — 7 stat cards + 4 widget sections duplicating sidebar list pages, (2) SalesDashboard 100% mocked data (`generateMockKPIs()`, `generateMockActivities()`, fake 800ms setTimeout), ContractWidgets faked renewal rate, QuickActions hardcoded fake Recent Activity, (3) Raw numbers without trend context — no "is this good or bad?"
