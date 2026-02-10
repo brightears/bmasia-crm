@@ -50,6 +50,7 @@ import ProfitLoss from './pages/ProfitLoss';
 import CashFlow from './pages/CashFlow';
 import BalanceSheet from './pages/BalanceSheet';
 import ContractTemplates from './pages/ContractTemplates';
+import ActionCenter from './pages/ActionCenter';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -261,7 +262,8 @@ function App() {
         />
 
         {/* New navigation routes */}
-        <Route path="/quick-actions" element={<PlaceholderPage title="Quick Actions" />} />
+        <Route path="/today" element={<ActionCenter />} />
+        <Route path="/quick-actions" element={<Navigate to="/today" replace />} />
         <Route
           path="/contacts"
           element={

@@ -82,6 +82,9 @@ router.register(r'cash-flow', views.CashFlowViewSet, basename='cash-flow')
 # Balance Sheet routes (Phase 6 - Finance Module)
 router.register(r'balance-sheet', views.BalanceSheetViewSet, basename='balance-sheet')
 
+# Action Center (Today page)
+router.register(r'action-center', views.ActionCenterViewSet, basename='action-center')
+
 # The API URLs are now determined automatically by the router.
 urlpatterns = [
     path('v1/', include(router.urls)),

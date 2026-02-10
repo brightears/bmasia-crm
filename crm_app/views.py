@@ -5014,6 +5014,229 @@ class DashboardViewSet(viewsets.ViewSet):
         return Response(serializer.data)
 
 
+class ActionCenterViewSet(viewsets.ViewSet):
+    """Today page: prioritized feed of items needing attention."""
+    permission_classes = [IsAuthenticated]
+
+    def _get_primary_contact(self, company):
+        """Get primary contact for a company, fallback to first active."""
+        contact = Contact.objects.filter(
+            company=company, is_primary=True, is_active=True
+        ).first()
+        if not contact:
+            contact = Contact.objects.filter(
+                company=company, is_active=True
+            ).first()
+        return contact
+
+    def _contact_dict(self, contact):
+        if not contact:
+            return {'contact_name': None, 'contact_email': None, 'contact_phone': None}
+        return {
+            'contact_name': contact.name,
+            'contact_email': contact.email,
+            'contact_phone': contact.phone or None,
+        }
+
+    def list(self, request):
+        user = request.user
+        now = timezone.now()
+        today = now.date()
+        tomorrow = today + timedelta(days=1)
+        day_after_tomorrow = today + timedelta(days=2)
+        week_end = today + timedelta(days=7)
+        two_weeks = today + timedelta(days=14)
+        sixty_days = today + timedelta(days=60)
+        stale_threshold = now - timedelta(days=14)
+
+        items = []
+
+        # --- Helper: role-based task filter ---
+        task_qs = Task.objects.select_related('company', 'assigned_to', 'related_contact')
+        if user.role == 'Sales':
+            task_qs = task_qs.filter(assigned_to=user)
+
+        # --- OVERDUE TASKS ---
+        for t in task_qs.filter(status__in=['To Do', 'In Progress'], due_date__lt=now):
+            days = (today - t.due_date.date()).days
+            contact = t.related_contact or self._get_primary_contact(t.company)
+            items.append({
+                'id': str(t.id), 'type': 'task', 'urgency': 'overdue',
+                'title': t.title, 'subtitle': t.company.name if t.company else '',
+                **self._contact_dict(contact),
+                'time_context': f'{days} day{"s" if days != 1 else ""} overdue',
+                'priority': t.priority, 'amount': None, 'currency': None,
+                'link_url': '/tasks', 'link_id': str(t.id),
+                'meta': {
+                    'task_type': t.task_type,
+                    'assigned_to': t.assigned_to.get_full_name() if t.assigned_to else None,
+                },
+            })
+
+        # --- OVERDUE INVOICES ---
+        overdue_invoices = Invoice.objects.filter(
+            status__in=['Sent', 'Overdue'], due_date__lt=today
+        ).select_related('contract__company')
+        for inv in overdue_invoices:
+            company = inv.contract.company if inv.contract else None
+            contact = self._get_primary_contact(company) if company else None
+            items.append({
+                'id': str(inv.id), 'type': 'invoice', 'urgency': 'overdue',
+                'title': f'Invoice {inv.invoice_number}',
+                'subtitle': company.name if company else '',
+                **self._contact_dict(contact),
+                'time_context': f'{inv.days_overdue} day{"s" if inv.days_overdue != 1 else ""} overdue',
+                'priority': 'High' if inv.days_overdue > 30 else 'Medium',
+                'amount': float(inv.total_amount), 'currency': inv.currency,
+                'link_url': '/invoices', 'link_id': str(inv.id),
+                'meta': {'status': inv.status},
+            })
+
+        # --- STALE OPPORTUNITIES ---
+        stale_opps = Opportunity.objects.filter(
+            is_active=True
+        ).exclude(
+            stage__in=['Won', 'Lost']
+        ).filter(
+            Q(follow_up_date__lt=today) |
+            Q(follow_up_date__isnull=True, updated_at__lt=stale_threshold)
+        ).select_related('company', 'owner')
+        if user.role == 'Sales':
+            stale_opps = stale_opps.filter(owner=user)
+
+        for opp in stale_opps:
+            contact = self._get_primary_contact(opp.company) if opp.company else None
+            ref_date = opp.follow_up_date if opp.follow_up_date else opp.updated_at.date()
+            days_stale = (today - ref_date).days
+            items.append({
+                'id': str(opp.id), 'type': 'opportunity', 'urgency': 'overdue',
+                'title': opp.name, 'subtitle': f'{opp.company.name} — {opp.stage}' if opp.company else opp.stage,
+                **self._contact_dict(contact),
+                'time_context': f'No activity for {days_stale} days',
+                'priority': 'High',
+                'amount': float(opp.expected_value) if opp.expected_value else None,
+                'currency': None,
+                'link_url': '/opportunities', 'link_id': str(opp.id),
+                'meta': {'stage': opp.stage, 'owner': opp.owner.get_full_name() if opp.owner else None},
+            })
+
+        # --- TASKS DUE TODAY & TOMORROW ---
+        tomorrow_end = now.replace(hour=23, minute=59, second=59) + timedelta(days=1)
+        for t in task_qs.filter(status__in=['To Do', 'In Progress'], due_date__gte=now, due_date__lte=tomorrow_end):
+            is_today = t.due_date.date() == today
+            contact = t.related_contact or self._get_primary_contact(t.company)
+            items.append({
+                'id': str(t.id), 'type': 'task', 'urgency': 'today',
+                'title': t.title, 'subtitle': t.company.name if t.company else '',
+                **self._contact_dict(contact),
+                'time_context': 'Due today' if is_today else 'Due tomorrow',
+                'priority': t.priority, 'amount': None, 'currency': None,
+                'link_url': '/tasks', 'link_id': str(t.id),
+                'meta': {
+                    'task_type': t.task_type,
+                    'assigned_to': t.assigned_to.get_full_name() if t.assigned_to else None,
+                },
+            })
+
+        # --- INVOICES DUE THIS WEEK ---
+        for inv in Invoice.objects.filter(
+            status='Sent', due_date__gte=today, due_date__lte=week_end
+        ).select_related('contract__company'):
+            company = inv.contract.company if inv.contract else None
+            contact = self._get_primary_contact(company) if company else None
+            days_until = (inv.due_date - today).days
+            items.append({
+                'id': str(inv.id), 'type': 'invoice', 'urgency': 'today',
+                'title': f'Invoice {inv.invoice_number}',
+                'subtitle': company.name if company else '',
+                **self._contact_dict(contact),
+                'time_context': 'Due today' if days_until == 0 else f'Due in {days_until} day{"s" if days_until != 1 else ""}',
+                'priority': 'Medium', 'amount': float(inv.total_amount), 'currency': inv.currency,
+                'link_url': '/invoices', 'link_id': str(inv.id),
+                'meta': {'status': inv.status},
+            })
+
+        # --- CONTRACTS EXPIRING WITHIN 60 DAYS ---
+        for c in Contract.objects.filter(
+            status='Active', end_date__gte=today, end_date__lte=sixty_days
+        ).select_related('company'):
+            contact_name = c.customer_signatory_name
+            contact = None
+            if not contact_name and c.company:
+                contact = self._get_primary_contact(c.company)
+            days_until = (c.end_date - today).days
+            items.append({
+                'id': str(c.id), 'type': 'contract', 'urgency': 'upcoming',
+                'title': f'Contract {c.contract_number}',
+                'subtitle': c.company.name if c.company else '',
+                **(self._contact_dict(contact) if contact else {
+                    'contact_name': contact_name or None,
+                    'contact_email': None, 'contact_phone': None,
+                }),
+                'time_context': f'Expires in {days_until} day{"s" if days_until != 1 else ""}',
+                'priority': 'High' if days_until <= 30 else 'Medium',
+                'amount': float(c.value) if c.value else None,
+                'currency': c.currency,
+                'link_url': '/contracts', 'link_id': str(c.id),
+                'meta': {'auto_renew': c.auto_renew},
+            })
+
+        # --- TASKS DUE THIS WEEK (not today/tomorrow) ---
+        week_start = now + timedelta(days=2)
+        week_end_dt = now.replace(hour=23, minute=59, second=59) + timedelta(days=7)
+        for t in task_qs.filter(status__in=['To Do', 'In Progress'], due_date__gt=tomorrow_end, due_date__lte=week_end_dt):
+            days_until = (t.due_date.date() - today).days
+            contact = t.related_contact or self._get_primary_contact(t.company)
+            items.append({
+                'id': str(t.id), 'type': 'task', 'urgency': 'upcoming',
+                'title': t.title, 'subtitle': t.company.name if t.company else '',
+                **self._contact_dict(contact),
+                'time_context': f'Due in {days_until} days',
+                'priority': t.priority, 'amount': None, 'currency': None,
+                'link_url': '/tasks', 'link_id': str(t.id),
+                'meta': {
+                    'task_type': t.task_type,
+                    'assigned_to': t.assigned_to.get_full_name() if t.assigned_to else None,
+                },
+            })
+
+        # --- UPCOMING OPPORTUNITY FOLLOW-UPS ---
+        upcoming_opps = Opportunity.objects.filter(
+            is_active=True, follow_up_date__gte=today, follow_up_date__lte=two_weeks
+        ).exclude(stage__in=['Won', 'Lost']).select_related('company', 'owner')
+        if user.role == 'Sales':
+            upcoming_opps = upcoming_opps.filter(owner=user)
+
+        for opp in upcoming_opps:
+            contact = self._get_primary_contact(opp.company) if opp.company else None
+            days_until = (opp.follow_up_date - today).days
+            items.append({
+                'id': str(opp.id), 'type': 'opportunity', 'urgency': 'upcoming',
+                'title': opp.name, 'subtitle': f'{opp.company.name} — {opp.stage}' if opp.company else opp.stage,
+                **self._contact_dict(contact),
+                'time_context': 'Follow up today' if days_until == 0 else f'Follow up in {days_until} day{"s" if days_until != 1 else ""}',
+                'priority': 'Medium',
+                'amount': float(opp.expected_value) if opp.expected_value else None,
+                'currency': None,
+                'link_url': '/opportunities', 'link_id': str(opp.id),
+                'meta': {'stage': opp.stage, 'owner': opp.owner.get_full_name() if opp.owner else None},
+            })
+
+        # Sort: overdue first (oldest first), then today, then upcoming
+        urgency_order = {'overdue': 0, 'today': 1, 'upcoming': 2}
+        items.sort(key=lambda x: urgency_order.get(x['urgency'], 9))
+
+        # Build summary
+        summary = {
+            'overdue_count': sum(1 for i in items if i['urgency'] == 'overdue'),
+            'today_count': sum(1 for i in items if i['urgency'] == 'today'),
+            'upcoming_count': sum(1 for i in items if i['urgency'] == 'upcoming'),
+            'expiring_count': sum(1 for i in items if i['type'] == 'contract'),
+        }
+
+        return Response({'items': items, 'summary': summary})
+
+
 class AuthViewSet(viewsets.ViewSet):
     """ViewSet for authentication"""
     permission_classes = [AllowAny]

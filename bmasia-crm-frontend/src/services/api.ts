@@ -30,6 +30,12 @@ class ApiService {
     return response.data;
   }
 
+  // Action Center (Today page)
+  async getActionCenterItems(): Promise<any> {
+    const response = await authApi.get('/action-center/');
+    return response.data;
+  }
+
   // Companies
   async getCompanies(params?: any): Promise<ApiResponse<Company>> {
     if (this.useMockData) {

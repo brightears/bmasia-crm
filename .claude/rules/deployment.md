@@ -21,6 +21,7 @@
 - Frontend (React): `srv-d3clctt6ubrc73etb580`
 - Email Automation Cron: `crn-d4b9g875r7bs7391al2g`
 - Soundtrack Sync Cron: `crn-d5ea7j2li9vc73dccnb0`
+- Task Digest Cron: `crn-d65drn75r7bs73cpu72g` (daily 02:00 UTC / 9 AM Bangkok)
 
 ### Standard Deployment Workflow
 1. Make code changes

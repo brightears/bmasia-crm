@@ -47,7 +47,7 @@ import {
   LightMode as LightModeIcon,
   DarkMode as DarkModeIcon,
   Person as PersonIcon,
-  Bolt as BoltIcon,
+  Today as TodayIcon,
   TrendingUp as TrendingUpIcon,
   Description as DescriptionIcon,
   TrackChanges as TrackChangesIcon,
@@ -129,7 +129,7 @@ const unifiedNavigation = [
     title: 'Overview',
     items: [
       { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
-      { text: 'Quick Actions', icon: <BoltIcon />, path: '/quick-actions' },
+      { text: 'Today', icon: <TodayIcon />, path: '/today' },
     ],
   },
   {

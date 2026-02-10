@@ -2,6 +2,44 @@
 
 ## February 2026
 
+### Feb 10, 2026 - Tasks Audit & Improvements (5 Phases)
+
+**Research**: Audited Tasks section against HubSpot, Pipedrive, Zoho, Freshsales best practices. Found critical gaps: backend-frontend field mismatch (frontend had fields that didn't exist in Django model), status mismatch (backend: Pending/Completed, frontend: To Do/Done), over-engineered UI (4 Kanban columns, WIP limits, Time Tracking, Subtasks), zero notifications.
+
+**Phase 1 - Backend Model Fix** (`crm_app/models.py`, `0058_task_improvements.py`):
+- Added FKs: `related_opportunity`, `related_contract`, `related_contact`
+- Added `task_type` (Call, Email, Follow-up, Meeting, Other)
+- Created `TaskComment` model
+- Fixed status choices: To Do, In Progress, Done, Cancelled, On Hold
+- Removed unused: `estimated_hours`, `actual_hours`, `department`, `tags`
+- Data migration: Pending→To Do, Completed→Done, Review→Done
+
+**Phase 2 - Email Notifications** (`crm_app/views.py`, TaskViewSet):
+- `perform_create()` and `perform_update()` detect `assigned_to` changes
+- `_send_assignment_email()` sends HTML email via `django.core.mail.send_mail`
+- Uses system email (NOT per-user SMTP EmailService)
+
+**Phase 3 - Daily Digest Cron** (`crm_app/management/commands/send_task_digest.py`):
+- Render cron: `crn-d65drn75r7bs73cpu72g` at 02:00 UTC (9 AM Bangkok)
+- Email shows: tasks due today, overdue tasks, newly assigned tasks
+
+**Phase 4 - Frontend Simplification**:
+- Kanban: 3 columns (To Do, In Progress, Done) — removed Review + WIP limits
+- TaskForm: promoted task_type/opportunity/contact to main section, removed Advanced Options
+- TaskDetail: removed Subtasks + Time Tracking tabs, wired Comments to API
+- Reduced task_type to 5 options (removed Delivery, Support, Research, Development)
+
+**Phase 5 - Opportunity Auto-Task**:
+- `OpportunityViewSet.perform_create()` creates "Follow up with {company}" task (3 day due, Follow-up type)
+- `QuoteViewSet.perform_create()` also creates task when auto-creating Opportunity
+- OpportunityDetail: new "Tasks" tab showing linked tasks with Create Task button
+
+**Build Fix**: Two build failures fixed:
+1. `TaskDetail.tsx`: Used `{ api }` named import instead of `ApiService` default import
+2. `TaskListView.tsx`: `LinearProgress` import was removed but component still used
+
+---
+
 ### Feb 10, 2026 - Opportunities PDF Design Fixes
 
 **Problem**: Thai Baht symbol (฿) rendered as black square (■) in Opportunities PDF — Helvetica font doesn't support U+0E3F. Also, internal `_entity_raw` key was displayed in the PDF header metadata.
