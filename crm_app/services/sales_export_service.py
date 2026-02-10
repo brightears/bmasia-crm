@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # Entity info using full Company model names
 ENTITY_INFO = {
     'BMAsia Limited': {'currency': 'USD', 'symbol': '$', 'name': 'BMAsia Limited'},
-    'BMAsia (Thailand) Co., Ltd.': {'currency': 'THB', 'symbol': '฿', 'name': 'BMAsia (Thailand) Co., Ltd.'},
+    'BMAsia (Thailand) Co., Ltd.': {'currency': 'THB', 'symbol': 'THB ', 'name': 'BMAsia (Thailand) Co., Ltd.'},
 }
 
 # Stage colors matching frontend
@@ -138,7 +138,7 @@ class SalesExportService:
 
         # Subtitle lines
         if subtitle_lines:
-            info_text = '<br/>'.join(f"<b>{k}:</b> {v}" for k, v in subtitle_lines.items() if v)
+            info_text = '<br/>'.join(f"<b>{k}:</b> {v}" for k, v in subtitle_lines.items() if v and not k.startswith('_'))
             elements.append(Paragraph(info_text, self.body_style))
         elements.append(Spacer(1, 0.2 * inch))
 
