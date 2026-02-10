@@ -603,25 +603,110 @@ class TaskViewSet(BaseModelViewSet):
     """ViewSet for Task management"""
     queryset = Task.objects.all()
     serializer_class = TaskSerializer
-    search_fields = ['title', 'description', 'tags']
-    ordering_fields = ['created_at', 'due_date', 'priority', 'status']
+    search_fields = ['title', 'description']
+    ordering_fields = ['created_at', 'due_date', 'priority', 'status', 'company__name', 'updated_at']
     ordering = ['-priority', 'due_date']
     permission_classes = [IsAuthenticated, TaskAssigneePermission]
-    filterset_fields = ['company', 'assigned_to', 'priority', 'status', 'department']
-    
+    filterset_fields = [
+        'company', 'assigned_to', 'priority', 'status', 'task_type',
+        'related_opportunity', 'related_contract', 'related_contact',
+    ]
+
+    def get_queryset(self):
+        return super().get_queryset().select_related(
+            'company', 'assigned_to', 'created_by',
+            'related_opportunity', 'related_contract', 'related_contact',
+        ).prefetch_related('comments', 'comments__user')
+
+    def perform_create(self, serializer):
+        instance = serializer.save(created_by=self.request.user)
+        self.log_action('CREATE', instance)
+        # Send assignment email if assigned to someone else
+        if instance.assigned_to and instance.assigned_to != self.request.user:
+            self._send_assignment_email(instance, self.request.user)
+
+    def perform_update(self, serializer):
+        old_assigned = self.get_object().assigned_to
+        instance = serializer.save()
+        self.log_action('UPDATE', instance)
+        # Send assignment email if assigned_to changed
+        if instance.assigned_to and instance.assigned_to != old_assigned:
+            self._send_assignment_email(instance, self.request.user)
+
+    def _send_assignment_email(self, task, assigned_by):
+        """Send email notification when a task is assigned."""
+        import logging
+        from django.conf import settings
+        logger = logging.getLogger(__name__)
+        if not task.assigned_to or not task.assigned_to.email:
+            return
+        try:
+            due_str = task.due_date.strftime('%B %d, %Y') if task.due_date else 'No due date'
+            subject = f'[BMAsia CRM] Task assigned: {task.title}'
+            body_html = f"""
+            <div style="font-family: Arial, sans-serif; max-width: 600px;">
+                <div style="background: #FFA500; padding: 15px; color: white;">
+                    <h2 style="margin: 0;">New Task Assigned</h2>
+                </div>
+                <div style="padding: 20px; border: 1px solid #e0e0e0;">
+                    <p>Hi {task.assigned_to.first_name or task.assigned_to.username},</p>
+                    <p><b>{assigned_by.get_full_name()}</b> assigned you a task:</p>
+                    <table style="width: 100%; border-collapse: collapse; margin: 15px 0;">
+                        <tr><td style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold; width: 120px;">Task</td><td style="padding: 8px; border-bottom: 1px solid #eee;">{task.title}</td></tr>
+                        <tr><td style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">Company</td><td style="padding: 8px; border-bottom: 1px solid #eee;">{task.company.name}</td></tr>
+                        <tr><td style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">Priority</td><td style="padding: 8px; border-bottom: 1px solid #eee;">{task.priority}</td></tr>
+                        <tr><td style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">Due Date</td><td style="padding: 8px; border-bottom: 1px solid #eee;">{due_str}</td></tr>
+                        {f'<tr><td style="padding: 8px; border-bottom: 1px solid #eee; font-weight: bold;">Type</td><td style="padding: 8px; border-bottom: 1px solid #eee;">{task.task_type}</td></tr>' if task.task_type else ''}
+                    </table>
+                    {f'<p style="color: #666;">{task.description}</p>' if task.description else ''}
+                    <p><a href="https://bmasia-crm-frontend.onrender.com/tasks" style="background: #FFA500; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block;">View in CRM</a></p>
+                </div>
+                <div style="padding: 10px; color: #999; font-size: 12px;">
+                    BMAsia CRM - Task Notification
+                </div>
+            </div>
+            """
+            from django.core.mail import send_mail
+            send_mail(
+                subject=subject,
+                message=f'Task assigned: {task.title} - Company: {task.company.name} - Due: {due_str} - Priority: {task.priority}',
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[task.assigned_to.email],
+                html_message=body_html,
+                fail_silently=True,
+            )
+            logger.info(f"Task assignment email sent to {task.assigned_to.email} for task '{task.title}'")
+        except Exception as e:
+            logger.error(f"Failed to send task assignment email: {e}")
+
     @action(detail=False, methods=['get'])
     def my_tasks(self, request):
         """Get tasks assigned to current user"""
         tasks = self.get_queryset().filter(assigned_to=request.user)
         serializer = self.get_serializer(tasks, many=True)
         return Response(serializer.data)
-    
+
     @action(detail=False, methods=['get'])
     def overdue(self, request):
         """Get overdue tasks"""
         overdue_tasks = [task for task in self.get_queryset() if task.is_overdue]
         serializer = self.get_serializer(overdue_tasks, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=['get', 'post'], url_path='comments')
+    def comments(self, request, pk=None):
+        """List or add comments on a task."""
+        task = self.get_object()
+        if request.method == 'GET':
+            from crm_app.serializers import TaskCommentSerializer
+            serializer = TaskCommentSerializer(task.comments.all(), many=True)
+            return Response(serializer.data)
+        else:
+            from crm_app.serializers import TaskCommentSerializer
+            serializer = TaskCommentSerializer(data={**request.data, 'task': task.id})
+            serializer.is_valid(raise_exception=True)
+            serializer.save(user=request.user, task=task)
+            return Response(serializer.data, status=201)
 
 
 class OpportunityViewSet(BaseModelViewSet):
@@ -643,7 +728,26 @@ class OpportunityViewSet(BaseModelViewSet):
             return queryset.filter(owner=user)
         
         return queryset
-    
+
+    def perform_create(self, serializer):
+        """Auto-create a follow-up task when an Opportunity is created."""
+        instance = serializer.save()
+        self.log_action('CREATE', instance)
+        # Auto-create follow-up task assigned to the opportunity owner
+        if instance.owner:
+            Task.objects.create(
+                company=instance.company,
+                assigned_to=instance.owner,
+                created_by=self.request.user,
+                title=f"Follow up with {instance.company.name}",
+                description=f"Follow up on opportunity: {instance.name}",
+                priority='Medium',
+                status='To Do',
+                task_type='Follow-up',
+                due_date=timezone.now() + timedelta(days=3),
+                related_opportunity=instance,
+            )
+
     @action(detail=False, methods=['get'])
     def pipeline(self, request):
         """Get sales pipeline data"""
@@ -4294,6 +4398,19 @@ class QuoteViewSet(BaseModelViewSet):
             )
             instance.opportunity = new_opp
             instance.save(update_fields=['opportunity'])
+            # Auto-create follow-up task for the new opportunity
+            Task.objects.create(
+                company=instance.company,
+                assigned_to=self.request.user,
+                created_by=self.request.user,
+                title=f"Follow up with {instance.company.name}",
+                description=f"Follow up on opportunity: {new_opp.name}",
+                priority='Medium',
+                status='To Do',
+                task_type='Follow-up',
+                due_date=timezone.now() + timedelta(days=3),
+                related_opportunity=new_opp,
+            )
 
         self.log_action('CREATE', instance)
 

@@ -94,7 +94,6 @@ const TaskWidgets: React.FC<TaskWidgetsProps> = ({ onTaskClick }) => {
     switch (status) {
       case 'To Do': return 'default';
       case 'In Progress': return 'info';
-      case 'Review': return 'warning';
       case 'Done': return 'success';
       case 'Cancelled': return 'error';
       case 'On Hold': return 'warning';

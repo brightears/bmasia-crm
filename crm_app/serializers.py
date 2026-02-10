@@ -3,7 +3,7 @@ from django.contrib.auth import authenticate
 from django.utils import timezone
 from django.db.models import Sum
 from .models import (
-    User, Company, Contact, Note, Task, AuditLog,
+    User, Company, Contact, Note, Task, TaskComment, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice, Zone, ContractZone,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailCampaign, CampaignRecipient, EmailTemplate,
@@ -360,23 +360,40 @@ class NoteSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
+class TaskCommentSerializer(serializers.ModelSerializer):
+    """Serializer for TaskComment model"""
+    user_name = serializers.CharField(source='user.get_full_name', read_only=True)
+
+    class Meta:
+        model = TaskComment
+        fields = ['id', 'task', 'user', 'user_name', 'comment', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user', 'created_at', 'updated_at']
+
+
 class TaskSerializer(serializers.ModelSerializer):
-    """Serializer for Task model with enhanced fields"""
+    """Serializer for Task model"""
     assigned_to_name = serializers.CharField(source='assigned_to.get_full_name', read_only=True)
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
     company_name = serializers.CharField(source='company.name', read_only=True)
+    related_opportunity_name = serializers.CharField(source='related_opportunity.name', read_only=True)
+    related_contract_number = serializers.CharField(source='related_contract.contract_number', read_only=True)
+    related_contact_name = serializers.CharField(source='related_contact.name', read_only=True)
     is_overdue = serializers.ReadOnlyField()
-    
+    comments = TaskCommentSerializer(many=True, read_only=True)
+
     class Meta:
         model = Task
         fields = [
             'id', 'company', 'company_name', 'assigned_to', 'assigned_to_name',
-            'created_by', 'created_by_name', 'department', 'title', 'description',
-            'priority', 'status', 'due_date', 'completed_at', 'estimated_hours',
-            'actual_hours', 'tags', 'is_overdue', 'created_at', 'updated_at'
+            'created_by', 'created_by_name', 'title', 'description',
+            'priority', 'status', 'task_type', 'due_date', 'completed_at',
+            'related_opportunity', 'related_opportunity_name',
+            'related_contract', 'related_contract_number',
+            'related_contact', 'related_contact_name',
+            'is_overdue', 'comments', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_by', 'completed_at', 'created_at', 'updated_at']
-    
+
     def create(self, validated_data):
         validated_data['created_by'] = self.context['request'].user
         return super().create(validated_data)

@@ -33,7 +33,6 @@ import {
   RadioButtonUnchecked,
   PlayArrow,
   Pause,
-  RateReview,
 } from '@mui/icons-material';
 import { Task } from '../types';
 import { format, isToday, isTomorrow, isPast, parseISO } from 'date-fns';
@@ -67,14 +66,6 @@ const columns: KanbanColumn[] = [
     title: 'In Progress',
     color: '#fff3e0',
     icon: <PlayArrow />,
-    limit: 5, // WIP limit
-  },
-  {
-    id: 'Review',
-    title: 'Review',
-    color: '#f3e5f5',
-    icon: <RateReview />,
-    limit: 3,
   },
   {
     id: 'Done',
@@ -137,9 +128,6 @@ const TaskCard: React.FC<{
     if (!name) return '?';
     return name.split(' ').map(n => n[0]).join('').toUpperCase();
   };
-
-  const completedSubtasks = task.subtasks?.filter(s => s.completed).length || 0;
-  const totalSubtasks = task.subtasks?.length || 0;
 
   return (
     <Draggable draggableId={task.id} index={index}>
@@ -218,39 +206,6 @@ const TaskCard: React.FC<{
                 <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
                   {task.related_opportunity_name || task.related_contract_number || task.related_contact_name}
                 </Typography>
-              </Box>
-            )}
-
-            {/* Progress indicator for subtasks */}
-            {totalSubtasks > 0 && (
-              <Box display="flex" alignItems="center" gap={0.5} mb={1}>
-                <CheckCircle sx={{ fontSize: 14, color: theme.palette.success.main }} />
-                <Typography variant="caption" color="text.secondary">
-                  {completedSubtasks}/{totalSubtasks} subtasks
-                </Typography>
-              </Box>
-            )}
-
-            {/* Tags */}
-            {task.tags && (
-              <Box mb={1}>
-                {task.tags.split(',').slice(0, 2).map((tag, index) => (
-                  <Chip
-                    key={index}
-                    label={tag.trim()}
-                    size="small"
-                    variant="outlined"
-                    sx={{ mr: 0.5, fontSize: '0.7rem', height: 18 }}
-                  />
-                ))}
-                {task.tags.split(',').length > 2 && (
-                  <Chip
-                    label={`+${task.tags.split(',').length - 2}`}
-                    size="small"
-                    variant="outlined"
-                    sx={{ fontSize: '0.7rem', height: 18 }}
-                  />
-                )}
               </Box>
             )}
           </CardContent>

@@ -2,6 +2,47 @@
 
 ## February 2026
 
+### Feb 10, 2026 - Opportunities PDF Design Fixes
+
+**Problem**: Thai Baht symbol (฿) rendered as black square (■) in Opportunities PDF — Helvetica font doesn't support U+0E3F. Also, internal `_entity_raw` key was displayed in the PDF header metadata.
+
+**Fix 1** (`crm_app/services/sales_export_service.py`, ENTITY_INFO line 34):
+- Changed THB symbol from `'฿'` to `'THB '` — standard for Thai business documents
+- Affects both Opportunities PDF and Sales Performance PDF (shared `_format_currency()`)
+
+**Fix 2** (`crm_app/services/sales_export_service.py`, `_add_pdf_header` line 141):
+- Skip keys starting with `_` when rendering subtitle metadata: `if v and not k.startswith('_')`
+- Convention: prefix internal/private keys with `_` to hide from PDF output
+
+---
+
+### Feb 10, 2026 - Prospect Workflow: Auto-Infer service_type from Quotes
+
+**Problem**: When `QuoteViewSet.perform_create()` auto-creates an Opportunity from a Quote, it did NOT set `service_type`. This left auto-created Opportunities with `NULL` service_type, making them invisible to Soundtrack/Beat Breeze filters. Also, auto-generated names were generic ("Quote Q-0032").
+
+**CRM Best Practice Research**: Industry standard is Opportunity-first (Opportunity → Quote). BMAsia's Quote-first shortcut is pragmatic for a small team — both paths now coexist.
+
+**Fix** (`crm_app/views.py`, QuoteViewSet.perform_create ~line 4241):
+1. **Infer `service_type` from Quote line items**: Inspects `product_service` field — if contains "soundtrack" → `service_type = 'soundtrack'`, if "beat breeze" → `'beatbreeze'`, if both/neither → `NULL`
+2. **Meaningful Opportunity name**: `f"{company.name} - {service_label}"` where service_label is "Soundtrack", "Beat Breeze", or "New Deal"
+3. **Backfill existing**: When linking a Quote to an existing Opportunity that has `service_type = NULL`, backfills the inferred service_type
+
+**Code**:
+```python
+# Infer service_type from quote line items
+items = instance.line_items.all()
+has_soundtrack = any('soundtrack' in (i.product_service or '').lower() for i in items)
+has_beatbreeze = any('beat breeze' in (i.product_service or '').lower() for i in items)
+if has_soundtrack and not has_beatbreeze:
+    service_type = 'soundtrack'
+elif has_beatbreeze and not has_soundtrack:
+    service_type = 'beatbreeze'
+```
+
+**No migration needed** — `service_type` field already existed from `0057_opportunity_service_type.py`.
+
+---
+
 ### Feb 10, 2026 - Service Type + Multi-Entity Pipeline Enhancement
 
 **Context**: BMAsia manages sales across a 2x2 matrix: 2 entities (Thailand THB / HK USD) x 2 services (Soundtrack / Beat Breeze). Previously tracked on 4 separate Google Sheets. CRM best practice research (Salesforce, HubSpot, Zoho, Pipedrive) confirmed: never mix currencies in pipeline totals; use a "Product/Service Line" field + filter dropdowns.

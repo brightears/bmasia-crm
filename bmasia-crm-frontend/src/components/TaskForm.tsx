@@ -13,39 +13,23 @@ import {
   Select,
   MenuItem,
   Typography,
-  Autocomplete,
   CircularProgress,
   Alert,
   InputAdornment,
   IconButton,
-  Chip,
-  FormControlLabel,
-  Switch,
-  Divider,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemSecondaryAction,
-  Checkbox,
-  Paper,
-  Slider,
 } from '@mui/material';
 import {
   Close as CloseIcon,
-  Add as AddIcon,
-  Delete as DeleteIcon,
   Person as PersonIcon,
   Business as BusinessIcon,
   Schedule as ScheduleIcon,
   Flag as FlagIcon,
-  AttachFile as AttachFileIcon,
 } from '@mui/icons-material';
-import { DatePicker, TimePicker } from '@mui/x-date-pickers';
+import { DatePicker } from '@mui/x-date-pickers';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import {
   Task,
-  TaskSubtask,
   User,
   Company,
   Opportunity,
@@ -77,7 +61,6 @@ const priorityOptions = [
 const statusOptions = [
   { value: 'To Do', label: 'To Do' },
   { value: 'In Progress', label: 'In Progress' },
-  { value: 'Review', label: 'Review' },
   { value: 'Done', label: 'Done' },
   { value: 'On Hold', label: 'On Hold' },
   { value: 'Cancelled', label: 'Cancelled' },
@@ -85,13 +68,9 @@ const statusOptions = [
 
 const taskTypeOptions = [
   { value: 'Call', label: 'Call' },
-  { value: 'Event', label: 'Event' },
+  { value: 'Email', label: 'Email' },
   { value: 'Follow-up', label: 'Follow-up' },
   { value: 'Meeting', label: 'Meeting' },
-  { value: 'Delivery', label: 'Delivery' },
-  { value: 'Support', label: 'Support' },
-  { value: 'Research', label: 'Research' },
-  { value: 'Development', label: 'Development' },
   { value: 'Other', label: 'Other' },
 ];
 
@@ -115,39 +94,22 @@ const TaskForm: React.FC<TaskFormProps> = ({
     status: 'To Do',
     task_type: 'Other',
     due_date: undefined,
-    reminder_date: undefined,
-    estimated_hours: undefined,
-    actual_hours: undefined,
     company: '',
     assigned_to: undefined,
     related_opportunity: undefined,
     related_contract: undefined,
     related_contact: undefined,
-    tags: '',
-    subtasks: [],
   });
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [newSubtask, setNewSubtask] = useState('');
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     if (task) {
       setFormData({
         ...task,
         due_date: task.due_date || undefined,
-        reminder_date: task.reminder_date || undefined,
-        subtasks: task.subtasks || [],
       });
-      setShowAdvanced(Boolean(
-        task.task_type ||
-        task.estimated_hours ||
-        task.related_opportunity ||
-        task.related_contract ||
-        task.related_contact ||
-        task.tags
-      ));
     } else {
       // Use initialTaskType if provided, otherwise default to 'Other'
       const taskType = (initialTaskType || 'Other') as Task['task_type'];
@@ -158,21 +120,12 @@ const TaskForm: React.FC<TaskFormProps> = ({
         status: 'To Do',
         task_type: taskType,
         due_date: undefined,
-        reminder_date: undefined,
-        estimated_hours: undefined,
-        actual_hours: undefined,
         company: '',
         assigned_to: undefined,
         related_opportunity: undefined,
         related_contract: undefined,
         related_contact: undefined,
-        tags: '',
-        subtasks: [],
       });
-      // Auto-expand advanced options if task type is set from quick action
-      if (initialTaskType) {
-        setShowAdvanced(true);
-      }
     }
     setError(null);
   }, [task, open, initialTaskType]);
@@ -181,36 +134,6 @@ const TaskForm: React.FC<TaskFormProps> = ({
     setFormData(prev => ({
       ...prev,
       [field]: value,
-    }));
-  };
-
-  const handleAddSubtask = () => {
-    if (newSubtask.trim()) {
-      const subtask: TaskSubtask = {
-        title: newSubtask.trim(),
-        completed: false,
-      };
-      setFormData(prev => ({
-        ...prev,
-        subtasks: [...(prev.subtasks || []), subtask],
-      }));
-      setNewSubtask('');
-    }
-  };
-
-  const handleRemoveSubtask = (index: number) => {
-    setFormData(prev => ({
-      ...prev,
-      subtasks: prev.subtasks?.filter((_, i) => i !== index) || [],
-    }));
-  };
-
-  const handleToggleSubtask = (index: number) => {
-    setFormData(prev => ({
-      ...prev,
-      subtasks: prev.subtasks?.map((subtask, i) =>
-        i === index ? { ...subtask, completed: !subtask.completed } : subtask
-      ) || [],
     }));
   };
 
@@ -234,15 +157,10 @@ const TaskForm: React.FC<TaskFormProps> = ({
         ...formData,
         title: formData.title?.trim(),
         description: formData.description?.trim() || '',
-        tags: formData.tags?.trim() || undefined,
         due_date: formData.due_date || undefined,
-        reminder_date: formData.reminder_date || undefined,
-        estimated_hours: formData.estimated_hours || undefined,
-        actual_hours: formData.actual_hours || undefined,
         related_opportunity: formData.related_opportunity || undefined,
         related_contract: formData.related_contract || undefined,
         related_contact: formData.related_contact || undefined,
-        subtasks: formData.subtasks || [],
       };
 
       await onSave(taskData);
@@ -467,223 +385,85 @@ const TaskForm: React.FC<TaskFormProps> = ({
               />
             </Grid>
 
-            {/* Advanced Options Toggle */}
-            <Grid item xs={12}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={showAdvanced}
-                    onChange={(e) => setShowAdvanced(e.target.checked)}
-                  />
-                }
-                label="Show Advanced Options"
-              />
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>Task Type</InputLabel>
+                <Select
+                  value={formData.task_type || 'Other'}
+                  label="Task Type"
+                  onChange={(e) => handleChange('task_type', e.target.value)}
+                  disabled={loading}
+                >
+                  {taskTypeOptions.map((option) => (
+                    <MenuItem key={option.value} value={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             </Grid>
 
-            {/* Advanced Options */}
-            {showAdvanced && (
-              <>
-                <Grid item xs={12}>
-                  <Divider />
-                  <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
-                    Advanced Options
-                  </Typography>
-                </Grid>
-
-                <Grid item xs={12} sm={6}>
-                  <FormControl fullWidth>
-                    <InputLabel>Task Type</InputLabel>
-                    <Select
-                      value={formData.task_type || 'Other'}
-                      label="Task Type"
-                      onChange={(e) => handleChange('task_type', e.target.value)}
-                      disabled={loading}
-                    >
-                      {taskTypeOptions.map((option) => (
-                        <MenuItem key={option.value} value={option.value}>
-                          {option.label}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-
-                <Grid item xs={12} sm={6}>
-                  <DatePicker
-                    label="Reminder Date"
-                    value={formData.reminder_date ? new Date(formData.reminder_date) : null}
-                    onChange={(date) => handleChange('reminder_date', date?.toISOString())}
-                    disabled={loading}
-                    slotProps={{
-                      textField: {
-                        fullWidth: true,
-                      },
-                    }}
-                  />
-                </Grid>
-
-                <Grid item xs={12} sm={6}>
-                  <TextField
-                    fullWidth
-                    type="number"
-                    label="Estimated Hours"
-                    value={formData.estimated_hours || ''}
-                    onChange={(e) => handleChange('estimated_hours', parseFloat(e.target.value) || undefined)}
-                    disabled={loading}
-                    inputProps={{ min: 0, step: 0.5 }}
-                  />
-                </Grid>
-
-                <Grid item xs={12} sm={6}>
-                  <TextField
-                    fullWidth
-                    type="number"
-                    label="Actual Hours"
-                    value={formData.actual_hours || ''}
-                    onChange={(e) => handleChange('actual_hours', parseFloat(e.target.value) || undefined)}
-                    disabled={loading}
-                    inputProps={{ min: 0, step: 0.5 }}
-                  />
-                </Grid>
-
-                {/* Related Entities */}
-                <Grid item xs={12} sm={4}>
-                  <FormControl fullWidth>
-                    <InputLabel>Related Opportunity</InputLabel>
-                    <Select
-                      value={formData.related_opportunity || ''}
-                      label="Related Opportunity"
-                      onChange={(e) => handleChange('related_opportunity', e.target.value || undefined)}
-                      disabled={loading || !formData.company}
-                    >
-                      <MenuItem value="">
-                        <em>None</em>
-                      </MenuItem>
-                      {getRelatedOpportunities().map((opportunity) => (
-                        <MenuItem key={opportunity.id} value={opportunity.id}>
-                          {opportunity.name}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-
-                <Grid item xs={12} sm={4}>
-                  <FormControl fullWidth>
-                    <InputLabel>Related Contract</InputLabel>
-                    <Select
-                      value={formData.related_contract || ''}
-                      label="Related Contract"
-                      onChange={(e) => handleChange('related_contract', e.target.value || undefined)}
-                      disabled={loading || !formData.company}
-                    >
-                      <MenuItem value="">
-                        <em>None</em>
-                      </MenuItem>
-                      {getRelatedContracts().map((contract) => (
-                        <MenuItem key={contract.id} value={contract.id}>
-                          {contract.contract_number}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-
-                <Grid item xs={12} sm={4}>
-                  <FormControl fullWidth>
-                    <InputLabel>Related Contact</InputLabel>
-                    <Select
-                      value={formData.related_contact || ''}
-                      label="Related Contact"
-                      onChange={(e) => handleChange('related_contact', e.target.value || undefined)}
-                      disabled={loading || !formData.company}
-                    >
-                      <MenuItem value="">
-                        <em>None</em>
-                      </MenuItem>
-                      {getRelatedContacts().map((contact) => (
-                        <MenuItem key={contact.id} value={contact.id}>
-                          {contact.name}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-
-                <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    label="Tags (comma-separated)"
-                    value={formData.tags || ''}
-                    onChange={(e) => handleChange('tags', e.target.value)}
-                    disabled={loading}
-                    helperText="Enter tags separated by commas (e.g., urgent, client-facing, technical)"
-                  />
-                </Grid>
-              </>
-            )}
-
-            {/* Subtasks */}
-            <Grid item xs={12}>
-              <Divider />
-              <Typography variant="h6" gutterBottom sx={{ mt: 2 }}>
-                Subtasks
-              </Typography>
-
-              <Box display="flex" gap={1} mb={2}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  placeholder="Add a subtask..."
-                  value={newSubtask}
-                  onChange={(e) => setNewSubtask(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleAddSubtask()}
-                  disabled={loading}
-                />
-                <Button
-                  variant="outlined"
-                  startIcon={<AddIcon />}
-                  onClick={handleAddSubtask}
-                  disabled={loading || !newSubtask.trim()}
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>Related Opportunity</InputLabel>
+                <Select
+                  value={formData.related_opportunity || ''}
+                  label="Related Opportunity"
+                  onChange={(e) => handleChange('related_opportunity', e.target.value || undefined)}
+                  disabled={loading || !formData.company}
                 >
-                  Add
-                </Button>
-              </Box>
+                  <MenuItem value="">
+                    <em>None</em>
+                  </MenuItem>
+                  {getRelatedOpportunities().map((opportunity) => (
+                    <MenuItem key={opportunity.id} value={opportunity.id}>
+                      {opportunity.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
 
-              {formData.subtasks && formData.subtasks.length > 0 && (
-                <Paper variant="outlined" sx={{ maxHeight: 200, overflow: 'auto' }}>
-                  <List dense>
-                    {formData.subtasks.map((subtask, index) => (
-                      <ListItem key={index} dense>
-                        <FormControlLabel
-                          control={
-                            <Checkbox
-                              checked={subtask.completed}
-                              onChange={() => handleToggleSubtask(index)}
-                              disabled={loading}
-                            />
-                          }
-                          label={subtask.title}
-                          sx={{
-                            textDecoration: subtask.completed ? 'line-through' : 'none',
-                            opacity: subtask.completed ? 0.6 : 1,
-                          }}
-                        />
-                        <ListItemSecondaryAction>
-                          <IconButton
-                            edge="end"
-                            size="small"
-                            onClick={() => handleRemoveSubtask(index)}
-                            disabled={loading}
-                          >
-                            <DeleteIcon />
-                          </IconButton>
-                        </ListItemSecondaryAction>
-                      </ListItem>
-                    ))}
-                  </List>
-                </Paper>
-              )}
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>Related Contract</InputLabel>
+                <Select
+                  value={formData.related_contract || ''}
+                  label="Related Contract"
+                  onChange={(e) => handleChange('related_contract', e.target.value || undefined)}
+                  disabled={loading || !formData.company}
+                >
+                  <MenuItem value="">
+                    <em>None</em>
+                  </MenuItem>
+                  {getRelatedContracts().map((contract) => (
+                    <MenuItem key={contract.id} value={contract.id}>
+                      {contract.contract_number}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+
+            <Grid item xs={12} sm={6}>
+              <FormControl fullWidth>
+                <InputLabel>Related Contact</InputLabel>
+                <Select
+                  value={formData.related_contact || ''}
+                  label="Related Contact"
+                  onChange={(e) => handleChange('related_contact', e.target.value || undefined)}
+                  disabled={loading || !formData.company}
+                >
+                  <MenuItem value="">
+                    <em>None</em>
+                  </MenuItem>
+                  {getRelatedContacts().map((contact) => (
+                    <MenuItem key={contact.id} value={contact.id}>
+                      {contact.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             </Grid>
           </Grid>
         </DialogContent>

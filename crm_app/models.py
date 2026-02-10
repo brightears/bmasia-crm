@@ -367,37 +367,45 @@ class Note(TimestampedModel):
 
 
 class Task(TimestampedModel):
-    """Enhanced Task model with better tracking and priorities"""
+    """Task model for sales team task management"""
     PRIORITY_CHOICES = [
         ('Low', 'Low'),
         ('Medium', 'Medium'),
         ('High', 'High'),
         ('Urgent', 'Urgent'),
     ]
-    
+
     STATUS_CHOICES = [
-        ('Pending', 'Pending'),
+        ('To Do', 'To Do'),
         ('In Progress', 'In Progress'),
-        ('Completed', 'Completed'),
+        ('Done', 'Done'),
         ('Cancelled', 'Cancelled'),
         ('On Hold', 'On Hold'),
     ]
-    
+
+    TASK_TYPE_CHOICES = [
+        ('Call', 'Call'),
+        ('Email', 'Email'),
+        ('Follow-up', 'Follow-up'),
+        ('Meeting', 'Meeting'),
+        ('Other', 'Other'),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='tasks')
     assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_tasks')
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='created_tasks')
-    department = models.CharField(max_length=20, choices=User.ROLE_CHOICES, blank=True)
     title = models.CharField(max_length=200)
-    description = models.TextField()
+    description = models.TextField(blank=True)
     priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='Medium')
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='To Do')
+    task_type = models.CharField(max_length=20, choices=TASK_TYPE_CHOICES, blank=True)
     due_date = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
-    estimated_hours = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    actual_hours = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    tags = models.CharField(max_length=500, blank=True, help_text="Comma-separated tags")
-    
+    related_opportunity = models.ForeignKey('Opportunity', on_delete=models.SET_NULL, null=True, blank=True, related_name='tasks')
+    related_contract = models.ForeignKey('Contract', on_delete=models.SET_NULL, null=True, blank=True, related_name='tasks')
+    related_contact = models.ForeignKey('Contact', on_delete=models.SET_NULL, null=True, blank=True, related_name='tasks')
+
     class Meta:
         ordering = ['-priority', 'due_date', '-created_at']
         indexes = [
@@ -405,21 +413,35 @@ class Task(TimestampedModel):
             models.Index(fields=['company', 'due_date']),
             models.Index(fields=['priority', 'status']),
         ]
-    
+
     def __str__(self):
         return f"{self.title} - {self.company.name}"
-    
+
     @property
     def is_overdue(self):
         """Check if task is overdue"""
-        return self.due_date and self.due_date < timezone.now() and self.status != 'Completed'
-    
+        return self.due_date and self.due_date < timezone.now() and self.status != 'Done'
+
     def save(self, *args, **kwargs):
-        if self.status == 'Completed' and not self.completed_at:
+        if self.status == 'Done' and not self.completed_at:
             self.completed_at = timezone.now()
-        elif self.status != 'Completed':
+        elif self.status != 'Done':
             self.completed_at = None
         super().save(*args, **kwargs)
+
+
+class TaskComment(TimestampedModel):
+    """Comments on tasks for team collaboration"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='comments')
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    comment = models.TextField()
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Comment by {self.user} on {self.task.title}"
 
 
 class AuditLog(models.Model):

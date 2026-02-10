@@ -15,11 +15,6 @@ import {
   ListItem,
   ListItemText,
   ListItemIcon,
-  ListItemSecondaryAction,
-  LinearProgress,
-  Tooltip,
-  Menu,
-  MenuItem,
   ListItemAvatar,
   Paper,
   Card,
@@ -28,10 +23,9 @@ import {
   Tabs,
   Tab,
   TextField,
-  FormControlLabel,
-  Checkbox,
+  Menu,
+  MenuItem,
   useTheme,
-  Alert,
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -44,20 +38,16 @@ import {
   CheckCircle as CheckCircleIcon,
   RadioButtonUnchecked as RadioButtonUncheckedIcon,
   Comment as CommentIcon,
-  AttachFile as AttachFileIcon,
-  MoreVert as MoreVertIcon,
   PlayArrow as PlayArrowIcon,
   Pause as PauseIcon,
   Stop as StopIcon,
-  RateReview as RateReviewIcon,
   Link as LinkIcon,
   Timeline as TimelineIcon,
-  AccessTime as AccessTimeIcon,
   Assignment as AssignmentIcon,
-  Label as LabelIcon,
 } from '@mui/icons-material';
 import { Task, TaskComment, User } from '../types';
 import { format, parseISO, formatDistanceToNow } from 'date-fns';
+import { api } from '../services/api';
 
 interface TaskDetailProps {
   open: boolean;
@@ -66,6 +56,7 @@ interface TaskDetailProps {
   onEdit: () => void;
   onDelete: (taskId: string) => void;
   onStatusChange: (taskId: string, newStatus: Task['status']) => void;
+  onTaskUpdate?: () => void;
   users: User[];
 }
 
@@ -100,6 +91,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
   onEdit,
   onDelete,
   onStatusChange,
+  onTaskUpdate,
   users,
 }) => {
   const theme = useTheme();
@@ -122,7 +114,6 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
     switch (status) {
       case 'To Do': return 'default';
       case 'In Progress': return 'info';
-      case 'Review': return 'warning';
       case 'Done': return 'success';
       case 'Cancelled': return 'error';
       case 'On Hold': return 'warning';
@@ -134,7 +125,6 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
     switch (status) {
       case 'To Do': return <RadioButtonUncheckedIcon />;
       case 'In Progress': return <PlayArrowIcon />;
-      case 'Review': return <RateReviewIcon />;
       case 'Done': return <CheckCircleIcon />;
       case 'Cancelled': return <StopIcon />;
       case 'On Hold': return <PauseIcon />;
@@ -170,16 +160,6 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
     return theme.palette.text.secondary;
   };
 
-  const getSubtaskProgress = () => {
-    if (!task.subtasks || task.subtasks.length === 0) return null;
-
-    const completed = task.subtasks.filter(s => s.completed).length;
-    const total = task.subtasks.length;
-    const percentage = Math.round((completed / total) * 100);
-
-    return { completed, total, percentage };
-  };
-
   const handleStatusMenuClick = (event: React.MouseEvent<HTMLElement>) => {
     setStatusMenuAnchor(event.currentTarget);
   };
@@ -204,22 +184,23 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
 
     setSubmittingComment(true);
     try {
-      // This would integrate with the API to add comments
-      console.log('Adding comment:', newComment);
+      await api.addTaskComment(task.id, newComment.trim());
       setNewComment('');
+      // Refresh task data to show new comment
+      if (onTaskUpdate) {
+        onTaskUpdate();
+      }
     } catch (error) {
       console.error('Error adding comment:', error);
+      alert('Failed to add comment. Please try again.');
     } finally {
       setSubmittingComment(false);
     }
   };
 
-  const progress = getSubtaskProgress();
-
   const statusOptions = [
     { value: 'To Do', label: 'To Do' },
     { value: 'In Progress', label: 'In Progress' },
-    { value: 'Review', label: 'Review' },
     { value: 'Done', label: 'Done' },
     { value: 'On Hold', label: 'On Hold' },
     { value: 'Cancelled', label: 'Cancelled' },
@@ -304,9 +285,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
           sx={{ borderBottom: 1, borderColor: 'divider', px: 3 }}
         >
           <Tab label="Overview" />
-          <Tab label="Subtasks" />
-          <Tab label="Activity" />
-          <Tab label="Time Tracking" />
+          <Tab label="Activity & Comments" />
         </Tabs>
 
         <Box sx={{ px: 3 }}>
@@ -326,7 +305,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
 
                 {/* Related Entities */}
                 {(task.related_opportunity_name || task.related_contract_number || task.related_contact_name) && (
-                  <Card sx={{ mb: 3 }}>
+                  <Card>
                     <CardHeader
                       title="Related Entities"
                       avatar={<LinkIcon />}
@@ -367,28 +346,6 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
                           </ListItem>
                         )}
                       </List>
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Tags */}
-                {task.tags && (
-                  <Card>
-                    <CardHeader
-                      title="Tags"
-                      avatar={<LabelIcon />}
-                    />
-                    <CardContent sx={{ pt: 0 }}>
-                      <Box display="flex" gap={1} flexWrap="wrap">
-                        {task.tags.split(',').map((tag, index) => (
-                          <Chip
-                            key={index}
-                            label={tag.trim()}
-                            size="small"
-                            variant="outlined"
-                          />
-                        ))}
-                      </Box>
                     </CardContent>
                   </Card>
                 )}
@@ -486,68 +443,12 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
                     )}
                   </List>
                 </Paper>
-
-                {/* Progress */}
-                {progress && (
-                  <Paper sx={{ p: 2 }}>
-                    <Typography variant="h6" gutterBottom>
-                      Progress
-                    </Typography>
-                    <Box display="flex" alignItems="center" gap={1} mb={1}>
-                      <CheckCircleIcon color="success" />
-                      <Typography variant="body2">
-                        {progress.completed} of {progress.total} subtasks completed
-                      </Typography>
-                    </Box>
-                    <LinearProgress
-                      variant="determinate"
-                      value={progress.percentage}
-                      sx={{ height: 8, borderRadius: 4 }}
-                    />
-                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                      {progress.percentage}% complete
-                    </Typography>
-                  </Paper>
-                )}
               </Box>
             </Box>
           </TabPanel>
 
-          {/* Subtasks Tab */}
+          {/* Activity & Comments Tab */}
           <TabPanel value={activeTab} index={1}>
-            {task.subtasks && task.subtasks.length > 0 ? (
-              <List>
-                {task.subtasks.map((subtask, index) => (
-                  <ListItem key={index} dense>
-                    <ListItemIcon>
-                      <Checkbox
-                        edge="start"
-                        checked={subtask.completed}
-                        disabled // Read-only in view mode
-                      />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={subtask.title}
-                      sx={{
-                        textDecoration: subtask.completed ? 'line-through' : 'none',
-                        opacity: subtask.completed ? 0.6 : 1,
-                      }}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            ) : (
-              <Box textAlign="center" py={4}>
-                <AssignmentIcon sx={{ fontSize: 48, color: theme.palette.text.disabled, mb: 2 }} />
-                <Typography variant="body1" color="text.secondary">
-                  No subtasks for this task
-                </Typography>
-              </Box>
-            )}
-          </TabPanel>
-
-          {/* Activity Tab */}
-          <TabPanel value={activeTab} index={2}>
             <Box mb={3}>
               <TextField
                 fullWidth
@@ -609,68 +510,6 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
                   No comments yet
                 </Typography>
               </Box>
-            )}
-          </TabPanel>
-
-          {/* Time Tracking Tab */}
-          <TabPanel value={activeTab} index={3}>
-            <Box display="flex" gap={3}>
-              <Card sx={{ flex: 1 }}>
-                <CardHeader
-                  title="Estimated Time"
-                  avatar={<AccessTimeIcon />}
-                />
-                <CardContent>
-                  <Typography variant="h4">
-                    {task.estimated_hours ? `${task.estimated_hours}h` : 'Not set'}
-                  </Typography>
-                </CardContent>
-              </Card>
-
-              <Card sx={{ flex: 1 }}>
-                <CardHeader
-                  title="Actual Time"
-                  avatar={<AccessTimeIcon />}
-                />
-                <CardContent>
-                  <Typography variant="h4">
-                    {task.actual_hours ? `${task.actual_hours}h` : 'Not tracked'}
-                  </Typography>
-                </CardContent>
-              </Card>
-
-              {task.estimated_hours && task.actual_hours && (
-                <Card sx={{ flex: 1 }}>
-                  <CardHeader
-                    title="Variance"
-                    avatar={<TimelineIcon />}
-                  />
-                  <CardContent>
-                    <Typography
-                      variant="h4"
-                      color={
-                        task.actual_hours > task.estimated_hours
-                          ? theme.palette.error.main
-                          : theme.palette.success.main
-                      }
-                    >
-                      {task.actual_hours > task.estimated_hours ? '+' : ''}
-                      {(task.actual_hours - task.estimated_hours).toFixed(1)}h
-                    </Typography>
-                  </CardContent>
-                </Card>
-              )}
-            </Box>
-
-            {task.estimated_hours && task.actual_hours && (
-              <Alert
-                severity={task.actual_hours > task.estimated_hours ? 'warning' : 'success'}
-                sx={{ mt: 2 }}
-              >
-                {task.actual_hours > task.estimated_hours
-                  ? 'Task took longer than estimated'
-                  : 'Task completed within estimated time'}
-              </Alert>
             )}
           </TabPanel>
         </Box>

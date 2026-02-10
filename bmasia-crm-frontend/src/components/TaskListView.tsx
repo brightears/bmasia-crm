@@ -19,7 +19,6 @@ import {
   Tooltip,
   Box,
   Typography,
-  LinearProgress,
   useTheme,
   Checkbox,
   Button,
@@ -35,7 +34,6 @@ import {
   Schedule,
   CheckCircle,
   Link as LinkIcon,
-  Assignment,
 } from '@mui/icons-material';
 import { Task } from '../types';
 import { format, isToday, isTomorrow, isPast, parseISO } from 'date-fns';
@@ -171,7 +169,6 @@ const TaskListView: React.FC<TaskListViewProps> = ({
     switch (status) {
       case 'To Do': return 'default';
       case 'In Progress': return 'info';
-      case 'Review': return 'warning';
       case 'Done': return 'success';
       case 'Cancelled': return 'error';
       case 'On Hold': return 'warning';
@@ -202,16 +199,6 @@ const TaskListView: React.FC<TaskListViewProps> = ({
   const getInitials = (name?: string) => {
     if (!name) return '?';
     return name.split(' ').map(n => n[0]).join('').toUpperCase();
-  };
-
-  const getSubtaskProgress = (task: Task) => {
-    if (!task.subtasks || task.subtasks.length === 0) return null;
-
-    const completed = task.subtasks.filter(s => s.completed).length;
-    const total = task.subtasks.length;
-    const percentage = Math.round((completed / total) * 100);
-
-    return { completed, total, percentage };
   };
 
   // Sort and paginate tasks
@@ -304,7 +291,6 @@ const TaskListView: React.FC<TaskListViewProps> = ({
             )}
             {visibleTasks.map((task) => {
               const isItemSelected = isSelected(task.id);
-              const progress = getSubtaskProgress(task);
 
               return (
                 <TableRow
@@ -374,21 +360,6 @@ const TaskListView: React.FC<TaskListViewProps> = ({
                           <Typography variant="caption" color="text.secondary">
                             {task.related_opportunity_name || task.related_contract_number || task.related_contact_name}
                           </Typography>
-                        </Box>
-                      )}
-
-                      {/* Subtask progress */}
-                      {progress && (
-                        <Box display="flex" alignItems="center" gap={1} mt={0.5}>
-                          <Assignment sx={{ fontSize: 12, color: theme.palette.text.secondary }} />
-                          <Typography variant="caption" color="text.secondary">
-                            {progress.completed}/{progress.total} subtasks
-                          </Typography>
-                          <LinearProgress
-                            variant="determinate"
-                            value={progress.percentage}
-                            sx={{ width: 60, height: 4 }}
-                          />
                         </Box>
                       )}
                     </Box>

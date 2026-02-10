@@ -206,21 +206,6 @@ class ApiService {
     return response.data;
   }
 
-  // Task Subtasks
-  async addTaskSubtask(taskId: string, title: string): Promise<any> {
-    const response = await authApi.post(`/tasks/${taskId}/subtasks/`, { title });
-    return response.data;
-  }
-
-  async updateTaskSubtask(taskId: string, subtaskId: string, data: any): Promise<any> {
-    const response = await authApi.put(`/tasks/${taskId}/subtasks/${subtaskId}/`, data);
-    return response.data;
-  }
-
-  async deleteTaskSubtask(taskId: string, subtaskId: string): Promise<void> {
-    await authApi.delete(`/tasks/${taskId}/subtasks/${subtaskId}/`);
-  }
-
   // Opportunities
   async getOpportunities(params?: any): Promise<ApiResponse<Opportunity>> {
     if (this.useMockData) {

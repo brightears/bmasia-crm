@@ -190,15 +190,6 @@ export interface Note {
   updated_at: string;
 }
 
-export interface TaskSubtask {
-  id?: string;
-  task?: string;
-  title: string;
-  completed: boolean;
-  created_at?: string;
-  updated_at?: string;
-}
-
 export interface TaskComment {
   id: string;
   task: string;
@@ -209,17 +200,6 @@ export interface TaskComment {
   updated_at: string;
 }
 
-export interface TaskAttachment {
-  id: string;
-  task: string;
-  name: string;
-  file: string;
-  size: number;
-  uploaded_by: string;
-  uploaded_by_name: string;
-  created_at: string;
-}
-
 export interface Task {
   id: string;
   company: string;
@@ -228,18 +208,13 @@ export interface Task {
   assigned_to_name?: string;
   created_by: string;
   created_by_name: string;
-  department?: string;
   title: string;
   description: string;
   priority: 'Low' | 'Medium' | 'High' | 'Urgent';
-  status: 'To Do' | 'In Progress' | 'Review' | 'Done' | 'Cancelled' | 'On Hold';
-  task_type?: 'Call' | 'Event' | 'Follow-up' | 'Meeting' | 'Delivery' | 'Support' | 'Research' | 'Development' | 'Other';
+  status: 'To Do' | 'In Progress' | 'Done' | 'Cancelled' | 'On Hold';
+  task_type?: 'Call' | 'Email' | 'Follow-up' | 'Meeting' | 'Other';
   due_date?: string;
-  reminder_date?: string;
   completed_at?: string;
-  estimated_hours?: number;
-  actual_hours?: number;
-  tags?: string;
   is_overdue: boolean;
   related_opportunity?: string;
   related_opportunity_name?: string;
@@ -247,11 +222,7 @@ export interface Task {
   related_contract_number?: string;
   related_contact?: string;
   related_contact_name?: string;
-  subtasks?: TaskSubtask[];
   comments?: TaskComment[];
-  attachments?: TaskAttachment[];
-  progress_percentage?: number;
-  watchers?: string[];  // user IDs who are watching this task
   created_at: string;
   updated_at: string;
 }

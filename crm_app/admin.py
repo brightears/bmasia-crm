@@ -14,7 +14,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 from .models import (
-    User, Company, Contact, Note, Task, AuditLog,
+    User, Company, Contact, Note, Task, TaskComment, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice, Zone, ContractZone,
     EmailTemplate, EmailLog, EmailCampaign, CampaignRecipient, DocumentAttachment,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
@@ -773,52 +773,37 @@ class NoteAdmin(admin.ModelAdmin):
 
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
-    list_display = ['title', 'company', 'assigned_to', 'priority', 'status', 'due_date', 'is_overdue']
-    list_filter = ['priority', 'status', 'department', 'created_at']
-    list_select_related = ['company', 'assigned_to', 'created_by']
+    list_display = ['title', 'company', 'assigned_to', 'task_type', 'priority', 'status', 'due_date', 'is_overdue']
+    list_filter = ['priority', 'status', 'task_type', 'created_at']
+    list_select_related = ['company', 'assigned_to', 'created_by', 'related_opportunity', 'related_contract', 'related_contact']
     search_fields = ['title', 'description', 'company__name']
     readonly_fields = ['created_at', 'updated_at', 'completed_at']
-    actions = ['bulk_mark_completed', 'bulk_mark_in_progress', 'bulk_assign_to_user']
-    
+    actions = ['bulk_mark_done', 'bulk_mark_in_progress']
+
     def is_overdue(self, obj):
         return obj.is_overdue
     is_overdue.boolean = True
 
-    def bulk_mark_completed(self, request, queryset):
-        """Mark selected tasks as completed"""
+    def bulk_mark_done(self, request, queryset):
+        """Mark selected tasks as done"""
         updated_count = 0
         for task in queryset:
-            if task.status != 'Completed':
-                task.status = 'Completed'
+            if task.status != 'Done':
+                task.status = 'Done'
                 task.completed_at = timezone.now()
                 task.save()
                 updated_count += 1
-
         if updated_count > 0:
-            self.message_user(request, f'Successfully marked {updated_count} tasks as completed')
+            self.message_user(request, f'Successfully marked {updated_count} tasks as done')
         else:
-            self.message_user(request, 'No tasks were updated (already completed)', level='WARNING')
-    bulk_mark_completed.short_description = 'Mark selected tasks as completed'
+            self.message_user(request, 'No tasks were updated (already done)', level='WARNING')
+    bulk_mark_done.short_description = 'Mark selected tasks as done'
 
     def bulk_mark_in_progress(self, request, queryset):
         """Mark selected tasks as in progress"""
         updated_count = queryset.exclude(status='In Progress').update(status='In Progress', completed_at=None)
         self.message_user(request, f'Successfully marked {updated_count} tasks as in progress')
     bulk_mark_in_progress.short_description = 'Mark selected tasks as in progress'
-
-    def bulk_assign_to_user(self, request, queryset):
-        """Bulk assign tasks to a user - redirect to form"""
-        if queryset.count() > 50:
-            self.message_user(request, 'Please select 50 tasks or fewer for bulk assignment', level='ERROR')
-            return
-
-        task_ids = ','.join(str(t.pk) for t in queryset)
-        return HttpResponseRedirect(
-            reverse('admin:crm_app_task_changelist') + f'?task_ids={task_ids}&action=assign'
-        )
-    bulk_assign_to_user.short_description = 'Bulk assign selected tasks to user'
-
-    # list_select_related handles the optimization
 
 
 class OpportunityActivityInline(admin.TabularInline):

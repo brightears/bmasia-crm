@@ -446,9 +446,9 @@ const Tasks: React.FC = () => {
                   <MenuItem value="">All</MenuItem>
                   <MenuItem value="To Do">To Do</MenuItem>
                   <MenuItem value="In Progress">In Progress</MenuItem>
-                  <MenuItem value="Review">Review</MenuItem>
                   <MenuItem value="Done">Done</MenuItem>
                   <MenuItem value="On Hold">On Hold</MenuItem>
+                  <MenuItem value="Cancelled">Cancelled</MenuItem>
                 </Select>
               </FormControl>
             </Grid>

@@ -35,7 +35,7 @@ import {
   Add,
 } from '@mui/icons-material';
 import ApiService from '../services/api';
-import { Opportunity, OpportunityActivity, Quote, Contract } from '../types';
+import { Opportunity, OpportunityActivity, Quote, Contract, Task } from '../types';
 import OpportunityForm from '../components/OpportunityForm';
 import ActivityTimeline from '../components/ActivityTimeline';
 import ActivityForm from '../components/ActivityForm';
@@ -57,6 +57,7 @@ const OpportunityDetail: React.FC = () => {
   const [activities, setActivities] = useState<OpportunityActivity[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentTab, setCurrentTab] = useState(0);
@@ -96,6 +97,9 @@ const OpportunityDetail: React.FC = () => {
       } else if (tabIndex === 3) {
         const contractsData = await ApiService.getContracts({ opportunity: id });
         setContracts(contractsData.results || []);
+      } else if (tabIndex === 4) {
+        const tasksData = await ApiService.getTasks({ related_opportunity: id });
+        setTasks(tasksData.results || []);
       }
     } catch (err) {
       console.error('Error loading tab data:', err);
@@ -296,6 +300,7 @@ const OpportunityDetail: React.FC = () => {
           <Tab label="Activities" />
           <Tab label="Quotes" />
           <Tab label="Contracts" />
+          <Tab label="Tasks" />
         </Tabs>
 
         <Box p={3}>
@@ -546,6 +551,80 @@ const OpportunityDetail: React.FC = () => {
                 <Box textAlign="center" py={4}>
                   <Typography variant="body1" color="text.secondary">
                     No contracts linked to this opportunity
+                  </Typography>
+                </Box>
+              )}
+            </Box>
+          )}
+
+          {/* Tasks Tab */}
+          {currentTab === 4 && (
+            <Box>
+              <Box display="flex" justifyContent="flex-end" mb={2}>
+                <Button
+                  variant="contained"
+                  startIcon={<Add />}
+                  onClick={() => navigate(`/tasks?new=true&opportunity=${id}&company=${opportunity.company}`)}
+                >
+                  Create Task
+                </Button>
+              </Box>
+              {tasks.length > 0 ? (
+                <TableContainer>
+                  <Table>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Title</TableCell>
+                        <TableCell>Type</TableCell>
+                        <TableCell>Priority</TableCell>
+                        <TableCell>Status</TableCell>
+                        <TableCell>Due Date</TableCell>
+                        <TableCell>Assignee</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {tasks.map((task) => (
+                        <TableRow
+                          key={task.id}
+                          hover
+                          sx={{ cursor: 'pointer' }}
+                          onClick={() => navigate(`/tasks`)}
+                        >
+                          <TableCell>{task.title}</TableCell>
+                          <TableCell>{task.task_type || 'N/A'}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={task.priority}
+                              size="small"
+                              color={
+                                task.priority === 'Urgent' ? 'error' :
+                                task.priority === 'High' ? 'warning' :
+                                task.priority === 'Medium' ? 'info' : 'default'
+                              }
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              label={task.status}
+                              size="small"
+                              color={
+                                task.status === 'Done' ? 'success' :
+                                task.status === 'In Progress' ? 'primary' :
+                                task.status === 'Cancelled' ? 'error' : 'default'
+                              }
+                            />
+                          </TableCell>
+                          <TableCell>{formatDate(task.due_date)}</TableCell>
+                          <TableCell>{task.assigned_to_name || 'Unassigned'}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <Box textAlign="center" py={4}>
+                  <Typography variant="body1" color="text.secondary">
+                    No tasks linked to this opportunity
                   </Typography>
                 </Box>
               )}
