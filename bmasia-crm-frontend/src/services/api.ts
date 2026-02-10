@@ -25,8 +25,8 @@ class ApiService {
   // This service focuses on business data operations using the shared axios instance
 
   // Dashboard
-  async getDashboardStats(): Promise<DashboardStats> {
-    const response = await authApi.get<DashboardStats>('/dashboard/stats/');
+  async getDashboardStats(params?: { billing_entity?: string }): Promise<DashboardStats> {
+    const response = await authApi.get<DashboardStats>('/dashboard/stats/', { params });
     return response.data;
   }
 

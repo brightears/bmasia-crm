@@ -4952,18 +4952,39 @@ class DashboardViewSet(viewsets.ViewSet):
     """ViewSet for dashboard statistics"""
     permission_classes = [IsAuthenticated]
     
+    def _classify_lifecycle(self, contract):
+        """Classify contract lifecycle type with inference when lifecycle_type is blank."""
+        if contract.lifecycle_type:
+            return contract.lifecycle_type
+        if contract.renewed_from_id:
+            return 'renewal'
+        if Contract.objects.filter(
+            company=contract.company, start_date__lt=contract.start_date
+        ).exists():
+            return 'renewal'
+        return 'new'
+
     @action(detail=False, methods=['get'])
     def stats(self, request):
         """Get dashboard statistics"""
         user = request.user
-        
+
         # Base querysets
         companies = Company.objects.filter(is_active=True)
         opportunities = Opportunity.objects.filter(is_active=True)
         contracts = Contract.objects.filter(is_active=True)
         tasks = Task.objects.all()
         invoices = Invoice.objects.all()
-        
+
+        # Entity filter (optional — filters all data by billing entity)
+        billing_entity = request.query_params.get('billing_entity', '')
+        if billing_entity:
+            companies = companies.filter(billing_entity=billing_entity)
+            opportunities = opportunities.filter(company__billing_entity=billing_entity)
+            contracts = contracts.filter(company__billing_entity=billing_entity)
+            tasks = tasks.filter(company__billing_entity=billing_entity)
+            invoices = invoices.filter(contract__company__billing_entity=billing_entity)
+
         # Apply role-based filtering
         if user.role == 'Sales':
             opportunities = opportunities.filter(owner=user)
@@ -4973,7 +4994,7 @@ class DashboardViewSet(viewsets.ViewSet):
         elif user.role in ['Tech', 'Music']:
             tasks = tasks.filter(Q(assigned_to=user) | Q(department=user.role))
             companies = companies.filter(tasks__in=tasks).distinct()
-        
+
         # Calculate statistics
         stats = {
             'total_companies': companies.count(),
@@ -4985,7 +5006,7 @@ class DashboardViewSet(viewsets.ViewSet):
             'overdue_invoices': sum(1 for invoice in invoices if invoice.is_overdue),
             'pending_renewals': sum(1 for contract in contracts if contract.is_expiring_soon),
         }
-        
+
         # Sales funnel stats
         stats.update({
             'contacted_count': opportunities.filter(stage='Contacted').count(),
@@ -4994,7 +5015,7 @@ class DashboardViewSet(viewsets.ViewSet):
             'won_count': opportunities.filter(stage='Won').count(),
             'lost_count': opportunities.filter(stage='Lost').count(),
         })
-        
+
         # Monthly stats
         now = timezone.now()
         current_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -5062,20 +5083,81 @@ class DashboardViewSet(viewsets.ViewSet):
             }
         stats['pipeline_stages'] = pipeline_stages
 
-        # Revenue trend (last 6 months)
+        # --- Revenue breakdown (New / Renewal / Churn) ---
+        from decimal import Decimal
+        new_revenue = Decimal('0')
+        renewal_revenue = Decimal('0')
+        for c in monthly_contracts:
+            ltype = self._classify_lifecycle(c)
+            val = c.value or Decimal('0')
+            if ltype == 'new':
+                new_revenue += val
+            elif ltype in ('renewal', 'addon'):
+                renewal_revenue += val
+
+        # Churn: contracts ending this month with no successor
+        next_month = (current_month + timedelta(days=32)).replace(day=1)
+        renewed_contract_ids = set(
+            Contract.objects.filter(renewed_from__isnull=False)
+            .values_list('renewed_from_id', flat=True)
+        )
+        churned_qs = Contract.objects.filter(
+            end_date__gte=current_month.date(),
+            end_date__lt=next_month.date(),
+            status__in=['Expired', 'Cancelled']
+        ).exclude(id__in=renewed_contract_ids)
+        if billing_entity:
+            churned_qs = churned_qs.filter(company__billing_entity=billing_entity)
+        churned_revenue = sum(float(c.value or 0) for c in churned_qs)
+        churned_count = churned_qs.count()
+
+        stats.update({
+            'new_revenue': float(new_revenue),
+            'renewal_revenue': float(renewal_revenue),
+            'churned_revenue': churned_revenue,
+            'churned_count': churned_count,
+            'net_revenue': float(new_revenue + renewal_revenue) - churned_revenue,
+        })
+
+        # --- Revenue trend (last 6 months) with breakdown ---
         revenue_trend = []
         for i in range(5, -1, -1):
             month_date = (now - timedelta(days=i * 30)).replace(day=1)
-            month_start = month_date.replace(hour=0, minute=0, second=0, microsecond=0)
-            next_month = (month_start + timedelta(days=32)).replace(day=1)
-            month_rev = Contract.objects.filter(
-                is_active=True,
-                start_date__gte=month_start.date(),
-                start_date__lt=next_month.date()
-            ).aggregate(Sum('value'))['value__sum'] or 0
+            m_start = month_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            m_next = (m_start + timedelta(days=32)).replace(day=1)
+
+            # Contracts starting this month (new + renewal revenue)
+            started_qs = contracts.filter(
+                start_date__gte=m_start.date(),
+                start_date__lt=m_next.date()
+            )
+            m_new = 0.0
+            m_renewal = 0.0
+            for c in started_qs:
+                ltype = self._classify_lifecycle(c)
+                val = float(c.value or 0)
+                if ltype == 'new':
+                    m_new += val
+                else:
+                    m_renewal += val
+
+            # Contracts ending this month without renewal (churn)
+            ended_qs = Contract.objects.filter(
+                end_date__gte=m_start.date(),
+                end_date__lt=m_next.date(),
+                status__in=['Expired', 'Cancelled']
+            ).exclude(id__in=renewed_contract_ids)
+            if billing_entity:
+                ended_qs = ended_qs.filter(company__billing_entity=billing_entity)
+            m_churn = sum(float(c.value or 0) for c in ended_qs)
+
             revenue_trend.append({
-                'month': month_start.strftime('%b'),
-                'revenue': float(month_rev),
+                'month': m_start.strftime('%b'),
+                'revenue': m_new + m_renewal,
+                'new_revenue': m_new,
+                'renewal_revenue': m_renewal,
+                'churned_revenue': m_churn,
+                'net_revenue': m_new + m_renewal - m_churn,
             })
         stats['revenue_trend'] = revenue_trend
 

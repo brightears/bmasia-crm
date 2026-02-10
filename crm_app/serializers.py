@@ -746,6 +746,13 @@ class DashboardStatsSerializer(serializers.Serializer):
     pipeline_stages = serializers.DictField()
     revenue_trend = serializers.ListField()
 
+    # Revenue breakdown
+    new_revenue = serializers.DecimalField(max_digits=12, decimal_places=2, default=0)
+    renewal_revenue = serializers.DecimalField(max_digits=12, decimal_places=2, default=0)
+    churned_revenue = serializers.DecimalField(max_digits=12, decimal_places=2, default=0)
+    churned_count = serializers.IntegerField(default=0)
+    net_revenue = serializers.DecimalField(max_digits=12, decimal_places=2, default=0)
+
 
 class BulkOperationSerializer(serializers.Serializer):
     """Serializer for bulk operations"""

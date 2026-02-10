@@ -2,6 +2,75 @@
 
 ## February 2026
 
+### Feb 10, 2026 - Dashboard Redesign: Business Health Snapshot
+
+**Research**: Audited Dashboard against HubSpot, Pipedrive, Close.io, monday.com, Explo, Breakcold. Found 3 major problems: (1) Kitchen-sink layout — 7 stat cards + 4 widget sections duplicating sidebar list pages, (2) SalesDashboard 100% mocked data (`generateMockKPIs()`, `generateMockActivities()`, fake 800ms setTimeout), ContractWidgets faked renewal rate, QuickActions hardcoded fake Recent Activity, (3) Raw numbers without trend context — no "is this good or bad?"
+
+**Research conclusion**: Dashboard ≠ landing page. Dashboard = "Are we winning?" (strategic health check). Action Center = "What's on fire?" (tactical). They coexist. 5-7 KPIs max with trend context for small teams.
+
+**Backend Enhancement** (`crm_app/views.py`, DashboardViewSet.stats + `crm_app/serializers.py`):
+- Added `win_rate`: won/(won+lost)*100
+- Added `previous_month_revenue` + `previous_win_rate` for trend indicators
+- Added `total_overdue_amount` (sum of overdue invoice amounts)
+- Added `pending_renewal_value` (sum of contracts expiring in 60 days)
+- Added `pipeline_stages`: dict with count + value per stage (Contacted, Quotation Sent, Contract Sent, Won, Lost)
+- Added `revenue_trend`: last 6 months as `[{month, revenue}]`
+- Updated `DashboardStatsSerializer` with all new fields
+
+**Frontend Rewrite** (`bmasia-crm-frontend/src/pages/Dashboard.tsx`, ~423 lines):
+- KPICard component: icon, large value, subtitle, trend indicator (↑/↓ % vs last month), color-coded left border
+- 6 KPI cards: Revenue This Month, Active Pipeline, Win Rate, Pending Renewals, Overdue Invoices, Tasks Overdue
+- Color logic: green (healthy), orange (warning), red (critical) — thresholds per card
+- Urgency cards (Renewals, Invoices, Tasks) include "View in Today →" link
+- Pipeline funnel: Recharts `BarChart` layout="vertical" with per-stage colors + custom tooltip
+- Revenue trend: Recharts `LineChart` with currency-formatted Y-axis
+- Updated `DashboardStats` TypeScript interface + added `PipelineStage`, `RevenueTrendPoint`
+
+**Default Landing Page** (`App.tsx` line 110):
+- Changed `<Navigate to="/dashboard" replace />` → `<Navigate to="/today" replace />`
+
+**Cleanup — 14 deleted components** (net: 432 added, 7,015 deleted):
+- `QuickActions.tsx` — shortcut buttons + hardcoded fake activity
+- `SalesDashboard.tsx` — 100% mocked data
+- `SalesKPICard.tsx`, `SalesActivityFeed.tsx` — only used by SalesDashboard
+- `charts/SalesPipelineFunnel.tsx`, `charts/RevenueTrendChart.tsx` — only used by SalesDashboard
+- `QuoteWidgets.tsx`, `ContractWidgets.tsx`, `InvoiceWidgets.tsx`, `TaskWidgets.tsx`, `TargetWidgets.tsx` — duplicated list pages
+- `QuickTaskCreate.tsx` — only used by QuickActions
+- `MarketingDashboard.tsx`, `TechSupportDashboard.tsx` — dead code (imported deleted SalesKPICard, caused build failure)
+
+**Build Fix**: First deploy failed because MarketingDashboard.tsx and TechSupportDashboard.tsx imported deleted SalesKPICard. TypeScript compiles ALL .tsx files, not just those in the app dependency tree. Fixed by deleting both orphaned files.
+
+**Lesson**: When deleting components, grep ALL .tsx files for imports — not just those reachable from App.tsx.
+
+---
+
+### Feb 10, 2026 - "Today" Action Center
+
+**Problem**: QuickActions page was a placeholder with shortcut buttons (redundant with sidebar) and hardcoded fake "Recent Activity" data. No daily task view existed.
+
+**Backend** (`crm_app/views.py`, `ActionCenterViewSet`):
+- Endpoint: `GET /api/v1/action-center/` — returns `{ items: [...], summary: {...} }`
+- Queries existing models (no new models/migrations): Tasks, Invoices, Opportunities, Contracts
+- 3 urgency tiers: Overdue (past due), Today & Tomorrow, Coming Up (next 7 days)
+- Item types: overdue_task, overdue_invoice, stale_opportunity (14+ days no activity), task_due, invoice_due, contract_expiring (60 days), opportunity_followup
+- Contact context on every item (primary contact fallback: task.related_contact → company.primary_contact → first active contact)
+- Role filtering: Sales users see only their assigned tasks + owned opportunities
+- Summary chips: `overdue_count`, `today_count`, `upcoming_count`, `total_value`
+
+**Frontend** (`bmasia-crm-frontend/src/pages/ActionCenter.tsx`, ~393 lines):
+- Summary chips at top: Overdue (red), Today (orange), Coming Up (blue)
+- 3 collapsible urgency sections with item cards
+- Each item: type icon, title, subtitle (contact + company), due date, amount, click-to-navigate
+- Navigation: items link to their source page (/tasks, /invoices/:id, /opportunities/:id, /contracts/:id)
+- Empty state when no items
+
+**Sidebar & Routing** (`Layout.tsx`, `App.tsx`):
+- Renamed "Quick Actions" (BoltIcon) → "Today" (TodayIcon)
+- Route: `/today` (with redirect from old `/quick-actions`)
+- Default landing: `/` → `/today`
+
+---
+
 ### Feb 10, 2026 - Tasks Audit & Improvements (5 Phases)
 
 **Research**: Audited Tasks section against HubSpot, Pipedrive, Zoho, Freshsales best practices. Found critical gaps: backend-frontend field mismatch (frontend had fields that didn't exist in Django model), status mismatch (backend: Pending/Completed, frontend: To Do/Done), over-engineered UI (4 Kanban columns, WIP limits, Time Tracking, Subtasks), zero notifications.

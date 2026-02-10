@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -7,10 +7,14 @@ import {
   CircularProgress,
   Alert,
   IconButton,
-  Chip,
+  Select,
+  MenuItem,
+  FormControl,
+  InputAdornment,
 } from '@mui/material';
 import {
   TrendingUp,
+  TrendingDown,
   Handshake,
   EmojiEvents,
   EventRepeat,
@@ -19,11 +23,15 @@ import {
   Refresh,
   ArrowUpward,
   ArrowDownward,
+  FiberNew,
+  AccountBalance,
+  FilterList,
 } from '@mui/icons-material';
 import {
   BarChart,
   Bar,
-  LineChart,
+  AreaChart,
+  Area,
   Line,
   XAxis,
   YAxis,
@@ -31,10 +39,16 @@ import {
   Tooltip as RechartsTooltip,
   ResponsiveContainer,
   Cell,
+  Legend,
 } from 'recharts';
 import ApiService from '../services/api';
 import { DashboardStats } from '../types';
-import { useAuth } from '../contexts/AuthContext';
+import {
+  EntityFilter,
+  DEFAULT_ENTITY,
+  ENTITY_OPTIONS,
+  formatCurrency,
+} from '../constants/entities';
 
 interface KPICardProps {
   title: string;
@@ -140,21 +154,19 @@ const KPICard: React.FC<KPICardProps> = ({
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
+  const [entityFilter, setEntityFilter] = useState<EntityFilter>(DEFAULT_ENTITY);
 
-  useEffect(() => {
-    loadDashboardData();
-  }, []);
-
-  const loadDashboardData = async () => {
+  const loadDashboardData = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
-      const dashboardStats = await ApiService.getDashboardStats();
+      const dashboardStats = await ApiService.getDashboardStats({
+        billing_entity: entityFilter,
+      });
       setStats(dashboardStats);
       setLastRefreshed(new Date());
     } catch (err: any) {
@@ -163,15 +175,14 @@ const Dashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [entityFilter]);
 
-  const formatCurrency = (amount: number): string => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(amount);
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
+
+  const fmtCurrency = (amount: number): string => {
+    return formatCurrency(amount, entityFilter);
   };
 
   const calculatePercentChange = (current: number, previous: number): number => {
@@ -215,8 +226,8 @@ const Dashboard: React.FC = () => {
   // KPI Cards Data
   const kpiCards = [
     {
-      title: 'Revenue This Month',
-      value: formatCurrency(stats.monthly_revenue),
+      title: 'Net Revenue This Month',
+      value: fmtCurrency(stats.net_revenue ?? stats.monthly_revenue),
       trend: {
         value: revenueChange,
         label: 'vs last month',
@@ -228,7 +239,7 @@ const Dashboard: React.FC = () => {
     },
     {
       title: 'Active Pipeline',
-      value: formatCurrency(stats.opportunities_value),
+      value: fmtCurrency(stats.opportunities_value),
       subtitle: `${stats.active_opportunities} opportunities`,
       icon: <Handshake />,
       iconColor: '#2196f3',
@@ -251,7 +262,7 @@ const Dashboard: React.FC = () => {
     {
       title: 'Pending Renewals',
       value: stats.pending_renewals,
-      subtitle: formatCurrency(stats.pending_renewal_value),
+      subtitle: fmtCurrency(stats.pending_renewal_value),
       icon: <EventRepeat />,
       iconColor: stats.pending_renewals > 5 ? '#f44336' : stats.pending_renewals > 0 ? '#ff9800' : '#4caf50',
       borderColor: stats.pending_renewals > 5 ? '#f44336' : stats.pending_renewals > 0 ? '#ff9800' : '#4caf50',
@@ -259,7 +270,7 @@ const Dashboard: React.FC = () => {
     {
       title: 'Overdue Invoices',
       value: stats.overdue_invoices,
-      subtitle: formatCurrency(stats.total_overdue_amount),
+      subtitle: fmtCurrency(stats.total_overdue_amount),
       icon: <Receipt />,
       iconColor: stats.overdue_invoices > 3 ? '#f44336' : stats.overdue_invoices > 0 ? '#ff9800' : '#4caf50',
       borderColor: stats.overdue_invoices > 3 ? '#f44336' : stats.overdue_invoices > 0 ? '#ff9800' : '#4caf50',
@@ -284,6 +295,35 @@ const Dashboard: React.FC = () => {
               onClick: () => navigate('/today'),
             }
           : undefined,
+    },
+  ];
+
+  // Revenue breakdown data
+  const revenueBreakdown = [
+    {
+      label: 'New Revenue',
+      value: stats.new_revenue ?? 0,
+      icon: <FiberNew sx={{ fontSize: 20 }} />,
+      color: '#4caf50',
+    },
+    {
+      label: 'Renewals',
+      value: stats.renewal_revenue ?? 0,
+      icon: <EventRepeat sx={{ fontSize: 20 }} />,
+      color: '#2196f3',
+    },
+    {
+      label: 'Churned',
+      value: stats.churned_revenue ?? 0,
+      icon: <TrendingDown sx={{ fontSize: 20 }} />,
+      color: '#f44336',
+      subtitle: stats.churned_count ? `${stats.churned_count} contract${stats.churned_count !== 1 ? 's' : ''}` : undefined,
+    },
+    {
+      label: 'Net Revenue',
+      value: stats.net_revenue ?? stats.monthly_revenue,
+      icon: <AccountBalance sx={{ fontSize: 20 }} />,
+      color: '#7b1fa2',
     },
   ];
 
@@ -313,13 +353,16 @@ const Dashboard: React.FC = () => {
             {data.stage}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            {data.count} opportunities — {formatCurrency(data.value)}
+            {data.count} opportunities — {fmtCurrency(data.value)}
           </Typography>
         </Paper>
       );
     }
     return null;
   };
+
+  // Check if trend data has breakdown fields
+  const hasBreakdown = stats.revenue_trend?.some((p) => p.new_revenue !== undefined);
 
   return (
     <Box>
@@ -333,9 +376,28 @@ const Dashboard: React.FC = () => {
             Last refreshed: {lastRefreshed.toLocaleTimeString()}
           </Typography>
         </Box>
-        <IconButton onClick={loadDashboardData} color="primary">
-          <Refresh />
-        </IconButton>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <FormControl size="small" sx={{ minWidth: 180 }}>
+            <Select
+              value={entityFilter}
+              onChange={(e) => setEntityFilter(e.target.value as EntityFilter)}
+              startAdornment={
+                <InputAdornment position="start">
+                  <FilterList fontSize="small" />
+                </InputAdornment>
+              }
+            >
+              {ENTITY_OPTIONS.map((opt) => (
+                <MenuItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <IconButton onClick={loadDashboardData} color="primary">
+            <Refresh />
+          </IconButton>
+        </Box>
       </Box>
 
       {/* Section 1: KPI Cards (6 cards in 2 rows of 3) */}
@@ -344,7 +406,7 @@ const Dashboard: React.FC = () => {
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
           gap: 2.5,
-          mb: 4,
+          mb: 3,
         }}
       >
         {kpiCards.map((card, index) => (
@@ -352,7 +414,55 @@ const Dashboard: React.FC = () => {
         ))}
       </Box>
 
-      {/* Section 2: Sales Pipeline */}
+      {/* Section 2: Revenue Breakdown */}
+      {(stats.new_revenue !== undefined) && (
+        <Paper sx={{ p: 2.5, mb: 4 }}>
+          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 2 }}>
+            Revenue Breakdown — This Month
+          </Typography>
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: 2,
+            }}
+          >
+            {revenueBreakdown.map((item) => (
+              <Box
+                key={item.label}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1.5,
+                  p: 1.5,
+                  borderLeft: 3,
+                  borderColor: item.color,
+                  borderRadius: 1,
+                  bgcolor: 'action.hover',
+                }}
+              >
+                <Box sx={{ color: item.color, display: 'flex' }}>{item.icon}</Box>
+                <Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.75rem' }}>
+                    {item.label}
+                  </Typography>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+                    {item.label === 'Churned' && item.value > 0 ? '-' : ''}
+                    {fmtCurrency(item.value)}
+                  </Typography>
+                  {item.subtitle && (
+                    <Typography variant="caption" color="text.secondary">
+                      {item.subtitle}
+                    </Typography>
+                  )}
+                </Box>
+              </Box>
+            ))}
+          </Box>
+        </Paper>
+      )}
+
+      {/* Section 3: Sales Pipeline */}
       {pipelineData.length > 0 && (
         <Paper sx={{ p: 3, mb: 4 }}>
           <Typography variant="h6" sx={{ fontWeight: 600, mb: 3 }}>
@@ -361,7 +471,7 @@ const Dashboard: React.FC = () => {
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={pipelineData} layout="vertical">
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" />
+              <XAxis type="number" tickFormatter={(v) => fmtCurrency(v)} />
               <YAxis type="category" dataKey="stage" width={130} />
               <RechartsTooltip content={<CustomPipelineTooltip />} />
               <Bar dataKey="value" radius={[0, 8, 8, 0]}>
@@ -374,45 +484,76 @@ const Dashboard: React.FC = () => {
         </Paper>
       )}
 
-      {/* Section 3: Revenue Trend */}
+      {/* Section 4: Revenue Trend */}
       {stats.revenue_trend && stats.revenue_trend.length > 0 && (
         <Paper sx={{ p: 3 }}>
-          <Typography variant="h6" sx={{ fontWeight: 600, mb: 3 }}>
+          <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
             Revenue Trend — Last 6 Months
           </Typography>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={stats.revenue_trend}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
-              <YAxis
-                tickFormatter={(value) =>
-                  new Intl.NumberFormat('en-US', {
-                    style: 'currency',
-                    currency: 'USD',
-                    minimumFractionDigits: 0,
-                    maximumFractionDigits: 0,
-                  }).format(value)
-                }
-              />
-              <RechartsTooltip
-                formatter={(value: any) =>
-                  new Intl.NumberFormat('en-US', {
-                    style: 'currency',
-                    currency: 'USD',
-                    minimumFractionDigits: 0,
-                    maximumFractionDigits: 0,
-                  }).format(value)
-                }
-              />
-              <Line
-                type="monotone"
-                dataKey="revenue"
-                stroke="#2196f3"
-                strokeWidth={2}
-                fill="#2196f3"
-                fillOpacity={0.1}
-              />
-            </LineChart>
+          {hasBreakdown && (
+            <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
+              New revenue, renewals, and churn
+            </Typography>
+          )}
+          <ResponsiveContainer width="100%" height={320}>
+            {hasBreakdown ? (
+              <AreaChart data={stats.revenue_trend}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis tickFormatter={(v) => fmtCurrency(v)} />
+                <RechartsTooltip formatter={(value: any, name: string) => [fmtCurrency(value), name]} />
+                <Legend />
+                <Area
+                  type="monotone"
+                  dataKey="new_revenue"
+                  stackId="1"
+                  stroke="#4caf50"
+                  fill="#4caf50"
+                  fillOpacity={0.6}
+                  name="New"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="renewal_revenue"
+                  stackId="1"
+                  stroke="#2196f3"
+                  fill="#2196f3"
+                  fillOpacity={0.6}
+                  name="Renewals"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="churned_revenue"
+                  stroke="#f44336"
+                  strokeDasharray="5 5"
+                  strokeWidth={2}
+                  name="Churn"
+                  dot={{ fill: '#f44336', r: 3 }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="net_revenue"
+                  stroke="#ff9800"
+                  strokeWidth={2}
+                  name="Net"
+                  dot={{ fill: '#ff9800', r: 3 }}
+                />
+              </AreaChart>
+            ) : (
+              <AreaChart data={stats.revenue_trend}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis tickFormatter={(v) => fmtCurrency(v)} />
+                <RechartsTooltip formatter={(value: any) => fmtCurrency(value)} />
+                <Area
+                  type="monotone"
+                  dataKey="revenue"
+                  stroke="#2196f3"
+                  fill="#2196f3"
+                  fillOpacity={0.1}
+                />
+              </AreaChart>
+            )}
           </ResponsiveContainer>
         </Paper>
       )}

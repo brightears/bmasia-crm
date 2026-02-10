@@ -434,6 +434,10 @@ export interface PipelineStage {
 export interface RevenueTrendPoint {
   month: string;
   revenue: number;
+  new_revenue?: number;
+  renewal_revenue?: number;
+  churned_revenue?: number;
+  net_revenue?: number;
 }
 
 export interface DashboardStats {
@@ -461,6 +465,12 @@ export interface DashboardStats {
   pending_renewal_value: number;
   pipeline_stages: Record<string, PipelineStage>;
   revenue_trend: RevenueTrendPoint[];
+  // Revenue breakdown
+  new_revenue: number;
+  renewal_revenue: number;
+  churned_revenue: number;
+  churned_count: number;
+  net_revenue: number;
 }
 
 export interface ApiResponse<T> {

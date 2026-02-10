@@ -851,9 +851,9 @@ class Contract(TimestampedModel):
     
     @property
     def is_expiring_soon(self):
-        """Check if contract expires within 30 days"""
+        """Check if contract expires within 60 days"""
         if self.end_date:
-            return 0 <= self.days_until_expiry <= 30
+            return 0 <= self.days_until_expiry <= 60
         return False
     
     @property
