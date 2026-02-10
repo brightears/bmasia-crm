@@ -724,18 +724,27 @@ class DashboardStatsSerializer(serializers.Serializer):
     overdue_tasks = serializers.IntegerField()
     overdue_invoices = serializers.IntegerField()
     pending_renewals = serializers.IntegerField()
-    
+
     # Sales funnel stats
     contacted_count = serializers.IntegerField()
     quotation_count = serializers.IntegerField()
     contract_count = serializers.IntegerField()
     won_count = serializers.IntegerField()
     lost_count = serializers.IntegerField()
-    
+
     # Monthly stats
     monthly_revenue = serializers.DecimalField(max_digits=12, decimal_places=2)
     monthly_new_opportunities = serializers.IntegerField()
     monthly_closed_deals = serializers.IntegerField()
+
+    # Enhanced stats for Business Health Snapshot
+    win_rate = serializers.FloatField()
+    previous_month_revenue = serializers.DecimalField(max_digits=12, decimal_places=2)
+    previous_win_rate = serializers.FloatField()
+    total_overdue_amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    pending_renewal_value = serializers.DecimalField(max_digits=12, decimal_places=2)
+    pipeline_stages = serializers.DictField()
+    revenue_trend = serializers.ListField()
 
 
 class BulkOperationSerializer(serializers.Serializer):

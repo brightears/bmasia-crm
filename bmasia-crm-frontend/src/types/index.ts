@@ -426,6 +426,16 @@ export interface Invoice {
   updated_at: string;
 }
 
+export interface PipelineStage {
+  count: number;
+  value: number;
+}
+
+export interface RevenueTrendPoint {
+  month: string;
+  revenue: number;
+}
+
 export interface DashboardStats {
   total_companies: number;
   active_opportunities: number;
@@ -443,12 +453,14 @@ export interface DashboardStats {
   monthly_revenue: number;
   monthly_new_opportunities: number;
   monthly_closed_deals: number;
-  total_invoices: number;
-  total_invoice_amount: number;
-  paid_invoice_amount: number;
-  pending_invoice_amount: number;
-  overdue_invoice_amount: number;
-  invoice_collection_rate: number;
+  // Enhanced stats
+  win_rate: number;
+  previous_month_revenue: number;
+  previous_win_rate: number;
+  total_overdue_amount: number;
+  pending_renewal_value: number;
+  pipeline_stages: Record<string, PipelineStage>;
+  revenue_trend: RevenueTrendPoint[];
 }
 
 export interface ApiResponse<T> {

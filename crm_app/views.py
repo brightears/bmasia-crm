@@ -4996,20 +4996,89 @@ class DashboardViewSet(viewsets.ViewSet):
         })
         
         # Monthly stats
-        current_month = timezone.now().replace(day=1)
+        now = timezone.now()
+        current_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         monthly_contracts = contracts.filter(start_date__gte=current_month)
         monthly_opportunities = opportunities.filter(created_at__gte=current_month)
         monthly_closed = opportunities.filter(
             actual_close_date__gte=current_month,
             stage='Won'
         )
-        
+
         stats.update({
             'monthly_revenue': monthly_contracts.aggregate(Sum('value'))['value__sum'] or 0,
             'monthly_new_opportunities': monthly_opportunities.count(),
             'monthly_closed_deals': monthly_closed.count(),
         })
-        
+
+        # --- Enhanced stats for Business Health Snapshot ---
+
+        # Win rate
+        won = stats['won_count']
+        lost = stats['lost_count']
+        stats['win_rate'] = round((won / (won + lost) * 100), 1) if (won + lost) > 0 else 0
+
+        # Previous month comparison
+        prev_month_start = (current_month - timedelta(days=1)).replace(day=1)
+        prev_month_contracts = contracts.filter(
+            start_date__gte=prev_month_start, start_date__lt=current_month
+        )
+        stats['previous_month_revenue'] = prev_month_contracts.aggregate(
+            Sum('value')
+        )['value__sum'] or 0
+
+        # Previous month win rate
+        prev_won = opportunities.filter(
+            stage='Won', actual_close_date__gte=prev_month_start,
+            actual_close_date__lt=current_month
+        ).count()
+        prev_lost = opportunities.filter(
+            stage='Lost', actual_close_date__gte=prev_month_start,
+            actual_close_date__lt=current_month
+        ).count()
+        stats['previous_win_rate'] = round(
+            (prev_won / (prev_won + prev_lost) * 100), 1
+        ) if (prev_won + prev_lost) > 0 else 0
+
+        # Overdue invoice total amount
+        stats['total_overdue_amount'] = sum(
+            float(inv.total_amount) for inv in invoices if inv.is_overdue
+        )
+
+        # Pending renewal total value
+        stats['pending_renewal_value'] = sum(
+            float(c.value) for c in contracts if c.is_expiring_soon and c.value
+        )
+
+        # Pipeline stages with values
+        pipeline_stages = {}
+        for stage_name in ['Contacted', 'Quotation Sent', 'Contract Sent', 'Won', 'Lost']:
+            stage_opps = opportunities.filter(stage=stage_name)
+            pipeline_stages[stage_name] = {
+                'count': stage_opps.count(),
+                'value': float(stage_opps.aggregate(
+                    Sum('expected_value')
+                )['expected_value__sum'] or 0),
+            }
+        stats['pipeline_stages'] = pipeline_stages
+
+        # Revenue trend (last 6 months)
+        revenue_trend = []
+        for i in range(5, -1, -1):
+            month_date = (now - timedelta(days=i * 30)).replace(day=1)
+            month_start = month_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            next_month = (month_start + timedelta(days=32)).replace(day=1)
+            month_rev = Contract.objects.filter(
+                is_active=True,
+                start_date__gte=month_start.date(),
+                start_date__lt=next_month.date()
+            ).aggregate(Sum('value'))['value__sum'] or 0
+            revenue_trend.append({
+                'month': month_start.strftime('%b'),
+                'revenue': float(month_rev),
+            })
+        stats['revenue_trend'] = revenue_trend
+
         serializer = DashboardStatsSerializer(stats)
         return Response(serializer.data)
 

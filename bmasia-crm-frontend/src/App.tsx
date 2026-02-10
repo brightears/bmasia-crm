@@ -107,7 +107,7 @@ function App() {
               <Typography variant="body1">Initializing BMAsia CRM...</Typography>
             </Box>
           ) : isAuthenticated ? (
-            <Navigate to="/dashboard" replace />
+            <Navigate to="/today" replace />
           ) : (
             <Navigate to="/login" replace />
           )
