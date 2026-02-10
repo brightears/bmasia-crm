@@ -47,7 +47,7 @@ import {
 } from '@mui/icons-material';
 import { Task, TaskComment, User } from '../types';
 import { format, parseISO, formatDistanceToNow } from 'date-fns';
-import { api } from '../services/api';
+import ApiService from '../services/api';
 
 interface TaskDetailProps {
   open: boolean;
@@ -184,7 +184,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
 
     setSubmittingComment(true);
     try {
-      await api.addTaskComment(task.id, newComment.trim());
+      await ApiService.addTaskComment(task.id, newComment.trim());
       setNewComment('');
       // Refresh task data to show new comment
       if (onTaskUpdate) {
