@@ -1190,6 +1190,30 @@ class Invoice(TimestampedModel):
         super().save(*args, **kwargs)
 
 
+class InvoiceLineItem(TimestampedModel):
+    """Line items for invoices"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='line_items')
+    description = models.TextField()
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=1)
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2)
+    tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    line_total = models.DecimalField(max_digits=12, decimal_places=2)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.description} - {self.invoice.invoice_number}"
+
+    def save(self, *args, **kwargs):
+        """Auto-calculate line total"""
+        subtotal = self.quantity * self.unit_price
+        tax = subtotal * (self.tax_rate / 100)
+        self.line_total = subtotal + tax
+        super().save(*args, **kwargs)
+
+
 # DEPRECATED: Use Contract model with service_type field instead
 """
 class SubscriptionPlan(TimestampedModel):

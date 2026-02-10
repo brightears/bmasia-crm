@@ -196,7 +196,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     setDueDate(invoice.due_date ? new Date(invoice.due_date) : null);
     setPaymentTerms(invoice.payment_terms || 'Net 30');
     setNotes(invoice.notes || '');
-    setLineItems(invoice.line_items.length > 0 ? invoice.line_items : [defaultLineItem]);
+    setLineItems(invoice.line_items?.length > 0 ? invoice.line_items : [defaultLineItem]);
     setDiscountAmount(invoice.discount_amount || 0);
     setCurrency(invoice.currency || 'USD');
     setSendEmail(false);

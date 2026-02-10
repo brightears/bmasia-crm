@@ -15,7 +15,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 from .models import (
     User, Company, Contact, Note, Task, TaskComment, AuditLog,
-    Opportunity, OpportunityActivity, Contract, Invoice, Zone, ContractZone,
+    Opportunity, OpportunityActivity, Contract, Invoice, InvoiceLineItem, Zone, ContractZone,
     EmailTemplate, EmailLog, EmailCampaign, CampaignRecipient, DocumentAttachment,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
@@ -1213,6 +1213,13 @@ class ContractZoneAdmin(admin.ModelAdmin):
         )
 
 
+class InvoiceLineItemInline(admin.TabularInline):
+    model = InvoiceLineItem
+    extra = 0
+    readonly_fields = ['line_total', 'created_at']
+    fields = ['description', 'quantity', 'unit_price', 'tax_rate', 'line_total']
+
+
 @admin.register(Invoice)
 class InvoiceAdmin(admin.ModelAdmin):
     list_display = ['invoice_number', 'contract', 'status', 'issue_date', 'due_date', 'total_amount', 'days_overdue']
@@ -1220,6 +1227,7 @@ class InvoiceAdmin(admin.ModelAdmin):
     list_select_related = ['contract', 'contract__company']
     search_fields = ['invoice_number', 'contract__company__name', 'contract__contract_number']
     readonly_fields = ['created_at', 'updated_at', 'total_amount', 'days_overdue']
+    inlines = [InvoiceLineItemInline]
     actions = ['bulk_mark_paid', 'bulk_mark_unpaid', 'export_invoices_csv', 'export_invoices_excel']
     
     def days_overdue(self, obj):

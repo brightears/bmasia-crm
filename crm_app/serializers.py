@@ -4,7 +4,7 @@ from django.utils import timezone
 from django.db.models import Sum
 from .models import (
     User, Company, Contact, Note, Task, TaskComment, AuditLog,
-    Opportunity, OpportunityActivity, Contract, Invoice, Zone, ContractZone,
+    Opportunity, OpportunityActivity, Contract, Invoice, InvoiceLineItem, Zone, ContractZone,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailCampaign, CampaignRecipient, EmailTemplate,
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
@@ -446,13 +446,31 @@ class OpportunitySerializer(serializers.ModelSerializer):
         return OpportunityActivitySerializer(recent, many=True).data
 
 
+class InvoiceLineItemSerializer(serializers.ModelSerializer):
+    """Serializer for InvoiceLineItem model"""
+    id = serializers.UUIDField(read_only=True)
+    invoice = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = InvoiceLineItem
+        fields = [
+            'id', 'invoice', 'description', 'quantity', 'unit_price',
+            'tax_rate', 'line_total', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'invoice', 'line_total', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'invoice': {'required': False}
+        }
+
+
 class InvoiceSerializer(serializers.ModelSerializer):
-    """Serializer for Invoice model"""
+    """Serializer for Invoice model with nested line items"""
     company_name = serializers.CharField(source='company.name', read_only=True)
     contract = serializers.PrimaryKeyRelatedField(queryset=Contract.objects.all(), required=False, allow_null=True)
     contract_number = serializers.SerializerMethodField()
     days_overdue = serializers.ReadOnlyField()
     is_overdue = serializers.ReadOnlyField()
+    line_items = InvoiceLineItemSerializer(many=True, required=False)
 
     class Meta:
         model = Invoice
@@ -462,12 +480,35 @@ class InvoiceSerializer(serializers.ModelSerializer):
             'discount_amount', 'total_amount', 'currency', 'payment_method',
             'transaction_id', 'notes', 'days_overdue', 'is_overdue',
             'first_reminder_sent', 'second_reminder_sent', 'final_notice_sent',
-            'created_at', 'updated_at'
+            'line_items', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'total_amount', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
     def get_contract_number(self, obj):
         return obj.contract.contract_number if obj.contract else None
+
+    def create(self, validated_data):
+        """Create invoice with nested line items"""
+        line_items_data = validated_data.pop('line_items', [])
+        invoice = Invoice.objects.create(**validated_data)
+        for item_data in line_items_data:
+            InvoiceLineItem.objects.create(invoice=invoice, **item_data)
+        return invoice
+
+    def update(self, instance, validated_data):
+        """Update invoice and handle nested line items"""
+        line_items_data = validated_data.pop('line_items', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if line_items_data is not None:
+            instance.line_items.all().delete()
+            for item_data in line_items_data:
+                InvoiceLineItem.objects.create(invoice=instance, **item_data)
+
+        return instance
 
 
 class ContractZoneSerializer(serializers.ModelSerializer):

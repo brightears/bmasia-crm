@@ -25,7 +25,7 @@ import uuid
 
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
-    Opportunity, OpportunityActivity, Contract, Invoice, ContractZone,
+    Opportunity, OpportunityActivity, Contract, Invoice, InvoiceLineItem, ContractZone,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailTemplate, EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
     CustomerSegment, EmailCampaign, CampaignRecipient,
@@ -3800,7 +3800,7 @@ and<br/><br/>
 
 class InvoiceViewSet(BaseModelViewSet):
     """ViewSet for Invoice management"""
-    queryset = Invoice.objects.all()
+    queryset = Invoice.objects.all().prefetch_related('line_items')
     serializer_class = InvoiceSerializer
     search_fields = ['invoice_number', 'company__name']
     ordering_fields = ['created_at', 'issue_date', 'due_date', 'total_amount', 'updated_at', 'company__name']
@@ -3877,12 +3877,13 @@ class InvoiceViewSet(BaseModelViewSet):
         from reportlab.lib.pagesizes import letter, A4
         from reportlab.lib import colors
         from reportlab.lib.units import inch
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable, KeepTogether
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
         from io import BytesIO
         from django.conf import settings
         import os
+        from decimal import Decimal
 
         invoice = self.get_object()
         company = invoice.company
@@ -4102,27 +4103,40 @@ class InvoiceViewSet(BaseModelViewSet):
         # Currency symbol
         currency_symbol = {'USD': '$', 'THB': 'THB ', 'EUR': 'EUR ', 'GBP': 'GBP '}.get(invoice.currency, invoice.currency + ' ')
 
-        # Create services table
-        services_data = [
-            ['Description', 'Amount']
-        ]
-
-        # Add main service line
-        if invoice.contract:
-            service_description = f"{invoice.contract.get_service_type_display() if invoice.contract.service_type else 'Professional Services'}"
-            if invoice.contract.service_type:
-                service_description += f"<br/><font size=8>Contract: {invoice.contract.contract_number}</font>"
-                service_description += f"<br/><font size=8>Period: {invoice.contract.start_date.strftime('%b %d, %Y')} - {invoice.contract.end_date.strftime('%b %d, %Y')}</font>"
+        # Build services table from persisted line items (or fallback for legacy invoices)
+        line_items = invoice.line_items.all()
+        if line_items.exists():
+            # Multi-column table with actual line items
+            services_data = [
+                ['Description', 'Qty', 'Unit Price', 'Amount']
+            ]
+            for item in line_items:
+                item_subtotal = item.quantity * item.unit_price
+                services_data.append([
+                    Paragraph(item.description, body_style),
+                    f"{item.quantity:,.0f}" if item.quantity == int(item.quantity) else f"{item.quantity:,.2f}",
+                    f"{currency_symbol}{item.unit_price:,.2f}",
+                    f"{currency_symbol}{item_subtotal:,.2f}"
+                ])
+            services_table = Table(services_data, colWidths=[3.5*inch, 0.7*inch, 1.35*inch, 1.35*inch])
         else:
-            service_description = 'Professional Services'
+            # Fallback for legacy invoices without persisted line items
+            services_data = [
+                ['Description', 'Amount']
+            ]
+            if invoice.contract:
+                service_description = f"{invoice.contract.get_service_type_display() if invoice.contract.service_type else 'Professional Services'}"
+                if invoice.contract.service_type:
+                    service_description += f"<br/><font size=8>Contract: {invoice.contract.contract_number}</font>"
+                    service_description += f"<br/><font size=8>Period: {invoice.contract.start_date.strftime('%b %d, %Y')} - {invoice.contract.end_date.strftime('%b %d, %Y')}</font>"
+            else:
+                service_description = 'Professional Services'
+            services_data.append([
+                Paragraph(service_description, body_style),
+                f"{currency_symbol}{invoice.amount:,.2f}"
+            ])
+            services_table = Table(services_data, colWidths=[5*inch, 1.9*inch])
 
-        services_data.append([
-            Paragraph(service_description, body_style),
-            f"{currency_symbol}{invoice.amount:,.2f}"
-        ])
-
-        # Create services table
-        services_table = Table(services_data, colWidths=[5*inch, 1.9*inch])
         services_table.setStyle(TableStyle([
             # Header row
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
@@ -4193,8 +4207,12 @@ class InvoiceViewSet(BaseModelViewSet):
         elements.append(totals_table)
         elements.append(Spacer(1, 0.2*inch))
 
-        # Bank Details Section - Organized blocks with background
-        elements.append(Paragraph("BANK DETAILS FOR PAYMENT", heading_style))
+        # Bank Details + Payment Status + Payment Terms — wrapped in KeepTogether
+        # to prevent page breaks splitting this section
+        payment_section = []
+
+        # Bank Details
+        payment_section.append(Paragraph("BANK DETAILS FOR PAYMENT", heading_style))
 
         bank_data = [
             ['Beneficiary', entity_name],
@@ -4217,8 +4235,8 @@ class InvoiceViewSet(BaseModelViewSet):
             ('RIGHTPADDING', (0, 0), (-1, -1), 12),
             ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e0e0e0')),
         ]))
-        elements.append(bank_table)
-        elements.append(Spacer(1, 0.15*inch))
+        payment_section.append(bank_table)
+        payment_section.append(Spacer(1, 0.15*inch))
 
         # Payment status indicator
         if invoice.status == 'Paid':
@@ -4231,9 +4249,9 @@ class InvoiceViewSet(BaseModelViewSet):
                 spaceBefore=12,
                 spaceAfter=12
             )
-            elements.append(Paragraph("<b>✓ PAID</b>", paid_style))
+            payment_section.append(Paragraph("<b>PAID</b>", paid_style))
             if invoice.paid_date:
-                elements.append(Paragraph(f"Payment received on {invoice.paid_date.strftime('%B %d, %Y')}", body_style))
+                payment_section.append(Paragraph(f"Payment received on {invoice.paid_date.strftime('%B %d, %Y')}", body_style))
         elif invoice.is_overdue:
             overdue_style = ParagraphStyle(
                 'OverdueStamp',
@@ -4244,7 +4262,7 @@ class InvoiceViewSet(BaseModelViewSet):
                 spaceBefore=12,
                 spaceAfter=12
             )
-            elements.append(Paragraph(f"<b>⚠ OVERDUE - {invoice.days_overdue} days past due</b>", overdue_style))
+            payment_section.append(Paragraph(f"<b>OVERDUE - {invoice.days_overdue} days past due</b>", overdue_style))
         else:
             pending_style = ParagraphStyle(
                 'PendingStamp',
@@ -4257,25 +4275,28 @@ class InvoiceViewSet(BaseModelViewSet):
             )
             days_until_due = (invoice.due_date - timezone.now().date()).days
             if days_until_due > 0:
-                elements.append(Paragraph(f"Payment due in {days_until_due} days", pending_style))
+                payment_section.append(Paragraph(f"Payment due in {days_until_due} days", pending_style))
             else:
-                elements.append(Paragraph("Payment due today", pending_style))
+                payment_section.append(Paragraph("Payment due today", pending_style))
 
-        elements.append(Spacer(1, 0.2*inch))
+        payment_section.append(Spacer(1, 0.2*inch))
 
         # Payment terms
-        elements.append(Paragraph("Payment Terms:", heading_style))
-        # Use contract payment terms if specified, otherwise use entity default
+        payment_section.append(Paragraph("Payment Terms:", heading_style))
         payment_terms_text = (invoice.contract.payment_terms if invoice.contract and invoice.contract.payment_terms else payment_terms_default)
         payment_terms_formatted = payment_terms_text.replace('\n', '<br/>')
-        elements.append(Paragraph(payment_terms_formatted, body_style))
+        payment_section.append(Paragraph(payment_terms_formatted, body_style))
+
+        elements.append(KeepTogether(payment_section))
         elements.append(Spacer(1, 0.2*inch))
 
-        # Notes (if any)
+        # Notes (if any) — also wrapped in KeepTogether
         if invoice.notes:
-            elements.append(Paragraph("Notes:", heading_style))
+            notes_section = []
+            notes_section.append(Paragraph("Notes:", heading_style))
             notes_text = invoice.notes.replace('\n', '<br/>')
-            elements.append(Paragraph(notes_text, body_style))
+            notes_section.append(Paragraph(notes_text, body_style))
+            elements.append(KeepTogether(notes_section))
             elements.append(Spacer(1, 0.2*inch))
 
         # Footer - entity-specific with separator (two-line format for cleaner appearance)
