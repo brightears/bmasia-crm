@@ -113,6 +113,9 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
   // Track company country for smart VAT/currency (same pattern as QuoteForm)
   const [selectedCompanyCountry, setSelectedCompanyCountry] = useState('');
 
+  // Track which unit price field is focused (show raw number when editing)
+  const [focusedPriceIndex, setFocusedPriceIndex] = useState<number | null>(null);
+
   // Helper function to get currency symbol
   const getCurrencySymbol = (currencyCode: string): string => {
     const symbols: Record<string, string> = {
@@ -683,10 +686,17 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                         <TableCell>
                           <TextField
                             size="small"
-                            type="number"
-                            value={item.unit_price}
-                            onChange={(e) => handleLineItemChange(index, 'unit_price', parseFloat(e.target.value) || 0)}
-                            inputProps={{ min: 0, step: 0.01 }}
+                            type="text"
+                            value={focusedPriceIndex === index
+                              ? item.unit_price
+                              : new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(item.unit_price)
+                            }
+                            onChange={(e) => {
+                              const cleaned = e.target.value.replace(/[^0-9.]/g, '');
+                              handleLineItemChange(index, 'unit_price', parseFloat(cleaned) || 0);
+                            }}
+                            onFocus={() => setFocusedPriceIndex(index)}
+                            onBlur={() => setFocusedPriceIndex(null)}
                             InputProps={{
                               startAdornment: <InputAdornment position="start">{getCurrencySymbol(currency)}</InputAdornment>,
                             }}
@@ -696,9 +706,9 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                           <TextField
                             size="small"
                             type="number"
-                            value={item.tax_rate}
-                            onChange={(e) => handleLineItemChange(index, 'tax_rate', parseFloat(e.target.value) || 0)}
-                            inputProps={{ min: 0, max: 100, step: 0.1 }}
+                            value={Math.round(item.tax_rate)}
+                            onChange={(e) => handleLineItemChange(index, 'tax_rate', parseInt(e.target.value) || 0)}
+                            inputProps={{ min: 0, max: 100, step: 1 }}
                           />
                         </TableCell>
                         <TableCell>
