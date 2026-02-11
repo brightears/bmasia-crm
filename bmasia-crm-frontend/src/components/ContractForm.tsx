@@ -184,8 +184,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
     bmasia_signatory_name: '',
     bmasia_signatory_title: '',
     custom_terms: '',
-    show_zone_pricing_detail: true,
-    price_per_zone: '',
     bmasia_contact_name: '',
     bmasia_contact_email: '',
     bmasia_contact_title: '',
@@ -289,8 +287,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
       bmasia_signatory_name: contract.bmasia_signatory_name || '',
       bmasia_signatory_title: contract.bmasia_signatory_title || '',
       custom_terms: contract.custom_terms || '',
-      show_zone_pricing_detail: contract.show_zone_pricing_detail ?? true,
-      price_per_zone: contract.price_per_zone?.toString() || '',
       bmasia_contact_name: contract.bmasia_contact_name || '',
       bmasia_contact_email: contract.bmasia_contact_email || '',
       bmasia_contact_title: contract.bmasia_contact_title || '',
@@ -375,8 +371,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
       bmasia_signatory_name: '',
       bmasia_signatory_title: '',
       custom_terms: '',
-      show_zone_pricing_detail: true,
-      price_per_zone: '',
       bmasia_contact_name: '',
       bmasia_contact_email: '',
       bmasia_contact_title: '',
@@ -559,13 +553,10 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
       newItems[index] = { ...newItems[index], [field]: value };
 
-      // Recalculate line total when quantity, unit_price, discount_percentage, or tax_rate changes
-      if (field === 'quantity' || field === 'unit_price' || field === 'discount_percentage' || field === 'tax_rate') {
+      // Recalculate line total when quantity, unit_price, or tax_rate changes
+      if (field === 'quantity' || field === 'unit_price' || field === 'tax_rate') {
         const item = newItems[index];
-        const subtotal = item.quantity * item.unit_price;
-        const discountAmount = subtotal * (item.discount_percentage / 100);
-        const afterDiscount = subtotal - discountAmount;
-        newItems[index].line_total = afterDiscount;
+        newItems[index].line_total = item.quantity * item.unit_price;
       }
 
       return newItems;
@@ -574,8 +565,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
   // Calculate totals from line items
   const calculateLineItemTotals = () => {
-    const subtotal = lineItems.reduce((sum, item) => sum + (item.quantity * item.unit_price - item.quantity * item.unit_price * item.discount_percentage / 100), 0);
-    return subtotal;
+    return lineItems.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
   };
 
   // Handle quote selection and auto-fill
@@ -589,15 +579,19 @@ const ContractForm: React.FC<ContractFormProps> = ({
       // Auto-populate line items from quote
       if (selectedQuote.line_items && selectedQuote.line_items.length > 0) {
         const smartTaxRate = formData.currency === 'THB' ? 7 : 0;
-        setLineItems(selectedQuote.line_items.map(item => ({
-          product_service: item.product_service,
-          description: item.description,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          discount_percentage: item.discount_percentage,
-          tax_rate: smartTaxRate,
-          line_total: item.quantity * item.unit_price * (1 - item.discount_percentage / 100),
-        })));
+        setLineItems(selectedQuote.line_items.map(item => {
+          // Fold quote discount into final unit price (contracts show agreed price)
+          const finalUnitPrice = item.unit_price * (1 - (item.discount_percentage || 0) / 100);
+          return {
+            product_service: item.product_service,
+            description: item.description,
+            quantity: item.quantity,
+            unit_price: Math.round(finalUnitPrice * 100) / 100,
+            discount_percentage: 0,
+            tax_rate: smartTaxRate,
+            line_total: item.quantity * Math.round(finalUnitPrice * 100) / 100,
+          };
+        }));
       }
 
       // Auto-fill currency from quote
@@ -661,7 +655,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
         discount_percentage: parseFloat(formData.discount_percentage) || 0,
         start_date: formData.start_date.toISOString().split('T')[0],
         end_date: formData.end_date.toISOString().split('T')[0],
-        price_per_zone: formData.price_per_zone ? parseFloat(formData.price_per_zone) : undefined,
         additional_customer_signatories: additionalSignatories.length > 0 ? additionalSignatories : [],
         preamble_template: selectedTemplate || undefined,
         quote: selectedQuoteId || null,
@@ -670,7 +663,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
           description: item.description,
           quantity: item.quantity,
           unit_price: item.unit_price,
-          discount_percentage: item.discount_percentage,
+          discount_percentage: 0,
           tax_rate: item.tax_rate,
         })),
       };
@@ -733,7 +726,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
       <Dialog
         open={open}
         onClose={onClose}
-        maxWidth="md"
+        maxWidth="lg"
         fullWidth
         scroll="paper"
       >
@@ -1221,8 +1214,17 @@ const ContractForm: React.FC<ContractFormProps> = ({
                     type="number"
                     value={formData.discount_percentage}
                     onChange={(e) => setFormData(prev => ({ ...prev, discount_percentage: e.target.value }))}
-                    sx={{ minWidth: 120 }}
                     inputProps={{ min: 0, max: 100 }}
+                    sx={{
+                      minWidth: 120,
+                      '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button': {
+                        WebkitAppearance: 'none',
+                        margin: 0
+                      },
+                      '& input[type=number]': {
+                        MozAppearance: 'textfield'
+                      }
+                    }}
                   />
                 </Box>
               </Box>
@@ -1254,10 +1256,9 @@ const ContractForm: React.FC<ContractFormProps> = ({
                       <TableCell>Product/Service</TableCell>
                       <TableCell>Description</TableCell>
                       <TableCell width="80px">Qty</TableCell>
-                      <TableCell width="140px">Unit Price</TableCell>
-                      <TableCell width="100px">Discount %</TableCell>
+                      <TableCell width="160px">Unit Price</TableCell>
                       <TableCell width="100px">Tax %</TableCell>
-                      <TableCell width="140px">Line Total</TableCell>
+                      <TableCell width="150px">Line Total</TableCell>
                       <TableCell width="50px">Actions</TableCell>
                     </TableRow>
                   </TableHead>
@@ -1350,19 +1351,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
                           <TextField
                             size="small"
                             type="number"
-                            value={item.discount_percentage}
-                            onChange={(e) => updateLineItem(index, 'discount_percentage', parseFloat(e.target.value) || 0)}
-                            inputProps={{ min: 0, max: 100, step: 0.1 }}
-                            InputProps={{
-                              endAdornment: <InputAdornment position="end">%</InputAdornment>,
-                            }}
-                            sx={{ minWidth: '90px' }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            size="small"
-                            type="number"
                             value={Math.round(item.tax_rate)}
                             onChange={(e) => updateLineItem(index, 'tax_rate', parseInt(e.target.value) || 0)}
                             inputProps={{ min: 0, max: 100, step: 1 }}
@@ -1417,42 +1405,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
                     </Typography>
                   </Paper>
                 </Box>
-              )}
-            </Box>
-
-            <Divider />
-
-            {/* Zone Pricing */}
-            <Box>
-              <Typography variant="h6" gutterBottom>
-                Zone Pricing
-              </Typography>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={formData.show_zone_pricing_detail}
-                    onChange={(e) => setFormData(prev => ({ ...prev, show_zone_pricing_detail: e.target.checked }))}
-                  />
-                }
-                label="Show Zone Pricing Detail on Contract"
-              />
-
-              {formData.show_zone_pricing_detail && (
-                <TextField
-                  label="Price Per Zone"
-                  type="number"
-                  value={formData.price_per_zone}
-                  onChange={(e) => setFormData(prev => ({ ...prev, price_per_zone: e.target.value }))}
-                  fullWidth
-                  sx={{ mt: 1 }}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        {formData.currency === 'THB' ? '฿' : formData.currency === 'EUR' ? '€' : formData.currency === 'GBP' ? '£' : '$'}
-                      </InputAdornment>
-                    ),
-                  }}
-                />
               )}
             </Box>
 
