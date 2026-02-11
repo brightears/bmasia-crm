@@ -649,10 +649,10 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                   <TableHead>
                     <TableRow>
                       <TableCell>Description</TableCell>
-                      <TableCell width="80">Qty</TableCell>
-                      <TableCell width="140">Unit Price</TableCell>
-                      <TableCell width="80">{getTaxLabel().replace(':', '')} (%)</TableCell>
-                      <TableCell width="140">Total</TableCell>
+                      <TableCell width="90">Qty</TableCell>
+                      <TableCell width="160">Unit Price</TableCell>
+                      <TableCell width="90">{getTaxLabel().replace(':', '')} (%)</TableCell>
+                      <TableCell width="150">Total</TableCell>
                       <TableCell width="50">Actions</TableCell>
                     </TableRow>
                   </TableHead>
