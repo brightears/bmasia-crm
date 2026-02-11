@@ -89,7 +89,8 @@ const ContractDocuments: React.FC<ContractDocumentsProps> = ({ contractId }) => 
       setLoading(true);
       setError('');
       const docs = await ApiService.getContractDocuments(contractId);
-      setDocuments(docs);
+      // Safety filter: ensure only this contract's documents display
+      setDocuments(docs.filter(d => d.contract === contractId));
     } catch (err: any) {
       setError('Failed to load documents');
       console.error('Failed to load contract documents:', err);

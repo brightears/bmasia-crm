@@ -8143,6 +8143,14 @@ class ContractDocumentViewSet(viewsets.ModelViewSet):
     ordering_fields = ['uploaded_at', 'signed_date']
     ordering = ['-uploaded_at']
 
+    def get_queryset(self):
+        """Filter by contract when contract param is provided"""
+        qs = ContractDocument.objects.select_related('contract', 'uploaded_by')
+        contract_id = self.request.query_params.get('contract')
+        if contract_id:
+            qs = qs.filter(contract_id=contract_id)
+        return qs
+
     def perform_create(self, serializer):
         """Auto-set uploaded_by from request user"""
         serializer.save(uploaded_by=self.request.user)
