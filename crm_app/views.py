@@ -1998,10 +1998,34 @@ and<br/><br/>
             tax_amount = total_before_tax * (tax_rate / 100)
             total_with_tax = total_before_tax + tax_amount
 
-            elements.append(Paragraph(
-                f"<b>{clause_num}.</b> Total Cost: {contract.currency} {total_before_tax:,.2f} for {contract.get_zone_count()} zone{'s' if contract.get_zone_count() != 1 else ''} + {tax_rate}% VAT ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}</b>",
-                clause_style
-            ))
+            # Check if contract has line items for detailed breakdown
+            contract_line_items = list(contract.line_items.all()) if hasattr(contract, 'line_items') else []
+
+            if contract_line_items:
+                # Line items breakdown
+                elements.append(Paragraph(
+                    f"<b>{clause_num}. Total cost:</b>",
+                    clause_style
+                ))
+                for li in contract_line_items:
+                    qty = int(li.quantity) if li.quantity == int(li.quantity) else li.quantity
+                    li_total = float(li.line_total)
+                    elements.append(Paragraph(
+                        f"&nbsp;&nbsp;&nbsp;&nbsp;• {qty}× {li.product_service} @ {contract.currency} {float(li.unit_price):,.2f} = {contract.currency} {li_total:,.2f}",
+                        clause_style
+                    ))
+                vat_text = f" + {tax_rate:.0f}% VAT ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}</b>" if tax_rate > 0 else ""
+                elements.append(Paragraph(
+                    f"&nbsp;&nbsp;&nbsp;&nbsp;Subtotal: {contract.currency} {total_before_tax:,.2f}{vat_text}",
+                    clause_style
+                ))
+            else:
+                # Legacy: flat value with zone count
+                zone_count = contract.get_zone_count()
+                elements.append(Paragraph(
+                    f"<b>{clause_num}.</b> Total cost: {contract.currency} {total_before_tax:,.2f} for {zone_count} zone{'s' if zone_count != 1 else ''} + {tax_rate:.0f}% VAT ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}</b>",
+                    clause_style
+                ))
             clause_num += 1
 
             # Clause 7: Terms of Payment

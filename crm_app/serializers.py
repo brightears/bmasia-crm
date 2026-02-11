@@ -727,6 +727,19 @@ class ContractSerializer(serializers.ModelSerializer):
         contract = Contract.objects.create(**validated_data)
         for item_data in line_items_data:
             ContractLineItem.objects.create(contract=contract, **item_data)
+
+        # Auto-sum line items to contract.value
+        if line_items_data:
+            total = sum(item.line_total for item in contract.line_items.all())
+            contract.value = total
+            # Recalculate tax fields with updated value
+            tax_data = {'value': contract.value, 'currency': contract.currency}
+            tax_data = self._calculate_tax_fields(tax_data)
+            contract.tax_rate = tax_data['tax_rate']
+            contract.tax_amount = tax_data['tax_amount']
+            contract.total_value = tax_data['total_value']
+            contract.save()
+
         return contract
 
     def update(self, instance, validated_data):
@@ -755,6 +768,18 @@ class ContractSerializer(serializers.ModelSerializer):
             instance.line_items.all().delete()
             for item_data in line_items_data:
                 ContractLineItem.objects.create(contract=instance, **item_data)
+
+            # Auto-sum line items to contract.value
+            if line_items_data:
+                total = sum(item.line_total for item in instance.line_items.all())
+                instance.value = total
+                # Recalculate tax fields with updated value
+                tax_data = {'value': instance.value, 'currency': instance.currency}
+                tax_data = self._calculate_tax_fields(tax_data)
+                instance.tax_rate = tax_data['tax_rate']
+                instance.tax_amount = tax_data['tax_amount']
+                instance.total_value = tax_data['total_value']
+                instance.save()
 
         return instance
 

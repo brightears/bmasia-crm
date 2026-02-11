@@ -644,14 +644,20 @@ const ContractForm: React.FC<ContractFormProps> = ({
         return;
       }
 
-      if (!formData.value || parseFloat(formData.value) <= 0) {
-        setError('Please enter a valid contract value');
+      // Auto-calculate value from line items if they exist
+      const validLineItems = lineItems.filter(item => item.product_service || item.description);
+      const calculatedValue = validLineItems.length > 0
+        ? calculateLineItemTotals()
+        : parseFloat(formData.value);
+
+      if (!calculatedValue || calculatedValue <= 0) {
+        setError('Please enter a valid contract value or add line items');
         return;
       }
 
       const contractData = {
         ...formData,
-        value: parseFloat(formData.value),
+        value: calculatedValue,
         discount_percentage: parseFloat(formData.discount_percentage) || 0,
         start_date: formData.start_date.toISOString().split('T')[0],
         end_date: formData.end_date.toISOString().split('T')[0],
