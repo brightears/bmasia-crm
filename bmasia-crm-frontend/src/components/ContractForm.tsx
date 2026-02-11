@@ -651,7 +651,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
         : parseFloat(formData.value);
 
       if (!calculatedValue || calculatedValue <= 0) {
-        setError('Please enter a valid contract value or add line items');
+        setError('Please add line items with pricing');
         return;
       }
 
@@ -1122,117 +1122,51 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
             <Divider />
 
-            {/* Financial Information */}
+            {/* Payment & Billing */}
             <Box>
               <Typography variant="h6" gutterBottom>
-                Financial Terms
+                Payment &amp; Billing
               </Typography>
 
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  <TextField
-                    label="Contract Value *"
-                    type="number"
-                    value={formData.value}
-                    onChange={(e) => setFormData(prev => ({ ...prev, value: e.target.value }))}
-                    fullWidth
-                    helperText={
-                      formData.currency === 'THB'
-                        ? 'Enter base price (excluding VAT). System will add 7% VAT automatically.'
-                        : 'Enter contract value'
-                    }
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          {formData.currency === 'THB' ? '฿' : formData.currency === 'EUR' ? '€' : formData.currency === 'GBP' ? '£' : '$'}
-                        </InputAdornment>
-                      ),
-                    }}
-                  />
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <FormControl sx={{ minWidth: 120 }}>
+                  <InputLabel>Currency</InputLabel>
+                  <Select
+                    value={formData.currency}
+                    onChange={(e) => setFormData(prev => ({ ...prev, currency: e.target.value }))}
+                    label="Currency"
+                  >
+                    {currencies.map(currency => (
+                      <MenuItem key={currency} value={currency}>{currency}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
 
-                  <FormControl sx={{ minWidth: 120 }}>
-                    <InputLabel>Currency</InputLabel>
-                    <Select
-                      value={formData.currency}
-                      onChange={(e) => setFormData(prev => ({ ...prev, currency: e.target.value }))}
-                      label="Currency"
-                    >
-                      {currencies.map(currency => (
-                        <MenuItem key={currency} value={currency}>{currency}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Box>
+                <FormControl fullWidth>
+                  <InputLabel>Payment Terms</InputLabel>
+                  <Select
+                    value={formData.payment_terms}
+                    onChange={(e) => setFormData(prev => ({ ...prev, payment_terms: e.target.value }))}
+                    label="Payment Terms"
+                  >
+                    {paymentTermsOptions.map(terms => (
+                      <MenuItem key={terms} value={terms}>{terms}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
 
-                {/* Tax calculation display for THB contracts */}
-                {formData.currency === 'THB' && formData.value && parseFloat(formData.value) > 0 && (
-                  <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
-                    <Typography variant="subtitle2" color="text.secondary" gutterBottom>
-                      Tax Calculation (7% VAT)
-                    </Typography>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2" color="text.secondary">Base Value:</Typography>
-                      <Typography variant="body2">฿{parseFloat(formData.value).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2" color="text.secondary">VAT (7%):</Typography>
-                      <Typography variant="body2">฿{(parseFloat(formData.value) * 0.07).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography>
-                    </Box>
-                    <Divider sx={{ my: 1 }} />
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <Typography variant="body2" fontWeight="bold">Total (incl. VAT):</Typography>
-                      <Typography variant="body2" fontWeight="bold" color="primary">
-                        ฿{(parseFloat(formData.value) * 1.07).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </Typography>
-                    </Box>
-                  </Paper>
-                )}
-
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  <FormControl fullWidth>
-                    <InputLabel>Payment Terms</InputLabel>
-                    <Select
-                      value={formData.payment_terms}
-                      onChange={(e) => setFormData(prev => ({ ...prev, payment_terms: e.target.value }))}
-                      label="Payment Terms"
-                    >
-                      {paymentTermsOptions.map(terms => (
-                        <MenuItem key={terms} value={terms}>{terms}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-
-                  <FormControl fullWidth>
-                    <InputLabel>Billing Frequency</InputLabel>
-                    <Select
-                      value={formData.billing_frequency}
-                      onChange={(e) => setFormData(prev => ({ ...prev, billing_frequency: e.target.value }))}
-                      label="Billing Frequency"
-                    >
-                      {billingFrequencies.map(freq => (
-                        <MenuItem key={freq} value={freq}>{freq}</MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-
-                  <TextField
-                    label="Discount %"
-                    type="number"
-                    value={formData.discount_percentage}
-                    onChange={(e) => setFormData(prev => ({ ...prev, discount_percentage: e.target.value }))}
-                    inputProps={{ min: 0, max: 100 }}
-                    sx={{
-                      minWidth: 120,
-                      '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button': {
-                        WebkitAppearance: 'none',
-                        margin: 0
-                      },
-                      '& input[type=number]': {
-                        MozAppearance: 'textfield'
-                      }
-                    }}
-                  />
-                </Box>
+                <FormControl fullWidth>
+                  <InputLabel>Billing Frequency</InputLabel>
+                  <Select
+                    value={formData.billing_frequency}
+                    onChange={(e) => setFormData(prev => ({ ...prev, billing_frequency: e.target.value }))}
+                    label="Billing Frequency"
+                  >
+                    {billingFrequencies.map(freq => (
+                      <MenuItem key={freq} value={freq}>{freq}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
               </Box>
             </Box>
 
@@ -1396,22 +1330,39 @@ const ContractForm: React.FC<ContractFormProps> = ({
                 </Table>
               </TableContainer>
 
-              {/* Line Items Summary */}
-              {lineItems.length > 0 && (
-                <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
-                  <Paper sx={{ p: 2, minWidth: 280 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2" color="text.secondary">Calculated Value:</Typography>
-                      <Typography variant="body2" fontWeight="medium">
-                        {getCurrencySymbol(formData.currency)}{calculateLineItemTotals().toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </Typography>
-                    </Box>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                      Contract value will be auto-calculated from line items when saving
-                    </Typography>
-                  </Paper>
-                </Box>
-              )}
+              {/* Line Items Summary with VAT */}
+              {lineItems.length > 0 && (() => {
+                const subtotal = calculateLineItemTotals();
+                const taxRate = formData.currency === 'THB' ? 7 : 0;
+                const vatAmount = subtotal * (taxRate / 100);
+                const total = subtotal + vatAmount;
+                const sym = getCurrencySymbol(formData.currency);
+                const fmt = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                return (
+                  <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+                    <Paper variant="outlined" sx={{ p: 2, minWidth: 300 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                        <Typography variant="body2" color="text.secondary">Subtotal:</Typography>
+                        <Typography variant="body2">{sym}{fmt(subtotal)}</Typography>
+                      </Box>
+                      {taxRate > 0 && (
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                          <Typography variant="body2" color="text.secondary">VAT ({taxRate}%):</Typography>
+                          <Typography variant="body2">{sym}{fmt(vatAmount)}</Typography>
+                        </Box>
+                      )}
+                      <Divider sx={{ my: 1 }} />
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography variant="body2" fontWeight="bold">Total{taxRate > 0 ? ' (incl. VAT)' : ''}:</Typography>
+                        <Typography variant="body2" fontWeight="bold" color="primary">
+                          {sym}{fmt(total)}
+                        </Typography>
+                      </Box>
+                    </Paper>
+                  </Box>
+                );
+              })()}
             </Box>
 
             <Divider />
