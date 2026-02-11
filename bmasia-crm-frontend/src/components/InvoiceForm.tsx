@@ -213,7 +213,12 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     setPaymentTerms(invoice.payment_terms || 'Net 30');
     setPaymentTermsText(invoice.payment_terms_text || '');
     setNotes(invoice.notes || '');
-    setLineItems(invoice.line_items?.length > 0 ? invoice.line_items : [defaultLineItem]);
+    setLineItems(invoice.line_items?.length > 0
+      ? invoice.line_items.map(item => ({
+          ...item,
+          total: item.total || item.line_total || (item.quantity * item.unit_price * (1 + item.tax_rate / 100)),
+        }))
+      : [defaultLineItem]);
     setDiscountAmount(invoice.discount_amount || 0);
     setCurrency(invoice.currency || 'USD');
     setServicePeriodStart(invoice.service_period_start ? new Date(invoice.service_period_start) : null);
@@ -644,11 +649,11 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                   <TableHead>
                     <TableRow>
                       <TableCell>Description</TableCell>
-                      <TableCell width="100">Quantity</TableCell>
-                      <TableCell width="120">Unit Price</TableCell>
-                      <TableCell width="100">{getTaxLabel().replace(':', '')} Rate (%)</TableCell>
-                      <TableCell width="120">Total</TableCell>
-                      <TableCell width="60">Actions</TableCell>
+                      <TableCell width="80">Qty</TableCell>
+                      <TableCell width="140">Unit Price</TableCell>
+                      <TableCell width="80">{getTaxLabel().replace(':', '')} (%)</TableCell>
+                      <TableCell width="140">Total</TableCell>
+                      <TableCell width="50">Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -658,6 +663,9 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                           <TextField
                             fullWidth
                             size="small"
+                            multiline
+                            minRows={1}
+                            maxRows={3}
                             value={item.description}
                             onChange={(e) => handleLineItemChange(index, 'description', e.target.value)}
                             placeholder="Enter description..."
@@ -667,9 +675,9 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                           <TextField
                             size="small"
                             type="number"
-                            value={item.quantity}
-                            onChange={(e) => handleLineItemChange(index, 'quantity', parseFloat(e.target.value) || 0)}
-                            inputProps={{ min: 0, step: 0.01 }}
+                            value={Math.round(item.quantity)}
+                            onChange={(e) => handleLineItemChange(index, 'quantity', parseInt(e.target.value) || 0)}
+                            inputProps={{ min: 0, step: 1 }}
                           />
                         </TableCell>
                         <TableCell>

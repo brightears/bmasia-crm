@@ -376,6 +376,7 @@ export interface InvoiceLineItem {
   unit_price: number;
   tax_rate: number;
   total: number;
+  line_total?: number;
   created_at?: string;
   updated_at?: string;
 }
