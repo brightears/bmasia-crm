@@ -405,8 +405,8 @@ export interface Invoice {
   issue_date: string;
   due_date: string;
   paid_date?: string;
-  service_period_start?: string;
-  service_period_end?: string;
+  service_period_start?: string | null;
+  service_period_end?: string | null;
   amount: number;
   tax_amount: number;
   discount_amount: number;
