@@ -3874,7 +3874,7 @@ class InvoiceViewSet(BaseModelViewSet):
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
         """Generate and download PDF for invoice"""
-        from reportlab.lib.pagesizes import letter, A4
+        from reportlab.lib.pagesizes import letter
         from reportlab.lib import colors
         from reportlab.lib.units import inch
         from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable, KeepTogether
@@ -3911,7 +3911,23 @@ class InvoiceViewSet(BaseModelViewSet):
 
         # Create PDF buffer
         buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.4*inch)
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.75*inch)
+
+        # Footer callback — draws at fixed bottom position on every page
+        def draw_invoice_footer(canvas_obj, doc_obj):
+            canvas_obj.saveState()
+            page_width = letter[0]
+            # Gray separator line
+            canvas_obj.setStrokeColor(colors.HexColor('#e0e0e0'))
+            canvas_obj.setLineWidth(1)
+            canvas_obj.line(doc_obj.leftMargin, 0.65*inch, page_width - doc_obj.rightMargin, 0.65*inch)
+            # Footer text
+            canvas_obj.setFont('Helvetica-Bold', 8)
+            canvas_obj.setFillColor(colors.HexColor('#888888'))
+            canvas_obj.drawCentredString(page_width / 2, 0.48*inch, entity_name)
+            canvas_obj.setFont('Helvetica', 8)
+            canvas_obj.drawCentredString(page_width / 2, 0.33*inch, f"{entity_address} | Phone: {entity_phone}")
+            canvas_obj.restoreState()
 
         # Container for PDF elements
         elements = []
@@ -4267,25 +4283,8 @@ class InvoiceViewSet(BaseModelViewSet):
             elements.append(KeepTogether(notes_section))
             elements.append(Spacer(1, 0.2*inch))
 
-        # Footer - entity-specific with separator (two-line format for cleaner appearance)
-        elements.append(Spacer(1, 0.25*inch))
-        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=12))
-
-        footer_style = ParagraphStyle(
-            'FooterText',
-            parent=styles['Normal'],
-            fontSize=8,
-            textColor=colors.HexColor('#888888'),
-            alignment=TA_CENTER,
-            leading=12,
-        )
-
-        # Two-line footer: company name on line 1, address + phone on line 2
-        footer_text = f"""<b>{entity_name}</b><br/>{entity_address} | Phone: {entity_phone}"""
-        elements.append(Paragraph(footer_text, footer_style))
-
-        # Build PDF
-        doc.build(elements)
+        # Build PDF with fixed footer on every page
+        doc.build(elements, onFirstPage=draw_invoice_footer, onLaterPages=draw_invoice_footer)
 
         # Get PDF data
         pdf_data = buffer.getvalue()
