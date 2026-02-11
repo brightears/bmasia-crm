@@ -699,6 +699,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                             value={Math.round(item.quantity)}
                             onChange={(e) => handleLineItemChange(index, 'quantity', parseInt(e.target.value) || 0)}
                             inputProps={{ min: 0, step: 1 }}
+                            sx={{ '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button': { WebkitAppearance: 'none', margin: 0 }, '& input[type=number]': { MozAppearance: 'textfield' } }}
                           />
                         </TableCell>
                         <TableCell>
@@ -727,6 +728,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                             value={Math.round(item.tax_rate)}
                             onChange={(e) => handleLineItemChange(index, 'tax_rate', parseInt(e.target.value) || 0)}
                             inputProps={{ min: 0, max: 100, step: 1 }}
+                            sx={{ '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button': { WebkitAppearance: 'none', margin: 0 }, '& input[type=number]': { MozAppearance: 'textfield' } }}
                           />
                         </TableCell>
                         <TableCell>
