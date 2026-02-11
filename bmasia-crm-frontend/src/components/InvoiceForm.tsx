@@ -408,7 +408,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         amount: Math.round(totals.subtotal * 100) / 100,
         tax_amount: Math.round(totals.taxAmount * 100) / 100,
         discount_amount: Math.round(discountAmount * 100) / 100,
-        total_amount: totals.total,
+        total_amount: Math.round(totals.total * 100) / 100,
         currency: currency,
         status: 'Draft' as const,
       };
