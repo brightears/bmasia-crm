@@ -303,24 +303,42 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
       const soundtrackZones = activeZones.filter(z => z.zone_platform === 'soundtrack');
       const beatBreezeZones = activeZones.filter(z => z.zone_platform === 'beatbreeze');
 
-      let description = `${selectedContract.contract_number} - ${billingDesc} Subscription`;
-      if (soundtrackZones.length > 0 && beatBreezeZones.length > 0) {
-        description += `\nSoundtrack: ${soundtrackZones.map(z => z.zone_name).join(', ')}`;
-        description += `\nBeat Breeze: ${beatBreezeZones.map(z => z.zone_name).join(', ')}`;
-      } else if (activeZones.length > 0) {
-        description += `\nZones: ${activeZones.map(z => z.zone_name).join(', ')}`;
-      }
-
       const zoneCount = activeZones.length || 1;
       const perZonePrice = Math.round((contractValue / zoneCount) * 100) / 100;
 
-      setLineItems([{
-        description,
-        quantity: zoneCount,
-        unit_price: perZonePrice,
-        tax_rate: smartTaxRate,
-        total: contractValue * (1 + smartTaxRate / 100),
-      }]);
+      if (soundtrackZones.length > 0 && beatBreezeZones.length > 0) {
+        // Mixed contract: create separate line items per service type
+        setLineItems([
+          {
+            description: `Soundtrack Your Brand\n${soundtrackZones.map(z => z.zone_name).join(', ')}`,
+            quantity: soundtrackZones.length,
+            unit_price: perZonePrice,
+            tax_rate: smartTaxRate,
+            total: soundtrackZones.length * perZonePrice * (1 + smartTaxRate / 100),
+          },
+          {
+            description: `Beat Breeze\n${beatBreezeZones.map(z => z.zone_name).join(', ')}`,
+            quantity: beatBreezeZones.length,
+            unit_price: perZonePrice,
+            tax_rate: smartTaxRate,
+            total: beatBreezeZones.length * perZonePrice * (1 + smartTaxRate / 100),
+          },
+        ]);
+      } else {
+        // Single service: one line item
+        let description = `${selectedContract.contract_number} - ${billingDesc} Subscription`;
+        if (activeZones.length > 0) {
+          const serviceName = soundtrackZones.length > 0 ? 'Soundtrack' : 'Beat Breeze';
+          description += `\n${serviceName}: ${activeZones.map(z => z.zone_name).join(', ')}`;
+        }
+        setLineItems([{
+          description,
+          quantity: zoneCount,
+          unit_price: perZonePrice,
+          tax_rate: smartTaxRate,
+          total: contractValue * (1 + smartTaxRate / 100),
+        }]);
+      }
 
       // Auto-fill service period from contract dates
       if (selectedContract.start_date) {
