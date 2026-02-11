@@ -23,6 +23,13 @@ import {
   IconButton,
   Stack,
   Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  GridLegacy as Grid,
 } from '@mui/material';
 import {
   AttachFile,
@@ -32,11 +39,12 @@ import {
   LocationOn as LocationOnIcon,
   MusicNote as MusicNoteIcon,
   Add as AddIcon,
+  Calculate,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { Contract, Company, ApiResponse, Zone, PreviewZone, ContractTemplate } from '../types';
+import { Contract, Company, ApiResponse, Zone, PreviewZone, ContractTemplate, ContractLineItem, Quote } from '../types';
 import ApiService from '../services/api';
 import EnhancedZonePicker from './EnhancedZonePicker';
 
@@ -93,6 +101,48 @@ const paymentTermsOptions = [
   'Due on Receipt',
   'COD',
   'Prepaid'
+];
+
+// Product options (same as QuoteForm)
+const PRODUCT_OPTIONS = [
+  {
+    code: 'soundtrack_essential',
+    name: 'Soundtrack Your Brand',
+    description: `• 100+ million tracks
+• Personalized music design and support services
+• Custom API solutions
+• AI-powered content management`,
+    thailandOnly: false,
+  },
+  {
+    code: 'beat_breeze',
+    name: 'Beat Breeze',
+    description: `• 100,000+ tracks
+• Public performance licenses included
+• Personalized music design
+• Dedicated technical support services`,
+    thailandOnly: false,
+  },
+  {
+    code: 'mini_pc',
+    name: 'Windows Mini PC',
+    description: 'Windows Mini PC',
+    thailandOnly: true,
+  },
+  {
+    code: 'soundtrack_player',
+    name: 'Soundtrack Player',
+    description: `• Includes a 1-year warranty
+• Shipping costs covered
+• Customs fees to be paid by the receiver`,
+    thailandOnly: false,
+  },
+  {
+    code: 'custom',
+    name: 'Custom',
+    description: '',
+    thailandOnly: false,
+  },
 ];
 
 // Helper function for generating temporary IDs
@@ -156,6 +206,22 @@ const ContractForm: React.FC<ContractFormProps> = ({
   const [previewZones, setPreviewZones] = useState<PreviewZone[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
+
+  // Line Items and Quote state
+  const defaultContractLineItem: ContractLineItem = {
+    product_service: '',
+    description: '',
+    quantity: 1,
+    unit_price: 0,
+    discount_percentage: 0,
+    tax_rate: formData.currency === 'THB' ? 7 : 0,
+    line_total: 0,
+  };
+  const [lineItems, setLineItems] = useState<ContractLineItem[]>([defaultContractLineItem]);
+  const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [selectedQuoteId, setSelectedQuoteId] = useState<string>('');
+  const [selectedCompanyCountry, setSelectedCompanyCountry] = useState<string>('');
+  const [focusedPriceIndex, setFocusedPriceIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -239,6 +305,26 @@ const ContractForm: React.FC<ContractFormProps> = ({
     // Load selected template
     setSelectedTemplate(contract.preamble_template || '');
 
+    // Load line items
+    if (contract.line_items && contract.line_items.length > 0) {
+      setLineItems(contract.line_items.map(item => ({
+        ...item,
+        line_total: item.line_total || 0,
+      })));
+    } else {
+      const smartTaxRate = contract.currency === 'THB' ? 7 : 0;
+      setLineItems([{ ...defaultContractLineItem, tax_rate: smartTaxRate }]);
+    }
+
+    // Load quote selection
+    setSelectedQuoteId(contract.quote || '');
+
+    // Set company country for product filtering
+    const editCompany = companies.find(c => c.id === contract.company);
+    if (editCompany) {
+      setSelectedCompanyCountry(editCompany.country || '');
+    }
+
     // Load existing contract zones in edit mode
     if (contract.id) {
       loadContractZones(contract.id, contract.company);
@@ -302,14 +388,19 @@ const ContractForm: React.FC<ContractFormProps> = ({
     setAttachments([]);
     setAdditionalSignatories([]);
     setSelectedTemplate('');
+    setLineItems([defaultContractLineItem]);
+    setQuotes([]);
+    setSelectedQuoteId('');
+    setSelectedCompanyCountry('');
     setError('');
     setShowErrors(false);
   };
 
-  const handleCompanyChange = (company: Company | null) => {
+  const handleCompanyChange = async (company: Company | null) => {
     setFormData(prev => ({
       ...prev,
       company: company?.id || '',
+      currency: company?.country === 'Thailand' ? 'THB' : 'USD',
     }));
     // Clear selected zones when company changes (zones are company-specific)
     setSelectedZones([]);
@@ -317,6 +408,34 @@ const ContractForm: React.FC<ContractFormProps> = ({
     setSoundtrackAccountId(company?.soundtrack_account_id || '');
     setPreviewZones([]);
     setPreviewError('');
+
+    // Set company country for product filtering and tax rates
+    const country = company?.country || '';
+    setSelectedCompanyCountry(country);
+
+    // Load accepted quotes for this company
+    if (company?.id) {
+      try {
+        const response = await ApiService.getQuotes({
+          company: company.id,
+          status: 'Accepted',
+        });
+        setQuotes(response.results || []);
+      } catch (err) {
+        console.error('Failed to load quotes:', err);
+        setQuotes([]);
+      }
+    } else {
+      setQuotes([]);
+      setSelectedQuoteId('');
+    }
+
+    // Update line items tax rates based on country
+    const smartTaxRate = country === 'Thailand' ? 7 : 0;
+    setLineItems(prev => prev.map(item => ({
+      ...item,
+      tax_rate: smartTaxRate,
+    })));
   };
 
   // Load Soundtrack zones preview when account ID changes
@@ -391,6 +510,119 @@ const ContractForm: React.FC<ContractFormProps> = ({
     return date;
   };
 
+  // Helper to get currency symbol
+  const getCurrencySymbol = (currencyCode: string): string => {
+    const symbols: Record<string, string> = {
+      'USD': '$',
+      'THB': '฿',
+      'EUR': '€',
+      'GBP': '£',
+    };
+    return symbols[currencyCode] || '$';
+  };
+
+  // Available products based on company country
+  const getAvailableProducts = () => {
+    return PRODUCT_OPTIONS.filter(product =>
+      !product.thailandOnly || selectedCompanyCountry === 'Thailand'
+    );
+  };
+
+  // Line item handlers
+  const addLineItem = () => {
+    const smartTaxRate = formData.currency === 'THB' ? 7 : 0;
+    setLineItems(prev => [...prev, { ...defaultContractLineItem, tax_rate: smartTaxRate }]);
+  };
+
+  const removeLineItem = (index: number) => {
+    if (lineItems.length > 1) {
+      setLineItems(prev => prev.filter((_, i) => i !== index));
+    }
+  };
+
+  const updateLineItem = (index: number, field: keyof ContractLineItem | 'product_code', value: any) => {
+    setLineItems(prev => {
+      const newItems = [...prev];
+
+      // Handle product selection from dropdown
+      if (field === 'product_code') {
+        const product = PRODUCT_OPTIONS.find(p => p.code === value);
+        if (product && product.code !== 'custom') {
+          newItems[index] = {
+            ...newItems[index],
+            product_service: product.name,
+            description: product.description,
+          };
+        }
+        return newItems;
+      }
+
+      newItems[index] = { ...newItems[index], [field]: value };
+
+      // Recalculate line total when quantity, unit_price, discount_percentage, or tax_rate changes
+      if (field === 'quantity' || field === 'unit_price' || field === 'discount_percentage' || field === 'tax_rate') {
+        const item = newItems[index];
+        const subtotal = item.quantity * item.unit_price;
+        const discountAmount = subtotal * (item.discount_percentage / 100);
+        const afterDiscount = subtotal - discountAmount;
+        newItems[index].line_total = afterDiscount;
+      }
+
+      return newItems;
+    });
+  };
+
+  // Calculate totals from line items
+  const calculateLineItemTotals = () => {
+    const subtotal = lineItems.reduce((sum, item) => sum + (item.quantity * item.unit_price - item.quantity * item.unit_price * item.discount_percentage / 100), 0);
+    return subtotal;
+  };
+
+  // Handle quote selection and auto-fill
+  const handleQuoteChange = async (quoteId: string) => {
+    setSelectedQuoteId(quoteId);
+
+    if (!quoteId) return;
+
+    const selectedQuote = quotes.find(q => q.id === quoteId);
+    if (selectedQuote) {
+      // Auto-populate line items from quote
+      if (selectedQuote.line_items && selectedQuote.line_items.length > 0) {
+        const smartTaxRate = formData.currency === 'THB' ? 7 : 0;
+        setLineItems(selectedQuote.line_items.map(item => ({
+          product_service: item.product_service,
+          description: item.description,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          discount_percentage: item.discount_percentage,
+          tax_rate: smartTaxRate,
+          line_total: item.quantity * item.unit_price * (1 - item.discount_percentage / 100),
+        })));
+      }
+
+      // Auto-fill currency from quote
+      setFormData(prev => ({
+        ...prev,
+        currency: selectedQuote.currency,
+      }));
+
+      // Auto-fill payment terms if quote has terms
+      if (selectedQuote.terms_conditions) {
+        // Try to extract payment terms from terms text
+        const termsText = selectedQuote.terms_conditions.toLowerCase();
+        if (termsText.includes('30 days')) {
+          setFormData(prev => ({ ...prev, payment_terms: 'Net 30' }));
+        } else if (termsText.includes('15 days')) {
+          setFormData(prev => ({ ...prev, payment_terms: 'Net 15' }));
+        } else if (termsText.includes('45 days')) {
+          setFormData(prev => ({ ...prev, payment_terms: 'Net 45' }));
+        } else if (termsText.includes('60 days')) {
+          setFormData(prev => ({ ...prev, payment_terms: 'Net 60' }));
+        }
+      }
+    }
+  };
+
   const handleSubmit = async () => {
     try {
       setLoading(true);
@@ -432,6 +664,15 @@ const ContractForm: React.FC<ContractFormProps> = ({
         price_per_zone: formData.price_per_zone ? parseFloat(formData.price_per_zone) : undefined,
         additional_customer_signatories: additionalSignatories.length > 0 ? additionalSignatories : [],
         preamble_template: selectedTemplate || undefined,
+        quote: selectedQuoteId || null,
+        line_items: lineItems.filter(item => item.product_service || item.description).map(item => ({
+          product_service: item.product_service,
+          description: item.description,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          discount_percentage: item.discount_percentage,
+          tax_rate: item.tax_rate,
+        })),
       };
 
       let savedContract: Contract;
@@ -658,6 +899,33 @@ const ContractForm: React.FC<ContractFormProps> = ({
                       placeholder="Enter custom contract terms for this master agreement..."
                       helperText="Specific terms that apply to all participation agreements under this master contract"
                     />
+                  </Box>
+                )}
+
+                {/* Source Quote Dropdown */}
+                {quotes.length > 0 && (
+                  <Box sx={{ mt: 2 }}>
+                    <FormControl fullWidth>
+                      <InputLabel>Source Quote (Optional)</InputLabel>
+                      <Select
+                        value={selectedQuoteId}
+                        onChange={(e) => handleQuoteChange(e.target.value)}
+                        label="Source Quote (Optional)"
+                      >
+                        <MenuItem value="">
+                          <em>None</em>
+                        </MenuItem>
+                        {quotes.map((quote) => (
+                          <MenuItem key={quote.id} value={quote.id}>
+                            {quote.quote_number} - {getCurrencySymbol(quote.currency)}{quote.total_value.toLocaleString()}
+                            {quote.contact_name && ` (${quote.contact_name})`}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
+                        Auto-fill line items, currency, and payment terms from accepted quote
+                      </Typography>
+                    </FormControl>
                   </Box>
                 )}
               </Box>
@@ -958,6 +1226,198 @@ const ContractForm: React.FC<ContractFormProps> = ({
                   />
                 </Box>
               </Box>
+            </Box>
+
+            <Divider />
+
+            {/* Line Items */}
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
+                  <Calculate sx={{ mr: 1 }} />
+                  Line Items
+                </Typography>
+                <Button
+                  variant="outlined"
+                  startIcon={<AddIcon />}
+                  onClick={addLineItem}
+                  size="small"
+                >
+                  Add Line Item
+                </Button>
+              </Box>
+
+              <TableContainer component={Paper} variant="outlined">
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Product/Service</TableCell>
+                      <TableCell>Description</TableCell>
+                      <TableCell width="80px">Qty</TableCell>
+                      <TableCell width="140px">Unit Price</TableCell>
+                      <TableCell width="100px">Discount %</TableCell>
+                      <TableCell width="100px">Tax %</TableCell>
+                      <TableCell width="140px">Line Total</TableCell>
+                      <TableCell width="50px">Actions</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {lineItems.map((item, index) => (
+                      <TableRow key={index}>
+                        <TableCell sx={{ minWidth: 180 }}>
+                          <FormControl fullWidth size="small">
+                            <Select
+                              value={
+                                PRODUCT_OPTIONS.find(p => p.name === item.product_service)?.code || 'custom'
+                              }
+                              onChange={(e) => {
+                                const code = e.target.value;
+                                updateLineItem(index, 'product_code', code);
+                                if (code === 'custom') {
+                                  updateLineItem(index, 'product_service', '');
+                                }
+                              }}
+                              displayEmpty
+                            >
+                              {getAvailableProducts().map((product) => (
+                                <MenuItem key={product.code} value={product.code}>
+                                  {product.name}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                          {/* Show text field for custom entry */}
+                          {!PRODUCT_OPTIONS.find(p => p.name === item.product_service) && (
+                            <TextField
+                              fullWidth
+                              size="small"
+                              value={item.product_service}
+                              onChange={(e) => updateLineItem(index, 'product_service', e.target.value)}
+                              placeholder="Enter product/service name"
+                              sx={{ mt: 1 }}
+                            />
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            multiline
+                            rows={2}
+                            value={item.description}
+                            onChange={(e) => updateLineItem(index, 'description', e.target.value)}
+                            placeholder="Description"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <TextField
+                            size="small"
+                            type="number"
+                            value={Math.round(item.quantity)}
+                            onChange={(e) => updateLineItem(index, 'quantity', parseInt(e.target.value) || 0)}
+                            inputProps={{ min: 0, step: 1 }}
+                            sx={{
+                              '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button': {
+                                WebkitAppearance: 'none',
+                                margin: 0
+                              },
+                              '& input[type=number]': {
+                                MozAppearance: 'textfield'
+                              }
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <TextField
+                            size="small"
+                            type="text"
+                            value={focusedPriceIndex === index
+                              ? item.unit_price
+                              : new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(item.unit_price)
+                            }
+                            onChange={(e) => {
+                              const cleaned = e.target.value.replace(/[^0-9.]/g, '');
+                              updateLineItem(index, 'unit_price', parseFloat(cleaned) || 0);
+                            }}
+                            onFocus={() => setFocusedPriceIndex(index)}
+                            onBlur={() => setFocusedPriceIndex(null)}
+                            InputProps={{
+                              startAdornment: <InputAdornment position="start">{getCurrencySymbol(formData.currency)}</InputAdornment>,
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <TextField
+                            size="small"
+                            type="number"
+                            value={item.discount_percentage}
+                            onChange={(e) => updateLineItem(index, 'discount_percentage', parseFloat(e.target.value) || 0)}
+                            inputProps={{ min: 0, max: 100, step: 0.1 }}
+                            InputProps={{
+                              endAdornment: <InputAdornment position="end">%</InputAdornment>,
+                            }}
+                            sx={{ minWidth: '90px' }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <TextField
+                            size="small"
+                            type="number"
+                            value={Math.round(item.tax_rate)}
+                            onChange={(e) => updateLineItem(index, 'tax_rate', parseInt(e.target.value) || 0)}
+                            inputProps={{ min: 0, max: 100, step: 1 }}
+                            InputProps={{
+                              endAdornment: <InputAdornment position="end">%</InputAdornment>,
+                            }}
+                            sx={{
+                              minWidth: '90px',
+                              '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button': {
+                                WebkitAppearance: 'none',
+                                margin: 0
+                              },
+                              '& input[type=number]': {
+                                MozAppearance: 'textfield'
+                              }
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight="medium">
+                            {getCurrencySymbol(formData.currency)}{(item.line_total || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          <IconButton
+                            size="small"
+                            onClick={() => removeLineItem(index)}
+                            disabled={lineItems.length === 1}
+                            color="error"
+                          >
+                            <Delete fontSize="small" />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+
+              {/* Line Items Summary */}
+              {lineItems.length > 0 && (
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+                  <Paper sx={{ p: 2, minWidth: 280 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                      <Typography variant="body2" color="text.secondary">Calculated Value:</Typography>
+                      <Typography variant="body2" fontWeight="medium">
+                        {getCurrencySymbol(formData.currency)}{calculateLineItemTotals().toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </Typography>
+                    </Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                      Contract value will be auto-calculated from line items when saving
+                    </Typography>
+                  </Paper>
+                </Box>
+              )}
             </Box>
 
             <Divider />

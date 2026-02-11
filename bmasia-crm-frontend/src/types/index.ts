@@ -279,6 +279,17 @@ export interface OpportunityActivity {
   updated_at: string;
 }
 
+export interface ContractLineItem {
+  id?: string;
+  product_service: string;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  discount_percentage: number;
+  tax_rate: number;
+  line_total?: number;
+}
+
 export interface Contract {
   id: string;
   company: string;
@@ -346,6 +357,10 @@ export interface Contract {
   customer_contact_name?: string;
   customer_contact_email?: string;
   customer_contact_title?: string;
+  // Quote and Line Items
+  quote?: string | null;
+  quote_number?: string | null;
+  line_items?: ContractLineItem[];
   created_at: string;
   updated_at: string;
 }
