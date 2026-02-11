@@ -4113,7 +4113,7 @@ class InvoiceViewSet(BaseModelViewSet):
             for item in line_items:
                 item_subtotal = item.quantity * item.unit_price
                 services_data.append([
-                    Paragraph(item.description, body_style),
+                    Paragraph(item.description.replace('\n', '<br/>'), body_style),
                     f"{item.quantity:,.0f}" if item.quantity == int(item.quantity) else f"{item.quantity:,.2f}",
                     f"{currency_symbol}{item.unit_price:,.2f}",
                     f"{currency_symbol}{item_subtotal:,.2f}"
