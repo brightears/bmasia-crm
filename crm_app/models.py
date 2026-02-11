@@ -640,6 +640,7 @@ class Contract(TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='contracts')
     opportunity = models.ForeignKey(Opportunity, on_delete=models.SET_NULL, null=True, blank=True, related_name='contracts')
+    quote = models.ForeignKey('Quote', on_delete=models.SET_NULL, null=True, blank=True, related_name='contracts')
     contract_number = models.CharField(max_length=50, unique=True)
     contract_type = models.CharField(max_length=20, choices=CONTRACT_TYPE_CHOICES, default='Annual')
     service_type = models.CharField(max_length=50, choices=SERVICE_TYPE_CHOICES, blank=True, help_text="Specific service or plan")
@@ -1215,6 +1216,32 @@ class InvoiceLineItem(TimestampedModel):
         subtotal = self.quantity * self.unit_price
         tax = subtotal * (self.tax_rate / 100)
         self.line_total = subtotal + tax
+        super().save(*args, **kwargs)
+
+
+class ContractLineItem(TimestampedModel):
+    """Line items for contracts — mirrors QuoteLineItem/InvoiceLineItem"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    contract = models.ForeignKey(Contract, on_delete=models.CASCADE, related_name='line_items')
+    product_service = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=1)
+    unit_price = models.DecimalField(max_digits=12, decimal_places=2)
+    discount_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    line_total = models.DecimalField(max_digits=12, decimal_places=2)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.product_service} - {self.contract.contract_number}"
+
+    def save(self, *args, **kwargs):
+        """Auto-calculate line total"""
+        subtotal = self.quantity * self.unit_price
+        discount = subtotal * (self.discount_percentage / 100)
+        self.line_total = subtotal - discount
         super().save(*args, **kwargs)
 
 

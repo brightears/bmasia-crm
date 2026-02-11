@@ -4,7 +4,7 @@ from django.utils import timezone
 from django.db.models import Sum
 from .models import (
     User, Company, Contact, Note, Task, TaskComment, AuditLog,
-    Opportunity, OpportunityActivity, Contract, Invoice, InvoiceLineItem, Zone, ContractZone,
+    Opportunity, OpportunityActivity, Contract, ContractLineItem, Invoice, InvoiceLineItem, Zone, ContractZone,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailCampaign, CampaignRecipient, EmailTemplate,
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
@@ -559,16 +559,38 @@ class ContractDocumentSerializer(serializers.ModelSerializer):
         read_only_fields = ['uploaded_at', 'uploaded_by']
 
 
+class ContractLineItemSerializer(serializers.ModelSerializer):
+    """Serializer for ContractLineItem model"""
+    id = serializers.UUIDField(read_only=True)
+    contract = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    class Meta:
+        model = ContractLineItem
+        fields = [
+            'id', 'contract', 'product_service', 'description', 'quantity',
+            'unit_price', 'discount_percentage', 'tax_rate', 'line_total',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'contract', 'line_total', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'contract': {'required': False}
+        }
+
+
 class ContractSerializer(serializers.ModelSerializer):
     """Serializer for Contract model with renewal tracking"""
     company_name = serializers.CharField(source='company.name', read_only=True)
     opportunity_name = serializers.CharField(source='opportunity.name', read_only=True)
+    quote_number = serializers.CharField(source='quote.quote_number', read_only=True, allow_null=True)
     days_until_expiry = serializers.ReadOnlyField()
     is_expiring_soon = serializers.ReadOnlyField()
     monthly_value = serializers.ReadOnlyField()
     invoices = InvoiceSerializer(many=True, read_only=True)
     paid_invoices_count = serializers.SerializerMethodField()
     outstanding_amount = serializers.SerializerMethodField()
+
+    # Line items (nested, like Invoice/Quote)
+    line_items = ContractLineItemSerializer(many=True, required=False)
 
     # NEW FIELDS for zones
     contract_zones = ContractZoneSerializer(many=True, read_only=True)
@@ -599,6 +621,7 @@ class ContractSerializer(serializers.ModelSerializer):
         model = Contract
         fields = [
             'id', 'company', 'company_name', 'opportunity', 'opportunity_name',
+            'quote', 'quote_number',
             'contract_number', 'contract_type', 'status', 'start_date', 'end_date',
             'value', 'tax_rate', 'tax_amount', 'total_value',
             'currency', 'auto_renew', 'renewal_period_months', 'is_active',
@@ -622,7 +645,7 @@ class ContractSerializer(serializers.ModelSerializer):
             'show_zone_pricing_detail', 'price_per_zone',
             'bmasia_contact_name', 'bmasia_contact_email', 'bmasia_contact_title',
             'customer_contact_name', 'customer_contact_email', 'customer_contact_title',
-            'contract_documents',
+            'contract_documents', 'line_items',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'contract_number', 'effective_soundtrack_account_id', 'created_at', 'updated_at']
@@ -685,7 +708,9 @@ class ContractSerializer(serializers.ModelSerializer):
         return validated_data
 
     def create(self, validated_data):
-        """Create contract with auto-generated contract number and tax calculation"""
+        """Create contract with auto-generated contract number, tax calculation, and nested line items"""
+        line_items_data = validated_data.pop('line_items', [])
+
         # Auto-generate contract number if not provided
         if not validated_data.get('contract_number'):
             today = timezone.now().date()
@@ -699,10 +724,15 @@ class ContractSerializer(serializers.ModelSerializer):
         # Auto-calculate tax fields
         validated_data = self._calculate_tax_fields(validated_data)
 
-        return super().create(validated_data)
+        contract = Contract.objects.create(**validated_data)
+        for item_data in line_items_data:
+            ContractLineItem.objects.create(contract=contract, **item_data)
+        return contract
 
     def update(self, instance, validated_data):
-        """Update contract with tax recalculation if value or currency changed"""
+        """Update contract with tax recalculation and nested line items"""
+        line_items_data = validated_data.pop('line_items', None)
+
         # Check if value or currency changed
         value_changed = 'value' in validated_data
         currency_changed = 'currency' in validated_data
@@ -717,7 +747,16 @@ class ContractSerializer(serializers.ModelSerializer):
             # Recalculate tax fields
             validated_data = self._calculate_tax_fields(validated_data)
 
-        return super().update(instance, validated_data)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if line_items_data is not None:
+            instance.line_items.all().delete()
+            for item_data in line_items_data:
+                ContractLineItem.objects.create(contract=instance, **item_data)
+
+        return instance
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

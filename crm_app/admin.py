@@ -15,7 +15,7 @@ from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 from .models import (
     User, Company, Contact, Note, Task, TaskComment, AuditLog,
-    Opportunity, OpportunityActivity, Contract, Invoice, InvoiceLineItem, Zone, ContractZone,
+    Opportunity, OpportunityActivity, Contract, ContractLineItem, Invoice, InvoiceLineItem, Zone, ContractZone,
     EmailTemplate, EmailLog, EmailCampaign, CampaignRecipient, DocumentAttachment,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
@@ -896,6 +896,13 @@ class ContractDocumentInline(admin.TabularInline):
         return super().get_queryset(request).select_related('contract', 'uploaded_by')
 
 
+class ContractLineItemInline(admin.TabularInline):
+    model = ContractLineItem
+    extra = 0
+    readonly_fields = ['line_total', 'created_at']
+    fields = ['product_service', 'description', 'quantity', 'unit_price', 'discount_percentage', 'tax_rate', 'line_total']
+
+
 class ContractAdminForm(forms.ModelForm):
     """Custom form for Contract admin with better number formatting"""
     class Meta:
@@ -913,7 +920,7 @@ class ContractAdmin(admin.ModelAdmin):
     search_fields = ['contract_number', 'company__name']
     readonly_fields = ['created_at', 'updated_at', 'days_until_expiry', 'formatted_monthly_value', 'participation_count']
     autocomplete_fields = ['master_contract']
-    inlines = [InvoiceInline, ContractZoneInline, ContractDocumentInline]
+    inlines = [ContractLineItemInline, InvoiceInline, ContractZoneInline, ContractDocumentInline]
     actions = ['bulk_update_status_active', 'bulk_update_status_inactive', 'export_contracts_csv', 'export_contracts_excel']
     
     def is_expiring_soon(self, obj):
