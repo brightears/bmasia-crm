@@ -4092,8 +4092,9 @@ class InvoiceViewSet(BaseModelViewSet):
 
         # Contract reference (only if invoice has a contract)
         if invoice.contract:
-            contract_text = f"<b>Contract:</b> {invoice.contract.contract_number}<br/>"
-            contract_text += f"<b>Service:</b> {invoice.contract.get_service_type_display() if invoice.contract.service_type else 'N/A'}"
+            contract_text = f"<b>Contract:</b> {invoice.contract.contract_number}"
+            if invoice.contract.service_type:
+                contract_text += f"<br/><b>Service:</b> {invoice.contract.get_service_type_display()}"
             elements.append(Paragraph(contract_text, body_style))
         elements.append(Spacer(1, 0.3*inch))
 

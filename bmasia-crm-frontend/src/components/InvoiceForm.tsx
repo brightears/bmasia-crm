@@ -303,10 +303,13 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         description += `\nZones: ${activeZones.map(z => z.zone_name).join(', ')}`;
       }
 
+      const zoneCount = activeZones.length || 1;
+      const perZonePrice = Math.round((contractValue / zoneCount) * 100) / 100;
+
       setLineItems([{
         description,
-        quantity: 1,
-        unit_price: contractValue,
+        quantity: zoneCount,
+        unit_price: perZonePrice,
         tax_rate: smartTaxRate,
         total: contractValue * (1 + smartTaxRate / 100),
       }]);
