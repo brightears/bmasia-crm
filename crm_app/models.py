@@ -1154,6 +1154,8 @@ class Invoice(TimestampedModel):
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
     payment_terms = models.CharField(max_length=50, blank=True, default='Net 30')
     payment_terms_text = models.TextField(blank=True)
+    service_period_start = models.DateField(null=True, blank=True)
+    service_period_end = models.DateField(null=True, blank=True)
     payment_method = models.CharField(max_length=50, blank=True)
     transaction_id = models.CharField(max_length=100, blank=True)
     notes = models.TextField(blank=True)

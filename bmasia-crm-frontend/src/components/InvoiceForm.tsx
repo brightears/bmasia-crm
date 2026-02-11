@@ -104,6 +104,8 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [discountAmount, setDiscountAmount] = useState(0);
   const [sendEmail, setSendEmail] = useState(false);
   const [currency, setCurrency] = useState<string>('USD');
+  const [servicePeriodStart, setServicePeriodStart] = useState<Date | null>(null);
+  const [servicePeriodEnd, setServicePeriodEnd] = useState<Date | null>(null);
 
   // Filtered contracts based on selected company
   const [filteredContracts, setFilteredContracts] = useState<Contract[]>([]);
@@ -196,6 +198,8 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     setDiscountAmount(0);
     setSendEmail(false);
     setCurrency('USD');
+    setServicePeriodStart(null);
+    setServicePeriodEnd(null);
     setSelectedCompanyCountry('');
     setError('');
   };
@@ -212,6 +216,8 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     setLineItems(invoice.line_items?.length > 0 ? invoice.line_items : [defaultLineItem]);
     setDiscountAmount(invoice.discount_amount || 0);
     setCurrency(invoice.currency || 'USD');
+    setServicePeriodStart(invoice.service_period_start ? new Date(invoice.service_period_start) : null);
+    setServicePeriodEnd(invoice.service_period_end ? new Date(invoice.service_period_end) : null);
     setSendEmail(false);
     setError('');
 
@@ -279,17 +285,39 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         setPaymentTerms(matchedTerms ? matchedTerms.value : 'Net 30');
       }
 
-      // Auto-fill first line item from contract
+      // Auto-fill first line item from contract (with zone details)
       const smartTaxRate = getSmartTaxRate();
       const billingDesc = selectedContract.billing_frequency || 'Service';
       const contractValue = parseFloat(String(selectedContract.value)) || 0;
+
+      // Build description with zone details
+      const activeZones = selectedContract.contract_zones?.filter(z => z.is_active) || [];
+      const soundtrackZones = activeZones.filter(z => z.zone_platform === 'soundtrack');
+      const beatBreezeZones = activeZones.filter(z => z.zone_platform === 'beatbreeze');
+
+      let description = `${selectedContract.contract_number} - ${billingDesc} Subscription`;
+      if (soundtrackZones.length > 0 && beatBreezeZones.length > 0) {
+        description += `\nSoundtrack: ${soundtrackZones.map(z => z.zone_name).join(', ')}`;
+        description += `\nBeat Breeze: ${beatBreezeZones.map(z => z.zone_name).join(', ')}`;
+      } else if (activeZones.length > 0) {
+        description += `\nZones: ${activeZones.map(z => z.zone_name).join(', ')}`;
+      }
+
       setLineItems([{
-        description: `${selectedContract.contract_number} - ${billingDesc} Fee`,
+        description,
         quantity: 1,
         unit_price: contractValue,
         tax_rate: smartTaxRate,
         total: contractValue * (1 + smartTaxRate / 100),
       }]);
+
+      // Auto-fill service period from contract dates
+      if (selectedContract.start_date) {
+        setServicePeriodStart(new Date(selectedContract.start_date));
+      }
+      if (selectedContract.end_date) {
+        setServicePeriodEnd(new Date(selectedContract.end_date));
+      }
     }
   };
 
@@ -371,6 +399,8 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         contract: contractId || null,
         issue_date: issueDate.toISOString().split('T')[0],
         due_date: dueDate.toISOString().split('T')[0],
+        service_period_start: servicePeriodStart ? servicePeriodStart.toISOString().split('T')[0] : null,
+        service_period_end: servicePeriodEnd ? servicePeriodEnd.toISOString().split('T')[0] : null,
         payment_terms: paymentTerms,
         payment_terms_text: paymentTermsText,
         notes,
@@ -556,6 +586,34 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                         fullWidth: true,
                         required: true,
                       },
+                    }}
+                  />
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <DatePicker
+                    label="Service Period Start"
+                    value={servicePeriodStart}
+                    onChange={setServicePeriodStart}
+                    slotProps={{
+                      textField: {
+                        fullWidth: true,
+                        helperText: 'Optional — auto-filled from contract',
+                      },
+                      field: { clearable: true },
+                    }}
+                  />
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <DatePicker
+                    label="Service Period End"
+                    value={servicePeriodEnd}
+                    onChange={setServicePeriodEnd}
+                    slotProps={{
+                      textField: {
+                        fullWidth: true,
+                        helperText: 'Optional — auto-filled from contract',
+                      },
+                      field: { clearable: true },
                     }}
                   />
                 </Grid>

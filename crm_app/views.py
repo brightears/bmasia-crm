@@ -4205,6 +4205,13 @@ class InvoiceViewSet(BaseModelViewSet):
         ]))
 
         elements.append(totals_table)
+
+        # Service Period (if specified)
+        if invoice.service_period_start and invoice.service_period_end:
+            period_text = f"Service Period: {invoice.service_period_start.strftime('%B %d, %Y')} – {invoice.service_period_end.strftime('%B %d, %Y')}"
+            elements.append(Spacer(1, 0.1*inch))
+            elements.append(Paragraph(period_text, ParagraphStyle('ServicePeriod', parent=body_style, fontSize=9, textColor=colors.HexColor('#757575'), alignment=2)))
+
         elements.append(Spacer(1, 0.2*inch))
 
         # Bank Details + Payment Status + Payment Terms — wrapped in KeepTogether
