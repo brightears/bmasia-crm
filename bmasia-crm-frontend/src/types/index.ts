@@ -168,7 +168,7 @@ export interface Contact {
   mobile?: string; // Not in backend yet
   status?: 'Active' | 'Inactive'; // Mapped from is_active
   is_decision_maker?: boolean; // Derived from contact_type
-  preferred_contact_method?: 'Email' | 'Phone' | 'Mobile' | 'LinkedIn'; // Not in backend yet
+  preferred_contact_method?: 'Email' | 'Phone' | 'Mobile' | 'LinkedIn' | '';
 }
 
 export interface Note {
