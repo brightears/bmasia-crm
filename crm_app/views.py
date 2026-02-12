@@ -568,7 +568,7 @@ class CompanyViewSet(BaseModelViewSet):
 
 class ContactViewSet(BaseModelViewSet):
     """ViewSet for Contact management"""
-    queryset = Contact.objects.all()
+    queryset = Contact.objects.select_related('company').all()
     serializer_class = ContactSerializer
     search_fields = ['name', 'email', 'phone', 'title', 'company__name']
     ordering_fields = ['name', 'email', 'created_at', 'updated_at', 'last_contacted', 'company__name']
@@ -711,7 +711,7 @@ class TaskViewSet(BaseModelViewSet):
 
 class OpportunityViewSet(BaseModelViewSet):
     """ViewSet for Opportunity management"""
-    queryset = Opportunity.objects.all()
+    queryset = Opportunity.objects.select_related('company', 'owner').prefetch_related('activities').all()
     serializer_class = OpportunitySerializer
     search_fields = ['name', 'company__name', 'notes']
     ordering_fields = ['created_at', 'expected_value', 'expected_close_date', 'stage']
@@ -985,7 +985,12 @@ class OpportunityActivityViewSet(BaseModelViewSet):
 
 class ContractViewSet(BaseModelViewSet):
     """ViewSet for Contract management"""
-    queryset = Contract.objects.all()
+    queryset = Contract.objects.select_related(
+        'company', 'opportunity', 'quote', 'master_contract', 'renewed_from',
+        'preamble_template', 'payment_template', 'activation_template'
+    ).prefetch_related(
+        'line_items', 'contract_zones', 'invoices', 'service_items', 'contract_documents'
+    ).all()
     serializer_class = ContractSerializer
     search_fields = ['contract_number', 'company__name']
     ordering_fields = ['created_at', 'start_date', 'end_date', 'value', 'updated_at', 'company__name', 'contract_number']
@@ -3824,7 +3829,7 @@ and<br/><br/>
 
 class InvoiceViewSet(BaseModelViewSet):
     """ViewSet for Invoice management"""
-    queryset = Invoice.objects.all().prefetch_related('line_items')
+    queryset = Invoice.objects.select_related('company', 'contract').prefetch_related('line_items').all()
     serializer_class = InvoiceSerializer
     search_fields = ['invoice_number', 'company__name']
     ordering_fields = ['created_at', 'issue_date', 'due_date', 'total_amount', 'updated_at', 'company__name']
@@ -4371,7 +4376,11 @@ class QuoteViewSet(BaseModelViewSet):
         service_type = None
         items = instance.line_items.all()
         has_soundtrack = any('soundtrack' in (i.product_service or '').lower() for i in items)
-        has_beatbreeze = any('beat breeze' in (i.product_service or '').lower() for i in items)
+        has_beatbreeze = any(
+            'beat breeze' in (i.product_service or '').lower() or
+            'beatbreeze' in (i.product_service or '').lower().replace(' ', '')
+            for i in items
+        )
         if has_soundtrack and not has_beatbreeze:
             service_type = 'soundtrack'
         elif has_beatbreeze and not has_soundtrack:

@@ -49,7 +49,6 @@ import {
   Warning,
   CheckCircle,
   Cancel,
-  Pending,
   Sort,
 } from '@mui/icons-material';
 import { Invoice, ApiResponse, Company, Contract } from '../types';
@@ -62,7 +61,6 @@ const statusOptions = [
   { value: 'Draft', label: 'Draft', color: '#9e9e9e', icon: <Edit fontSize="small" /> },
   { value: 'Sent', label: 'Sent', color: '#2196f3', icon: <Send fontSize="small" /> },
   { value: 'Paid', label: 'Paid', color: '#4caf50', icon: <CheckCircle fontSize="small" /> },
-  { value: 'Pending', label: 'Pending', color: '#ff9800', icon: <Pending fontSize="small" /> },
   { value: 'Overdue', label: 'Overdue', color: '#f44336', icon: <Warning fontSize="small" /> },
   { value: 'Cancelled', label: 'Cancelled', color: '#f44336', icon: <Cancel fontSize="small" /> },
   { value: 'Refunded', label: 'Refunded', color: '#9c27b0', icon: <AccountBalance fontSize="small" /> },

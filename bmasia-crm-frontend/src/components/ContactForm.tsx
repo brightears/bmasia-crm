@@ -101,13 +101,13 @@ const ContactForm: React.FC<ContactFormProps> = ({
         company: contact.company || '',
         email: contact.email || '',
         phone: contact.phone || '',
-        mobile: '', // Mobile field not in backend yet
+        mobile: contact.mobile || '',
         department: contact.department || '',
         status: contact.is_active ? 'Active' : 'Inactive',
         is_decision_maker: contact.contact_type === 'Decision Maker',
         linkedin_url: contact.linkedin_url || '',
         notes: contact.notes || '',
-        preferred_contact_method: '', // Not in backend yet
+        preferred_contact_method: contact.preferred_contact_method || '',
         // Email preferences (default to true if undefined)
         receives_renewal_emails: contact.receives_renewal_emails ?? true,
         receives_seasonal_emails: contact.receives_seasonal_emails ?? true,
@@ -200,7 +200,6 @@ const ContactForm: React.FC<ContactFormProps> = ({
 
     try {
       // Map frontend form data to backend API format
-      // Note: mobile and preferred_contact_method are not in the Django model yet
       const contactType: 'Primary' | 'Technical' | 'Billing' | 'Decision Maker' | 'Other' =
         formData.is_decision_maker ? 'Decision Maker' : 'Other';
 
@@ -208,10 +207,12 @@ const ContactForm: React.FC<ContactFormProps> = ({
         name: `${formData.first_name} ${formData.last_name}`.trim(),
         email: formData.email,
         phone: formData.phone || '',
+        mobile: formData.mobile || '',
         title: formData.title || '',
         department: formData.department || '',
         company: formData.company,
         contact_type: contactType,
+        preferred_contact_method: formData.preferred_contact_method || '',
         is_primary: false, // Default to non-primary
         is_active: formData.status === 'Active',
         linkedin_url: formData.linkedin_url || '',

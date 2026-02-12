@@ -155,6 +155,10 @@ class Company(TimestampedModel):
     state = models.CharField(max_length=100, blank=True)
     postal_code = models.CharField(max_length=20, blank=True)
 
+    # Contact information
+    phone = models.CharField(max_length=50, blank=True)
+    email = models.EmailField(blank=True)
+
     # Billing entity
     billing_entity = models.CharField(
         max_length=50,
@@ -263,6 +267,11 @@ class Contact(TimestampedModel):
     contact_type = models.CharField(max_length=20, choices=CONTACT_TYPE_CHOICES, default='Other')
     is_primary = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
+    mobile = models.CharField(max_length=20, blank=True)
+    preferred_contact_method = models.CharField(
+        max_length=20, blank=True,
+        choices=[('Email', 'Email'), ('Phone', 'Phone'), ('Mobile', 'Mobile'), ('LinkedIn', 'LinkedIn')],
+    )
     linkedin_url = models.URLField(blank=True)
     notes = models.TextField(blank=True)
     last_contacted = models.DateTimeField(null=True, blank=True)

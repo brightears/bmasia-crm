@@ -201,7 +201,6 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
       'Draft': '#9e9e9e',
       'Sent': '#2196f3',
       'Paid': '#4caf50',
-      'Pending': '#ff9800',
       'Overdue': '#f44336',
       'Cancelled': '#f44336',
       'Refunded': '#9c27b0',

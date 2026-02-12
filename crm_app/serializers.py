@@ -88,9 +88,10 @@ class ContactSerializer(serializers.ModelSerializer):
     class Meta:
         model = Contact
         fields = [
-            'id', 'company', 'company_name', 'name', 'email', 'phone',
+            'id', 'company', 'company_name', 'name', 'email', 'phone', 'mobile',
             'title', 'department', 'contact_type', 'is_primary', 'is_active',
-            'linkedin_url', 'notes', 'last_contacted', 'created_at', 'updated_at',
+            'preferred_contact_method', 'linkedin_url', 'notes', 'last_contacted',
+            'created_at', 'updated_at',
             # Granular email preferences
             'receives_renewal_emails', 'receives_seasonal_emails',
             'receives_payment_emails', 'receives_quarterly_emails',
@@ -204,6 +205,7 @@ class CompanySerializer(serializers.ModelSerializer):
             'soundtrack_account_id', 'is_active', 'seasonal_emails_enabled',
             'soundtrack_offline_alerts_enabled', 'notes', 'it_notes',
             'address_line1', 'address_line2', 'city', 'state', 'postal_code',
+            'phone', 'email',
             'billing_entity', 'full_address', 'total_contract_value', 'contacts', 'zones', 'zones_summary',
             'subscription_summary', 'primary_contact', 'opportunities_count',
             'active_contracts_count',

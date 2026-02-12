@@ -417,7 +417,7 @@ export interface Invoice {
   company: string;
   company_name: string;
   invoice_number: string;
-  status: 'Draft' | 'Sent' | 'Paid' | 'Overdue' | 'Cancelled' | 'Refunded' | 'Pending';
+  status: 'Draft' | 'Sent' | 'Paid' | 'Overdue' | 'Cancelled' | 'Refunded';
   issue_date: string;
   due_date: string;
   paid_date?: string;
