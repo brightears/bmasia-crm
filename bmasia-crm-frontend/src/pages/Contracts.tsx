@@ -37,7 +37,6 @@ import {
   MoreVert,
   Business,
   CalendarToday,
-  AttachMoney,
   Assignment,
   Warning,
   Refresh,
@@ -493,12 +492,9 @@ const Contracts: React.FC = () => {
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <AttachMoney sx={{ fontSize: 16, color: 'text.secondary' }} />
-                      <Typography variant="body2">
-                        {formatCurrency(contract.value, contract.currency)}
-                      </Typography>
-                    </Box>
+                    <Typography variant="body2">
+                      {formatCurrency(contract.value, contract.currency)}
+                    </Typography>
                   </TableCell>
                   <TableCell>
                     <Chip

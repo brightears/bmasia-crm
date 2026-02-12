@@ -43,7 +43,6 @@ import {
   Payment,
   MoreVert,
   Receipt,
-  AttachMoney,
   Business,
   Schedule,
   AccountBalance,

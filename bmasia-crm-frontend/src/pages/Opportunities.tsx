@@ -42,7 +42,6 @@ import {
   ViewKanban,
   Handshake,
   TrendingUp,
-  AttachMoney,
   Person,
   Business,
   Schedule,
@@ -529,12 +528,9 @@ const Opportunities: React.FC = () => {
                     />
                   </TableCell>
                   <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <AttachMoney sx={{ fontSize: 16, color: 'text.secondary' }} />
-                      <Typography variant="body2">
-                        {formatCurrency(opportunity.expected_value || 0, opportunity.company_billing_entity)}
-                      </Typography>
-                    </Box>
+                    <Typography variant="body2">
+                      {formatCurrency(opportunity.expected_value || 0, opportunity.company_billing_entity)}
+                    </Typography>
                   </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
