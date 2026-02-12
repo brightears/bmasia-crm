@@ -442,7 +442,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
       // Auto-fill property name from contract zones
       const activeZones = selectedContract.contract_zones?.filter((z: any) => z.is_active) || [];
-      const propertyNames = [...new Set(activeZones.map((z: any) => z.property_name).filter(Boolean))];
+      const propertyNames = Array.from(new Set(activeZones.map((z: any) => z.property_name).filter(Boolean))) as string[];
       if (propertyNames.length > 0) {
         setPropertyName(propertyNames.join(', '));
       }
