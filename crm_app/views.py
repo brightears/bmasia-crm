@@ -4106,7 +4106,7 @@ class InvoiceViewSet(BaseModelViewSet):
         # Create card-style FROM section
         from_lines = [f'<b>{entity_name}</b>']
         if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
-            from_lines.append('สำนักงานใหญ่ (Head Office)')
+            from_lines.append('Head Office')
         from_lines.append(entity_address)
         from_lines.append(f'Phone: {entity_phone}')
         if entity_tax:
