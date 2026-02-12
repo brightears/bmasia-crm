@@ -496,12 +496,9 @@ const Invoices: React.FC = () => {
                     </Box>
                   </TableCell>
                   <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <AttachMoney sx={{ fontSize: 16, color: 'text.secondary' }} />
-                      <Typography variant="body2">
-                        {formatCurrency(invoice.total_amount, invoice.currency)}
-                      </Typography>
-                    </Box>
+                    <Typography variant="body2">
+                      {formatCurrency(invoice.total_amount, invoice.currency)}
+                    </Typography>
                   </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
