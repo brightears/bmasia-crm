@@ -449,7 +449,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     }
   };
 
-  const handleLineItemChange = (index: number, field: keyof InvoiceLineItem, value: any) => {
+  const handleLineItemChange = (index: number, field: keyof InvoiceLineItem | 'product_code', value: any) => {
     const updatedItems = [...lineItems];
     updatedItems[index] = {
       ...updatedItems[index],
