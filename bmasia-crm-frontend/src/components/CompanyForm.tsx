@@ -35,6 +35,8 @@ interface CompanyFormProps {
 interface CompanyFormData {
   name: string;
   legal_entity_name: string;
+  tax_id: string;
+  branch: string;
   industry: string;
   country: string;
   billing_entity: string;
@@ -116,6 +118,8 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
   const [formData, setFormData] = useState<CompanyFormData>({
     name: '',
     legal_entity_name: '',
+    tax_id: '',
+    branch: '',
     industry: '',
     country: '',
     billing_entity: 'BMAsia Limited',
@@ -150,6 +154,8 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
       setFormData({
         name: company.name || '',
         legal_entity_name: company.legal_entity_name || '',
+        tax_id: company.tax_id || '',
+        branch: company.branch || '',
         industry: company.industry || '',
         country: company.country || '',
         billing_entity: company.billing_entity || 'BMAsia Limited',
@@ -175,6 +181,8 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
       setFormData({
         name: '',
         legal_entity_name: '',
+        tax_id: '',
+        branch: '',
         industry: '',
         country: '',
         billing_entity: 'BMAsia Limited',
@@ -263,6 +271,8 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
         ...formData,
         billing_entity: formData.billing_entity,
         legal_entity_name: formData.legal_entity_name || undefined,
+        tax_id: formData.tax_id || undefined,
+        branch: formData.branch || undefined,
         website: formData.website || undefined,
         phone: formData.phone || undefined,
         email: formData.email || undefined,
@@ -391,6 +401,38 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
               error={!!errors.legal_entity_name}
               size="medium"
             />
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <TextField
+              fullWidth
+              label="Tax ID"
+              value={formData.tax_id || ''}
+              onChange={(e) => setFormData(prev => ({ ...prev, tax_id: e.target.value }))}
+              helperText="Tax Identification Number (required for Thai tax invoices)"
+              error={!!errors.tax_id}
+              size="medium"
+            />
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <FormControl fullWidth error={!!errors.branch} size="medium">
+              <InputLabel>Branch</InputLabel>
+              <Select
+                value={formData.branch || ''}
+                onChange={(e) => setFormData(prev => ({ ...prev, branch: e.target.value }))}
+                label="Branch"
+              >
+                <MenuItem value="">None</MenuItem>
+                <MenuItem value="สำนักงานใหญ่ (Head Office)">สำนักงานใหญ่ (Head Office)</MenuItem>
+                <MenuItem value="Branch">Branch</MenuItem>
+              </Select>
+            </FormControl>
+            {errors.branch && (
+              <Typography variant="caption" color="error" sx={{ mt: 0.5, display: 'block' }}>
+                {errors.branch}
+              </Typography>
+            )}
           </Grid>
 
           <Grid item xs={12} sm={6}>

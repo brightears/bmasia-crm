@@ -393,6 +393,11 @@ class ApiService {
     return response.data;
   }
 
+  async getNextInvoiceNumber(entity: string): Promise<string> {
+    const response = await authApi.get(`/invoices/next-number/`, { params: { entity } });
+    return response.data.invoice_number;
+  }
+
   async sendInvoice(id: string, email?: string): Promise<any> {
     const response = await authApi.post(`/invoices/${id}/send/`, { email });
     return response.data;

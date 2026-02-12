@@ -26,6 +26,7 @@ import {
   Alert,
   GridLegacy as Grid,
   InputAdornment,
+  Autocomplete,
 } from '@mui/material';
 import {
   Add,
@@ -49,6 +50,8 @@ interface InvoiceFormProps {
   mode: 'create' | 'edit';
   companies: Company[];
   contracts: Contract[];
+  initialCompanyId?: string;
+  initialContractId?: string;
 }
 
 const paymentTermsOptions = [
@@ -70,12 +73,48 @@ const getDefaultPaymentTermsText = (country: string): string => {
   return PAYMENT_TERMS_DEFAULTS[country] || PAYMENT_TERMS_DEFAULTS['default'];
 };
 
+const PRODUCT_OPTIONS = [
+  {
+    code: 'soundtrack_essential',
+    name: 'Soundtrack Your Brand',
+    description: '100+ million tracks, Personalized music design and support services',
+    thailandOnly: false,
+  },
+  {
+    code: 'beat_breeze',
+    name: 'Beat Breeze',
+    description: '100,000+ tracks, Public performance licenses included',
+    thailandOnly: false,
+  },
+  {
+    code: 'mini_pc',
+    name: 'Windows Mini PC',
+    description: 'Windows Mini PC',
+    thailandOnly: true,
+  },
+  {
+    code: 'soundtrack_player',
+    name: 'Soundtrack Player',
+    description: 'Includes a 1-year warranty, Shipping costs covered',
+    thailandOnly: false,
+  },
+  {
+    code: 'custom',
+    name: 'Custom (Manual Entry)',
+    description: '',
+    thailandOnly: false,
+  },
+];
+
 const defaultLineItem: InvoiceLineItem = {
+  product_service: '',
   description: '',
   quantity: 1,
   unit_price: 0,
   tax_rate: 0,
   total: 0,
+  service_period_start: null,
+  service_period_end: null,
 };
 
 const InvoiceForm: React.FC<InvoiceFormProps> = ({
@@ -86,6 +125,8 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
   mode,
   companies,
   contracts,
+  initialCompanyId,
+  initialContractId,
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -106,6 +147,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [currency, setCurrency] = useState<string>('USD');
   const [servicePeriodStart, setServicePeriodStart] = useState<Date | null>(null);
   const [servicePeriodEnd, setServicePeriodEnd] = useState<Date | null>(null);
+  const [propertyName, setPropertyName] = useState('');
 
   // Filtered contracts based on selected company
   const [filteredContracts, setFilteredContracts] = useState<Contract[]>([]);
@@ -155,7 +197,16 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     if (open) {
       if (mode === 'create') {
         resetForm();
-        generateInvoiceNumber();
+        // Pre-fill from query params (e.g., from Contract/Quote detail)
+        if (initialCompanyId) {
+          handleCompanyChange(initialCompanyId);
+          if (initialContractId) {
+            // Small delay to let company-filtered contracts populate
+            setTimeout(() => handleContractChange(initialContractId), 100);
+          }
+        } else {
+          generateInvoiceNumber();
+        }
       } else if (invoice) {
         populateForm(invoice);
       }
@@ -203,6 +254,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     setCurrency('USD');
     setServicePeriodStart(null);
     setServicePeriodEnd(null);
+    setPropertyName('');
     setSelectedCompanyCountry('');
     setError('');
   };
@@ -219,6 +271,9 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     setLineItems(invoice.line_items?.length > 0
       ? invoice.line_items.map(item => ({
           ...item,
+          product_service: item.product_service || '',
+          service_period_start: item.service_period_start || null,
+          service_period_end: item.service_period_end || null,
           total: item.total || item.line_total || (item.quantity * item.unit_price * (1 + item.tax_rate / 100)),
         }))
       : [defaultLineItem]);
@@ -226,6 +281,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     setCurrency(invoice.currency || 'USD');
     setServicePeriodStart(invoice.service_period_start ? new Date(invoice.service_period_start) : null);
     setServicePeriodEnd(invoice.service_period_end ? new Date(invoice.service_period_end) : null);
+    setPropertyName(invoice.property_name || '');
     setSendEmail(false);
     setError('');
 
@@ -236,17 +292,18 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     }
   };
 
-  const generateInvoiceNumber = async () => {
+  const generateInvoiceNumber = async (entity?: string) => {
     try {
-      // Generate a simple invoice number based on current date
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const day = String(now.getDate()).padStart(2, '0');
-      const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-      setInvoiceNumber(`INV-${year}${month}${day}-${random}`);
+      // Call backend for sequential entity-based numbering (INV-TH-2026-0001 / INV-HK-2026-0001)
+      const number = await ApiService.getNextInvoiceNumber(entity || '');
+      setInvoiceNumber(number);
     } catch (err) {
-      console.error('Failed to generate invoice number:', err);
+      // Fallback to client-generated number if API fails
+      console.error('Failed to get next invoice number:', err);
+      const prefix = entity?.includes('Thailand') ? 'INV-TH' : 'INV-HK';
+      const year = new Date().getFullYear();
+      const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+      setInvoiceNumber(`${prefix}-${year}-${random}`);
     }
   };
 
@@ -273,6 +330,12 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         tax_rate: smartTaxRate,
         total: item.quantity * item.unit_price * (1 + smartTaxRate / 100),
       })));
+
+      // Re-generate entity-based invoice number (only in create mode)
+      if (mode === 'create') {
+        const billingEntity = selectedCompany.billing_entity || '';
+        generateInvoiceNumber(billingEntity);
+      }
     }
   };
 
@@ -305,11 +368,14 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
           const tax = parseFloat(String(item.tax_rate)) || smartTaxRate;
           const subtotal = qty * price * (1 - discount / 100);
           return {
-            description: item.product_service + (item.description ? `\n${item.description}` : ''),
+            product_service: item.product_service || '',
+            description: item.description || '',
             quantity: qty,
             unit_price: price,
             tax_rate: tax,
             total: subtotal * (1 + tax / 100),
+            service_period_start: null,
+            service_period_end: null,
           };
         }));
       } else {
@@ -325,32 +391,43 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         if (soundtrackZones.length > 0 && beatBreezeZones.length > 0) {
           setLineItems([
             {
-              description: `Soundtrack Your Brand\n${soundtrackZones.map((z: any) => z.zone_name).join(', ')}`,
+              product_service: 'Soundtrack Your Brand',
+              description: soundtrackZones.map((z: any) => z.zone_name).join(', '),
               quantity: soundtrackZones.length,
               unit_price: perZonePrice,
               tax_rate: smartTaxRate,
               total: soundtrackZones.length * perZonePrice * (1 + smartTaxRate / 100),
+              service_period_start: null,
+              service_period_end: null,
             },
             {
-              description: `Beat Breeze\n${beatBreezeZones.map((z: any) => z.zone_name).join(', ')}`,
+              product_service: 'Beat Breeze',
+              description: beatBreezeZones.map((z: any) => z.zone_name).join(', '),
               quantity: beatBreezeZones.length,
               unit_price: perZonePrice,
               tax_rate: smartTaxRate,
               total: beatBreezeZones.length * perZonePrice * (1 + smartTaxRate / 100),
+              service_period_start: null,
+              service_period_end: null,
             },
           ]);
         } else {
+          let productService = '';
           let description = `${selectedContract.contract_number} - ${billingDesc} Subscription`;
           if (activeZones.length > 0) {
-            const serviceName = soundtrackZones.length > 0 ? 'Soundtrack' : 'Beat Breeze';
-            description += `\n${serviceName}: ${activeZones.map((z: any) => z.zone_name).join(', ')}`;
+            const serviceName = soundtrackZones.length > 0 ? 'Soundtrack Your Brand' : 'Beat Breeze';
+            productService = serviceName;
+            description = activeZones.map((z: any) => z.zone_name).join(', ');
           }
           setLineItems([{
+            product_service: productService,
             description,
             quantity: zoneCount,
             unit_price: perZonePrice,
             tax_rate: smartTaxRate,
             total: contractValue * (1 + smartTaxRate / 100),
+            service_period_start: null,
+            service_period_end: null,
           }]);
         }
       }
@@ -361,6 +438,13 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
       }
       if (selectedContract.end_date) {
         setServicePeriodEnd(new Date(selectedContract.end_date));
+      }
+
+      // Auto-fill property name from contract zones
+      const activeZones = selectedContract.contract_zones?.filter((z: any) => z.is_active) || [];
+      const propertyNames = [...new Set(activeZones.map((z: any) => z.property_name).filter(Boolean))];
+      if (propertyNames.length > 0) {
+        setPropertyName(propertyNames.join(', '));
       }
     }
   };
@@ -380,13 +464,30 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
       item.total = subtotal + taxAmount;
     }
 
+    // Handle product selection from dropdown
+    if (field === 'product_code') {
+      const product = PRODUCT_OPTIONS.find(p => p.code === value);
+      if (product && product.code !== 'custom') {
+        updatedItems[index] = {
+          ...updatedItems[index],
+          product_service: product.name,
+          description: product.description,
+        };
+      } else if (product?.code === 'custom') {
+        updatedItems[index] = {
+          ...updatedItems[index],
+          product_service: '',
+        };
+      }
+    }
+
     setLineItems(updatedItems);
   };
 
   const addLineItem = () => {
     // Smart tax rate default based on company country (same as QuoteForm)
     const smartTaxRate = getSmartTaxRate();
-    setLineItems([...lineItems, { ...defaultLineItem, tax_rate: smartTaxRate }]);
+    setLineItems([...lineItems, { ...defaultLineItem, tax_rate: smartTaxRate, product_service: '', service_period_start: null, service_period_end: null }]);
   };
 
   const removeLineItem = (index: number) => {
@@ -430,7 +531,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         setError('Due date is required');
         return;
       }
-      if (lineItems.length === 0 || lineItems.every(item => !item.description.trim())) {
+      if (lineItems.length === 0 || lineItems.every(item => !item.description.trim() && !item.product_service?.trim())) {
         setError('At least one line item is required');
         return;
       }
@@ -445,10 +546,18 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         due_date: dueDate.toISOString().split('T')[0],
         service_period_start: servicePeriodStart ? servicePeriodStart.toISOString().split('T')[0] : null,
         service_period_end: servicePeriodEnd ? servicePeriodEnd.toISOString().split('T')[0] : null,
+        property_name: propertyName,
         payment_terms: paymentTerms,
         payment_terms_text: paymentTermsText,
         notes,
-        line_items: lineItems.filter(item => item.description.trim()),
+        line_items: lineItems
+          .filter(item => item.description.trim() || item.product_service?.trim())
+          .map(item => ({
+            ...item,
+            product_service: item.product_service || '',
+            service_period_start: item.service_period_start || null,
+            service_period_end: item.service_period_end || null,
+          })),
         amount: Math.round(totals.subtotal * 100) / 100,
         tax_amount: Math.round(totals.taxAmount * 100) / 100,
         discount_amount: Math.round(discountAmount * 100) / 100,
@@ -556,20 +665,20 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                   />
                 </Grid>
                 <Grid item xs={12} md={6}>
-                  <FormControl fullWidth required>
-                    <InputLabel>Company</InputLabel>
-                    <Select
-                      value={companyId}
-                      onChange={(e) => handleCompanyChange(e.target.value)}
-                      label="Company"
-                    >
-                      {companies.map((company) => (
-                        <MenuItem key={company.id} value={company.id}>
-                          {company.name}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
+                  <Autocomplete
+                    options={companies}
+                    value={companies.find(c => c.id === companyId) || null}
+                    onChange={(_e, newValue) => handleCompanyChange(newValue?.id || '')}
+                    getOptionLabel={(option) => `${option.name}${option.country ? ` (${option.country})` : ''}`}
+                    isOptionEqualToValue={(option, value) => option.id === value.id}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        label="Company"
+                        required
+                      />
+                    )}
+                  />
                 </Grid>
                 <Grid item xs={12} md={6}>
                   <FormControl fullWidth>
@@ -590,6 +699,16 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                       ))}
                     </Select>
                   </FormControl>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    fullWidth
+                    label="Property Name"
+                    value={propertyName}
+                    onChange={(e) => setPropertyName(e.target.value)}
+                    placeholder="e.g., Paradise Island Resort"
+                    helperText="Optional — shown in Bill To section on PDF"
+                  />
                 </Grid>
                 <Grid item xs={12} md={6}>
                   <FormControl fullWidth>
@@ -684,84 +803,155 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                 <Table size="small">
                   <TableHead>
                     <TableRow>
+                      <TableCell width="180">Product/Service</TableCell>
                       <TableCell>Description</TableCell>
-                      <TableCell width="90">Qty</TableCell>
-                      <TableCell width="160">Unit Price</TableCell>
-                      <TableCell width="90">{getTaxLabel().replace(':', '')} (%)</TableCell>
-                      <TableCell width="150">Total</TableCell>
+                      <TableCell width="80">Qty</TableCell>
+                      <TableCell width="140">Unit Price</TableCell>
+                      <TableCell width="80">{getTaxLabel().replace(':', '')} (%)</TableCell>
+                      <TableCell width="130">Total</TableCell>
                       <TableCell width="50">Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {lineItems.map((item, index) => (
-                      <TableRow key={index}>
-                        <TableCell>
-                          <TextField
-                            fullWidth
-                            size="small"
-                            multiline
-                            minRows={1}
-                            maxRows={3}
-                            value={item.description}
-                            onChange={(e) => handleLineItemChange(index, 'description', e.target.value)}
-                            placeholder="Enter description..."
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            size="small"
-                            type="number"
-                            value={Math.round(item.quantity)}
-                            onChange={(e) => handleLineItemChange(index, 'quantity', parseInt(e.target.value) || 0)}
-                            inputProps={{ min: 0, step: 1 }}
-                            sx={{ '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button': { WebkitAppearance: 'none', margin: 0 }, '& input[type=number]': { MozAppearance: 'textfield' } }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            size="small"
-                            type="text"
-                            value={focusedPriceIndex === index
-                              ? item.unit_price
-                              : new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(item.unit_price)
-                            }
-                            onChange={(e) => {
-                              const cleaned = e.target.value.replace(/[^0-9.]/g, '');
-                              handleLineItemChange(index, 'unit_price', parseFloat(cleaned) || 0);
-                            }}
-                            onFocus={() => setFocusedPriceIndex(index)}
-                            onBlur={() => setFocusedPriceIndex(null)}
-                            InputProps={{
-                              startAdornment: <InputAdornment position="start">{getCurrencySymbol(currency)}</InputAdornment>,
-                            }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            size="small"
-                            type="number"
-                            value={Math.round(item.tax_rate)}
-                            onChange={(e) => handleLineItemChange(index, 'tax_rate', parseInt(e.target.value) || 0)}
-                            inputProps={{ min: 0, max: 100, step: 1 }}
-                            sx={{ '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button': { WebkitAppearance: 'none', margin: 0 }, '& input[type=number]': { MozAppearance: 'textfield' } }}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2" fontWeight="medium">
-                            {formatCurrency(item.total, currency)}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <IconButton
-                            size="small"
-                            onClick={() => removeLineItem(index)}
-                            disabled={lineItems.length === 1}
-                            color="error"
-                          >
-                            <Delete fontSize="small" />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
+                      <React.Fragment key={index}>
+                        <TableRow>
+                          <TableCell>
+                            <FormControl fullWidth size="small">
+                              <Select
+                                value={
+                                  PRODUCT_OPTIONS.find(p => p.name === item.product_service)?.code || 'custom'
+                                }
+                                onChange={(e) => {
+                                  const code = e.target.value;
+                                  handleLineItemChange(index, 'product_code', code);
+                                  if (code === 'custom') {
+                                    handleLineItemChange(index, 'product_service', '');
+                                  }
+                                }}
+                                displayEmpty
+                              >
+                                {PRODUCT_OPTIONS.filter(p => !p.thailandOnly || selectedCompanyCountry === 'Thailand').map(product => (
+                                  <MenuItem key={product.code} value={product.code}>
+                                    {product.name}
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                            </FormControl>
+                            {!PRODUCT_OPTIONS.find(p => p.name === item.product_service) && item.product_service !== '' && (
+                              <TextField
+                                fullWidth
+                                size="small"
+                                value={item.product_service || ''}
+                                onChange={(e) => handleLineItemChange(index, 'product_service', e.target.value)}
+                                placeholder="Enter product/service name"
+                                sx={{ mt: 1 }}
+                              />
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              fullWidth
+                              size="small"
+                              multiline
+                              minRows={1}
+                              maxRows={3}
+                              value={item.description}
+                              onChange={(e) => handleLineItemChange(index, 'description', e.target.value)}
+                              placeholder="Enter description..."
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              size="small"
+                              type="number"
+                              value={Math.round(item.quantity)}
+                              onChange={(e) => handleLineItemChange(index, 'quantity', parseInt(e.target.value) || 0)}
+                              inputProps={{ min: 0, step: 1 }}
+                              sx={{ '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button': { WebkitAppearance: 'none', margin: 0 }, '& input[type=number]': { MozAppearance: 'textfield' } }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              size="small"
+                              type="text"
+                              value={focusedPriceIndex === index
+                                ? item.unit_price
+                                : new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(item.unit_price)
+                              }
+                              onChange={(e) => {
+                                const cleaned = e.target.value.replace(/[^0-9.]/g, '');
+                                handleLineItemChange(index, 'unit_price', parseFloat(cleaned) || 0);
+                              }}
+                              onFocus={() => setFocusedPriceIndex(index)}
+                              onBlur={() => setFocusedPriceIndex(null)}
+                              InputProps={{
+                                startAdornment: <InputAdornment position="start">{getCurrencySymbol(currency)}</InputAdornment>,
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              size="small"
+                              type="number"
+                              value={Math.round(item.tax_rate)}
+                              onChange={(e) => handleLineItemChange(index, 'tax_rate', parseInt(e.target.value) || 0)}
+                              inputProps={{ min: 0, max: 100, step: 1 }}
+                              sx={{ '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button': { WebkitAppearance: 'none', margin: 0 }, '& input[type=number]': { MozAppearance: 'textfield' } }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" fontWeight="medium">
+                              {formatCurrency(item.total, currency)}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <IconButton
+                              size="small"
+                              onClick={() => removeLineItem(index)}
+                              disabled={lineItems.length === 1}
+                              color="error"
+                            >
+                              <Delete fontSize="small" />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                        {/* Per-line service period row */}
+                        <TableRow>
+                          <TableCell colSpan={7} sx={{ py: 0.5, borderBottom: index < lineItems.length - 1 ? '2px solid #e0e0e0' : undefined }}>
+                            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', pl: 1 }}>
+                              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                                Service Period:
+                              </Typography>
+                              <DatePicker
+                                value={item.service_period_start ? new Date(item.service_period_start) : null}
+                                onChange={(date) => handleLineItemChange(index, 'service_period_start', date ? date.toISOString().split('T')[0] : null)}
+                                slotProps={{
+                                  textField: {
+                                    size: 'small',
+                                    sx: { width: 160 },
+                                    placeholder: 'Start',
+                                  },
+                                  field: { clearable: true },
+                                }}
+                              />
+                              <Typography variant="caption" color="text.secondary">to</Typography>
+                              <DatePicker
+                                value={item.service_period_end ? new Date(item.service_period_end) : null}
+                                onChange={(date) => handleLineItemChange(index, 'service_period_end', date ? date.toISOString().split('T')[0] : null)}
+                                slotProps={{
+                                  textField: {
+                                    size: 'small',
+                                    sx: { width: 160 },
+                                    placeholder: 'End',
+                                  },
+                                  field: { clearable: true },
+                                }}
+                              />
+                            </Box>
+                          </TableCell>
+                        </TableRow>
+                      </React.Fragment>
                     ))}
                   </TableBody>
                 </Table>

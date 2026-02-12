@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Dialog,
   DialogTitle,
@@ -55,6 +56,7 @@ import {
   TrendingUp,
   Description,
   Close,
+  Receipt,
 } from '@mui/icons-material';
 import { Quote, QuoteActivity } from '../types';
 import ApiService from '../services/api';
@@ -72,6 +74,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
   quote,
   onQuoteUpdate
 }) => {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -306,15 +309,29 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
               </>
             )}
             {quoteDetail?.status === 'Accepted' && (
-              <Button
-                variant="contained"
-                startIcon={<Assignment />}
-                onClick={handleConvertToContract}
-                sx={{ mr: 1 }}
-                disabled={loading}
-              >
-                Convert to Contract
-              </Button>
+              <>
+                <Button
+                  variant="contained"
+                  startIcon={<Assignment />}
+                  onClick={handleConvertToContract}
+                  sx={{ mr: 1 }}
+                  disabled={loading}
+                >
+                  Convert to Contract
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<Receipt />}
+                  onClick={() => {
+                    onClose();
+                    navigate(`/invoices?new=true&company=${quoteDetail.company}&quote=${quoteDetail.id}`);
+                  }}
+                  sx={{ mr: 1 }}
+                  disabled={loading}
+                >
+                  Create Invoice
+                </Button>
+              </>
             )}
             <Button
               variant="outlined"

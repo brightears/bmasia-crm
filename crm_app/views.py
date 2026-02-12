@@ -3843,6 +3843,30 @@ class InvoiceViewSet(BaseModelViewSet):
         serializer = self.get_serializer(overdue, many=True)
         return Response(serializer.data)
 
+    @action(detail=False, methods=['get'], url_path='next-number')
+    def next_number(self, request):
+        """Generate next sequential invoice number based on billing entity.
+        Format: INV-TH-2026-0001 (Thailand) or INV-HK-2026-0001 (HK/International)
+        """
+        from datetime import datetime
+        entity = request.query_params.get('entity', '')
+        prefix = 'INV-TH' if 'Thailand' in entity else 'INV-HK'
+        year = datetime.now().year
+        pattern = f'{prefix}-{year}-'
+        last = Invoice.objects.filter(
+            invoice_number__startswith=pattern
+        ).order_by('-invoice_number').first()
+        if last:
+            try:
+                last_seq = int(last.invoice_number.split('-')[-1])
+                next_seq = last_seq + 1
+            except (ValueError, IndexError):
+                next_seq = 1
+        else:
+            next_seq = 1
+        invoice_number = f'{pattern}{str(next_seq).zfill(4)}'
+        return Response({'invoice_number': invoice_number})
+
     @action(detail=True, methods=['post'])
     def send(self, request, pk=None):
         """Send invoice via email with PDF attachment"""
@@ -4080,12 +4104,14 @@ class InvoiceViewSet(BaseModelViewSet):
         )
 
         # Create card-style FROM section
-        from_content = Paragraph(f"""
-            <b>{entity_name}</b><br/>
-            {entity_address.replace(', ', '<br/>')}<br/>
-            Phone: {entity_phone}
-            {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
-        """, from_content_style)
+        from_lines = [f'<b>{entity_name}</b>']
+        if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+            from_lines.append('สำนักงานใหญ่ (Head Office)')
+        from_lines.append(entity_address)
+        from_lines.append(f'Phone: {entity_phone}')
+        if entity_tax:
+            from_lines.append(f'Tax ID: {entity_tax}')
+        from_content = Paragraph('<br/>'.join(from_lines), from_content_style)
 
         from_card_data = [
             [Paragraph('FROM', from_header_style)],
@@ -4105,10 +4131,17 @@ class InvoiceViewSet(BaseModelViewSet):
         ]))
 
         # Create card-style BILL TO section
-        bill_to_content = Paragraph(f"""
-            <b>{company.legal_entity_name or company.name}</b><br/>
-            {format_address_multiline(company)}
-        """, from_content_style)
+        bill_to_lines = [f'<b>{company.legal_entity_name or company.name}</b>']
+        if getattr(company, 'branch', ''):
+            bill_to_lines.append(f'({company.branch})')
+        if getattr(invoice, 'property_name', ''):
+            bill_to_lines.append(f'Property: {invoice.property_name}')
+        if getattr(company, 'tax_id', ''):
+            bill_to_lines.append(f'Tax ID: {company.tax_id}')
+        bill_addr = format_address_multiline(company)
+        if bill_addr:
+            bill_to_lines.append(bill_addr)
+        bill_to_content = Paragraph('<br/>'.join(bill_to_lines), from_content_style)
 
         bill_card_data = [
             [Paragraph('BILL TO', from_header_style)],
@@ -4152,19 +4185,37 @@ class InvoiceViewSet(BaseModelViewSet):
         # Build services table from persisted line items (or fallback for legacy invoices)
         line_items = invoice.line_items.all()
         if line_items.exists():
-            # Multi-column table with actual line items
-            services_data = [
-                ['Description', 'Qty', 'Unit Price', 'Amount']
-            ]
+            # Check if any line items have product_service
+            has_product = any(getattr(item, 'product_service', '') for item in line_items)
+            if has_product:
+                services_data = [['Product/Service', 'Description', 'Qty', 'Unit Price', 'Amount']]
+            else:
+                services_data = [['Description', 'Qty', 'Unit Price', 'Amount']]
             for item in line_items:
                 item_subtotal = item.quantity * item.unit_price
-                services_data.append([
-                    Paragraph(item.description.replace('\n', '<br/>'), body_style),
+                # Build description with optional per-line service period
+                desc_text = item.description.replace('\n', '<br/>') if item.description else ''
+                period_start = getattr(item, 'service_period_start', None)
+                period_end = getattr(item, 'service_period_end', None)
+                if period_start and period_end:
+                    desc_text += f"<br/><font size=7 color='#666666'>Service: {period_start.strftime('%b %d, %Y')} – {period_end.strftime('%b %d, %Y')}</font>"
+                elif period_start:
+                    desc_text += f"<br/><font size=7 color='#666666'>From: {period_start.strftime('%b %d, %Y')}</font>"
+
+                row = []
+                if has_product:
+                    row.append(Paragraph(getattr(item, 'product_service', '') or '', body_style))
+                row.extend([
+                    Paragraph(desc_text, body_style),
                     f"{item.quantity:,.0f}" if item.quantity == int(item.quantity) else f"{item.quantity:,.2f}",
                     f"{currency_symbol}{item.unit_price:,.2f}",
                     f"{currency_symbol}{item_subtotal:,.2f}"
                 ])
-            services_table = Table(services_data, colWidths=[3.5*inch, 0.7*inch, 1.35*inch, 1.35*inch])
+                services_data.append(row)
+            if has_product:
+                services_table = Table(services_data, colWidths=[1.5*inch, 2.2*inch, 0.6*inch, 1.15*inch, 1.15*inch])
+            else:
+                services_table = Table(services_data, colWidths=[3.5*inch, 0.7*inch, 1.35*inch, 1.35*inch])
         else:
             # Fallback for legacy invoices without persisted line items
             services_data = [

@@ -119,6 +119,8 @@ export interface Company {
   full_address?: string;
   phone?: string;
   email?: string;
+  tax_id?: string;
+  branch?: string;
   soundtrack_account_id?: string;
   total_contract_value: number;
   contacts: Contact[];
@@ -386,12 +388,15 @@ export interface ContractZone {
 export interface InvoiceLineItem {
   id?: string;
   invoice?: string;
+  product_service?: string;
   description: string;
   quantity: number;
   unit_price: number;
   tax_rate: number;
   total: number;
   line_total?: number;
+  service_period_start?: string | null;
+  service_period_end?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -428,6 +433,7 @@ export interface Invoice {
   discount_amount: number;
   total_amount: number;
   currency: string;
+  property_name?: string;
   payment_method?: string;
   payment_terms?: string;
   payment_terms_text?: string;

@@ -205,7 +205,7 @@ class CompanySerializer(serializers.ModelSerializer):
             'soundtrack_account_id', 'is_active', 'seasonal_emails_enabled',
             'soundtrack_offline_alerts_enabled', 'notes', 'it_notes',
             'address_line1', 'address_line2', 'city', 'state', 'postal_code',
-            'phone', 'email',
+            'phone', 'email', 'tax_id', 'branch',
             'billing_entity', 'full_address', 'total_contract_value', 'contacts', 'zones', 'zones_summary',
             'subscription_summary', 'primary_contact', 'opportunities_count',
             'active_contracts_count',
@@ -456,8 +456,9 @@ class InvoiceLineItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = InvoiceLineItem
         fields = [
-            'id', 'invoice', 'description', 'quantity', 'unit_price',
-            'tax_rate', 'line_total', 'created_at', 'updated_at'
+            'id', 'invoice', 'product_service', 'description', 'quantity', 'unit_price',
+            'tax_rate', 'line_total', 'service_period_start', 'service_period_end',
+            'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'invoice', 'line_total', 'created_at', 'updated_at']
         extra_kwargs = {
@@ -482,7 +483,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             'service_period_start', 'service_period_end',
             'amount', 'tax_amount',
             'discount_amount', 'total_amount', 'currency', 'payment_terms', 'payment_terms_text',
-            'payment_method', 'transaction_id', 'notes', 'days_overdue', 'is_overdue',
+            'property_name', 'payment_method', 'transaction_id', 'notes', 'days_overdue', 'is_overdue',
             'first_reminder_sent', 'second_reminder_sent', 'final_notice_sent',
             'line_items', 'created_at', 'updated_at'
         ]

@@ -44,6 +44,7 @@ import {
   Close,
   Send,
   GetApp,
+  Visibility,
   Payment,
   Receipt,
   Business,
@@ -109,6 +110,21 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
       onInvoiceUpdate();
     } catch (err) {
       setError('Failed to send invoice');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePreviewPDF = async () => {
+    if (!invoice) return;
+
+    try {
+      setLoading(true);
+      const blob = await ApiService.downloadInvoicePDF(invoice.id);
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    } catch (err) {
+      setError('Failed to preview PDF');
     } finally {
       setLoading(false);
     }
@@ -469,6 +485,14 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
       <DialogActions sx={{ p: 3, pt: 0 }}>
         <Button onClick={onClose}>
           Close
+        </Button>
+        <Button
+          onClick={handlePreviewPDF}
+          variant="outlined"
+          startIcon={<Visibility />}
+          disabled={loading}
+        >
+          Preview
         </Button>
         <Button
           onClick={handleDownloadPDF}

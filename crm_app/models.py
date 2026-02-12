@@ -159,6 +159,10 @@ class Company(TimestampedModel):
     phone = models.CharField(max_length=50, blank=True)
     email = models.EmailField(blank=True)
 
+    # Tax compliance fields
+    tax_id = models.CharField(max_length=50, blank=True, help_text='Tax Identification Number')
+    branch = models.CharField(max_length=100, blank=True, help_text='Head Office or Branch name/number')
+
     # Billing entity
     billing_entity = models.CharField(
         max_length=50,
@@ -1166,10 +1170,11 @@ class Invoice(TimestampedModel):
     payment_terms_text = models.TextField(blank=True)
     service_period_start = models.DateField(null=True, blank=True)
     service_period_end = models.DateField(null=True, blank=True)
+    property_name = models.CharField(max_length=200, blank=True, help_text='Property/venue name for Bill To')
     payment_method = models.CharField(max_length=50, blank=True)
     transaction_id = models.CharField(max_length=100, blank=True)
     notes = models.TextField(blank=True)
-    
+
     # Reminder tracking
     first_reminder_sent = models.BooleanField(default=False)
     second_reminder_sent = models.BooleanField(default=False)
@@ -1208,11 +1213,14 @@ class InvoiceLineItem(TimestampedModel):
     """Line items for invoices"""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='line_items')
+    product_service = models.CharField(max_length=200, blank=True)
     description = models.TextField()
     quantity = models.DecimalField(max_digits=10, decimal_places=2, default=1)
     unit_price = models.DecimalField(max_digits=12, decimal_places=2)
     tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     line_total = models.DecimalField(max_digits=12, decimal_places=2)
+    service_period_start = models.DateField(null=True, blank=True)
+    service_period_end = models.DateField(null=True, blank=True)
 
     class Meta:
         ordering = ['created_at']

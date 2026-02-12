@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -85,6 +86,7 @@ const sortOptions = [
 ];
 
 const Invoices: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
@@ -111,6 +113,10 @@ const Invoices: React.FC = () => {
   // Action menu
   const [actionMenuAnchor, setActionMenuAnchor] = useState<null | HTMLElement>(null);
   const [actionMenuInvoice, setActionMenuInvoice] = useState<Invoice | null>(null);
+
+  // Pre-fill from query params (e.g., from Contract/Quote detail)
+  const [initialCompanyId, setInitialCompanyId] = useState('');
+  const [initialContractId, setInitialContractId] = useState('');
 
   // Payment dialog
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
@@ -168,6 +174,19 @@ const Invoices: React.FC = () => {
     loadCompanies();
     loadContracts();
   }, []);
+
+  // Auto-open invoice form from query params (e.g., from Contract/Quote detail)
+  useEffect(() => {
+    if (searchParams.get('new') === 'true') {
+      setInitialCompanyId(searchParams.get('company') || '');
+      setInitialContractId(searchParams.get('contract') || '');
+      setFormMode('create');
+      setSelectedInvoice(null);
+      setFormOpen(true);
+      // Clear query params to prevent re-opening on navigation
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(event.target.value);
@@ -299,10 +318,11 @@ const Invoices: React.FC = () => {
     setActionMenuInvoice(null);
   };
 
-  const formatCurrency = (value: number): string => {
-    return new Intl.NumberFormat('en-US', {
+  const formatCurrency = (value: number, currency: string = 'USD'): string => {
+    const locale = currency === 'THB' ? 'th-TH' : 'en-US';
+    return new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: 'USD',
+      currency,
       minimumFractionDigits: 2,
     }).format(value);
   };
@@ -479,7 +499,7 @@ const Invoices: React.FC = () => {
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
                       <AttachMoney sx={{ fontSize: 16, color: 'text.secondary' }} />
                       <Typography variant="body2">
-                        {formatCurrency(invoice.total_amount)}
+                        {formatCurrency(invoice.total_amount, invoice.currency)}
                       </Typography>
                     </Box>
                   </TableCell>
@@ -596,12 +616,18 @@ const Invoices: React.FC = () => {
       {/* Invoice Form */}
       <InvoiceForm
         open={formOpen}
-        onClose={() => setFormOpen(false)}
+        onClose={() => {
+          setFormOpen(false);
+          setInitialCompanyId('');
+          setInitialContractId('');
+        }}
         onSave={handleInvoiceSave}
         invoice={selectedInvoice}
         mode={formMode}
         companies={companies}
         contracts={contracts}
+        initialCompanyId={initialCompanyId}
+        initialContractId={initialContractId}
       />
 
       {/* Invoice Detail */}

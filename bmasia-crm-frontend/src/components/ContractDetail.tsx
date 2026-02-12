@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Dialog,
   DialogTitle,
@@ -88,6 +89,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
   onEdit,
   contractId,
 }) => {
+  const navigate = useNavigate();
   const [contract, setContract] = useState<Contract | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -706,11 +708,11 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
           variant="outlined"
           startIcon={<Receipt />}
           onClick={() => {
-            // Generate invoice functionality
-            console.log('Generate invoice for contract:', contract.id);
+            onClose();
+            navigate(`/invoices?new=true&company=${contract.company}&contract=${contract.id}`);
           }}
         >
-          Generate Invoice
+          Create Invoice
         </Button>
         <Button
           variant="contained"
