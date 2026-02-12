@@ -274,11 +274,6 @@ SOUNDTRACK_API_TOKEN = config('SOUNDTRACK_API_TOKEN', default='')
 SOUNDTRACK_CLIENT_ID = config('SOUNDTRACK_CLIENT_ID', default='')
 SOUNDTRACK_CLIENT_SECRET = config('SOUNDTRACK_CLIENT_SECRET', default='')
 
-# Validate Soundtrack API configuration
-if not SOUNDTRACK_API_TOKEN:
-    import warnings
-    warnings.warn("SOUNDTRACK_API_TOKEN not configured - Soundtrack API integration will not work")
-
 # Field Encryption Key for encrypted model fields (Equipment credentials, etc.)
 # Generate a new key with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 FIELD_ENCRYPTION_KEY = config('FIELD_ENCRYPTION_KEY', default='3gnXjsPSDoeTaNo0hlFuWXCVVI3mox7SeG2r3jGehlE=')

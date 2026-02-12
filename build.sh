@@ -24,4 +24,7 @@ EOF
 # Create email templates (may fail if tables don't exist)
 python manage.py create_email_templates 2>/dev/null || echo "Skipping email template creation (tables may not exist yet)"
 
+# Set seasonal trigger dates for variable holidays (idempotent)
+python manage.py set_seasonal_dates 2>/dev/null || echo "Skipping seasonal date setup (tables may not exist yet)"
+
 echo "Build completed!"
