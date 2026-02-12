@@ -2,6 +2,242 @@
 
 ## February 2026
 
+### Feb 12, 2026 - Audit & Bug Fixes (6 Bugs from 32+ Audit Findings)
+
+**Context**: Ran comprehensive professional audit of Customer Management & Sales Operations using 3 parallel agents covering Companies, Contacts, Opportunities, Quotes, Contracts, and Invoices. Audit identified 32+ issues. Fixed 6 high-priority bugs.
+
+**Bug 1 — N+1 Query Fixes** (`crm_app/views.py`):
+- **ContactViewSet**: Added `select_related('company')` to `get_queryset()` — was hitting DB for every contact's company
+- **OpportunityViewSet**: Added `select_related('company', 'owner').prefetch_related('activities')` — was making separate queries for company, owner, and activities on every opportunity
+- **ContractViewSet**: Added full optimization:
+  ```python
+  .select_related('company', 'opportunity', 'quote', 'master_contract', 'renewed_from',
+                  'preamble_template', 'payment_template', 'activation_template')
+  .prefetch_related('line_items', 'contract_zones', 'invoices', 'service_items', 'contract_documents')
+  ```
+- **InvoiceViewSet**: Added `select_related('company', 'contract')` (already had `prefetch_related('line_items')`)
+
+**Bug 2 — Restored Deleted Logo** (`crm_app/static/crm_app/images/bmasia_logo.png`):
+- **Problem**: Logo was deleted from static files (unstaged), causing ALL PDFs (contracts, quotes, invoices) to fall back to text "BM ASIA"
+- **Fix**: Restored from git history commit `ee4073a4` (93KB PNG)
+- **Impact**: Logo now renders properly in all PDF headers
+
+**Bug 3 — Company Phone/Email Fields Missing** (`crm_app/models.py`, `crm_app/serializers.py`):
+- **Problem**: CompanyForm collected `phone` and `email` but Company model didn't have these fields — data was silently dropped by DRF
+- **Fix**: Added to Company model:
+  ```python
+  phone = models.CharField(max_length=50, blank=True)
+  email = models.EmailField(blank=True)
+  ```
+- **Fix**: Added to CompanySerializer `Meta.fields`
+- **Migration**: `0064_company_phone_email_contact_mobile.py`
+
+**Bug 4 — Contact Mobile/Preferred Contact Method Missing** (`crm_app/models.py`, `crm_app/serializers.py`, `ContactForm.tsx`):
+- **Problem**: ContactForm had `mobile` and `preferred_contact_method` fields with comments "Not in backend yet" — form showed them but didn't persist
+- **Fix**: Added to Contact model:
+  ```python
+  mobile = models.CharField(max_length=50, blank=True)
+  preferred_contact_method = models.CharField(max_length=20, choices=CONTACT_METHOD_CHOICES, blank=True)
+  ```
+- **Fix**: Added to ContactSerializer `Meta.fields`
+- **Fix**: Updated ContactForm to populate from `contact.mobile` and `contact.preferred_contact_method` in edit mode
+- **Fix**: ContactForm submit now sends `mobile` and `preferred_contact_method` in payload
+- **Migration**: `0064_company_phone_email_contact_mobile.py` (same migration as Bug 3)
+
+**Bug 5 — Invalid Invoice 'Pending' Status** (`types/index.ts`, `Invoices.tsx`, `InvoiceDetail.tsx`):
+- **Problem**: Frontend `InvoiceStatus` type included `'Pending'` which doesn't exist in backend Invoice model choices
+- **Backend valid statuses**: Draft, Sent, Paid, Overdue, Cancelled, Refunded (no Pending)
+- **Fix**: Removed `'Pending'` from InvoiceStatus type, Invoices.tsx filter list, InvoiceDetail.tsx status color map
+- **Fix**: Cleaned up unused `Pending` icon import
+
+**Bug 6 — Beat Breeze Service Type Matching** (`crm_app/views.py`, QuoteViewSet.perform_create):
+- **Problem**: Quote→Opportunity auto-creation searched for `'beat breeze'` (with space) in product_service, but some line items might have `'beatbreeze'` (no space) — failed to infer service_type
+- **Fix**: Added fallback matching:
+  ```python
+  has_beatbreeze = any('beat breeze' in (i.product_service or '').lower() for i in items)
+  # Fallback: also check without space
+  if not has_beatbreeze:
+      has_beatbreeze = any('beatbreeze' in (i.product_service or '').replace(' ', '').lower() for i in items)
+  ```
+
+**Files Modified**:
+- `crm_app/views.py` — N+1 fixes on 4 ViewSets + Beat Breeze matching fix
+- `crm_app/models.py` — Company phone/email + Contact mobile/preferred_contact_method
+- `crm_app/serializers.py` — Added new fields to Company and Contact serializers
+- `crm_app/migrations/0064_company_phone_email_contact_mobile.py` — New migration
+- `crm_app/static/crm_app/images/bmasia_logo.png` — Restored from git
+- `bmasia-crm-frontend/src/types/index.ts` — Removed Invoice 'Pending', updated Contact type
+- `bmasia-crm-frontend/src/components/ContactForm.tsx` — Now persists mobile/preferred_contact_method
+- `bmasia-crm-frontend/src/pages/Invoices.tsx` — Removed Pending filter option
+- `bmasia-crm-frontend/src/components/InvoiceDetail.tsx` — Removed Pending from color map
+
+**Known Audit Items (Not Fixed — Lower Priority)**:
+- Contact `contact_type` dropdown — form only exposes "Decision Maker" via checkbox, not full type list
+- Contact name split logic — fails for multi-part international names (e.g., "María José García López")
+- Company `location_count`/`music_zone_count` — not exposed in CompanyForm
+- Company `current_plan` field — unused, could be removed
+- No circular reference validation on Company `parent_company`
+- Quote status transitions — no validation preventing invalid transitions (e.g., Accepted→Draft)
+- Invoice number generated client-side (clock skew/collision risk)
+- InvoiceLineItem missing `product_service` field (only has `description`)
+- Contract end_date > start_date not validated on backend
+- File size limits not enforced on document uploads
+
+---
+
+### Feb 11, 2026 - ContractForm UI Cleanup & Line Items → PDF
+
+**Problem**: ContractForm was cluttered with redundant fields and sections. Line items existed in the form but weren't connected to the PDF, resulting in generic contract language instead of itemized pricing.
+
+**1. Declutter Line Items Table** (`ContractForm.tsx`):
+- Widened dialog from `maxWidth="md"` (960px) to `maxWidth="lg"` (1280px) — matches InvoiceForm
+- Removed Discount % column from line items table (8→7 columns: Product/Service, Description, Qty, Unit Price, Tax %, Line Total, Actions)
+- Removed Zone Pricing section entirely (redundant with line items for mixed Soundtrack/Beat Breeze pricing)
+- Fixed spinner arrows on Financial Terms Discount % field
+- When importing from quote, discount is folded into unit price (e.g., $14K at 10% off → $12,600 at 0% discount)
+
+**2. Connect Line Items to PDF + Auto-Calculate Value**:
+- Frontend auto-sets contract value from line items total on save
+- Backend serializer (`ContractSerializer.create/update`) auto-sums `line_items.line_total` → `contract.value`, recalculates tax fields
+- Contract PDF shows line items breakdown when contract has `line_items` array:
+  ```
+  "The services shall be provided at the following rates:
+  - 2× Soundtrack Your Brand @ THB 14,000.00 = THB 28,000.00
+  - 1× Windows Mini PC @ THB 5,000.00 = THB 5,000.00"
+  ```
+- Legacy contracts without line items fall back to "X zones for Y per month" format (backward compatible)
+- Fixed duplicate "THB THB" bug in PDF total cost clause (was in hardcoded zone pricing clause)
+
+**3. Simplify Financial Terms → Payment & Billing** (`ContractForm.tsx`):
+- Removed Contract Value field (auto-calculated from line items)
+- Removed Tax Calculation display (moved to Line Items summary)
+- Removed Discount % field (deprecated in favor of per-item discounts)
+- Renamed section "Financial Terms" → "Payment & Billing" (Currency + Payment Terms + Billing Frequency only)
+- Line Items summary now shows Subtotal + VAT (for THB) + Total
+- Payment & Billing section order: Currency, Payment Terms, Billing Frequency
+
+**Files Modified**:
+- `bmasia-crm-frontend/src/components/ContractForm.tsx` — all UI changes
+- `crm_app/serializers.py` — auto-sum line items in create/update
+- `crm_app/views.py` — PDF line items breakdown in hardcoded clause (~line 1445)
+
+**No new models/migrations** — builds on existing `ContractLineItem` model from earlier Feb 11 work.
+
+---
+
+### Feb 11, 2026 - Contract Document Cross-Leak Fix
+
+**Problem**: When viewing "Bright Ears" contract documents, Shangri-La documents appeared in the list. Root cause: `ContractDocumentViewSet` had **no `get_queryset()` override** — returned ALL documents from the database regardless of which contract was being viewed.
+
+**Fix** (`crm_app/views.py`):
+- Added `get_queryset()` override to `ContractDocumentViewSet`:
+  ```python
+  def get_queryset(self):
+      queryset = ContractDocument.objects.all()
+      contract_id = self.request.query_params.get('contract')
+      if contract_id:
+          queryset = queryset.filter(contract_id=contract_id)
+      return queryset
+  ```
+- Added client-side safety filter in `ContractDocuments.tsx`:
+  ```typescript
+  .filter(doc => doc.contract === contractId)
+  ```
+
+**Pattern**: This is the standard Django REST Framework pattern for filtering resources by parent ID. Without it, all related objects leak across parent boundaries.
+
+**Testing**: Verified Bright Ears now shows only its own documents (0 documents), Shangri-La shows only its documents (2 PDFs).
+
+---
+
+### Feb 11, 2026 - Contract Line Items + Quote→Contract→Invoice Data Chain
+
+**Feature Overview**: Complete data flow from Quote → Contract → Invoice with persistent line items and source tracking.
+
+**Backend — ContractLineItem Model** (`crm_app/models.py`):
+- New model mirroring `QuoteLineItem` and `InvoiceLineItem`: FK to Contract, product_service, description, quantity, unit_price, discount_percentage, tax_rate, line_total (auto-calculated)
+- Migration: `0063_contract_line_items.py`
+- Admin: `ContractLineItemInline` on ContractAdmin
+
+**Backend — Contract + Quote Linking** (`crm_app/models.py`):
+- New `quote` FK on Contract (ForeignKey, optional, null=True, blank=True, on_delete=SET_NULL)
+- Allows contract to track its source quote for audit trail
+- Migration: `0063_contract_line_items.py` (same as above)
+
+**Serializer** (`crm_app/serializers.py`):
+- New `ContractLineItemSerializer` (same pattern as `QuoteLineItemSerializer`)
+- `ContractSerializer` updated: nested `line_items` field, `quote`, `quote_number` (SerializerMethodField)
+- `create()` and `update()` overrides for nested writes (delete-recreate pattern, like QuoteSerializer)
+
+**Frontend — ContractForm** (`ContractForm.tsx`):
+- New **Line Items section**: Product/Service dropdown, Description, Quantity, Unit Price, Discount %, Tax %, Line Total
+- Product options: Soundtrack Your Brand, Beat Breeze, Windows Mini PC (Thailand only), Soundtrack Player, Custom (same PRODUCT_OPTIONS as QuoteForm)
+- **Source Quote dropdown**: loads Accepted quotes filtered by selected company, auto-fills line items + currency + payment terms
+- Smart defaults: 7% VAT for THB, 0% for USD (mirrors QuoteForm pattern)
+- Contract value auto-calculated from line items total
+- Same UX patterns as InvoiceForm: thousand separators, no spinners, multiline descriptions
+
+**Frontend — InvoiceForm Improvements** (`InvoiceForm.tsx`):
+- `handleContractChange()` now prioritizes contract `line_items` when available (if contract has line_items array)
+- Falls back to zone-based computation for legacy contracts (backward compatible)
+- Existing logic preserved: if no contract.line_items, uses zones → calculates qty + unit_price
+
+**Types** (`types/index.ts`):
+- Added `ContractLineItem` interface: product_service, description, quantity, unit_price, discount_percentage, tax_rate, line_total
+- Updated `Contract` interface: added `line_items`, `quote` (optional), `quote_number` (optional)
+
+**Backward Compatibility**:
+- Quote FK is optional (null=True) — existing contracts work fine
+- Line items array defaults to empty — API returns `[]` for legacy contracts
+- InvoiceForm still supports zone-based computation when contract has no line items
+- Admin works with or without line items populated
+
+**Migration**: `0063_contract_line_items.py`
+
+**Key Design Decisions**:
+1. Quote FK is optional — not all contracts come from quotes (existing contracts, manual quotes, etc.)
+2. Line items nested in serializer (create/update handles them) — same pattern as Quote/Invoice
+3. Product options inherited from QuoteForm — consistency across Quote→Contract→Invoice
+4. VAT logic mirrors QuoteForm — entity-driven (company billing_entity)
+5. Contract value auto-calculated from line_items.sum(line_total) — single source of truth
+
+---
+
+### Feb 11, 2026 - Invoice Auto-Fill from Contract: Zones, Service Period, Qty & UI Polish
+
+**Zone Description Auto-Fill** (`InvoiceForm.tsx` → `handleContractChange`):
+- Line item description now includes zone names grouped by platform when contract selected
+- Format: `CNT-2025-001 - Annual Subscription\nSoundtrack: Pool Bar, Rooftop\nBeat Breeze: Gym, Lobby`
+- Data source: `selectedContract.contract_zones` (already in ContractSerializer, filtered for `is_active`)
+- PDF renders `\n` → `<br/>` for multi-line display in Description column
+
+**Service Period Fields**:
+- New `service_period_start` + `service_period_end` DateFields on Invoice model (optional, informational)
+- Migration: `0062_invoice_service_period.py`
+- Auto-filled from `contract.start_date` / `contract.end_date` when contract selected
+- Shown on PDF as bold "**Service Period:** February 01, 2026 – January 31, 2027" below totals
+- Industry standard for subscription invoicing (answers "what period does this payment cover?")
+
+**Quantity = Zone Count** (`InvoiceForm.tsx`):
+- Qty auto-fills with number of active zones (was always 1)
+- Unit price calculated as per-zone rate: `contractValue / zoneCount`
+- User can override both in the form
+
+**PDF Cleanup**:
+- Removed "Service: N/A" line — only shows when `contract.service_type` has a value
+- Service period rendered in standard body text (was subtle gray 9pt)
+
+**Line Items UI Fixes** (`InvoiceForm.tsx`):
+- **NaN Total fix**: API returns `line_total`, frontend uses `total` — `populateForm` now maps between them
+- **Description**: multiline TextField (minRows=1, maxRows=3) shows zone details
+- **Quantity**: integer step (no decimals), `parseInt` instead of `parseFloat`
+- **Column widths**: adjusted to prevent truncation (Qty 80, Unit Price 140, Total 140)
+- **`total_amount` rounding**: added `Math.round(x * 100) / 100` (was missing, caused DRF rejection)
+
+**Section Rename**: "Additional Information" → "Payment Terms & Notes" in InvoiceForm
+
+---
+
 ### Feb 10, 2026 - Invoice Line Items Persistence, PDF Fixes & Edit Fix
 
 **3 Issues Found by User**:
