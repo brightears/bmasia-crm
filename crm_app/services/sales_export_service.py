@@ -22,6 +22,15 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+# Register Unicode-capable fonts (DejaVu ships with ReportLab)
+try:
+    pdfmetrics.getFont('DejaVuSans')
+except KeyError:
+    pdfmetrics.registerFont(TTFont('DejaVuSans', 'DejaVuSans.ttf'))
+    pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', 'DejaVuSans-Bold.ttf'))
 
 import os
 from django.conf import settings
@@ -60,7 +69,7 @@ class SalesExportService:
             textColor=colors.HexColor('#FFA500'),
             spaceAfter=12,
             alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         self.heading_style = ParagraphStyle(
@@ -70,7 +79,7 @@ class SalesExportService:
             textColor=colors.HexColor('#424242'),
             spaceAfter=8,
             spaceBefore=12,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         self.body_style = ParagraphStyle(
@@ -160,12 +169,12 @@ class SalesExportService:
             # Header row - orange background
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
             ('TOPPADDING', (0, 0), (-1, 0), 8),
             # Data rows
-            ('FONT', (0, 1), (-1, -1), 'Helvetica', 8),
+            ('FONT', (0, 1), (-1, -1), 'DejaVuSans', 8),
             ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#424242')),
             ('TOPPADDING', (0, 1), (-1, -1), 4),
             ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
@@ -220,9 +229,9 @@ class SalesExportService:
         summary_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#424242')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 10),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONT', (0, 1), (-1, 1), 'Helvetica-Bold', 14),
+            ('FONT', (0, 1), (-1, 1), 'DejaVuSans-Bold', 14),
             ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#FFA500')),
             ('TOPPADDING', (0, 0), (-1, -1), 8),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
@@ -352,9 +361,9 @@ class SalesExportService:
         kpi_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#424242')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 10),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONT', (0, 1), (-1, 1), 'Helvetica-Bold', 16),
+            ('FONT', (0, 1), (-1, 1), 'DejaVuSans-Bold', 16),
             ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#FFA500')),
             ('TOPPADDING', (0, 0), (-1, -1), 10),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
@@ -402,7 +411,7 @@ class SalesExportService:
         style.add('ALIGN', (1, 1), (-1, -1), 'RIGHT')
         style.add('ALIGN', (0, 1), (0, -1), 'LEFT')
         # Bold totals row
-        style.add('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 9)
+        style.add('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 9)
         style.add('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#fff3e0'))
         period_table.setStyle(style)
         elements.append(period_table)

@@ -23,6 +23,13 @@ import os
 import re
 import uuid
 
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+# Register Unicode-capable fonts (DejaVu ships with ReportLab)
+pdfmetrics.registerFont(TTFont('DejaVuSans', 'DejaVuSans.ttf'))
+pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', 'DejaVuSans-Bold.ttf'))
+
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice, InvoiceLineItem, ContractZone,
@@ -79,19 +86,25 @@ def convert_uuids_to_strings(obj):
 def format_address_multiline(company):
     """Format company address as multi-line HTML for PDF BILL TO sections.
     Builds line-by-line from individual fields to avoid splitting commas within values.
-    Filters out 'Other' country (dropdown catch-all value)."""
+    Filters out 'Other' country (dropdown catch-all value).
+    Deduplicates: skips city/state/postal/country if already in address lines."""
     if not company:
         return ''
-    parts = [
-        company.address_line1,
-        company.address_line2,
-        company.city,
-        company.state,
-        company.postal_code,
-    ]
-    if company.country and company.country != 'Other':
-        parts.append(company.country)
-    return '<br/>'.join(filter(None, parts))
+    lines = []
+    addr_text = ' '.join(filter(None, [company.address_line1, company.address_line2])).lower()
+    if company.address_line1:
+        lines.append(company.address_line1)
+    if company.address_line2:
+        lines.append(company.address_line2)
+    if company.city and company.city.lower() not in addr_text:
+        lines.append(company.city)
+    if company.state and company.state.lower() not in addr_text:
+        lines.append(company.state)
+    if company.postal_code and company.postal_code not in addr_text:
+        lines.append(company.postal_code)
+    if company.country and company.country != 'Other' and company.country.lower() not in addr_text:
+        lines.append(company.country)
+    return '<br/>'.join(lines)
 
 
 class BaseModelViewSet(viewsets.ModelViewSet):
@@ -1304,7 +1317,7 @@ class ContractViewSet(BaseModelViewSet):
         has_pricing = contract.show_zone_pricing_detail and contract.price_per_zone
 
         # Style for property name (enables word-wrap for long names)
-        prop_style = ParagraphStyle('ZoneProp', fontName='Helvetica', fontSize=9, textColor=colors.HexColor('#424242'))
+        prop_style = ParagraphStyle('ZoneProp', fontName='DejaVuSans', fontSize=9, textColor=colors.HexColor('#424242'))
 
         # Build header
         zone_header = ['Property', 'Service', 'Zone']
@@ -1357,9 +1370,9 @@ class ContractViewSet(BaseModelViewSet):
             # Header row - orange accent
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
             # Data rows
-            ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+            ('FONT', (0, 1), (-1, -1), 'DejaVuSans', 9),
             ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#424242')),
             ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#fafafa')),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
@@ -1398,9 +1411,9 @@ class ContractViewSet(BaseModelViewSet):
 
         # Text styles for signature blocks
         sig_line_style = ParagraphStyle('SigLine', alignment=TA_CENTER, fontSize=10)
-        sig_name_style = ParagraphStyle('SigName', alignment=TA_CENTER, fontSize=11, fontName='Helvetica-Bold')
+        sig_name_style = ParagraphStyle('SigName', alignment=TA_CENTER, fontSize=11, fontName='DejaVuSans-Bold')
         sig_title_style = ParagraphStyle('SigTitle', alignment=TA_CENTER, fontSize=10)
-        sig_company_style = ParagraphStyle('SigCompany', alignment=TA_CENTER, fontSize=10, fontName='Helvetica-Bold')
+        sig_company_style = ParagraphStyle('SigCompany', alignment=TA_CENTER, fontSize=10, fontName='DejaVuSans-Bold')
         sig_date_style = ParagraphStyle('SigDate', alignment=TA_CENTER, fontSize=9)
 
         # Get signatory info
@@ -1561,7 +1574,7 @@ class ContractViewSet(BaseModelViewSet):
             fontSize=24,
             textColor=colors.HexColor('#424242'),
             spaceAfter=12,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         heading_style = ParagraphStyle(
@@ -1571,7 +1584,7 @@ class ContractViewSet(BaseModelViewSet):
             textColor=colors.HexColor('#424242'),
             spaceAfter=8,
             spaceBefore=8,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         body_style = ParagraphStyle(
@@ -1639,7 +1652,7 @@ class ContractViewSet(BaseModelViewSet):
             textColor=colors.HexColor('#FFA500'),
             spaceAfter=20,
             alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
         elements.append(Paragraph("PRINCIPAL TERMS", contract_title_style))
 
@@ -1657,13 +1670,13 @@ class ContractViewSet(BaseModelViewSet):
             # Header row - orange background
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 10),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
             ('TOPPADDING', (0, 0), (-1, 0), 10),
 
             # Data row
-            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
+            ('FONT', (0, 1), (-1, 1), 'DejaVuSans', 10),
             ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#424242')),
             ('ALIGN', (0, 1), (-1, 1), 'CENTER'),
             ('TOPPADDING', (0, 1), (-1, 1), 10),
@@ -1682,7 +1695,7 @@ class ContractViewSet(BaseModelViewSet):
             fontSize=8,
             textColor=colors.HexColor('#888888'),
             spaceAfter=4,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         from_content_style = ParagraphStyle(
@@ -2057,7 +2070,7 @@ and<br/><br/>
                 fontSize=8,
                 textColor=colors.HexColor('#888888'),
                 spaceAfter=4,
-                fontName='Helvetica-Bold'
+                fontName='DejaVuSans-Bold'
             )
 
             bank_content_style = ParagraphStyle(
@@ -2080,14 +2093,14 @@ and<br/><br/>
                 # Header row - subtle gray
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f0f0f0')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#666666')),
-                ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 8),
+                ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 8),
                 ('ALIGN', (0, 0), (-1, 0), 'LEFT'),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
                 ('TOPPADDING', (0, 0), (-1, 0), 6),
 
                 # Data row
                 ('BACKGROUND', (0, 1), (-1, 1), colors.HexColor('#fafafa')),
-                ('FONT', (0, 1), (-1, 1), 'Helvetica', 8),
+                ('FONT', (0, 1), (-1, 1), 'DejaVuSans', 8),
                 ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#333333')),
                 ('ALIGN', (0, 1), (-1, 1), 'LEFT'),
                 ('TOPPADDING', (0, 1), (-1, 1), 8),
@@ -2238,9 +2251,9 @@ and<br/><br/>
 
         # Text styles
         sig_line_style = ParagraphStyle('SigLine', alignment=TA_CENTER, fontSize=10)
-        sig_name_style = ParagraphStyle('SigName', alignment=TA_CENTER, fontSize=11, fontName='Helvetica-Bold')
+        sig_name_style = ParagraphStyle('SigName', alignment=TA_CENTER, fontSize=11, fontName='DejaVuSans-Bold')
         sig_title_style = ParagraphStyle('SigTitle', alignment=TA_CENTER, fontSize=10)
-        sig_company_style = ParagraphStyle('SigCompany', alignment=TA_CENTER, fontSize=10, fontName='Helvetica-Bold')
+        sig_company_style = ParagraphStyle('SigCompany', alignment=TA_CENTER, fontSize=10, fontName='DejaVuSans-Bold')
         sig_date_style = ParagraphStyle('SigDate', alignment=TA_CENTER, fontSize=9)
 
         # BMAsia signature block - signature and stamp side by side, overlapping line/text
@@ -2386,7 +2399,7 @@ and<br/><br/>
             fontSize=24,
             textColor=colors.HexColor('#424242'),
             spaceAfter=12,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         heading_style = ParagraphStyle(
@@ -2396,7 +2409,7 @@ and<br/><br/>
             textColor=colors.HexColor('#424242'),
             spaceAfter=8,
             spaceBefore=8,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         body_style = ParagraphStyle(
@@ -2440,7 +2453,7 @@ and<br/><br/>
             textColor=colors.HexColor('#FFA500'),
             spaceAfter=20,
             alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
         elements.append(Paragraph("MASTER SERVICE AGREEMENT", master_title_style))
 
@@ -2457,11 +2470,11 @@ and<br/><br/>
         metadata_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 10),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
             ('TOPPADDING', (0, 0), (-1, 0), 10),
-            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
+            ('FONT', (0, 1), (-1, 1), 'DejaVuSans', 10),
             ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#424242')),
             ('ALIGN', (0, 1), (-1, 1), 'CENTER'),
             ('TOPPADDING', (0, 1), (-1, 1), 10),
@@ -2536,8 +2549,8 @@ and<br/><br/>
             pa_table = Table(pa_data, colWidths=[1.7*inch, 2.2*inch, 1.2*inch, 1.8*inch])
             pa_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f5f5f5')),
-                ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
-                ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+                ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 10),
+                ('FONT', (0, 1), (-1, -1), 'DejaVuSans', 9),
                 ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
                 ('TOPPADDING', (0, 0), (-1, -1), 6),
@@ -2568,11 +2581,11 @@ and<br/><br/>
 
         signature_table = Table(signature_data, colWidths=[3.45*inch, 3.45*inch])
         signature_table.setStyle(TableStyle([
-            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
-            ('FONT', (0, 2), (-1, 2), 'Helvetica-Bold', 11),
-            ('FONT', (0, 3), (-1, 3), 'Helvetica', 10),
-            ('FONT', (0, 4), (-1, 4), 'Helvetica-Bold', 10),
-            ('FONT', (0, 6), (-1, 6), 'Helvetica', 9),
+            ('FONT', (0, 1), (-1, 1), 'DejaVuSans', 10),
+            ('FONT', (0, 2), (-1, 2), 'DejaVuSans-Bold', 11),
+            ('FONT', (0, 3), (-1, 3), 'DejaVuSans', 10),
+            ('FONT', (0, 4), (-1, 4), 'DejaVuSans-Bold', 10),
+            ('FONT', (0, 6), (-1, 6), 'DejaVuSans', 9),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -2672,7 +2685,7 @@ and<br/><br/>
             fontSize=24,
             textColor=colors.HexColor('#424242'),
             spaceAfter=12,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         heading_style = ParagraphStyle(
@@ -2682,7 +2695,7 @@ and<br/><br/>
             textColor=colors.HexColor('#424242'),
             spaceAfter=8,
             spaceBefore=8,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         body_style = ParagraphStyle(
@@ -2726,7 +2739,7 @@ and<br/><br/>
             textColor=colors.HexColor('#FFA500'),
             spaceAfter=20,
             alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
         elements.append(Paragraph("PARTICIPATION AGREEMENT", participation_title_style))
 
@@ -2743,11 +2756,11 @@ and<br/><br/>
         metadata_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 10),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
             ('TOPPADDING', (0, 0), (-1, 0), 10),
-            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
+            ('FONT', (0, 1), (-1, 1), 'DejaVuSans', 10),
             ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#424242')),
             ('ALIGN', (0, 1), (-1, 1), 'CENTER'),
             ('TOPPADDING', (0, 1), (-1, 1), 10),
@@ -2816,8 +2829,8 @@ and<br/><br/>
             zone_table = Table(zone_data, colWidths=[3*inch, 2*inch, 1.9*inch])
             zone_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f5f5f5')),
-                ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
-                ('FONT', (0, 1), (-1, -1), 'Helvetica', 10),
+                ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 10),
+                ('FONT', (0, 1), (-1, -1), 'DejaVuSans', 10),
                 ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
                 ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
                 ('TOPPADDING', (0, 0), (-1, -1), 6),
@@ -2847,8 +2860,8 @@ and<br/><br/>
 
         details_table = Table(details_data, colWidths=[3.45*inch, 3.45*inch])
         details_table.setStyle(TableStyle([
-            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 10),
-            ('FONT', (1, 0), (1, -1), 'Helvetica', 10),
+            ('FONT', (0, 0), (0, -1), 'DejaVuSans-Bold', 10),
+            ('FONT', (1, 0), (1, -1), 'DejaVuSans', 10),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (1, -1), 'LEFT'),
@@ -2887,11 +2900,11 @@ and<br/><br/>
 
         signature_table = Table(signature_data, colWidths=[3.45*inch, 3.45*inch])
         signature_table.setStyle(TableStyle([
-            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
-            ('FONT', (0, 2), (-1, 2), 'Helvetica-Bold', 11),
-            ('FONT', (0, 3), (-1, 3), 'Helvetica', 10),
-            ('FONT', (0, 4), (-1, 4), 'Helvetica-Bold', 10),
-            ('FONT', (0, 6), (-1, 6), 'Helvetica', 9),
+            ('FONT', (0, 1), (-1, 1), 'DejaVuSans', 10),
+            ('FONT', (0, 2), (-1, 2), 'DejaVuSans-Bold', 11),
+            ('FONT', (0, 3), (-1, 3), 'DejaVuSans', 10),
+            ('FONT', (0, 4), (-1, 4), 'DejaVuSans-Bold', 10),
+            ('FONT', (0, 6), (-1, 6), 'DejaVuSans', 9),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -2987,7 +3000,7 @@ and<br/><br/>
             spaceAfter=6,
             spaceBefore=6,
             alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         heading_style = ParagraphStyle(
@@ -2997,7 +3010,7 @@ and<br/><br/>
             textColor=colors.black,
             spaceAfter=6,
             spaceBefore=12,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         body_style = ParagraphStyle(
@@ -3038,9 +3051,9 @@ and<br/><br/>
         info_table = Table(info_data, colWidths=[2.2*inch, 4.3*inch])
         info_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d9d9d9')),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
-            ('FONT', (0, 1), (0, -1), 'Helvetica-Bold', 9),
-            ('FONT', (1, 1), (1, -1), 'Helvetica', 9),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
+            ('FONT', (0, 1), (0, -1), 'DejaVuSans-Bold', 9),
+            ('FONT', (1, 1), (1, -1), 'DejaVuSans', 9),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
             ('ALIGN', (0, 0), (-1, 0), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -3105,8 +3118,8 @@ and<br/><br/>
         deliverables_table = Table(deliverables_data, colWidths=[3.25*inch, 3.25*inch])
         deliverables_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d9d9d9')),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
-            ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
+            ('FONT', (0, 1), (-1, -1), 'DejaVuSans', 9),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -3213,8 +3226,8 @@ and<br/><br/>
         price_table = Table(price_data, colWidths=[2.6*inch, 1*inch, 1.5*inch, 1.4*inch])
         price_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d9d9d9')),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
-            ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
+            ('FONT', (0, 1), (-1, -1), 'DejaVuSans', 9),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
@@ -3265,12 +3278,12 @@ and<br/><br/>
 
         signature_table = Table(signature_data, colWidths=[3.25*inch, 3.25*inch])
         signature_table.setStyle(TableStyle([
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
-            ('FONT', (0, 1), (-1, 2), 'Helvetica', 10),
-            ('FONT', (0, 3), (-1, 3), 'Helvetica-Bold', 10),
-            ('FONT', (0, 4), (-1, 4), 'Helvetica', 9),
-            ('FONT', (0, 5), (-1, 5), 'Helvetica-Bold', 9),
-            ('FONT', (0, 7), (-1, 7), 'Helvetica', 9),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 10),
+            ('FONT', (0, 1), (-1, 2), 'DejaVuSans', 10),
+            ('FONT', (0, 3), (-1, 3), 'DejaVuSans-Bold', 10),
+            ('FONT', (0, 4), (-1, 4), 'DejaVuSans', 9),
+            ('FONT', (0, 5), (-1, 5), 'DejaVuSans-Bold', 9),
+            ('FONT', (0, 7), (-1, 7), 'DejaVuSans', 9),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
             ('ALIGN', (0, 0), (-1, 0), 'LEFT'),
             ('ALIGN', (0, 1), (-1, -1), 'CENTER'),
@@ -3354,7 +3367,7 @@ and<br/><br/>
             spaceAfter=12,
             spaceBefore=6,
             alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         heading_style = ParagraphStyle(
@@ -3364,7 +3377,7 @@ and<br/><br/>
             textColor=colors.black,
             spaceAfter=4,
             spaceBefore=10,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         body_style = ParagraphStyle(
@@ -3547,9 +3560,9 @@ and<br/><br/>
 
         signature_table = Table(signature_data, colWidths=[3.25*inch, 3.25*inch])
         signature_table.setStyle(TableStyle([
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
-            ('FONT', (0, 1), (-1, 1), 'Helvetica-Bold', 9),
-            ('FONT', (0, 2), (-1, -1), 'Helvetica', 9),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 10),
+            ('FONT', (0, 1), (-1, 1), 'DejaVuSans-Bold', 9),
+            ('FONT', (0, 2), (-1, -1), 'DejaVuSans', 9),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
             ('ALIGN', (0, 0), (-1, 0), 'LEFT'),
             ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
@@ -3975,10 +3988,10 @@ class InvoiceViewSet(BaseModelViewSet):
             canvas_obj.setLineWidth(1)
             canvas_obj.line(doc_obj.leftMargin, 0.65*inch, page_width - doc_obj.rightMargin, 0.65*inch)
             # Footer text
-            canvas_obj.setFont('Helvetica-Bold', 8)
+            canvas_obj.setFont('DejaVuSans-Bold', 8)
             canvas_obj.setFillColor(colors.HexColor('#888888'))
             canvas_obj.drawCentredString(page_width / 2, 0.48*inch, entity_name)
-            canvas_obj.setFont('Helvetica', 8)
+            canvas_obj.setFont('DejaVuSans', 8)
             canvas_obj.drawCentredString(page_width / 2, 0.33*inch, f"{entity_address} | Phone: {entity_phone}")
             canvas_obj.restoreState()
 
@@ -3993,7 +4006,7 @@ class InvoiceViewSet(BaseModelViewSet):
             fontSize=24,
             textColor=colors.HexColor('#424242'),
             spaceAfter=12,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         heading_style = ParagraphStyle(
@@ -4003,7 +4016,7 @@ class InvoiceViewSet(BaseModelViewSet):
             textColor=colors.HexColor('#424242'),
             spaceAfter=8,
             spaceBefore=8,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         body_style = ParagraphStyle(
@@ -4049,7 +4062,7 @@ class InvoiceViewSet(BaseModelViewSet):
             textColor=colors.HexColor('#FFA500'),
             spaceAfter=20,
             alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
         elements.append(Paragraph("INVOICE", invoice_title_style))
 
@@ -4067,13 +4080,13 @@ class InvoiceViewSet(BaseModelViewSet):
             # Header row - orange background
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 10),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
             ('TOPPADDING', (0, 0), (-1, 0), 10),
 
             # Data row
-            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
+            ('FONT', (0, 1), (-1, 1), 'DejaVuSans', 10),
             ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#424242')),
             ('ALIGN', (0, 1), (-1, 1), 'CENTER'),
             ('TOPPADDING', (0, 1), (-1, 1), 10),
@@ -4092,7 +4105,7 @@ class InvoiceViewSet(BaseModelViewSet):
             fontSize=8,
             textColor=colors.HexColor('#888888'),
             spaceAfter=4,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         from_content_style = ParagraphStyle(
@@ -4106,7 +4119,7 @@ class InvoiceViewSet(BaseModelViewSet):
         # Create card-style FROM section
         from_lines = [f'<b>{entity_name}</b>']
         if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
-            from_lines.append('Head Office')
+            from_lines.append('สำนักงานใหญ่ (Head Office)')
         from_lines.append(entity_address)
         from_lines.append(f'Phone: {entity_phone}')
         if entity_tax:
@@ -4238,12 +4251,12 @@ class InvoiceViewSet(BaseModelViewSet):
             # Header row
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 10),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
 
             # Data rows
-            ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+            ('FONT', (0, 1), (-1, -1), 'DejaVuSans', 9),
             ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#212121')),
             ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
             ('ALIGN', (0, 1), (0, -1), 'LEFT'),
@@ -4292,12 +4305,12 @@ class InvoiceViewSet(BaseModelViewSet):
         totals_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-            ('FONT', (0, 0), (-1, -1), 'Helvetica', 10),
+            ('FONT', (0, 0), (-1, -1), 'DejaVuSans', 10),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
             ('TOPPADDING', (0, 0), (-1, -1), 6),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             # Bold the last row (Total)
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 12),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 12),
             ('LINEABOVE', (0, -1), (-1, -1), 1, colors.HexColor('#FFA500')),
         ]))
 
@@ -4328,8 +4341,8 @@ class InvoiceViewSet(BaseModelViewSet):
         bank_table = Table(bank_data, colWidths=[2*inch, 4.9*inch])
         bank_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f5f5f5')),
-            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 10),
-            ('FONT', (1, 0), (1, -1), 'Helvetica', 10),
+            ('FONT', (0, 0), (0, -1), 'DejaVuSans-Bold', 10),
+            ('FONT', (1, 0), (1, -1), 'DejaVuSans', 10),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (1, -1), 'LEFT'),
@@ -4664,7 +4677,7 @@ class QuoteViewSet(BaseModelViewSet):
             fontSize=22,
             textColor=colors.HexColor('#424242'),
             spaceAfter=8,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         heading_style = ParagraphStyle(
@@ -4674,7 +4687,7 @@ class QuoteViewSet(BaseModelViewSet):
             textColor=colors.HexColor('#424242'),
             spaceAfter=4,
             spaceBefore=4,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         body_style = ParagraphStyle(
@@ -4728,7 +4741,7 @@ class QuoteViewSet(BaseModelViewSet):
             textColor=colors.HexColor('#FFA500'),
             spaceAfter=10,
             alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
         elements.append(Paragraph("QUOTATION", quote_title_style))
 
@@ -4745,13 +4758,13 @@ class QuoteViewSet(BaseModelViewSet):
             # Header row - orange background
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
             ('TOPPADDING', (0, 0), (-1, 0), 4),
 
             # Data row
-            ('FONT', (0, 1), (-1, 1), 'Helvetica', 10),
+            ('FONT', (0, 1), (-1, 1), 'DejaVuSans', 10),
             ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#424242')),
             ('ALIGN', (0, 1), (-1, 1), 'CENTER'),
             ('TOPPADDING', (0, 1), (-1, 1), 4),
@@ -4770,7 +4783,7 @@ class QuoteViewSet(BaseModelViewSet):
             fontSize=8,
             textColor=colors.HexColor('#888888'),
             spaceAfter=4,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         from_bill_data = [
@@ -4847,13 +4860,13 @@ class QuoteViewSet(BaseModelViewSet):
                 # Header row
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 9),
+                ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
                 ('TOPPADDING', (0, 0), (-1, 0), 6),
 
                 # Data rows
-                ('FONT', (0, 1), (-1, -1), 'Helvetica', 8),
+                ('FONT', (0, 1), (-1, -1), 'DejaVuSans', 8),
                 ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#212121')),
                 ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
                 ('ALIGN', (0, 1), (0, -1), 'LEFT'),
@@ -4908,12 +4921,12 @@ class QuoteViewSet(BaseModelViewSet):
         totals_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-            ('FONT', (0, 0), (-1, -1), 'Helvetica', 10),
+            ('FONT', (0, 0), (-1, -1), 'DejaVuSans', 10),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
             ('TOPPADDING', (0, 0), (-1, -1), 6),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             # Bold the last row (Total)
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 12),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 12),
             ('LINEABOVE', (0, -1), (-1, -1), 1, colors.HexColor('#FFA500')),
         ]))
 
@@ -4931,7 +4944,7 @@ class QuoteViewSet(BaseModelViewSet):
             textColor=colors.HexColor('#888888'),
             spaceAfter=4,
             spaceBefore=0,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
         elements.append(Paragraph("Payment Information", bank_heading_style))
 
@@ -4945,8 +4958,8 @@ class QuoteViewSet(BaseModelViewSet):
         bank_table = Table(bank_data, colWidths=[1.5*inch, 5.4*inch])
         bank_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fafafa')),
-            ('FONT', (0, 0), (0, -1), 'Helvetica-Bold', 8),
-            ('FONT', (1, 0), (1, -1), 'Helvetica', 8),
+            ('FONT', (0, 0), (0, -1), 'DejaVuSans-Bold', 8),
+            ('FONT', (1, 0), (1, -1), 'DejaVuSans', 8),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#555555')),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (1, -1), 'LEFT'),

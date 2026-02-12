@@ -892,7 +892,7 @@ class EmailService:
                     textColor=colors.HexColor('#FFA500'),
                     spaceAfter=20,
                     alignment=TA_CENTER,
-                    fontName='Helvetica-Bold'
+                    fontName='DejaVuSans-Bold'
                 )
                 elements.append(Paragraph("CONTRACT AGREEMENT", contract_title_style))
 

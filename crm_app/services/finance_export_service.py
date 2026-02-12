@@ -33,6 +33,15 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+# Register Unicode-capable fonts (DejaVu ships with ReportLab)
+try:
+    pdfmetrics.getFont('DejaVuSans')
+except KeyError:
+    pdfmetrics.registerFont(TTFont('DejaVuSans', 'DejaVuSans.ttf'))
+    pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', 'DejaVuSans-Bold.ttf'))
 
 # openpyxl imports for Excel
 from openpyxl import Workbook
@@ -97,7 +106,7 @@ class FinanceExportService:
             textColor=colors.HexColor('#FFA500'),
             spaceAfter=12,
             alignment=TA_CENTER,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         # Report heading style
@@ -108,7 +117,7 @@ class FinanceExportService:
             textColor=colors.HexColor('#424242'),
             spaceAfter=8,
             spaceBefore=12,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         # Section heading style
@@ -119,7 +128,7 @@ class FinanceExportService:
             textColor=colors.HexColor('#424242'),
             spaceAfter=4,
             spaceBefore=8,
-            fontName='Helvetica-Bold'
+            fontName='DejaVuSans-Bold'
         )
 
         # Body text style
@@ -228,13 +237,13 @@ class FinanceExportService:
             # Header row - orange background
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 10),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
             ('TOPPADDING', (0, 0), (-1, 0), 8),
 
             # Data rows
-            ('FONT', (0, 1), (-1, -1), 'Helvetica', 9),
+            ('FONT', (0, 1), (-1, -1), 'DejaVuSans', 9),
             ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#424242')),
             ('ALIGN', (0, 1), (0, -1), 'LEFT'),
             ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
@@ -323,7 +332,7 @@ class FinanceExportService:
         revenue_table.setStyle(self._create_table_style())
         # Bold the total row
         revenue_table.setStyle(TableStyle([
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 10),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 10),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#fff3e0')),
         ]))
         elements.append(revenue_table)
@@ -344,7 +353,7 @@ class FinanceExportService:
         cogs_table = Table(cogs_data, colWidths=[5 * inch, 2 * inch])
         cogs_table.setStyle(self._create_table_style())
         cogs_table.setStyle(TableStyle([
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 10),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 10),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#fff3e0')),
         ]))
         elements.append(cogs_table)
@@ -379,7 +388,7 @@ class FinanceExportService:
         gna_table = Table(gna_data, colWidths=[5 * inch, 2 * inch])
         gna_table.setStyle(self._create_table_style())
         gna_table.setStyle(TableStyle([
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 9),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 9),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#f5f5f5')),
         ]))
         elements.append(gna_table)
@@ -399,7 +408,7 @@ class FinanceExportService:
         sm_table = Table(sm_data, colWidths=[5 * inch, 2 * inch])
         sm_table.setStyle(self._create_table_style())
         sm_table.setStyle(TableStyle([
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 9),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 9),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#f5f5f5')),
         ]))
         elements.append(sm_table)
@@ -433,7 +442,7 @@ class FinanceExportService:
 
         summary_table = Table(summary_data, colWidths=[3 * inch, 2.5 * inch, 1.5 * inch])
         summary_table.setStyle(TableStyle([
-            ('FONT', (0, 0), (-1, -1), 'Helvetica-Bold', 12),
+            ('FONT', (0, 0), (-1, -1), 'DejaVuSans-Bold', 12),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
             ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
@@ -750,7 +759,7 @@ class FinanceExportService:
         operating_table = Table(operating_data, colWidths=[5 * inch, 2 * inch])
         operating_table.setStyle(self._create_table_style())
         operating_table.setStyle(TableStyle([
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 10),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 10),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e3f2fd')),
         ]))
         elements.append(operating_table)
@@ -775,7 +784,7 @@ class FinanceExportService:
         investing_table = Table(investing_data, colWidths=[5 * inch, 2 * inch])
         investing_table.setStyle(self._create_table_style())
         investing_table.setStyle(TableStyle([
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 10),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 10),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#fce4ec')),
         ]))
         elements.append(investing_table)
@@ -804,7 +813,7 @@ class FinanceExportService:
         financing_table = Table(financing_data, colWidths=[5 * inch, 2 * inch])
         financing_table.setStyle(self._create_table_style())
         financing_table.setStyle(TableStyle([
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 10),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 10),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#f3e5f5')),
         ]))
         elements.append(financing_table)
@@ -831,11 +840,11 @@ class FinanceExportService:
 
         summary_table = Table(summary_data, colWidths=[5 * inch, 2 * inch])
         summary_table.setStyle(TableStyle([
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 10),
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONT', (0, 1), (-1, -2), 'Helvetica', 10),
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 12),
+            ('FONT', (0, 1), (-1, -2), 'DejaVuSans', 10),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 12),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e8f5e9') if closing >= 0 else colors.HexColor('#ffebee')),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
@@ -1137,7 +1146,7 @@ class FinanceExportService:
         current_table = Table(current_data, colWidths=[5 * inch, 2 * inch])
         current_table.setStyle(self._create_table_style())
         current_table.setStyle(TableStyle([
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 10),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 10),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e3f2fd')),
         ]))
         elements.append(current_table)
@@ -1156,7 +1165,7 @@ class FinanceExportService:
         fixed_table = Table(fixed_data, colWidths=[5 * inch, 2 * inch])
         fixed_table.setStyle(self._create_table_style())
         fixed_table.setStyle(TableStyle([
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 10),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 10),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e8f5e9')),
         ]))
         elements.append(fixed_table)
@@ -1188,7 +1197,7 @@ class FinanceExportService:
         curr_liab_table = Table(curr_liab_data, colWidths=[5 * inch, 2 * inch])
         curr_liab_table.setStyle(self._create_table_style())
         curr_liab_table.setStyle(TableStyle([
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 10),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 10),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#ffebee')),
         ]))
         elements.append(curr_liab_table)
@@ -1207,7 +1216,7 @@ class FinanceExportService:
         lt_liab_table = Table(lt_liab_data, colWidths=[5 * inch, 2 * inch])
         lt_liab_table.setStyle(self._create_table_style())
         lt_liab_table.setStyle(TableStyle([
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 10),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 10),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#fce4ec')),
         ]))
         elements.append(lt_liab_table)
@@ -1236,7 +1245,7 @@ class FinanceExportService:
         equity_table = Table(equity_data, colWidths=[5 * inch, 2 * inch])
         equity_table.setStyle(self._create_table_style())
         equity_table.setStyle(TableStyle([
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 10),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 10),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#f3e5f5')),
         ]))
         elements.append(equity_table)
@@ -1263,11 +1272,11 @@ class FinanceExportService:
 
         balance_table = Table(balance_data, colWidths=[5 * inch, 2 * inch])
         balance_table.setStyle(TableStyle([
-            ('FONT', (0, 0), (-1, 0), 'Helvetica-Bold', 10),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 10),
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONT', (0, 1), (-1, -1), 'Helvetica', 10),
-            ('FONT', (0, -1), (-1, -1), 'Helvetica-Bold', 10),
+            ('FONT', (0, 1), (-1, -1), 'DejaVuSans', 10),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 10),
             ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e8f5e9') if is_balanced else colors.HexColor('#ffebee')),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
