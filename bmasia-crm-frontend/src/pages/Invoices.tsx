@@ -480,7 +480,7 @@ const Invoices: React.FC = () => {
               </TableRow>
             ) : (
               invoices.map((invoice) => (
-                <TableRow key={invoice.id} hover>
+                <TableRow key={invoice.id} hover sx={{ cursor: 'pointer' }} onClick={() => handleViewInvoice(invoice)}>
                   <TableCell>
                     <Typography variant="body2" fontWeight="medium">
                       {invoice.invoice_number}
@@ -538,7 +538,7 @@ const Invoices: React.FC = () => {
                   <TableCell>
                     <IconButton
                       size="small"
-                      onClick={(e) => handleActionMenuOpen(e, invoice)}
+                      onClick={(e) => { e.stopPropagation(); handleActionMenuOpen(e, invoice); }}
                     >
                       <MoreVert />
                     </IconButton>

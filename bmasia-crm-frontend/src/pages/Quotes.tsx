@@ -511,7 +511,7 @@ const Quotes: React.FC = () => {
               </TableRow>
             ) : (
               quotes.map((quote) => (
-                <TableRow key={quote.id} hover>
+                <TableRow key={quote.id} hover sx={{ cursor: 'pointer' }} onClick={() => handleViewQuote(quote)}>
                   <TableCell>
                     <Typography variant="body2" fontWeight="medium">
                       {quote.quote_number}
@@ -569,7 +569,7 @@ const Quotes: React.FC = () => {
                   <TableCell>
                     <IconButton
                       size="small"
-                      onClick={(e) => handleActionMenuOpen(e, quote)}
+                      onClick={(e) => { e.stopPropagation(); handleActionMenuOpen(e, quote); }}
                     >
                       <MoreVert />
                     </IconButton>

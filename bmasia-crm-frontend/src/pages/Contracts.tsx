@@ -453,7 +453,7 @@ const Contracts: React.FC = () => {
               </TableRow>
             ) : (
               contracts.map((contract) => (
-                <TableRow key={contract.id} hover>
+                <TableRow key={contract.id} hover sx={{ cursor: 'pointer' }} onClick={() => handleViewContract(contract)}>
                   <TableCell>
                     <Typography variant="body2" fontWeight="medium">
                       {contract.contract_number}
@@ -519,7 +519,7 @@ const Contracts: React.FC = () => {
                   <TableCell>
                     <IconButton
                       size="small"
-                      onClick={(e) => handleActionMenuOpen(e, contract)}
+                      onClick={(e) => { e.stopPropagation(); handleActionMenuOpen(e, contract); }}
                     >
                       <MoreVert />
                     </IconButton>

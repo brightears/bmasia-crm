@@ -262,7 +262,7 @@ const Companies: React.FC = () => {
               </TableRow>
             ) : (
               companies.map((company) => (
-                <TableRow key={company.id} hover>
+                <TableRow key={company.id} hover sx={{ cursor: 'pointer' }} onClick={() => handleViewCompany(company.id)}>
                   <TableCell>
                     <Box sx={{ display: 'flex', alignItems: 'center' }}>
                       <Business sx={{ mr: 1, color: 'text.secondary' }} />
@@ -309,21 +309,21 @@ const Companies: React.FC = () => {
                   <TableCell>
                     <IconButton
                       size="small"
-                      onClick={() => handleViewCompany(company.id)}
+                      onClick={(e) => { e.stopPropagation(); handleViewCompany(company.id); }}
                       title="View Details"
                     >
                       <Visibility />
                     </IconButton>
                     <IconButton
                       size="small"
-                      onClick={() => handleEditCompany(company)}
+                      onClick={(e) => { e.stopPropagation(); handleEditCompany(company); }}
                       title="Edit Company"
                     >
                       <Edit />
                     </IconButton>
                     <IconButton
                       size="small"
-                      onClick={() => handleDeleteClick(company)}
+                      onClick={(e) => { e.stopPropagation(); handleDeleteClick(company); }}
                       title="Delete Company"
                       color="error"
                     >

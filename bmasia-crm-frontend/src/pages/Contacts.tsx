@@ -335,7 +335,7 @@ const Contacts: React.FC = () => {
                 const isDecisionMaker = contact.contact_type === 'Decision Maker';
 
                 return (
-                  <TableRow key={contact.id} hover>
+                  <TableRow key={contact.id} hover sx={{ cursor: 'pointer' }} onClick={() => handleViewContact(contact)}>
                     <TableCell>
                       <Box sx={{ display: 'flex', alignItems: 'center' }}>
                         <Avatar sx={{ mr: 2, bgcolor: 'primary.main', width: 40, height: 40 }}>
@@ -408,7 +408,7 @@ const Contacts: React.FC = () => {
                         <Tooltip title="More Actions">
                           <IconButton
                             size="small"
-                            onClick={(e) => handleMenuOpen(e, contact)}
+                            onClick={(e) => { e.stopPropagation(); handleMenuOpen(e, contact); }}
                           >
                             <MoreVert />
                           </IconButton>
