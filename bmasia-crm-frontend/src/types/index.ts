@@ -595,6 +595,7 @@ export interface Quote {
   opportunity?: string;
   opportunity_name?: string;
   status: 'Draft' | 'Sent' | 'Accepted' | 'Rejected' | 'Expired';
+  quote_type?: 'new' | 'renewal' | 'addon';
   valid_from: string;
   valid_until: string;
   subtotal: number;

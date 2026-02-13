@@ -4482,6 +4482,11 @@ class QuoteViewSet(BaseModelViewSet):
             self.log_action('CREATE', instance)
             return
 
+        # Skip opportunity auto-creation for renewal quotes
+        if instance.quote_type == 'renewal':
+            self.log_action('CREATE', instance)
+            return
+
         # Infer service_type from quote line items
         service_type = None
         items = instance.line_items.all()

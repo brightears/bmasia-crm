@@ -2100,6 +2100,12 @@ class Quote(TimestampedModel):
         ('Expired', 'Expired'),
     ]
 
+    QUOTE_TYPE_CHOICES = [
+        ('new', 'New Business'),
+        ('renewal', 'Renewal'),
+        ('addon', 'Add-on'),
+    ]
+
     CURRENCY_CHOICES = [
         ('USD', 'USD - US Dollar'),
         ('THB', 'THB - Thai Baht'),
@@ -2114,6 +2120,7 @@ class Quote(TimestampedModel):
     opportunity = models.ForeignKey(Opportunity, on_delete=models.SET_NULL, null=True, blank=True, related_name='quotes')
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Draft')
+    quote_type = models.CharField(max_length=20, choices=QUOTE_TYPE_CHOICES, default='new')
     valid_from = models.DateField()
     valid_until = models.DateField()
 

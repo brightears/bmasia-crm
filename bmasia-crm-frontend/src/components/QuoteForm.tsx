@@ -132,6 +132,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
     company: '',
     contact: '',
     opportunity: '',
+    quote_type: 'new' as 'new' | 'renewal' | 'addon',
     status: 'Draft' as Quote['status'],
     valid_from: new Date(),
     valid_until: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
@@ -166,6 +167,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
           company: quote.company,
           contact: quote.contact || '',
           opportunity: quote.opportunity || '',
+          quote_type: quote.quote_type || 'new',
           status: quote.status,
           valid_from: new Date(quote.valid_from),
           valid_until: new Date(quote.valid_until),
@@ -391,6 +393,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
         company: formData.company,
         contact: formData.contact || undefined,
         opportunity: formData.opportunity || undefined,
+        quote_type: formData.quote_type,
         status: formData.status,
         valid_from: formData.valid_from.toISOString().split('T')[0],
         valid_until: formData.valid_until.toISOString().split('T')[0],
@@ -580,22 +583,52 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
 
             <Grid item xs={12} md={3}>
               <FormControl fullWidth>
-                <InputLabel>Opportunity</InputLabel>
+                <InputLabel>Quote Type *</InputLabel>
                 <Select
-                  value={formData.opportunity}
-                  onChange={(e) => handleInputChange('opportunity', e.target.value)}
-                  label="Opportunity"
+                  value={formData.quote_type}
+                  onChange={(e) => {
+                    const newType = e.target.value;
+                    setFormData(prev => ({
+                      ...prev,
+                      quote_type: newType as 'new' | 'renewal' | 'addon',
+                      opportunity: newType === 'renewal' ? '' : prev.opportunity,
+                    }));
+                  }}
+                  label="Quote Type *"
                 >
-                  {opportunities
-                    .filter(opp => !formData.company || opp.company === formData.company)
-                    .map((opportunity) => (
-                      <MenuItem key={opportunity.id} value={opportunity.id}>
-                        {opportunity.name}
-                      </MenuItem>
-                    ))}
+                  <MenuItem value="new">New Business</MenuItem>
+                  <MenuItem value="renewal">Renewal</MenuItem>
+                  <MenuItem value="addon">Add-on</MenuItem>
                 </Select>
               </FormControl>
             </Grid>
+
+            {formData.quote_type !== 'renewal' && (
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth>
+                  <InputLabel>Opportunity</InputLabel>
+                  <Select
+                    value={formData.opportunity}
+                    onChange={(e) => handleInputChange('opportunity', e.target.value)}
+                    label="Opportunity"
+                  >
+                    <MenuItem value="">
+                      <em>Auto-create new</em>
+                    </MenuItem>
+                    {opportunities
+                      .filter(opp => !formData.company || opp.company === formData.company)
+                      .map((opportunity) => (
+                        <MenuItem key={opportunity.id} value={opportunity.id}>
+                          {opportunity.name}
+                        </MenuItem>
+                      ))}
+                  </Select>
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
+                    Leave empty to auto-create an opportunity
+                  </Typography>
+                </FormControl>
+              </Grid>
+            )}
 
             <Grid item xs={12} md={3}>
               <FormControl fullWidth>
