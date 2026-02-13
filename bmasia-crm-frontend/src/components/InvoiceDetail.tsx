@@ -518,14 +518,17 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
         >
           Download PDF
         </Button>
-        <Button
-          onClick={handleSendInvoice}
-          variant="outlined"
-          startIcon={<Send />}
-          disabled={loading}
-        >
-          Send Invoice
-        </Button>
+        {invoice && invoice.status === 'Draft' && (
+          <Button
+            onClick={handleSendInvoice}
+            variant="contained"
+            color="primary"
+            startIcon={<Send />}
+            disabled={loading}
+          >
+            Send Invoice
+          </Button>
+        )}
         {invoice && (invoice.status === 'Sent' || invoice.status === 'Overdue') && (
           <Button
             onClick={handleMarkPaid}

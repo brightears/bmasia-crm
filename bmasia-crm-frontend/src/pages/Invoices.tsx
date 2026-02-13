@@ -583,13 +583,15 @@ const Invoices: React.FC = () => {
           </ListItemIcon>
           <ListItemText>Download PDF</ListItemText>
         </MenuItem>
-        <MenuItem onClick={() => handleSendInvoice(actionMenuInvoice!)}>
-          <ListItemIcon>
-            <Send fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>Send</ListItemText>
-        </MenuItem>
-        {actionMenuInvoice?.status !== 'Paid' && (
+        {actionMenuInvoice?.status === 'Draft' && (
+          <MenuItem onClick={() => handleSendInvoice(actionMenuInvoice!)}>
+            <ListItemIcon>
+              <Send fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Send</ListItemText>
+          </MenuItem>
+        )}
+        {(actionMenuInvoice?.status === 'Sent' || actionMenuInvoice?.status === 'Overdue') && (
           <MenuItem onClick={() => handleMarkAsPaid(actionMenuInvoice!)}>
             <ListItemIcon>
               <Payment fontSize="small" />
