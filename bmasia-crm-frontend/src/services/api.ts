@@ -375,7 +375,7 @@ class ApiService {
   }
 
   async updateInvoice(id: string, data: Partial<Invoice>): Promise<Invoice> {
-    const response = await authApi.put<Invoice>(`/invoices/${id}/`, data);
+    const response = await authApi.patch<Invoice>(`/invoices/${id}/`, data);
     return response.data;
   }
 
