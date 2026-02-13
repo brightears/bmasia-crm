@@ -435,15 +435,18 @@ const Dashboard: React.FC = () => {
 
       {/* Personalized Greeting */}
       <Paper
+        onClick={() => navigate('/tasks')}
         sx={{
           p: 2.5,
           mb: 3,
+          cursor: 'pointer',
           background: (theme) => theme.palette.mode === 'dark'
             ? 'linear-gradient(135deg, #1e293b 0%, #334155 100%)'
             : 'linear-gradient(135deg, #fff7ed 0%, #ffffff 100%)',
           border: (theme) => theme.palette.mode === 'dark'
             ? '1px solid rgba(255,255,255,0.08)'
             : '1px solid rgba(255, 140, 0, 0.12)',
+          '&:hover': { opacity: 0.9 },
         }}
       >
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
