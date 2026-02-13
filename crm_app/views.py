@@ -405,6 +405,49 @@ class UserViewSet(BaseModelViewSet):
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
+    @action(detail=False, methods=["post"], url_path="upload-avatar",
+           parser_classes=[MultiPartParser, FormParser])
+    def upload_avatar(self, request):
+        """Upload and save avatar as base64 data URL"""
+        import base64
+        from PIL import Image as PILImage
+        from io import BytesIO
+
+        if "avatar" not in request.FILES:
+            return Response({"error": "No avatar file provided"}, status=400)
+
+        avatar_file = request.FILES["avatar"]
+
+        # Validate file type
+        allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+        if avatar_file.content_type not in allowed_types:
+            return Response(
+                {"error": "Invalid file type. Use JPEG, PNG, GIF, or WebP."},
+                status=400,
+            )
+
+        # Resize and convert to base64
+        try:
+            img = PILImage.open(avatar_file)
+            img = img.convert("RGB")
+            img.thumbnail((150, 150), PILImage.LANCZOS)
+
+            buffer = BytesIO()
+            img.save(buffer, format="JPEG", quality=85)
+            buffer.seek(0)
+
+            base64_data = base64.b64encode(buffer.read()).decode("utf-8")
+            data_url = f"data:image/jpeg;base64,{base64_data}"
+
+            request.user.avatar_url = data_url
+            request.user.save(update_fields=["avatar_url"])
+
+            return Response({"avatar_url": data_url})
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to process image: {str(e)}"}, status=400
+            )
+
 class CompanyViewSet(BaseModelViewSet):
     """ViewSet for Company management with enhanced features"""
     queryset = Company.objects.all().prefetch_related(

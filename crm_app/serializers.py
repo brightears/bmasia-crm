@@ -32,7 +32,7 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
             'role', 'phone', 'department', 'is_active',
             'smtp_email', 'smtp_password', 'smtp_configured',
-            'last_login', 'date_joined', 'password'
+            'avatar_url', 'last_login', 'date_joined', 'password'
         ]
         read_only_fields = ['id', 'last_login', 'date_joined']
         extra_kwargs = {

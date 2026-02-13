@@ -83,7 +83,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
           main: '#ff6b6b',
         },
         background: {
-          default: darkMode ? '#121212' : '#f5f5f5',
+          default: darkMode ? '#121212' : '#f8fafc',
           paper: darkMode ? '#1e1e1e' : '#ffffff',
         },
         text: {
@@ -155,8 +155,15 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
               borderRadius: 12,
               boxShadow: darkMode
                 ? '0 2px 8px rgba(0,0,0,0.3)'
-                : '0 2px 8px rgba(0,0,0,0.1)',
-              border: `1px solid ${darkMode ? '#333' : '#e0e0e0'}`,
+                : '0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06)',
+              border: `1px solid ${darkMode ? '#333' : 'rgba(0,0,0,0.06)'}`,
+              transition: 'box-shadow 0.2s ease, transform 0.2s ease',
+              '&:hover': {
+                boxShadow: darkMode
+                  ? '0 4px 12px rgba(0,0,0,0.4)'
+                  : '0 2px 6px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.08)',
+                transform: 'translateY(-1px)',
+              },
             },
           },
         },

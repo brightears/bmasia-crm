@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   AppBar,
   Box,
@@ -56,9 +56,11 @@ import {
   Settings as SettingsIcon,
   Wifi as WifiIcon,
   AttachMoney as AttachMoneyIcon,
+  CameraAlt as CameraAltIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import ApiService from '../services/api';
 import { useThemeContext } from '../contexts/ThemeContext';
 import MobileBottomNav from './MobileBottomNav';
 
@@ -227,10 +229,13 @@ const NavigationSection: React.FC<NavigationSectionProps> = ({
                   minHeight: 48,
                   justifyContent: 'center',
                   px: 2.5,
+                  '&:hover': {
+                    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                  },
                   '&.Mui-selected': {
-                    backgroundColor: alpha(departmentColor, 0.12),
+                    backgroundColor: 'rgba(255, 140, 0, 0.15)',
                     '&:hover': {
-                      backgroundColor: alpha(departmentColor, 0.2),
+                      backgroundColor: 'rgba(255, 140, 0, 0.25)',
                     },
                   },
                 }}
@@ -240,7 +245,7 @@ const NavigationSection: React.FC<NavigationSectionProps> = ({
                     minWidth: 0,
                     mr: 0,
                     justifyContent: 'center',
-                    color: currentPath === item.path ? departmentColor : 'inherit',
+                    color: currentPath === item.path ? '#FF8C00' : '#94a3b8',
                   }}
                 >
                   <Badge badgeContent={item.badge} color="error">
@@ -251,7 +256,7 @@ const NavigationSection: React.FC<NavigationSectionProps> = ({
             </ListItem>
           </Tooltip>
         ))}
-        <Divider sx={{ my: 1 }} />
+        <Divider sx={{ my: 1, borderColor: 'rgba(255,255,255,0.08)' }} />
       </>
     );
   }
@@ -264,12 +269,12 @@ const NavigationSection: React.FC<NavigationSectionProps> = ({
           primaryTypographyProps={{
             fontSize: '0.875rem',
             fontWeight: 600,
-            color: 'text.secondary',
+            color: '#94a3b8',
             textTransform: 'uppercase',
             letterSpacing: '0.5px',
           }}
         />
-        {open ? <ExpandLess /> : <ExpandMore />}
+        {open ? <ExpandLess sx={{ color: '#94a3b8' }} /> : <ExpandMore sx={{ color: '#94a3b8' }} />}
       </ListItemButton>
       <Collapse in={open} timeout="auto" unmountOnExit>
         <List component="div" disablePadding>
@@ -281,25 +286,28 @@ const NavigationSection: React.FC<NavigationSectionProps> = ({
                 sx={{
                   pl: 3,
                   py: 1,
+                  '&:hover': {
+                    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                  },
                   '&.Mui-selected': {
-                    backgroundColor: alpha(departmentColor, 0.12),
-                    borderRight: `3px solid ${departmentColor}`,
+                    backgroundColor: 'rgba(255, 140, 0, 0.15)',
+                    borderRight: '3px solid #FF8C00',
                     '&:hover': {
-                      backgroundColor: alpha(departmentColor, 0.2),
+                      backgroundColor: 'rgba(255, 140, 0, 0.25)',
                     },
                   },
                 }}
               >
                 <ListItemIcon
                   sx={{
-                    color: currentPath === item.path ? departmentColor : 'inherit',
+                    color: currentPath === item.path ? '#FF8C00' : '#94a3b8',
                   }}
                 >
                   <Badge badgeContent={item.badge} color="error">
                     {item.icon}
                   </Badge>
                 </ListItemIcon>
-                <ListItemText primary={item.text} />
+                <ListItemText primary={item.text} primaryTypographyProps={{ sx: { color: '#cbd5e1' } }} />
               </ListItemButton>
             </ListItem>
           ))}
@@ -322,7 +330,19 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [notificationAnchorEl, setNotificationAnchorEl] = useState<null | HTMLElement>(null);
   const { darkMode, toggleDarkMode } = useThemeContext();
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const result = await ApiService.uploadAvatar(file);
+      // Update user in auth context by reloading
+      window.location.reload();
+    } catch (err) {
+      console.error('Avatar upload failed:', err);
+    }
+  };
 
   // Get unified navigation and default color
   const userRole = user?.role || 'Admin';
@@ -379,21 +399,22 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           display: 'flex',
           alignItems: 'center',
           px: drawerCollapsed && !isMobile ? 1 : 2,
-          backgroundColor: departmentColor.primary,
+          background: 'linear-gradient(135deg, #FF8C00 0%, #FFA500 100%)',
           color: 'white',
         }}
       >
         {drawerCollapsed && !isMobile ? (
           <Tooltip title="BMAsia CRM" placement="right">
-            <Typography variant="h6" component="div" sx={{ fontWeight: 'bold' }}>
-              BM
-            </Typography>
+            <Box component="img" src="/bmasia-logo.png" alt="BM" sx={{ height: 28, filter: 'brightness(0) invert(1)' }} />
           </Tooltip>
         ) : (
           <>
-            <Typography variant="h6" component="div" sx={{ flexGrow: 1, fontWeight: 'bold' }}>
-              BMAsia CRM
-            </Typography>
+            <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center' }}>
+              <Box component="img" src="/bmasia-logo.png" alt="BMAsia CRM" sx={{ height: 32, mr: 1, filter: 'brightness(0) invert(1)' }} />
+              <Typography variant="h6" component="div" sx={{ fontWeight: 'bold' }}>
+                BMAsia CRM
+              </Typography>
+            </Box>
             {!isMobile && (
               <IconButton
                 color="inherit"
@@ -414,8 +435,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             label={user?.role || 'User'}
             size="small"
             sx={{
-              backgroundColor: departmentColor.background,
-              color: departmentColor.primary,
+              backgroundColor: 'rgba(255, 140, 0, 0.15)',
+              color: '#FFA500',
               fontWeight: 600,
               fontSize: '0.75rem',
             }}
@@ -442,9 +463,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
       {/* User Section */}
       {!drawerCollapsed && (
-        <Box sx={{ p: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+        <Box sx={{ p: 2, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
             <Avatar
+              src={user?.avatar_url || undefined}
               sx={{
                 width: 32,
                 height: 32,
@@ -456,10 +478,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               {user?.first_name?.[0]}{user?.last_name?.[0]}
             </Avatar>
             <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-              <Typography variant="body2" noWrap sx={{ fontWeight: 500 }}>
+              <Typography variant="body2" noWrap sx={{ fontWeight: 500, color: '#e2e8f0' }}>
                 {user?.first_name} {user?.last_name}
               </Typography>
-              <Typography variant="caption" color="text.secondary" noWrap>
+              <Typography variant="caption" noWrap sx={{ color: '#94a3b8' }}>
                 {user?.role}
               </Typography>
             </Box>
@@ -540,6 +562,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               }}
               startIcon={
                 <Avatar
+                  src={user?.avatar_url || undefined}
                   sx={{
                     width: 32,
                     height: 32,
@@ -588,6 +611,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               boxSizing: 'border-box',
               width: drawerWidth,
               border: 'none',
+              backgroundColor: '#1e293b',
+              color: '#cbd5e1',
             },
           }}
         >
@@ -603,8 +628,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               boxSizing: 'border-box',
               width: getCurrentDrawerWidth(),
               border: 'none',
-              borderRight: '1px solid',
-              borderColor: 'divider',
+              borderRight: '1px solid rgba(255,255,255,0.08)',
+              backgroundColor: '#1e293b',
+              color: '#cbd5e1',
               transition: theme.transitions.create('width', {
                 easing: theme.transitions.easing.sharp,
                 duration: theme.transitions.duration.leavingScreen,
@@ -665,6 +691,10 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         <MenuItem onClick={() => { handleNavigate('/profile'); handleUserMenuClose(); }}>
           <PersonIcon sx={{ mr: 1 }} />
           Profile
+        </MenuItem>
+        <MenuItem onClick={() => { avatarInputRef.current?.click(); handleUserMenuClose(); }}>
+          <CameraAltIcon sx={{ mr: 1 }} />
+          Change Avatar
         </MenuItem>
         <Divider />
         <MenuItem onClick={handleLogout}>
@@ -734,6 +764,15 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
       {/* Mobile Bottom Navigation */}
       <MobileBottomNav />
+
+      {/* Hidden avatar file input */}
+      <input
+        ref={avatarInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/gif,image/webp"
+        style={{ display: 'none' }}
+        onChange={handleAvatarUpload}
+      />
     </Box>
   );
 };

@@ -49,6 +49,13 @@ import {
   ENTITY_OPTIONS,
   formatCurrency,
 } from '../constants/entities';
+import { useAuth } from '../contexts/AuthContext';
+import { Task } from '../types';
+import { alpha } from '@mui/material';
+import {
+  Assignment as TaskIcon,
+  OpenInNew as OpenInNewIcon,
+} from '@mui/icons-material';
 
 interface KPICardProps {
   title: string;
@@ -94,10 +101,15 @@ const KPICard: React.FC<KPICardProps> = ({
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5 }}>
           <Box
             sx={{
-              color: iconColor,
-              mr: 1.5,
               display: 'flex',
               alignItems: 'center',
+              justifyContent: 'center',
+              width: 44,
+              height: 44,
+              borderRadius: '12px',
+              backgroundColor: alpha(iconColor, 0.1),
+              color: iconColor,
+              mr: 1.5,
             }}
           >
             {icon}
@@ -152,13 +164,22 @@ const KPICard: React.FC<KPICardProps> = ({
   );
 };
 
+const getGreeting = (): string => {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) return 'Good morning';
+  if (hour >= 12 && hour < 17) return 'Good afternoon';
+  return 'Good evening';
+};
+
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
   const [entityFilter, setEntityFilter] = useState<EntityFilter>(DEFAULT_ENTITY);
+  const [myTasks, setMyTasks] = useState<Task[]>([]);
 
   const loadDashboardData = useCallback(async () => {
     try {
@@ -180,6 +201,18 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     loadDashboardData();
   }, [loadDashboardData]);
+
+  useEffect(() => {
+    const loadMyTasks = async () => {
+      try {
+        const tasks = await ApiService.getMyTasks();
+        setMyTasks(tasks.filter((t: Task) => t.status === 'To Do' || t.status === 'In Progress'));
+      } catch (err) {
+        // Non-critical — don't show error
+      }
+    };
+    loadMyTasks();
+  }, []);
 
   const fmtCurrency = (amount: number): string => {
     return formatCurrency(amount, entityFilter);
@@ -399,6 +432,61 @@ const Dashboard: React.FC = () => {
           </IconButton>
         </Box>
       </Box>
+
+      {/* Personalized Greeting */}
+      <Paper
+        sx={{
+          p: 2.5,
+          mb: 3,
+          background: (theme) => theme.palette.mode === 'dark'
+            ? 'linear-gradient(135deg, #1e293b 0%, #334155 100%)'
+            : 'linear-gradient(135deg, #fff7ed 0%, #ffffff 100%)',
+          border: (theme) => theme.palette.mode === 'dark'
+            ? '1px solid rgba(255,255,255,0.08)'
+            : '1px solid rgba(255, 140, 0, 0.12)',
+        }}
+      >
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <Box>
+            <Typography variant="h5" sx={{ fontWeight: 600, mb: 0.5 }}>
+              {getGreeting()}, {user?.first_name || 'there'}!
+            </Typography>
+            {myTasks.length > 0 ? (
+              <Typography variant="body1" color="text.secondary">
+                You have <strong>{myTasks.length} active task{myTasks.length !== 1 ? 's' : ''}</strong>
+                {myTasks.filter(t => t.is_overdue).length > 0 && (
+                  <Typography component="span" sx={{ color: 'error.main', fontWeight: 600 }}>
+                    {' '}&mdash; {myTasks.filter(t => t.is_overdue).length} overdue
+                  </Typography>
+                )}
+              </Typography>
+            ) : (
+              <Typography variant="body1" color="text.secondary">
+                No active tasks — you're all caught up!
+              </Typography>
+            )}
+          </Box>
+          {myTasks.length > 0 && (
+            <Box
+              onClick={() => navigate('/tasks')}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 0.5,
+                cursor: 'pointer',
+                color: '#FF8C00',
+                '&:hover': { textDecoration: 'underline' },
+              }}
+            >
+              <TaskIcon sx={{ fontSize: 18 }} />
+              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                View Tasks
+              </Typography>
+              <OpenInNewIcon sx={{ fontSize: 14 }} />
+            </Box>
+          )}
+        </Box>
+      </Paper>
 
       {/* Section 1: KPI Cards (6 cards in 2 rows of 3) */}
       <Box

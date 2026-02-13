@@ -527,6 +527,15 @@ class ApiService {
     await authApi.delete(`/users/${id}/`);
   }
 
+  async uploadAvatar(file: File): Promise<{ avatar_url: string }> {
+    const formData = new FormData();
+    formData.append('avatar', file);
+    const response = await authApi.post<{ avatar_url: string }>('/users/upload-avatar/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  }
+
   async deactivateUser(id: string): Promise<User> {
     const response = await authApi.patch<User>(`/users/${id}/`, { is_active: false });
     return response.data;
