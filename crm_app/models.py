@@ -2141,6 +2141,10 @@ class Quote(TimestampedModel):
     rejected_date = models.DateField(null=True, blank=True)
     expired_date = models.DateField(null=True, blank=True)
 
+    # Follow-up tracking
+    first_followup_sent = models.BooleanField(default=False)
+    second_followup_sent = models.BooleanField(default=False)
+
     # Creator tracking
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='quotes_created')
 

@@ -704,6 +704,42 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
       </DialogContent>
 
       <DialogActions>
+        {contract.status === 'Draft' && (
+          <Button
+            variant="outlined"
+            color="primary"
+            startIcon={<Email />}
+            onClick={async () => {
+              try {
+                await ApiService.updateContract(contract.id, { status: 'Sent' });
+                const updated = await ApiService.getContract(contract.id);
+                setContract(updated);
+              } catch (err) {
+                console.error('Failed to send contract:', err);
+              }
+            }}
+          >
+            Mark as Sent
+          </Button>
+        )}
+        {contract.status === 'Sent' && (
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={<CheckCircle />}
+            onClick={async () => {
+              try {
+                await ApiService.updateContract(contract.id, { status: 'Active' });
+                const updated = await ApiService.getContract(contract.id);
+                setContract(updated);
+              } catch (err) {
+                console.error('Failed to mark as signed:', err);
+              }
+            }}
+          >
+            Mark as Signed
+          </Button>
+        )}
         <Button
           variant="outlined"
           startIcon={<Receipt />}

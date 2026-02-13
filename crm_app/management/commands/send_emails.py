@@ -80,6 +80,17 @@ class Command(BaseCommand):
                     f"{results['failed']} failed"
                 )
         
+        # Send quote follow-ups
+        if email_type in ['all', 'quote']:
+            self.stdout.write("Sending quote follow-ups...")
+            if not dry_run:
+                results = email_service.send_quote_followups()
+                self._update_results(total_results, results)
+                self.stdout.write(
+                    f"Quote follow-ups: {results['sent']} sent, "
+                    f"{results['failed']} failed"
+                )
+
         # Send quarterly check-ins
         if email_type in ['all', 'quarterly']:
             self.stdout.write("Sending quarterly check-ins...")

@@ -52,6 +52,7 @@ import {
   Add,
   History,
   Description,
+  CheckCircle,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -110,6 +111,21 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
       onInvoiceUpdate();
     } catch (err) {
       setError('Failed to send invoice');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMarkPaid = async () => {
+    if (!invoice) return;
+
+    try {
+      setLoading(true);
+      await ApiService.markInvoicePaid(invoice.id);
+      setSuccess('Invoice marked as paid');
+      onInvoiceUpdate();
+    } catch (err) {
+      setError('Failed to mark invoice as paid');
     } finally {
       setLoading(false);
     }
@@ -510,6 +526,17 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
         >
           Send Invoice
         </Button>
+        {invoice && (invoice.status === 'Sent' || invoice.status === 'Overdue') && (
+          <Button
+            onClick={handleMarkPaid}
+            variant="contained"
+            color="success"
+            startIcon={<CheckCircle />}
+            disabled={loading}
+          >
+            Mark as Paid
+          </Button>
+        )}
       </DialogActions>
 
       {/* Add Payment Dialog */}

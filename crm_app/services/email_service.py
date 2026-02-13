@@ -17,7 +17,7 @@ from django.db.models import Q
 
 from crm_app.models import (
     EmailTemplate, EmailLog, EmailCampaign,
-    Contact, Company, Contract, Invoice, DocumentAttachment,
+    Contact, Company, Contract, Invoice, Quote, DocumentAttachment,
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution
 )
 
@@ -457,6 +457,111 @@ class EmailService:
         
         return results
     
+    def send_quote_followups(self) -> Dict[str, int]:
+        """Send follow-up reminders for sent quotes that haven't been responded to"""
+        if not self.is_business_hours():
+            logger.info("Skipping quote follow-ups - outside business hours")
+            return {'skipped': 0}
+
+        results = {
+            'sent': 0,
+            'failed': 0,
+            'skipped': 0
+        }
+
+        # Find quotes in 'Sent' status with a sent_date
+        sent_quotes = Quote.objects.filter(
+            status='Sent',
+            sent_date__isnull=False
+        ).select_related('company', 'contact')
+
+        today = timezone.now().date()
+
+        for quote in sent_quotes:
+            days_since_sent = (today - quote.sent_date).days
+
+            # Determine which follow-up to send
+            if days_since_sent >= 7 and not quote.second_followup_sent:
+                followup_type = 'second'
+                quote.second_followup_sent = True
+            elif days_since_sent >= 3 and not quote.first_followup_sent:
+                followup_type = 'first'
+                quote.first_followup_sent = True
+            else:
+                results['skipped'] += 1
+                continue
+
+            quote.save(update_fields=['first_followup_sent', 'second_followup_sent'])
+
+            # Get contact to email — prefer quote contact, fallback to primary
+            contact = quote.contact
+            if not contact:
+                contact = quote.company.contacts.filter(
+                    is_active=True,
+                    receives_notifications=True,
+                    unsubscribed=False
+                ).first()
+
+            if not contact or not contact.email:
+                results['skipped'] += 1
+                continue
+
+            if not contact.receives_notifications or contact.unsubscribed:
+                results['skipped'] += 1
+                continue
+
+            # Build email content
+            currency_symbol = 'THB' if quote.currency == 'THB' else '$'
+            quote_value = f"{currency_symbol}{quote.total_value:,.2f}"
+            valid_until = quote.valid_until.strftime('%B %d, %Y') if quote.valid_until else 'N/A'
+
+            if followup_type == 'first':
+                subject = f"Following up on Quote {quote.quote_number}"
+                body = f"""
+                <p>Dear {contact.name},</p>
+                <p>I hope this message finds you well. I wanted to follow up on the quote we sent you recently.</p>
+                <p><strong>Quote:</strong> {quote.quote_number}<br/>
+                <strong>Amount:</strong> {quote_value}<br/>
+                <strong>Valid Until:</strong> {valid_until}</p>
+                <p>If you have any questions or would like to discuss the details, please don't hesitate to reach out.</p>
+                <p>Best regards,<br/>BMAsia Team</p>
+                """
+            else:
+                subject = f"Quote {quote.quote_number} — Friendly Reminder"
+                body = f"""
+                <p>Dear {contact.name},</p>
+                <p>Just a friendly reminder about the quote we sent for your review.</p>
+                <p><strong>Quote:</strong> {quote.quote_number}<br/>
+                <strong>Amount:</strong> {quote_value}<br/>
+                <strong>Valid Until:</strong> {valid_until}</p>
+                <p>This quote is valid until {valid_until}. We'd love to help you move forward — let us know if you'd like any adjustments or have questions.</p>
+                <p>Best regards,<br/>BMAsia Team</p>
+                """
+
+            try:
+                success, message = self.send_email(
+                    to_email=contact.email,
+                    subject=subject,
+                    body_html=body,
+                    body_text=f"Follow-up on Quote {quote.quote_number}",
+                    company=quote.company,
+                    contact=contact,
+                    email_type='quote_followup',
+                )
+
+                if success:
+                    results['sent'] += 1
+                    logger.info(f"Sent {followup_type} follow-up for quote {quote.quote_number}")
+                else:
+                    results['failed'] += 1
+                    logger.warning(f"Failed to send follow-up for quote {quote.quote_number}: {message}")
+            except Exception as e:
+                results['failed'] += 1
+                logger.error(f"Error sending follow-up for quote {quote.quote_number}: {e}")
+
+        logger.info(f"Quote follow-ups: {results}")
+        return results
+
     def send_quarterly_checkins(self) -> Dict[str, int]:
         """Send quarterly check-in emails"""
         results = {
