@@ -63,6 +63,7 @@ import { useAuth } from '../contexts/AuthContext';
 import ApiService from '../services/api';
 import { useThemeContext } from '../contexts/ThemeContext';
 import MobileBottomNav from './MobileBottomNav';
+import { getDailyQuote, getSeasonalIcon } from '../constants/quotes';
 
 const drawerWidth = 280;
 const miniDrawerWidth = 64;
@@ -331,6 +332,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [notificationAnchorEl, setNotificationAnchorEl] = useState<null | HTMLElement>(null);
   const { darkMode, toggleDarkMode } = useThemeContext();
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const dailyQuote = getDailyQuote();
+  const seasonalIcon = getSeasonalIcon();
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -521,7 +524,17 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             <MenuIcon />
           </IconButton>
 
-          <Box sx={{ flexGrow: 1 }} />
+          <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 0.75, overflow: 'hidden', ml: 1 }}>
+            <Typography sx={{ fontSize: '1rem', flexShrink: 0 }}>
+              {seasonalIcon}
+            </Typography>
+            <Typography noWrap sx={{ color: 'text.secondary', fontSize: '0.875rem', fontStyle: 'italic' }}>
+              &ldquo;{dailyQuote.text}&rdquo;
+            </Typography>
+            <Typography noWrap sx={{ color: 'text.disabled', fontSize: '0.8rem', flexShrink: 0 }}>
+              &mdash; {dailyQuote.author}
+            </Typography>
+          </Box>
 
           {/* Header actions */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
