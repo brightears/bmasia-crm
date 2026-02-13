@@ -23,7 +23,7 @@ const Login: React.FC = () => {
   const [credentials, setCredentials] = useState({
     username: '',
     password: '',
-    remember_me: false,
+    remember_me: true,
   });
   const [error, setError] = useState('');
 
