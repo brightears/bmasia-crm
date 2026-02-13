@@ -343,6 +343,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       window.location.reload();
     } catch (err) {
       console.error('Avatar upload failed:', err);
+      alert('Failed to upload avatar. Please try again.');
     }
   };
 
