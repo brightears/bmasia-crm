@@ -395,7 +395,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Header */}
       <Box
         sx={{
-          height: 80,
+          height: 100,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
