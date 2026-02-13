@@ -249,6 +249,17 @@ const Invoices: React.FC = () => {
     setActionMenuAnchor(null);
   };
 
+  const handleMarkAsSent = async (invoice: Invoice) => {
+    try {
+      await ApiService.updateInvoice(invoice.id, { status: 'Sent' });
+      setSuccess('Invoice marked as sent');
+      loadInvoices();
+    } catch (err) {
+      setError('Failed to update invoice status');
+    }
+    setActionMenuAnchor(null);
+  };
+
   const handleDownloadPDF = async (invoice: Invoice) => {
     try {
       const blob = await ApiService.downloadInvoicePDF(invoice.id);
@@ -588,7 +599,15 @@ const Invoices: React.FC = () => {
             <ListItemIcon>
               <Send fontSize="small" />
             </ListItemIcon>
-            <ListItemText>Send</ListItemText>
+            <ListItemText>Send via Email</ListItemText>
+          </MenuItem>
+        )}
+        {actionMenuInvoice?.status === 'Draft' && (
+          <MenuItem onClick={() => handleMarkAsSent(actionMenuInvoice!)}>
+            <ListItemIcon>
+              <CheckCircle fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Mark as Sent</ListItemText>
           </MenuItem>
         )}
         {(actionMenuInvoice?.status === 'Sent' || actionMenuInvoice?.status === 'Overdue') && (

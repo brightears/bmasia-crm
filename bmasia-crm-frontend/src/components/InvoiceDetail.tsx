@@ -116,6 +116,21 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
     }
   };
 
+  const handleMarkAsSent = async () => {
+    if (!invoice) return;
+
+    try {
+      setLoading(true);
+      await ApiService.updateInvoice(invoice.id, { status: 'Sent' });
+      setSuccess('Invoice marked as sent');
+      onInvoiceUpdate();
+    } catch (err) {
+      setError('Failed to update invoice status');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleMarkPaid = async () => {
     if (!invoice) return;
 
@@ -526,7 +541,17 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
             startIcon={<Send />}
             disabled={loading}
           >
-            Send Invoice
+            Send via Email
+          </Button>
+        )}
+        {invoice && invoice.status === 'Draft' && (
+          <Button
+            onClick={handleMarkAsSent}
+            variant="outlined"
+            startIcon={<CheckCircle />}
+            disabled={loading}
+          >
+            Mark as Sent
           </Button>
         )}
         {invoice && (invoice.status === 'Sent' || invoice.status === 'Overdue') && (
