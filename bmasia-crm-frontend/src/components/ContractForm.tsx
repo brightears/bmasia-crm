@@ -54,6 +54,8 @@ interface ContractFormProps {
   onSave: (contract: Contract) => void;
   contract: Contract | null;
   mode: 'create' | 'edit';
+  initialCompanyId?: string;
+  initialQuoteId?: string;
 }
 
 interface ZoneFormData {
@@ -154,6 +156,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
   onSave,
   contract,
   mode,
+  initialCompanyId,
+  initialQuoteId,
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -233,6 +237,21 @@ const ContractForm: React.FC<ContractFormProps> = ({
       }
     }
   }, [open, mode, contract]);
+
+  // Pre-fill from query params (e.g., "Convert to Contract" from QuoteDetail)
+  useEffect(() => {
+    if (open && mode === 'create' && initialCompanyId && companies.length > 0) {
+      const company = companies.find(c => c.id === initialCompanyId);
+      if (company) {
+        handleCompanyChange(company).then(() => {
+          if (initialQuoteId) {
+            // Wait for quotes to load, then auto-select
+            setTimeout(() => handleQuoteChange(initialQuoteId), 500);
+          }
+        });
+      }
+    }
+  }, [open, mode, initialCompanyId, initialQuoteId, companies]);
 
   const loadCompanies = async () => {
     try {

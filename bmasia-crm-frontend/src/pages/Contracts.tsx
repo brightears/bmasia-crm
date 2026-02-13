@@ -116,15 +116,19 @@ const Contracts: React.FC = () => {
   const [emailContract, setEmailContract] = useState<Contract | null>(null);
   const [emailContacts, setEmailContacts] = useState<Contact[]>([]);
 
-  // Handle query param for opening create dialog from dashboard
+  // Pre-fill state for ContractForm (from query params)
+  const [initialCompanyId, setInitialCompanyId] = useState('');
+  const [initialQuoteId, setInitialQuoteId] = useState('');
+
+  // Handle query param for opening create dialog (from dashboard or QuoteDetail)
   useEffect(() => {
     if (searchParams.get('new') === 'true') {
+      setInitialCompanyId(searchParams.get('company') || '');
+      setInitialQuoteId(searchParams.get('quote') || '');
       setSelectedContract(null);
       setFormMode('create');
       setFormOpen(true);
-      // Clear the query param to avoid re-opening on refresh
-      searchParams.delete('new');
-      setSearchParams(searchParams, { replace: true });
+      setSearchParams({}, { replace: true });
     }
   }, [searchParams, setSearchParams]);
 
@@ -547,10 +551,12 @@ const Contracts: React.FC = () => {
       {/* Contract Form */}
       <ContractForm
         open={formOpen}
-        onClose={() => setFormOpen(false)}
+        onClose={() => { setFormOpen(false); setInitialCompanyId(''); setInitialQuoteId(''); }}
         onSave={handleContractSave}
         contract={selectedContract}
         mode={formMode}
+        initialCompanyId={initialCompanyId}
+        initialQuoteId={initialQuoteId}
       />
 
       {/* Contract Detail */}

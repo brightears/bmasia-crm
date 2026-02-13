@@ -175,24 +175,10 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
     window.print();
   };
 
-  const handleConvertToContract = async () => {
+  const handleConvertToContract = () => {
     if (!quoteDetail) return;
-
-    if (!window.confirm('Are you sure you want to convert this quote to a contract?')) {
-      return;
-    }
-
-    try {
-      setLoading(true);
-      await ApiService.convertQuoteToContract(quoteDetail.id);
-      setSuccess('Quote converted to contract successfully');
-      onQuoteUpdate();
-      loadQuoteDetail();
-    } catch (err) {
-      setError('Failed to convert quote to contract');
-    } finally {
-      setLoading(false);
-    }
+    onClose();
+    navigate(`/contracts?new=true&company=${quoteDetail.company}&quote=${quoteDetail.id}`);
   };
 
   const formatCurrency = (value: number, currency: string = 'USD'): string => {
