@@ -17,12 +17,10 @@ import {
   Autocomplete,
   CircularProgress,
   Alert,
-  InputAdornment,
   IconButton,
 } from '@mui/material';
 import {
   Close as CloseIcon,
-  AttachMoney as MoneyIcon,
   Add as AddIcon,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -439,13 +437,6 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
                 onChange={(e) => handleInputChange('expected_value', parseFloat(e.target.value) || 0)}
                 error={!!errors.expected_value}
                 helperText={errors.expected_value || `Weighted Value: ${formatCurrency((formData.expected_value || 0) * (formData.probability || 0) / 100)}`}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <MoneyIcon />
-                    </InputAdornment>
-                  ),
-                }}
               />
             </Grid>
 
