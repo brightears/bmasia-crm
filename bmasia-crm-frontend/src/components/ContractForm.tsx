@@ -67,6 +67,8 @@ interface ZoneFormData {
 }
 
 const contractStatuses = [
+  'Draft',
+  'Sent',
   'Active',
   'Renewed',
   'Expired',
