@@ -536,11 +536,6 @@ class ApiService {
     return response.data;
   }
 
-  async getIndustryNews(): Promise<Array<{ title: string; link: string; published: string; source: string }>> {
-    const response = await authApi.get('/industry-news/');
-    return response.data;
-  }
-
   async deactivateUser(id: string): Promise<User> {
     const response = await authApi.patch<User>(`/users/${id}/`, { is_active: false });
     return response.data;

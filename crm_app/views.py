@@ -5726,41 +5726,6 @@ def debug_soundtrack_api(request):
     }, json_dumps_params={'indent': 2})
 
 
-# --- Industry News (RSS Proxy) ---
-_news_cache = {'items': [], 'fetched_at': 0}
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def industry_news(request):
-    """Fetch B2B music industry news from RSS feeds. Cached for 1 hour."""
-    import time
-    now = time.time()
-    # Return cache if less than 1 hour old
-    if _news_cache['items'] and (now - _news_cache['fetched_at']) < 3600:
-        return Response(_news_cache['items'])
-
-    try:
-        import feedparser
-        feed = feedparser.parse('https://www.musicbusinessworldwide.com/feed/')
-        items = []
-        for entry in feed.entries[:10]:
-            published = ''
-            if hasattr(entry, 'published'):
-                published = entry.published
-            items.append({
-                'title': entry.get('title', ''),
-                'link': entry.get('link', ''),
-                'published': published,
-                'source': 'Music Business Worldwide',
-            })
-        _news_cache['items'] = items
-        _news_cache['fetched_at'] = now
-        return Response(items)
-    except Exception:
-        # Return cached items if available, otherwise empty
-        return Response(_news_cache['items'])
-
-
 @csrf_exempt
 def initialize_database(request):
     """
