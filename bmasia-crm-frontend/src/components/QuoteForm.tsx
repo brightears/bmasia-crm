@@ -955,12 +955,13 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
             <Grid item xs={12} md={6}>
               <TextField
                 fullWidth
-                label="Notes"
+                label="Notes (shown on PDF)"
                 value={formData.notes}
                 onChange={(e) => handleInputChange('notes', e.target.value)}
                 multiline
                 rows={4}
-                placeholder="Internal notes..."
+                placeholder="e.g., Zone added prorated on top of existing zones..."
+                helperText="Optional — visible to the client on the quote PDF"
               />
             </Grid>
 
