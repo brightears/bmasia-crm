@@ -398,28 +398,24 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           height: 64,
           display: 'flex',
           alignItems: 'center',
+          justifyContent: drawerCollapsed && !isMobile ? 'center' : 'space-between',
           px: drawerCollapsed && !isMobile ? 1 : 2,
-          background: 'linear-gradient(135deg, #FF8C00 0%, #FFA500 100%)',
-          color: 'white',
+          backgroundColor: '#ffffff',
+          borderBottom: '1px solid rgba(0,0,0,0.08)',
         }}
       >
         {drawerCollapsed && !isMobile ? (
           <Tooltip title="BMAsia CRM" placement="right">
-            <Box component="img" src="/bmasia-logo.png" alt="BM" sx={{ height: 28, borderRadius: '4px' }} />
+            <Box component="img" src="/bmasia-logo.png" alt="BMAsia" sx={{ height: 32, borderRadius: '4px' }} />
           </Tooltip>
         ) : (
           <>
-            <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center' }}>
-              <Box component="img" src="/bmasia-logo.png" alt="BMAsia CRM" sx={{ height: 32, mr: 1, borderRadius: '4px' }} />
-              <Typography variant="h6" component="div" sx={{ fontWeight: 'bold' }}>
-                BMAsia CRM
-              </Typography>
-            </Box>
+            <Box component="img" src="/bmasia-logo.png" alt="BMAsia" sx={{ height: 38, borderRadius: '4px' }} />
             {!isMobile && (
               <IconButton
-                color="inherit"
                 onClick={handleDrawerCollapse}
                 size="small"
+                sx={{ color: '#64748b' }}
               >
                 {drawerCollapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
               </IconButton>
