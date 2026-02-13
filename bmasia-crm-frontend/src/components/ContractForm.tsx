@@ -181,8 +181,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
     master_contract: '',
     customer_signatory_name: '',
     customer_signatory_title: '',
-    bmasia_signatory_name: '',
-    bmasia_signatory_title: '',
+    bmasia_signatory_name: 'Chris Andrews',
+    bmasia_signatory_title: 'Director',
     custom_terms: '',
     bmasia_contact_name: '',
     bmasia_contact_email: '',
@@ -284,8 +284,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
       master_contract: contract.master_contract || '',
       customer_signatory_name: contract.customer_signatory_name || '',
       customer_signatory_title: contract.customer_signatory_title || '',
-      bmasia_signatory_name: contract.bmasia_signatory_name || '',
-      bmasia_signatory_title: contract.bmasia_signatory_title || '',
+      bmasia_signatory_name: contract.bmasia_signatory_name || 'Chris Andrews',
+      bmasia_signatory_title: contract.bmasia_signatory_title || 'Director',
       custom_terms: contract.custom_terms || '',
       bmasia_contact_name: contract.bmasia_contact_name || '',
       bmasia_contact_email: contract.bmasia_contact_email || '',
@@ -1020,14 +1020,14 @@ const ContractForm: React.FC<ContractFormProps> = ({
                     label="BMAsia Signatory Name"
                     value={formData.bmasia_signatory_name}
                     onChange={(e) => setFormData(prev => ({ ...prev, bmasia_signatory_name: e.target.value }))}
-                    placeholder="e.g., Norbert Platzer"
+                    placeholder="Chris Andrews"
                   />
                   <TextField
                     fullWidth
                     label="BMAsia Signatory Title"
                     value={formData.bmasia_signatory_title}
                     onChange={(e) => setFormData(prev => ({ ...prev, bmasia_signatory_title: e.target.value }))}
-                    placeholder="e.g., Managing Director"
+                    placeholder="Director"
                   />
                 </Box>
               </Box>
