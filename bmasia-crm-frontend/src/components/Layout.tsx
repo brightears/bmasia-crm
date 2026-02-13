@@ -33,7 +33,7 @@ import {
   Assignment as AssignmentIcon,
   Receipt as ReceiptIcon,
   Logout,
-  Notifications as NotificationsIcon,
+
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
   ExpandLess,
@@ -329,7 +329,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [drawerCollapsed, setDrawerCollapsed] = useState(isTablet);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const [notificationAnchorEl, setNotificationAnchorEl] = useState<null | HTMLElement>(null);
+
   const { darkMode, toggleDarkMode } = useThemeContext();
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const dailyQuote = getDailyQuote();
@@ -368,13 +368,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     setAnchorEl(null);
   };
 
-  const handleNotificationMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
-    setNotificationAnchorEl(event.currentTarget);
-  };
-
-  const handleNotificationMenuClose = () => {
-    setNotificationAnchorEl(null);
-  };
 
   const handleLogout = async () => {
     handleUserMenuClose();
@@ -546,18 +539,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               </IconButton>
             </Tooltip>
 
-            {/* Notifications */}
-            <Tooltip title="Notifications">
-              <IconButton
-                color="inherit"
-                onClick={handleNotificationMenuOpen}
-              >
-                <Badge badgeContent={3} color="error">
-                  <NotificationsIcon />
-                </Badge>
-              </IconButton>
-            </Tooltip>
-
             {/* User menu */}
             <Button
               onClick={handleUserMenuOpen}
@@ -708,65 +689,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         <MenuItem onClick={handleLogout}>
           <Logout sx={{ mr: 1 }} />
           Logout
-        </MenuItem>
-      </Menu>
-
-      {/* Notification Menu */}
-      <Menu
-        anchorEl={notificationAnchorEl}
-        open={Boolean(notificationAnchorEl)}
-        onClose={handleNotificationMenuClose}
-        PaperProps={{
-          elevation: 3,
-          sx: {
-            overflow: 'visible',
-            filter: 'drop-shadow(0px 2px 8px rgba(0,0,0,0.32))',
-            mt: 1.5,
-            minWidth: 320,
-            maxWidth: 400,
-          },
-        }}
-        transformOrigin={{ horizontal: 'right', vertical: 'top' }}
-        anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
-      >
-        <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
-          <Typography variant="h6">Notifications</Typography>
-        </Box>
-        <MenuItem>
-          <Box>
-            <Typography variant="body2" sx={{ fontWeight: 500 }}>
-              New opportunity created
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              2 minutes ago
-            </Typography>
-          </Box>
-        </MenuItem>
-        <MenuItem>
-          <Box>
-            <Typography variant="body2" sx={{ fontWeight: 500 }}>
-              Contract renewal due
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              1 hour ago
-            </Typography>
-          </Box>
-        </MenuItem>
-        <MenuItem>
-          <Box>
-            <Typography variant="body2" sx={{ fontWeight: 500 }}>
-              Task overdue
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              3 hours ago
-            </Typography>
-          </Box>
-        </MenuItem>
-        <Divider />
-        <MenuItem sx={{ justifyContent: 'center' }}>
-          <Typography variant="body2" color="primary">
-            View all notifications
-          </Typography>
         </MenuItem>
       </Menu>
 
