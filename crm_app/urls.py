@@ -115,6 +115,8 @@ urlpatterns = [
     path('admin/preview-email/company/<uuid:company_id>/', admin_views.preview_email_view, name='admin_preview_email_company'),
     path('admin/preview-template/<uuid:template_id>/', admin_views.preview_template_view, name='admin_preview_template'),
     path('admin/send-test-email/', admin_views.send_test_email_view, name='admin_send_test_email'),
+    # Industry news RSS proxy
+    path('v1/industry-news/', views.industry_news, name='industry_news'),
     # Database initialization endpoint (one-time use)
     path('initialize-database/', views.initialize_database, name='initialize_database'),
 ]

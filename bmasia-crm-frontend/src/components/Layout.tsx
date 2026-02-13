@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   AppBar,
   Box,
@@ -57,13 +57,13 @@ import {
   Wifi as WifiIcon,
   AttachMoney as AttachMoneyIcon,
   CameraAlt as CameraAltIcon,
+  Article as ArticleIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import ApiService from '../services/api';
 import { useThemeContext } from '../contexts/ThemeContext';
 import MobileBottomNav from './MobileBottomNav';
-import { getDailyQuote, getSeasonalIcon } from '../constants/quotes';
 
 const drawerWidth = 280;
 const miniDrawerWidth = 64;
@@ -332,8 +332,48 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [notificationAnchorEl, setNotificationAnchorEl] = useState<null | HTMLElement>(null);
   const { darkMode, toggleDarkMode } = useThemeContext();
   const avatarInputRef = useRef<HTMLInputElement>(null);
-  const dailyQuote = getDailyQuote();
-  const seasonalIcon = getSeasonalIcon();
+
+  // Industry news ticker
+  const [newsItems, setNewsItems] = useState<Array<{ title: string; link: string; published: string; source: string }>>([]);
+  const [currentNewsIndex, setCurrentNewsIndex] = useState(0);
+  const [newsFading, setNewsFading] = useState(false);
+  const [newsHovered, setNewsHovered] = useState(false);
+
+  const fetchNews = useCallback(async () => {
+    try {
+      // Check sessionStorage cache first (30 min TTL)
+      const cached = sessionStorage.getItem('industryNews');
+      if (cached) {
+        const { items, timestamp } = JSON.parse(cached);
+        if (Date.now() - timestamp < 1800000) {
+          setNewsItems(items);
+          return;
+        }
+      }
+      const items = await ApiService.getIndustryNews();
+      setNewsItems(items);
+      sessionStorage.setItem('industryNews', JSON.stringify({ items, timestamp: Date.now() }));
+    } catch {
+      // Silently fail — empty header is fine
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchNews();
+  }, [fetchNews]);
+
+  // Auto-rotate news every 8 seconds
+  useEffect(() => {
+    if (newsItems.length <= 1 || newsHovered) return;
+    const interval = setInterval(() => {
+      setNewsFading(true);
+      setTimeout(() => {
+        setCurrentNewsIndex((prev) => (prev + 1) % newsItems.length);
+        setNewsFading(false);
+      }, 300);
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [newsItems.length, newsHovered]);
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -405,7 +445,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           position: 'relative',
           px: drawerCollapsed && !isMobile ? 1 : 2,
           py: 2,
-          backgroundColor: '#ffffff',
+          backgroundColor: '#f1f5f9',
           borderBottom: '1px solid rgba(0,0,0,0.08)',
         }}
       >
@@ -525,16 +565,38 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             <MenuIcon />
           </IconButton>
 
-          <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 0.75, overflow: 'hidden', ml: 1 }}>
-            <Typography sx={{ fontSize: '1rem', flexShrink: 0 }}>
-              {seasonalIcon}
-            </Typography>
-            <Typography noWrap sx={{ color: 'text.secondary', fontSize: '0.875rem', fontStyle: 'italic' }}>
-              &ldquo;{dailyQuote.text}&rdquo;
-            </Typography>
-            <Typography noWrap sx={{ color: 'text.disabled', fontSize: '0.8rem', flexShrink: 0 }}>
-              &mdash; {dailyQuote.author}
-            </Typography>
+          <Box
+            sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 1, overflow: 'hidden', ml: 1 }}
+            onMouseEnter={() => setNewsHovered(true)}
+            onMouseLeave={() => setNewsHovered(false)}
+          >
+            {newsItems.length > 0 && (
+              <>
+                <ArticleIcon sx={{ color: 'text.disabled', fontSize: '1.1rem', flexShrink: 0 }} />
+                <Box
+                  component="a"
+                  href={newsItems[currentNewsIndex]?.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  sx={{
+                    color: 'text.secondary',
+                    fontSize: '0.85rem',
+                    textDecoration: 'none',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    opacity: newsFading ? 0 : 1,
+                    transition: 'opacity 0.3s ease',
+                    '&:hover': { color: 'primary.main', textDecoration: 'underline' },
+                  }}
+                >
+                  {newsItems[currentNewsIndex]?.title}
+                </Box>
+                <Typography noWrap sx={{ color: 'text.disabled', fontSize: '0.7rem', flexShrink: 0, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  MBW
+                </Typography>
+              </>
+            )}
           </Box>
 
           {/* Header actions */}
