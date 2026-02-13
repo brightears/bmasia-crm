@@ -131,7 +131,7 @@ const OpportunityDetailDialog: React.FC<OpportunityDetailDialogProps> = ({
                 <Typography><strong>Expected Value:</strong> {formatCurrencyFn(opportunity.expected_value || 0, opportunity.company_billing_entity)}</Typography>
               </Box>
               <Typography><strong>Probability:</strong> {opportunity.probability}%</Typography>
-              <Typography><strong>Weighted Value:</strong> {formatCurrencyFn(opportunity.weighted_value, opportunity.company_billing_entity)}</Typography>
+              <Typography><strong>Weighted Value:</strong> {formatCurrencyFn(opportunity.weighted_value || 0, opportunity.company_billing_entity)}</Typography>
             </Box>
           </Grid>
 
@@ -387,7 +387,7 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
     return stageConfig.map(stage => {
       const stageOpportunities = opportunities.filter(opp => opp.stage === stage.id);
       const totalValue = stageOpportunities.reduce((sum, opp) => sum + (opp.expected_value || 0), 0);
-      const weightedValue = stageOpportunities.reduce((sum, opp) => sum + opp.weighted_value, 0);
+      const weightedValue = stageOpportunities.reduce((sum, opp) => sum + (opp.weighted_value || 0), 0);
       
       return {
         id: stage.id,

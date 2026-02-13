@@ -20,13 +20,11 @@ import {
   useMediaQuery,
   Badge,
   Tooltip,
-  InputBase,
   alpha,
   Chip,
   Button,
   Collapse,
 } from '@mui/material';
-import { styled } from '@mui/material/styles';
 import {
   Menu as MenuIcon,
   Dashboard as DashboardIcon,
@@ -35,7 +33,6 @@ import {
   Assignment as AssignmentIcon,
   Receipt as ReceiptIcon,
   Logout,
-  Search as SearchIcon,
   Notifications as NotificationsIcon,
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
@@ -188,46 +185,6 @@ const unifiedNavigation = [
   },
 ];
 
-const Search = styled('div')(({ theme }) => ({
-  position: 'relative',
-  borderRadius: theme.shape.borderRadius,
-  backgroundColor: alpha(theme.palette.common.white, 0.15),
-  '&:hover': {
-    backgroundColor: alpha(theme.palette.common.white, 0.25),
-  },
-  marginLeft: 0,
-  width: '100%',
-  [theme.breakpoints.up('sm')]: {
-    marginLeft: theme.spacing(1),
-    width: 'auto',
-  },
-}));
-
-const SearchIconWrapper = styled('div')(({ theme }) => ({
-  padding: theme.spacing(0, 2),
-  height: '100%',
-  position: 'absolute',
-  pointerEvents: 'none',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-}));
-
-const StyledInputBase = styled(InputBase)(({ theme }) => ({
-  color: 'inherit',
-  width: '100%',
-  '& .MuiInputBase-input': {
-    padding: theme.spacing(1, 1, 1, 0),
-    paddingLeft: `calc(1em + ${theme.spacing(4)})`,
-    transition: theme.transitions.create('width'),
-    [theme.breakpoints.up('sm')]: {
-      width: '12ch',
-      '&:focus': {
-        width: '20ch',
-      },
-    },
-  },
-}));
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -365,7 +322,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [notificationAnchorEl, setNotificationAnchorEl] = useState<null | HTMLElement>(null);
   const { darkMode, toggleDarkMode } = useThemeContext();
-  const [searchQuery, setSearchQuery] = useState('');
+
 
   // Get unified navigation and default color
   const userRole = user?.role || 'Admin';
@@ -544,19 +501,6 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           >
             <MenuIcon />
           </IconButton>
-
-          {/* Search */}
-          <Search>
-            <SearchIconWrapper>
-              <SearchIcon />
-            </SearchIconWrapper>
-            <StyledInputBase
-              placeholder="Search…"
-              inputProps={{ 'aria-label': 'search' }}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </Search>
 
           <Box sx={{ flexGrow: 1 }} />
 
