@@ -398,12 +398,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Header */}
       <Box
         sx={{
-          height: 100,
+          height: 120,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           position: 'relative',
           px: drawerCollapsed && !isMobile ? 1 : 2,
+          py: 2,
           backgroundColor: '#ffffff',
           borderBottom: '1px solid rgba(0,0,0,0.08)',
         }}
