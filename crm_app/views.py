@@ -737,8 +737,11 @@ class TaskViewSet(BaseModelViewSet):
 
     @action(detail=False, methods=['get'])
     def my_tasks(self, request):
-        """Get tasks assigned to current user"""
-        tasks = self.get_queryset().filter(assigned_to=request.user)
+        """Get tasks for current user (admins see all, sales see assigned)"""
+        tasks = self.get_queryset()
+        if request.user.role in ('Sales',):
+            tasks = tasks.filter(assigned_to=request.user)
+        tasks = tasks.filter(status__in=['To Do', 'In Progress'])
         serializer = self.get_serializer(tasks, many=True)
         return Response(serializer.data)
 

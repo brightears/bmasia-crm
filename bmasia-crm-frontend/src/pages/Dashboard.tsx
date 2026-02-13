@@ -206,7 +206,7 @@ const Dashboard: React.FC = () => {
     const loadMyTasks = async () => {
       try {
         const tasks = await ApiService.getMyTasks();
-        setMyTasks(tasks.filter((t: Task) => t.status === 'To Do' || t.status === 'In Progress'));
+        setMyTasks(tasks);
       } catch (err) {
         // Non-critical — don't show error
       }
