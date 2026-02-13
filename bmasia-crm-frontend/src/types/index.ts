@@ -301,7 +301,7 @@ export interface Contract {
   opportunity_name?: string;
   contract_number: string;
   contract_type: 'Annual' | 'Monthly' | 'One-time' | 'Custom';
-  status: 'Active' | 'Renewed' | 'Expired' | 'Cancelled';
+  status: 'Draft' | 'Sent' | 'Active' | 'Renewed' | 'Expired' | 'Cancelled';
   start_date: string;
   end_date: string;
   value: number;

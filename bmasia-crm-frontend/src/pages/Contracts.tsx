@@ -54,9 +54,11 @@ import EmailSendDialog from '../components/EmailSendDialog';
 
 const statusOptions = [
   { value: '', label: 'All Statuses' },
+  { value: 'Draft', label: 'Draft', color: '#9e9e9e' },
+  { value: 'Sent', label: 'Sent', color: '#ff9800' },
   { value: 'Active', label: 'Active', color: '#4caf50' },
   { value: 'Renewed', label: 'Renewed', color: '#2196f3' },
-  { value: 'Expired', label: 'Expired', color: '#9e9e9e' },
+  { value: 'Expired', label: 'Expired', color: '#757575' },
   { value: 'Cancelled', label: 'Cancelled', color: '#f44336' },
 ];
 
@@ -250,8 +252,10 @@ const Contracts: React.FC = () => {
 
     const colorMap: { [key: string]: any } = {
       '#9e9e9e': 'default',
+      '#ff9800': 'warning',
       '#2196f3': 'info',
       '#4caf50': 'success',
+      '#757575': 'default',
       '#f44336': 'error',
     };
 

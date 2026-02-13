@@ -443,6 +443,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
       company: '',
       contact: '',
       opportunity: '',
+      quote_type: 'new' as 'new' | 'renewal' | 'addon',
       status: 'Draft',
       valid_from: new Date(),
       valid_until: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),

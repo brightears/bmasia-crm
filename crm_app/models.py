@@ -628,6 +628,8 @@ class Contract(TimestampedModel):
     ]
     
     CONTRACT_STATUS_CHOICES = [
+        ('Draft', 'Draft'),
+        ('Sent', 'Sent'),
         ('Active', 'Active'),
         ('Renewed', 'Renewed'),
         ('Expired', 'Expired'),
@@ -663,7 +665,7 @@ class Contract(TimestampedModel):
     contract_number = models.CharField(max_length=50, unique=True)
     contract_type = models.CharField(max_length=20, choices=CONTRACT_TYPE_CHOICES, default='Annual')
     service_type = models.CharField(max_length=50, choices=SERVICE_TYPE_CHOICES, blank=True, help_text="Specific service or plan")
-    status = models.CharField(max_length=20, choices=CONTRACT_STATUS_CHOICES, default='Active')
+    status = models.CharField(max_length=20, choices=CONTRACT_STATUS_CHOICES, default='Draft')
     start_date = models.DateField()
     end_date = models.DateField()
     value = models.DecimalField(
