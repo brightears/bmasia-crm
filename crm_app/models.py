@@ -50,8 +50,7 @@ class User(AbstractUser):
         help_text="Gmail app password (will be encrypted)"
     )
 
-    avatar_url = models.CharField(
-        max_length=500,
+    avatar_url = models.TextField(
         blank=True,
         null=True,
         help_text="URL or base64 data URL for user avatar"
