@@ -52,14 +52,10 @@ const quotes: DailyQuote[] = [
 ];
 
 /**
- * Returns the same quote for everyone on the same day.
- * Changes at midnight local time.
+ * Returns a random quote on each page load.
  */
 export const getDailyQuote = (): DailyQuote => {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), 0, 0);
-  const dayOfYear = Math.floor((now.getTime() - start.getTime()) / 86400000);
-  return quotes[dayOfYear % quotes.length];
+  return quotes[Math.floor(Math.random() * quotes.length)];
 };
 
 export default quotes;
