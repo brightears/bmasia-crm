@@ -405,12 +405,12 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       >
         {drawerCollapsed && !isMobile ? (
           <Tooltip title="BMAsia CRM" placement="right">
-            <Box component="img" src="/bmasia-logo.png" alt="BM" sx={{ height: 28, filter: 'brightness(0) invert(1)' }} />
+            <Box component="img" src="/bmasia-logo.png" alt="BM" sx={{ height: 28, borderRadius: '4px' }} />
           </Tooltip>
         ) : (
           <>
             <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center' }}>
-              <Box component="img" src="/bmasia-logo.png" alt="BMAsia CRM" sx={{ height: 32, mr: 1, filter: 'brightness(0) invert(1)' }} />
+              <Box component="img" src="/bmasia-logo.png" alt="BMAsia CRM" sx={{ height: 32, mr: 1, borderRadius: '4px' }} />
               <Typography variant="h6" component="div" sx={{ fontWeight: 'bold' }}>
                 BMAsia CRM
               </Typography>
