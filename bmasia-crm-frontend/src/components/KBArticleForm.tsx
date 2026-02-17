@@ -189,6 +189,12 @@ const KBArticleForm: React.FC<KBArticleFormProps> = ({ articleId, onSave, onCanc
 
     if (!formData.content.trim() || formData.content === '<p><br></p>') {
       errors.content = 'Content is required';
+    } else {
+      // Strip HTML tags and check minimum length (backend requires 100 chars)
+      const textContent = formData.content.replace(/<[^<]+?>/g, '').trim();
+      if (textContent.length < 100) {
+        errors.content = `Content must be at least 100 characters (currently ${textContent.length})`;
+      }
     }
 
     setValidationErrors(errors);
@@ -203,8 +209,8 @@ const KBArticleForm: React.FC<KBArticleFormProps> = ({ articleId, onSave, onCanc
       const submitData = {
         title: formData.title,
         excerpt: formData.excerpt,
-        category: formData.category,
-        tags: formData.tags,
+        category_id: formData.category,
+        tag_ids: formData.tags,
         content: formData.content,
         status: formData.status,
         visibility: formData.visibility,
@@ -233,8 +239,8 @@ const KBArticleForm: React.FC<KBArticleFormProps> = ({ articleId, onSave, onCanc
       const submitData = {
         title: formData.title,
         excerpt: formData.excerpt,
-        category: formData.category,
-        tags: formData.tags,
+        category_id: formData.category,
+        tag_ids: formData.tags,
         content: formData.content,
         status: formData.status,
         visibility: formData.visibility,
@@ -266,7 +272,16 @@ const KBArticleForm: React.FC<KBArticleFormProps> = ({ articleId, onSave, onCanc
       onSave(savedArticle);
     } catch (err: any) {
       console.error('Failed to save article:', err);
-      setError(err.response?.data?.detail || 'Failed to save article');
+      const errorData = err.response?.data;
+      if (errorData && typeof errorData === 'object' && !errorData.detail) {
+        // Show field-level validation errors from DRF
+        const messages = Object.entries(errorData)
+          .map(([field, msgs]) => `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`)
+          .join('; ');
+        setError(messages || 'Failed to save article');
+      } else {
+        setError(errorData?.detail || 'Failed to save article');
+      }
     } finally {
       setLoading(false);
     }
