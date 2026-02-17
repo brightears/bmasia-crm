@@ -57,6 +57,7 @@ import {
   Description,
   Close,
   Receipt,
+  Visibility,
 } from '@mui/icons-material';
 import { Quote, QuoteActivity } from '../types';
 import ApiService from '../services/api';
@@ -150,6 +151,17 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
       setError('Failed to reject quote');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePreviewPDF = async () => {
+    if (!quoteDetail) return;
+    try {
+      const blob = await ApiService.downloadQuotePDF(quoteDetail.id);
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    } catch (err) {
+      setError('Failed to preview PDF');
     }
   };
 
@@ -319,6 +331,15 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
                 </Button>
               </>
             )}
+            <Button
+              variant="outlined"
+              startIcon={<Visibility />}
+              onClick={handlePreviewPDF}
+              sx={{ mr: 1 }}
+              disabled={loading}
+            >
+              Preview
+            </Button>
             <Button
               variant="outlined"
               startIcon={<GetApp />}
