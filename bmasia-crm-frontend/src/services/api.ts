@@ -1559,7 +1559,7 @@ class ApiService {
 
   // Email Logs
   async getEmailLogs(params?: { quote?: string; invoice?: string; contract?: string; company?: string }): Promise<EmailLogEntry[]> {
-    const response = await authApi.get('/api/v1/email-logs/', { params });
+    const response = await authApi.get('/email-logs/', { params });
     return response.data.results || response.data;
   }
 }

@@ -43,7 +43,8 @@ from .models import (
     ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
     SeasonalTriggerDate,
     MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent,
-    Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry
+    Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry,
+    EmailLog
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
