@@ -2,6 +2,85 @@
 
 ## February 2026
 
+### Feb 16-17, 2026 - Contract Service Locations + PDF Preview
+
+**Problem 1 — Complex Zone Picker**: ContractForm used EnhancedZonePicker showing Soundtrack account IDs, device statuses, API sync info — all tech-support concerns. Sales just needs to enter a zone name (e.g., "Lobby") and pick a platform type (Soundtrack or Beat Breeze).
+
+**Problem 2 — No PDF Preview**: ContractDetail lacked a PDF preview button (had to download every time), unlike InvoiceDetail.
+
+**Solution — New ContractServiceLocation Model** (`crm_app/models.py`):
+- Simple model: `contract` FK, `location_name` (CharField), `platform` (soundtrack/beatbreeze), `sort_order` (int)
+- No device info, no API sync, no status — just what the contract PDF needs
+- `related_name='service_locations'` on Contract FK
+- Ordering: `['sort_order', 'platform', 'location_name']`
+- Migration: `0071_contract_service_location.py`
+
+**Backend — Serializer** (`crm_app/serializers.py`):
+- New `ContractServiceLocationSerializer` (id, location_name, platform, sort_order)
+- Added `service_locations` as nested writable field on `ContractSerializer`
+- `create()`/`update()`: delete-recreate pattern (same as `line_items`)
+- `get_active_zone_count()`/`get_total_zone_count()`: prefers service_locations count, falls back to contract_zones
+
+**Backend — PDF Dual-Source Fallback** (`crm_app/views.py`):
+- `_build_zones_table()`: checks `contract.service_locations.all()` first
+- If service_locations exist → delegates to new `_build_service_locations_table()`
+- If no service_locations → falls back to `contract.get_active_zones()` (legacy)
+- Returns `None` if no data at all — all 5 call sites null-check the result
+- `_substitute_template_variables()`: also dual-source for `{{venue_names}}` and `{{number_of_zones}}`
+
+**Frontend — ContractForm Refactor** (`ContractForm.tsx`):
+- **Removed**: EnhancedZonePicker import/usage, `selectedZones` state, `loadContractZones()`, `soundtrackAccountId`/`previewZones`/`previewLoading`/`previewError` states, Soundtrack Account Configuration section, Music Zones section, `updateContractZones()` in handleSubmit
+- **Added**: `ServiceLocationEntry` interface, `serviceLocations` state, add/remove/update handlers
+- **UI**: Simple table — Location Name (TextField) + Platform (Select) + Delete button + "Add Location" button
+- **handleQuoteChange()**: auto-creates service location rows from quote line items (maps product_service to platform, uses quantity for row count, skips hardware)
+- **handleSubmit()**: includes `service_locations` in payload (filtered non-blank, mapped with sort_order)
+- **Edit mode**: reads `contract.service_locations` first, falls back to `contract.contract_zones` for legacy
+
+**Frontend — ContractDetail Updates** (`ContractDetail.tsx`):
+- Replaced zone card grid with simple "Service Locations" table (Location + Platform chip)
+- Fallback to contractZones display for legacy contracts
+- Added "Preview PDF" button (Visibility icon) — blob→createObjectURL→window.open
+- Added "Download PDF" button (PictureAsPdf icon) — blob→download link
+
+**TypeScript Types** (`types/index.ts`):
+- New `ServiceLocation` interface (id, location_name, platform, sort_order, timestamps)
+- Added `service_locations?: ServiceLocation[]` to Contract interface
+
+**Backward Compatibility**:
+- Old contracts with ContractZone data: PDF falls back to legacy zone path automatically
+- No data migration — gradual migration when contracts are edited
+- EnhancedZonePicker.tsx file stays (not deleted) — just no longer imported
+- Zone/ContractZone system unchanged for CompanyDetail → Zones tab
+
+**Files Modified**:
+- `crm_app/models.py` — ContractServiceLocation model
+- `crm_app/serializers.py` — ContractServiceLocationSerializer + ContractSerializer updates
+- `crm_app/views.py` — `_build_service_locations_table()` + dual-source fallback
+- `crm_app/migrations/0071_contract_service_location.py` — New migration
+- `bmasia-crm-frontend/src/components/ContractForm.tsx` — Replaced zone picker with service locations
+- `bmasia-crm-frontend/src/components/ContractDetail.tsx` — Service locations display + PDF preview/download
+- `bmasia-crm-frontend/src/types/index.ts` — ServiceLocation interface
+
+**Commit**: `2c30de1f` — "Simplify contract service locations + add PDF preview"
+
+---
+
+### Feb 16, 2026 - Task Digest Cron Fix
+
+**Problem**: Task digest cron (`crn-d65drn75r7bs73cpu72g`) failing to deploy with `ModuleNotFoundError: No module named 'crm_project'` and Python 3.13 in build path.
+
+**Root Cause**: Two incorrect environment variables:
+- `DJANGO_SETTINGS_MODULE` was `crm_project.settings` (should be `bmasia_crm.settings`)
+- No `PYTHON_VERSION` env var — defaulted to Python 3.13 instead of pinned 3.12.8
+
+**Fix**: Updated environment variables via Render MCP:
+- `DJANGO_SETTINGS_MODULE=bmasia_crm.settings`
+- `PYTHON_VERSION=3.12.8`
+
+**Lesson**: Render crons have their own environment variables separate from the web service. When creating new crons, always verify `DJANGO_SETTINGS_MODULE` and `PYTHON_VERSION` match the web service settings.
+
+---
+
 ### Feb 13, 2026 - Contract Draft/Sent Status Workflow
 
 **Problem**: All new contracts were created with status `Active`, which made no sense — a freshly created contract hasn't been sent or signed yet. Users had to mentally track contract lifecycle outside the CRM.

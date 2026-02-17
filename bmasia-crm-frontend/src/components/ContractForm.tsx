@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -198,6 +198,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
   });
 
   const [serviceLocations, setServiceLocations] = useState<ServiceLocationEntry[]>([]);
+  const [locationsTrimmedWarning, setLocationsTrimmedWarning] = useState('');
+  const isFormInitialized = useRef(false);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [masterContracts, setMasterContracts] = useState<Contract[]>([]);
   const [additionalSignatories, setAdditionalSignatories] = useState<Array<{ name: string; title: string }>>([]);
@@ -278,6 +280,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
   };
 
   const populateForm = (contract: Contract) => {
+    isFormInitialized.current = false;
     setFormData({
       company: contract.company,
       contract_number: contract.contract_number,
@@ -354,9 +357,13 @@ const ContractForm: React.FC<ContractFormProps> = ({
     } else {
       setServiceLocations([]);
     }
+
+    // Allow sync to run after initial form population
+    setTimeout(() => { isFormInitialized.current = true; }, 0);
   };
 
   const resetForm = () => {
+    isFormInitialized.current = false;
     setFormData({
       company: '',
       contract_number: '',
@@ -397,6 +404,10 @@ const ContractForm: React.FC<ContractFormProps> = ({
     setSelectedCompanyCountry('');
     setError('');
     setShowErrors(false);
+    setLocationsTrimmedWarning('');
+
+    // Allow sync to run after form reset
+    setTimeout(() => { isFormInitialized.current = true; }, 0);
   };
 
   const handleCompanyChange = async (company: Company | null) => {
@@ -537,23 +548,72 @@ const ContractForm: React.FC<ContractFormProps> = ({
     return lineItems.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
   };
 
-  // Service location handlers
-  const addServiceLocation = () => {
-    setServiceLocations(prev => [
-      ...prev,
-      { location_name: '', platform: 'soundtrack', tempId: generateTempId() },
-    ]);
-  };
-
-  const removeServiceLocation = (tempId: string) => {
-    setServiceLocations(prev => prev.filter(loc => loc.tempId !== tempId));
-  };
-
+  // Service location handler (only location_name is editable — platform is derived from line items)
   const updateServiceLocation = (tempId: string, field: keyof Omit<ServiceLocationEntry, 'tempId'>, value: string) => {
     setServiceLocations(prev => prev.map(loc =>
       loc.tempId === tempId ? { ...loc, [field]: value } : loc
     ));
   };
+
+  // Sync service locations from music line items
+  const syncLocationsFromLineItems = (
+    currentLineItems: ContractLineItem[],
+    currentLocations: ServiceLocationEntry[]
+  ): { locations: ServiceLocationEntry[]; droppedNamedCount: number } => {
+    const requiredCounts: Record<string, number> = { soundtrack: 0, beatbreeze: 0 };
+
+    currentLineItems.forEach(item => {
+      const product = PRODUCT_OPTIONS.find(p => p.name === item.product_service);
+      const platform = product?.platform;
+      if (platform) {
+        requiredCounts[platform] += Math.max(0, Math.round(item.quantity));
+      }
+    });
+
+    const result: ServiceLocationEntry[] = [];
+    let droppedNamedCount = 0;
+
+    for (const platform of ['soundtrack', 'beatbreeze'] as const) {
+      const existing = currentLocations.filter(loc => loc.platform === platform);
+      const required = requiredCounts[platform];
+
+      if (existing.length <= required) {
+        // Keep all existing, add blank rows to fill the gap
+        result.push(...existing);
+        for (let i = 0; i < required - existing.length; i++) {
+          result.push({ location_name: '', platform, tempId: generateTempId() });
+        }
+      } else {
+        // Need to remove some — prefer removing blank/unnamed ones first
+        const named = existing.filter(loc => loc.location_name.trim() !== '');
+        const unnamed = existing.filter(loc => loc.location_name.trim() === '');
+
+        if (named.length <= required) {
+          result.push(...named);
+          result.push(...unnamed.slice(0, required - named.length));
+        } else {
+          // Even named ones exceed required — keep first N
+          result.push(...named.slice(0, required));
+          droppedNamedCount += named.length - required;
+        }
+      }
+    }
+
+    return { locations: result, droppedNamedCount };
+  };
+
+  // Auto-sync service locations when line items change (after form is initialized)
+  useEffect(() => {
+    if (!isFormInitialized.current) return;
+    const { locations, droppedNamedCount } = syncLocationsFromLineItems(lineItems, serviceLocations);
+    setServiceLocations(locations);
+    if (droppedNamedCount > 0) {
+      setLocationsTrimmedWarning(`${droppedNamedCount} named location(s) removed due to quantity decrease`);
+    } else {
+      setLocationsTrimmedWarning('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lineItems]);
 
   // Handle quote selection and auto-fill
   const handleQuoteChange = async (quoteId: string) => {
@@ -579,32 +639,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
             line_total: item.quantity * Math.round(finalUnitPrice * 100) / 100,
           };
         }));
-
-        // Auto-create service location rows from music line items
-        const newLocations: ServiceLocationEntry[] = [];
-        selectedQuote.line_items.forEach(item => {
-          const productName = (item.product_service || '').toLowerCase();
-          let platform: 'soundtrack' | 'beatbreeze' | null = null;
-          if (productName.includes('soundtrack')) {
-            platform = 'soundtrack';
-          } else if (productName.includes('beat breeze') || productName.includes('beatbreeze')) {
-            platform = 'beatbreeze';
-          }
-          // Only music service items generate location rows (skip hardware)
-          if (platform !== null) {
-            const qty = Math.max(1, Math.round(item.quantity));
-            for (let i = 0; i < qty; i++) {
-              newLocations.push({
-                location_name: '',
-                platform,
-                tempId: generateTempId(),
-              });
-            }
-          }
-        });
-        if (newLocations.length > 0) {
-          setServiceLocations(newLocations);
-        }
+        // Service locations will auto-sync via useEffect on lineItems
       }
 
       // Auto-fill currency from quote
@@ -653,6 +688,13 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
       if (!formData.start_date || !formData.end_date) {
         setError('Please select start and end dates');
+        return;
+      }
+
+      // Validate service locations have names
+      const emptyLocations = serviceLocations.filter(loc => !loc.location_name.trim());
+      if (emptyLocations.length > 0) {
+        setError(`Please fill in all ${emptyLocations.length} service location name(s)`);
         return;
       }
 
@@ -1374,43 +1416,44 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
             <Divider />
 
-            {/* Service Locations */}
+            {/* Service Locations (auto-derived from music line items) */}
             <Box>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+              <Box sx={{ mb: 1 }}>
                 <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
                   <LocationOnIcon sx={{ mr: 1, color: '#FFA500' }} />
                   Service Locations
                 </Typography>
-                <Button
-                  variant="outlined"
-                  startIcon={<AddIcon />}
-                  onClick={addServiceLocation}
-                  size="small"
-                >
-                  Add Location
-                </Button>
               </Box>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Locations that will appear on the contract PDF
+                Auto-generated from music line items above. Adjust line item quantities to add or remove locations.
               </Typography>
+
+              {locationsTrimmedWarning && (
+                <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setLocationsTrimmedWarning('')}>
+                  {locationsTrimmedWarning}
+                </Alert>
+              )}
 
               {serviceLocations.length === 0 ? (
                 <Typography variant="body2" color="text.disabled" sx={{ py: 2, textAlign: 'center' }}>
-                  No service locations added yet. Click "Add Location" to add one.
+                  Add a music service line item (Soundtrack Your Brand or Beat Breeze) to generate service locations.
                 </Typography>
               ) : (
                 <TableContainer component={Paper} variant="outlined">
                   <Table size="small">
                     <TableHead>
                       <TableRow>
+                        <TableCell width="60px">#</TableCell>
                         <TableCell>Location Name</TableCell>
                         <TableCell width="220px">Platform</TableCell>
-                        <TableCell width="60px">Actions</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {serviceLocations.map((loc) => (
+                      {serviceLocations.map((loc, index) => (
                         <TableRow key={loc.tempId}>
+                          <TableCell>
+                            <Typography variant="body2" color="text.secondary">{index + 1}</Typography>
+                          </TableCell>
                           <TableCell>
                             <TextField
                               fullWidth
@@ -1421,24 +1464,9 @@ const ContractForm: React.FC<ContractFormProps> = ({
                             />
                           </TableCell>
                           <TableCell>
-                            <FormControl fullWidth size="small">
-                              <Select
-                                value={loc.platform}
-                                onChange={(e) => updateServiceLocation(loc.tempId, 'platform', e.target.value)}
-                              >
-                                <MenuItem value="soundtrack">Soundtrack Your Brand</MenuItem>
-                                <MenuItem value="beatbreeze">Beat Breeze</MenuItem>
-                              </Select>
-                            </FormControl>
-                          </TableCell>
-                          <TableCell>
-                            <IconButton
-                              size="small"
-                              onClick={() => removeServiceLocation(loc.tempId)}
-                              color="error"
-                            >
-                              <Delete fontSize="small" />
-                            </IconButton>
+                            <Typography variant="body2">
+                              {loc.platform === 'soundtrack' ? 'Soundtrack Your Brand' : 'Beat Breeze'}
+                            </Typography>
                           </TableCell>
                         </TableRow>
                       ))}
