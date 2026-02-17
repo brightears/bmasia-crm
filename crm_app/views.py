@@ -1306,9 +1306,15 @@ class ContractViewSet(BaseModelViewSet):
             if not primary_contact:
                 primary_contact = company.contacts.first()
 
-        # Get venue/zone names
-        zones = contract.get_active_zones()
-        venue_names = ', '.join([z.name for z in zones]) if zones.exists() else ''
+        # Get venue/zone names — prefer service_locations, fall back to legacy zones
+        service_locs = contract.service_locations.all()
+        if service_locs.exists():
+            venue_names = ', '.join([loc.location_name for loc in service_locs])
+            zone_count_str = str(service_locs.count())
+        else:
+            zones = contract.get_active_zones()
+            venue_names = ', '.join([z.name for z in zones]) if zones.exists() else ''
+            zone_count_str = str(contract.get_zone_count())
 
         replacements = {
             # Company & Client Info
@@ -1332,8 +1338,8 @@ class ContractViewSet(BaseModelViewSet):
 
             # Venue & Zones
             '{{venue_names}}': venue_names,
-            '{{number_of_zones}}': str(contract.get_zone_count()),
-            '{{zone_count}}': str(contract.get_zone_count()),  # alias
+            '{{number_of_zones}}': zone_count_str,
+            '{{zone_count}}': zone_count_str,  # alias
 
             # Signatories
             '{{client_signatory_name}}': contract.customer_signatory_name or '',
@@ -1351,13 +1357,23 @@ class ContractViewSet(BaseModelViewSet):
             zone_lines.append(f"Zone {idx}: {zone.name}")
         return "<br/>".join(zone_lines) if zone_lines else ""
 
-    def _build_zones_table(self, contract, zones):
+    def _build_zones_table(self, contract, zones=None):
         """Build a styled zones Table flowable for PDF insertion.
-        Groups zones by platform (Soundtrack / Beat Breeze) with Service column."""
+        Prefers service_locations (new simple model), falls back to legacy Zone objects.
+        Groups by platform (Soundtrack / Beat Breeze) with Service column."""
         from reportlab.lib import colors
         from reportlab.lib.units import inch
         from reportlab.platypus import Table, TableStyle, Paragraph
         from reportlab.lib.styles import ParagraphStyle
+
+        # Check for new service_locations first
+        service_locs = contract.service_locations.all()
+        if service_locs.exists():
+            return self._build_service_locations_table(contract, service_locs)
+
+        # Legacy path: use Zone objects
+        if zones is None or not zones.exists():
+            return None
 
         company = contract.company
         has_pricing = contract.show_zone_pricing_detail and contract.price_per_zone
@@ -1435,6 +1451,74 @@ class ContractViewSet(BaseModelViewSet):
             zone_style_list.append(('VALIGN', (0, 1), (0, zone_count), 'MIDDLE'))
 
         # Merge Service cells per platform group
+        for start, end in service_spans:
+            zone_style_list.append(('SPAN', (1, start), (1, end)))
+            zone_style_list.append(('VALIGN', (1, start), (1, end), 'MIDDLE'))
+
+        zone_table.setStyle(TableStyle(zone_style_list))
+        return zone_table
+
+    def _build_service_locations_table(self, contract, service_locations):
+        """Build zones table from ContractServiceLocation records (new simple model)."""
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import Table, TableStyle, Paragraph
+        from reportlab.lib.styles import ParagraphStyle
+
+        company = contract.company
+        prop_style = ParagraphStyle('ZoneProp', fontName='DejaVuSans', fontSize=9, textColor=colors.HexColor('#424242'))
+
+        zone_header = ['Property', 'Service', 'Zone']
+        platform_labels = {'soundtrack': 'Soundtrack', 'beatbreeze': 'Beat Breeze'}
+
+        loc_list = list(service_locations)
+        soundtrack_locs = [l for l in loc_list if l.platform == 'soundtrack']
+        beatbreeze_locs = [l for l in loc_list if l.platform == 'beatbreeze']
+
+        zone_data = [zone_header]
+        row_idx = 0
+        service_spans = []
+
+        for platform_locs, platform_key in [
+            (soundtrack_locs, 'soundtrack'),
+            (beatbreeze_locs, 'beatbreeze'),
+        ]:
+            if not platform_locs:
+                continue
+            group_start = row_idx + 1
+            for idx, loc in enumerate(platform_locs, 1):
+                property_name = Paragraph(company.name, prop_style) if row_idx == 0 else ''
+                service_name = platform_labels[platform_key] if idx == 1 else ''
+                row = [property_name, service_name, f"Zone {idx}: {loc.location_name}"]
+                zone_data.append(row)
+                row_idx += 1
+            group_end = row_idx
+            if len(platform_locs) > 1:
+                service_spans.append((group_start, group_end))
+
+        zone_count = row_idx
+        zone_col_widths = [2.0*inch, 1.3*inch, 2.2*inch]
+        zone_table = Table(zone_data, colWidths=zone_col_widths)
+
+        zone_style_list = [
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
+            ('FONT', (0, 1), (-1, -1), 'DejaVuSans', 9),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#424242')),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#fafafa')),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+        ]
+
+        if zone_count > 1:
+            zone_style_list.append(('SPAN', (0, 1), (0, zone_count)))
+            zone_style_list.append(('VALIGN', (0, 1), (0, zone_count), 'MIDDLE'))
+
         for start, end in service_spans:
             zone_style_list.append(('SPAN', (1, start), (1, end)))
             zone_style_list.append(('VALIGN', (1, start), (1, end), 'MIDDLE'))
@@ -1814,6 +1898,7 @@ class ContractViewSet(BaseModelViewSet):
             # Skip all hardcoded clauses and render only template content
             template_content = contract.preamble_template.content
             zones = contract.get_active_zones()
+            has_locations = contract.service_locations.exists() or zones.exists()
 
             # Helper function to render template segments with special variable handling
             def render_segment(segment):
@@ -1851,19 +1936,21 @@ class ContractViewSet(BaseModelViewSet):
                         keep_together_items = []
                         if heading_content.strip():
                             keep_together_items.append(Paragraph(heading_content, body_style))
-                        if zones.exists():
+                        if has_locations:
                             zone_table = self._build_zones_table(contract, zones)
-                            keep_together_items.append(zone_table)
-                            keep_together_items.append(Spacer(1, 0.15*inch))
+                            if zone_table:
+                                keep_together_items.append(zone_table)
+                                keep_together_items.append(Spacer(1, 0.15*inch))
                         if keep_together_items:
                             elements.append(KeepTogether(keep_together_items))
                     else:
                         # No <br/><br/> found - just wrap zones table in KeepTogether
                         if before.strip():
                             elements.append(Paragraph(before, body_style))
-                        if zones.exists():
+                        if has_locations:
                             zone_table = self._build_zones_table(contract, zones)
-                            elements.append(KeepTogether([zone_table, Spacer(1, 0.15*inch)]))
+                            if zone_table:
+                                elements.append(KeepTogether([zone_table, Spacer(1, 0.15*inch)]))
 
                     # Process content after {{zones_table}} (may contain other special vars)
                     if len(parts) > 1 and parts[1].strip():
@@ -1899,12 +1986,13 @@ class ContractViewSet(BaseModelViewSet):
             # Render the template content (handles all special variables)
             render_segment(template_content)
 
-            # If zones exist but {{zones_table}} wasn't in template, append at end
-            if zones.exists() and '{{zones_table}}' not in contract.preamble_template.content:
-                elements.append(Paragraph("<b>Locations for provision of services:</b>", clause_style))
+            # If locations exist but {{zones_table}} wasn't in template, append at end
+            if has_locations and '{{zones_table}}' not in contract.preamble_template.content:
                 zone_table = self._build_zones_table(contract, zones)
-                elements.append(zone_table)
-                elements.append(Spacer(1, 0.2*inch))
+                if zone_table:
+                    elements.append(Paragraph("<b>Locations for provision of services:</b>", clause_style))
+                    elements.append(zone_table)
+                    elements.append(Spacer(1, 0.2*inch))
 
             # Template mode: Skip Additional Terms, Status Indicator, and Signatures
             # (template already contains complete contract with signatures)
@@ -1973,14 +2061,12 @@ and<br/><br/>
 
             # Clause 2: Locations for provision of services (Zones)
             zones = contract.get_active_zones()
-            if zones.exists():
+            zone_table = self._build_zones_table(contract, zones)
+            if zone_table:
                 elements.append(Paragraph(
                     f"<b>{clause_num}.</b> Locations for provision of services:",
                     clause_style
                 ))
-
-                # Build zone table (reuse shared helper with platform grouping)
-                zone_table = self._build_zones_table(contract, zones)
                 elements.append(zone_table)
                 clause_num += 1
             else:
@@ -2858,19 +2944,28 @@ and<br/><br/>
         elements.append(venue_table)
         elements.append(Spacer(1, 0.2*inch))
 
-        # Zones Covered
+        # Zones Covered — prefer service_locations, fall back to legacy zones
+        service_locs = contract.service_locations.all()
         zones = contract.get_active_zones()
-        if zones.exists():
+        if service_locs.exists() or zones.exists():
             elements.append(Paragraph("ZONES COVERED BY THIS AGREEMENT", heading_style))
 
             platform_labels = {'soundtrack': 'Soundtrack', 'beatbreeze': 'Beat Breeze'}
             zone_data = [['Zone Name', 'Service', 'Status']]
-            for zone in zones:
-                zone_data.append([
-                    zone.name,
-                    platform_labels.get(zone.platform, 'N/A'),
-                    'Active' if zone.is_active else 'Inactive'
-                ])
+            if service_locs.exists():
+                for loc in service_locs:
+                    zone_data.append([
+                        loc.location_name,
+                        platform_labels.get(loc.platform, 'N/A'),
+                        'Active'
+                    ])
+            else:
+                for zone in zones:
+                    zone_data.append([
+                        zone.name,
+                        platform_labels.get(zone.platform, 'N/A'),
+                        'Active' if zone.is_active else 'Inactive'
+                    ])
 
             zone_table = Table(zone_data, colWidths=[3*inch, 2*inch, 1.9*inch])
             zone_table.setStyle(TableStyle([
@@ -3127,9 +3222,16 @@ and<br/><br/>
         elements.append(Paragraph(services_text, body_style))
         elements.append(Spacer(1, 0.1*inch))
 
-        # Get zones and list them
+        # Get zones and list them — prefer service_locations
+        service_locs = contract.service_locations.all()
         zones = contract.get_active_zones()
-        if zones.exists():
+        if service_locs.exists():
+            zone_items = []
+            for idx, loc in enumerate(service_locs, 1):
+                zone_items.append(f"<b>{self._number_to_roman(idx)}.</b> {loc.location_name}")
+            zone_list = "<br/>".join(zone_items)
+            elements.append(Paragraph(zone_list, body_style))
+        elif zones.exists():
             zone_items = []
             for idx, zone in enumerate(zones, 1):
                 zone_items.append(f"<b>{self._number_to_roman(idx)}.</b> {zone.name}")

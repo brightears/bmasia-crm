@@ -15,7 +15,6 @@ import {
   Typography,
   Alert,
   CircularProgress,
-  Chip,
   FormControlLabel,
   Switch,
   InputAdornment,
@@ -29,7 +28,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  GridLegacy as Grid,
 } from '@mui/material';
 import {
   AttachFile,
@@ -37,16 +35,14 @@ import {
   Delete,
   CalendarToday,
   LocationOn as LocationOnIcon,
-  MusicNote as MusicNoteIcon,
   Add as AddIcon,
   Calculate,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { Contract, Company, ApiResponse, Zone, PreviewZone, ContractTemplate, ContractLineItem, Quote } from '../types';
+import { Contract, Company, ApiResponse, ContractTemplate, ContractLineItem, Quote } from '../types';
 import ApiService from '../services/api';
-import EnhancedZonePicker from './EnhancedZonePicker';
 
 interface ContractFormProps {
   open: boolean;
@@ -58,12 +54,10 @@ interface ContractFormProps {
   initialQuoteId?: string;
 }
 
-interface ZoneFormData {
-  id?: string;
-  name: string;
+interface ServiceLocationEntry {
+  location_name: string;
   platform: 'soundtrack' | 'beatbreeze';
-  status?: string;
-  tempId?: string;
+  tempId: string;
 }
 
 const contractStatuses = [
@@ -117,6 +111,7 @@ const PRODUCT_OPTIONS = [
 • Custom API solutions
 • AI-powered content management`,
     thailandOnly: false,
+    platform: 'soundtrack' as 'soundtrack' | 'beatbreeze',
   },
   {
     code: 'beat_breeze',
@@ -126,12 +121,14 @@ const PRODUCT_OPTIONS = [
 • Personalized music design
 • Dedicated technical support services`,
     thailandOnly: false,
+    platform: 'beatbreeze' as 'soundtrack' | 'beatbreeze',
   },
   {
     code: 'mini_pc',
     name: 'Windows Mini PC',
     description: 'Windows Mini PC',
     thailandOnly: true,
+    platform: null,
   },
   {
     code: 'soundtrack_player',
@@ -140,12 +137,14 @@ const PRODUCT_OPTIONS = [
 • Shipping costs covered
 • Customs fees to be paid by the receiver`,
     thailandOnly: false,
+    platform: null,
   },
   {
     code: 'custom',
     name: 'Custom',
     description: '',
     thailandOnly: false,
+    platform: null,
   },
 ];
 
@@ -198,18 +197,12 @@ const ContractForm: React.FC<ContractFormProps> = ({
     customer_contact_title: '',
   });
 
-  const [selectedZones, setSelectedZones] = useState<Zone[]>([]);
+  const [serviceLocations, setServiceLocations] = useState<ServiceLocationEntry[]>([]);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [masterContracts, setMasterContracts] = useState<Contract[]>([]);
   const [additionalSignatories, setAdditionalSignatories] = useState<Array<{ name: string; title: string }>>([]);
   const [contractTemplates, setContractTemplates] = useState<ContractTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
-
-  // Soundtrack Account ID preview state
-  const [soundtrackAccountId, setSoundtrackAccountId] = useState('');
-  const [previewZones, setPreviewZones] = useState<PreviewZone[]>([]);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState('');
 
   // Line Items and Quote state
   const defaultContractLineItem: ContractLineItem = {
@@ -342,29 +335,24 @@ const ContractForm: React.FC<ContractFormProps> = ({
       setSelectedCompanyCountry(editCompany.country || '');
     }
 
-    // Load existing contract zones in edit mode
-    if (contract.id) {
-      loadContractZones(contract.id, contract.company);
-    }
-  };
-
-  const loadContractZones = async (contractId: string, companyId: string) => {
-    try {
-      // Get all zones for the company
-      const companyZones = await ApiService.getZonesByCompany(companyId);
-
-      // Get contract's linked zones
-      const contractZones = await ApiService.getContractZones(contractId);
-      const activeZoneIds = contractZones
-        .filter((cz: any) => cz.is_active)
-        .map((cz: any) => cz.zone);
-
-      // Filter to get the Zone objects that are linked to this contract
-      const linkedZones = companyZones.filter((z: Zone) => activeZoneIds.includes(z.id));
-      setSelectedZones(linkedZones);
-    } catch (err) {
-      console.error('Failed to load contract zones:', err);
-      setSelectedZones([]);
+    // Populate service locations
+    // Prefer new service_locations field; fall back to contract_zones for legacy contracts
+    if (contract.service_locations && contract.service_locations.length > 0) {
+      setServiceLocations(contract.service_locations.map(loc => ({
+        location_name: loc.location_name,
+        platform: loc.platform,
+        tempId: generateTempId(),
+      })));
+    } else if (contract.contract_zones && contract.contract_zones.length > 0) {
+      // One-time migration path: convert legacy contract_zones to service location rows
+      const activeZones = contract.contract_zones.filter(cz => cz.is_active);
+      setServiceLocations(activeZones.map(cz => ({
+        location_name: cz.zone_name || '',
+        platform: (cz.zone_platform || 'soundtrack') as 'soundtrack' | 'beatbreeze',
+        tempId: generateTempId(),
+      })));
+    } else {
+      setServiceLocations([]);
     }
   };
 
@@ -399,7 +387,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
       customer_contact_email: '',
       customer_contact_title: '',
     });
-    setSelectedZones([]);
+    setServiceLocations([]);
     setAttachments([]);
     setAdditionalSignatories([]);
     setSelectedTemplate('');
@@ -417,12 +405,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
       company: company?.id || '',
       currency: company?.country === 'Thailand' ? 'THB' : 'USD',
     }));
-    // Clear selected zones when company changes (zones are company-specific)
-    setSelectedZones([]);
-    // Load company's Soundtrack Account ID
-    setSoundtrackAccountId(company?.soundtrack_account_id || '');
-    setPreviewZones([]);
-    setPreviewError('');
 
     // Set company country for product filtering and tax rates
     const country = company?.country || '';
@@ -451,40 +433,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
       ...item,
       tax_rate: smartTaxRate,
     })));
-  };
-
-  // Load Soundtrack zones preview when account ID changes
-  useEffect(() => {
-    const loadPreviewZones = async () => {
-      if (!soundtrackAccountId || soundtrackAccountId.length < 5) {
-        setPreviewZones([]);
-        return;
-      }
-
-      setPreviewLoading(true);
-      setPreviewError('');
-      try {
-        const zones = await ApiService.previewSoundtrackZones(soundtrackAccountId);
-        setPreviewZones(zones);
-      } catch (err: any) {
-        setPreviewError(err.message || 'Failed to fetch zones. Check Account ID.');
-        setPreviewZones([]);
-      } finally {
-        setPreviewLoading(false);
-      }
-    };
-
-    // Debounce the API call
-    const timer = setTimeout(() => {
-      loadPreviewZones();
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [soundtrackAccountId]);
-
-  const handleAccountIdChange = (accountId: string) => {
-    setSoundtrackAccountId(accountId);
-    setFormData(prev => ({ ...prev, soundtrack_account_id: accountId }));
   };
 
   const handleStartDateChange = (date: Date | null) => {
@@ -589,6 +537,24 @@ const ContractForm: React.FC<ContractFormProps> = ({
     return lineItems.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
   };
 
+  // Service location handlers
+  const addServiceLocation = () => {
+    setServiceLocations(prev => [
+      ...prev,
+      { location_name: '', platform: 'soundtrack', tempId: generateTempId() },
+    ]);
+  };
+
+  const removeServiceLocation = (tempId: string) => {
+    setServiceLocations(prev => prev.filter(loc => loc.tempId !== tempId));
+  };
+
+  const updateServiceLocation = (tempId: string, field: keyof Omit<ServiceLocationEntry, 'tempId'>, value: string) => {
+    setServiceLocations(prev => prev.map(loc =>
+      loc.tempId === tempId ? { ...loc, [field]: value } : loc
+    ));
+  };
+
   // Handle quote selection and auto-fill
   const handleQuoteChange = async (quoteId: string) => {
     setSelectedQuoteId(quoteId);
@@ -613,6 +579,32 @@ const ContractForm: React.FC<ContractFormProps> = ({
             line_total: item.quantity * Math.round(finalUnitPrice * 100) / 100,
           };
         }));
+
+        // Auto-create service location rows from music line items
+        const newLocations: ServiceLocationEntry[] = [];
+        selectedQuote.line_items.forEach(item => {
+          const productName = (item.product_service || '').toLowerCase();
+          let platform: 'soundtrack' | 'beatbreeze' | null = null;
+          if (productName.includes('soundtrack')) {
+            platform = 'soundtrack';
+          } else if (productName.includes('beat breeze') || productName.includes('beatbreeze')) {
+            platform = 'beatbreeze';
+          }
+          // Only music service items generate location rows (skip hardware)
+          if (platform !== null) {
+            const qty = Math.max(1, Math.round(item.quantity));
+            for (let i = 0; i < qty; i++) {
+              newLocations.push({
+                location_name: '',
+                platform,
+                tempId: generateTempId(),
+              });
+            }
+          }
+        });
+        if (newLocations.length > 0) {
+          setServiceLocations(newLocations);
+        }
       }
 
       // Auto-fill currency from quote
@@ -623,7 +615,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
       // Auto-fill payment terms if quote has terms
       if (selectedQuote.terms_conditions) {
-        // Try to extract payment terms from terms text
         const termsText = selectedQuote.terms_conditions.toLowerCase();
         if (termsText.includes('30 days')) {
           setFormData(prev => ({ ...prev, payment_terms: 'Net 30' }));
@@ -693,6 +684,13 @@ const ContractForm: React.FC<ContractFormProps> = ({
           discount_percentage: 0,
           tax_rate: item.tax_rate,
         })),
+        service_locations: serviceLocations
+          .filter(loc => loc.location_name.trim())
+          .map((loc, index) => ({
+            location_name: loc.location_name.trim(),
+            platform: loc.platform,
+            sort_order: index,
+          })),
       };
 
       let savedContract: Contract;
@@ -702,32 +700,20 @@ const ContractForm: React.FC<ContractFormProps> = ({
         savedContract = await ApiService.updateContract(contract!.id, contractData);
       }
 
-      // Update contract zones (link selected existing zones by ID)
-      if (savedContract.id) {
-        try {
-          const zoneIds = selectedZones.map(z => z.id);
-          await ApiService.updateContractZones(savedContract.id, zoneIds);
-        } catch (zoneErr) {
-          console.error('Failed to update zones:', zoneErr);
-          // Don't fail the entire operation if zones fail
-        }
-      }
-
       // Upload attachments
       if (attachments.length > 0 && savedContract.id) {
         for (const file of attachments) {
           try {
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('contract', savedContract.id);
-            formData.append('title', file.name.replace(/\.[^/.]+$/, '')); // Remove extension for title
-            formData.append('document_type', 'other');
-            formData.append('is_official', 'false');
-            formData.append('is_signed', 'false');
-            await ApiService.uploadContractDocument(savedContract.id, formData);
+            const formDataUpload = new FormData();
+            formDataUpload.append('file', file);
+            formDataUpload.append('contract', savedContract.id);
+            formDataUpload.append('title', file.name.replace(/\.[^/.]+$/, ''));
+            formDataUpload.append('document_type', 'other');
+            formDataUpload.append('is_official', 'false');
+            formDataUpload.append('is_signed', 'false');
+            await ApiService.uploadContractDocument(savedContract.id, formDataUpload);
           } catch (uploadErr) {
             console.error('Failed to upload document:', uploadErr);
-            // Don't fail the entire operation if document upload fails
           }
         }
       }
@@ -1388,6 +1374,82 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
             <Divider />
 
+            {/* Service Locations */}
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
+                  <LocationOnIcon sx={{ mr: 1, color: '#FFA500' }} />
+                  Service Locations
+                </Typography>
+                <Button
+                  variant="outlined"
+                  startIcon={<AddIcon />}
+                  onClick={addServiceLocation}
+                  size="small"
+                >
+                  Add Location
+                </Button>
+              </Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Locations that will appear on the contract PDF
+              </Typography>
+
+              {serviceLocations.length === 0 ? (
+                <Typography variant="body2" color="text.disabled" sx={{ py: 2, textAlign: 'center' }}>
+                  No service locations added yet. Click "Add Location" to add one.
+                </Typography>
+              ) : (
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Location Name</TableCell>
+                        <TableCell width="220px">Platform</TableCell>
+                        <TableCell width="60px">Actions</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {serviceLocations.map((loc) => (
+                        <TableRow key={loc.tempId}>
+                          <TableCell>
+                            <TextField
+                              fullWidth
+                              size="small"
+                              value={loc.location_name}
+                              onChange={(e) => updateServiceLocation(loc.tempId, 'location_name', e.target.value)}
+                              placeholder="e.g., Bangkok HQ - Lobby"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <FormControl fullWidth size="small">
+                              <Select
+                                value={loc.platform}
+                                onChange={(e) => updateServiceLocation(loc.tempId, 'platform', e.target.value)}
+                              >
+                                <MenuItem value="soundtrack">Soundtrack Your Brand</MenuItem>
+                                <MenuItem value="beatbreeze">Beat Breeze</MenuItem>
+                              </Select>
+                            </FormControl>
+                          </TableCell>
+                          <TableCell>
+                            <IconButton
+                              size="small"
+                              onClick={() => removeServiceLocation(loc.tempId)}
+                              color="error"
+                            >
+                              <Delete fontSize="small" />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </Box>
+
+            <Divider />
+
             {/* Contact Information */}
             <Box>
               <Typography variant="h6" gutterBottom>
@@ -1439,72 +1501,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
                   />
                 </Box>
               </Box>
-            </Box>
-
-            <Divider />
-
-            {/* Soundtrack Account Configuration */}
-            <Box>
-              <Typography variant="h6" gutterBottom>
-                Soundtrack Account Configuration
-              </Typography>
-              <TextField
-                fullWidth
-                size="small"
-                label="Soundtrack Account ID"
-                value={soundtrackAccountId}
-                onChange={(e) => handleAccountIdChange(e.target.value)}
-                helperText="Enter Soundtrack account ID to fetch available zones"
-                InputProps={{
-                  endAdornment: previewLoading ? (
-                    <InputAdornment position="end">
-                      <CircularProgress size={20} />
-                    </InputAdornment>
-                  ) : previewZones.length > 0 ? (
-                    <InputAdornment position="end">
-                      <Chip size="small" label={`${previewZones.length} zones`} color="success" />
-                    </InputAdornment>
-                  ) : null
-                }}
-              />
-              {previewError && (
-                <Alert severity="error" sx={{ mt: 1 }}>{previewError}</Alert>
-              )}
-            </Box>
-
-            <Divider />
-
-            {/* Zone Management Section */}
-            <Box sx={{ mt: 4, mb: 3 }}>
-              <Divider sx={{ mb: 3 }} />
-
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <LocationOnIcon sx={{ color: '#FFA500' }} />
-                  Music Zones
-                </Typography>
-                <Chip
-                  label={`${selectedZones.length} zone${selectedZones.length !== 1 ? 's' : ''} selected`}
-                  color="primary"
-                  size="small"
-                  sx={{ bgcolor: '#FFA500' }}
-                />
-              </Box>
-
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Soundtrack zones are auto-selected for new contracts. Beat Breeze zones can be added manually.
-              </Typography>
-
-              <EnhancedZonePicker
-                companyId={formData.company || null}
-                soundtrackAccountId={soundtrackAccountId}
-                previewZones={previewZones}
-                selectedZones={selectedZones}
-                onChange={setSelectedZones}
-                disabled={!formData.company}
-                mode={mode}
-                contractId={contract?.id}
-              />
             </Box>
 
             <Divider />

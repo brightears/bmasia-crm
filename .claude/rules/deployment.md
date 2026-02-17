@@ -19,9 +19,15 @@
 ### Render Service IDs
 - Backend (Django): `srv-d13ukt8gjchc73fjat0g`
 - Frontend (React): `srv-d3clctt6ubrc73etb580`
-- Email Automation Cron: `crn-d4b9g875r7bs7391al2g`
-- Soundtrack Sync Cron: `crn-d5ea7j2li9vc73dccnb0`
+- Email Automation Cron: `crn-d4b9g875r7bs7391al2g` (daily 03:00 UTC / 10 AM Bangkok)
+- Email Sequences Cron: `crn-d66mhcbnv86c73d6e4kg` (every 20 min)
+- Soundtrack Sync Cron: `crn-d5ea7j2li9vc73dccnb0` (hourly)
 - Task Digest Cron: `crn-d65drn75r7bs73cpu72g` (daily 02:00 UTC / 9 AM Bangkok)
+
+### Python Version
+- Pinned to **3.12.8** via `.python-version` + `runtime.txt`
+- CRITICAL: Do NOT upgrade to 3.13+ — psycopg2-binary 2.9.9 ABI incompatible with 3.13
+- Render crons use `.python-version` to determine Python version
 
 ### Standard Deployment Workflow
 1. Make code changes

@@ -15,7 +15,8 @@ from .models import (
     ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
     SeasonalTriggerDate,
     MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent,
-    Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry
+    Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry,
+    ContractServiceLocation
 )
 
 
@@ -580,6 +581,13 @@ class ContractLineItemSerializer(serializers.ModelSerializer):
         }
 
 
+class ContractServiceLocationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ContractServiceLocation
+        fields = ['id', 'location_name', 'platform', 'sort_order']
+        read_only_fields = ['id']
+
+
 class ContractSerializer(serializers.ModelSerializer):
     """Serializer for Contract model with renewal tracking"""
     company_name = serializers.CharField(source='company.name', read_only=True)
@@ -594,6 +602,9 @@ class ContractSerializer(serializers.ModelSerializer):
 
     # Line items (nested, like Invoice/Quote)
     line_items = ContractLineItemSerializer(many=True, required=False)
+
+    # Service locations (simple zone entries for PDF)
+    service_locations = ContractServiceLocationSerializer(many=True, required=False)
 
     # NEW FIELDS for zones
     contract_zones = ContractZoneSerializer(many=True, read_only=True)
@@ -648,7 +659,7 @@ class ContractSerializer(serializers.ModelSerializer):
             'show_zone_pricing_detail', 'price_per_zone',
             'bmasia_contact_name', 'bmasia_contact_email', 'bmasia_contact_title',
             'customer_contact_name', 'customer_contact_email', 'customer_contact_title',
-            'contract_documents', 'line_items',
+            'contract_documents', 'line_items', 'service_locations',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'contract_number', 'effective_soundtrack_account_id', 'created_at', 'updated_at']
@@ -666,11 +677,17 @@ class ContractSerializer(serializers.ModelSerializer):
         return outstanding or 0
 
     def get_active_zone_count(self, obj):
-        """Count of currently active zones"""
+        """Count of currently active zones (prefers service_locations)"""
+        loc_count = obj.service_locations.count()
+        if loc_count > 0:
+            return loc_count
         return obj.contract_zones.filter(is_active=True).count()
 
     def get_total_zone_count(self, obj):
-        """Total count of all zones (active + historical)"""
+        """Total count of all zones (prefers service_locations)"""
+        loc_count = obj.service_locations.count()
+        if loc_count > 0:
+            return loc_count
         return obj.contract_zones.count()
 
     def get_participation_agreements_count(self, obj):
@@ -713,6 +730,7 @@ class ContractSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Create contract with auto-generated contract number, tax calculation, and nested line items"""
         line_items_data = validated_data.pop('line_items', [])
+        service_locations_data = validated_data.pop('service_locations', [])
 
         # Auto-generate contract number if not provided
         if not validated_data.get('contract_number'):
@@ -730,6 +748,8 @@ class ContractSerializer(serializers.ModelSerializer):
         contract = Contract.objects.create(**validated_data)
         for item_data in line_items_data:
             ContractLineItem.objects.create(contract=contract, **item_data)
+        for loc_data in service_locations_data:
+            ContractServiceLocation.objects.create(contract=contract, **loc_data)
 
         # Auto-sum line items to contract.value
         if line_items_data:
@@ -748,6 +768,7 @@ class ContractSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         """Update contract with tax recalculation and nested line items"""
         line_items_data = validated_data.pop('line_items', None)
+        service_locations_data = validated_data.pop('service_locations', None)
 
         # Check if value or currency changed
         value_changed = 'value' in validated_data
@@ -783,6 +804,11 @@ class ContractSerializer(serializers.ModelSerializer):
                 instance.tax_amount = tax_data['tax_amount']
                 instance.total_value = tax_data['total_value']
                 instance.save()
+
+        if service_locations_data is not None:
+            instance.service_locations.all().delete()
+            for loc_data in service_locations_data:
+                ContractServiceLocation.objects.create(contract=instance, **loc_data)
 
         return instance
 

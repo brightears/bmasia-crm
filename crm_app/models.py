@@ -1012,6 +1012,34 @@ class ContractZone(TimestampedModel):
         return f"{self.zone.name} on {self.contract.contract_number} ({active_status})"
 
 
+class ContractServiceLocation(TimestampedModel):
+    """
+    Simple service location entries for contract PDFs.
+    Decoupled from the tech-support Zone system.
+    Sales users just enter a location name and pick a platform type.
+    """
+    PLATFORM_CHOICES = [
+        ('soundtrack', 'Soundtrack Your Brand'),
+        ('beatbreeze', 'Beat Breeze'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    contract = models.ForeignKey(
+        Contract,
+        on_delete=models.CASCADE,
+        related_name='service_locations'
+    )
+    location_name = models.CharField(max_length=200)
+    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES, default='soundtrack')
+    sort_order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['sort_order', 'platform', 'location_name']
+
+    def __str__(self):
+        return f"{self.location_name} ({self.get_platform_display()})"
+
+
 # ============================================================================
 # Contract Content Management System
 # ============================================================================

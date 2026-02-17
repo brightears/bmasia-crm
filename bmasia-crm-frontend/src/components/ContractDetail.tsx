@@ -54,8 +54,9 @@ import {
   GetApp,
   Print,
   LocationOn as LocationOnIcon,
+  Visibility,
 } from '@mui/icons-material';
-import { Contract, Invoice, ContractZone } from '../types';
+import { Contract, Invoice, ContractZone, ServiceLocation } from '../types';
 import ApiService from '../services/api';
 import ContractDocuments from './ContractDocuments';
 
@@ -161,6 +162,37 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
       console.error('Failed to send renewal notice:', err);
     } finally {
       setSendingRenewal(false);
+    }
+  };
+
+  const handlePreviewPDF = async () => {
+    if (!contract) return;
+    try {
+      setLoading(true);
+      const blob = await ApiService.downloadContractPDF(contract.id);
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    } catch (err) {
+      console.error('Failed to preview PDF:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownloadPDF = async () => {
+    if (!contract) return;
+    try {
+      const blob = await ApiService.downloadContractPDF(contract.id);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Contract_${contract.contract_number}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to download PDF:', err);
     }
   };
 
@@ -635,66 +667,62 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
             </Grid>
           )}
 
-          {/* Music Zones */}
-          <Grid item xs={12}>
-            <Paper sx={{ p: 3 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {/* Service Locations */}
+          {((contract.service_locations && contract.service_locations.length > 0) || contractZones.length > 0) && (
+            <Grid item xs={12}>
+              <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
                   <LocationOnIcon sx={{ color: '#FFA500' }} />
-                  Music Zones
+                  Service Locations
+                  <Chip
+                    label={contract.service_locations?.length || contractZones.length}
+                    color="primary"
+                    size="small"
+                  />
                 </Typography>
-                <Chip
-                  label={`${contract.active_zone_count || 0} active`}
-                  color="success"
-                  size="small"
-                />
-              </Box>
-
-              {loadingZones ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-                  <CircularProgress />
-                </Box>
-              ) : contractZones.length === 0 ? (
-                <Paper sx={{ p: 3, textAlign: 'center', bgcolor: 'grey.50' }}>
-                  <LocationOnIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2 }} />
-                  <Typography variant="body1" color="text.secondary">
-                    No zones configured for this contract
-                  </Typography>
-                </Paper>
-              ) : (
-                <Grid container spacing={2}>
-                  {contractZones.map((cz) => (
-                    <Grid item xs={12} sm={6} md={4} key={cz.id}>
-                      <Card variant="outlined">
-                        <CardContent>
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', mb: 2 }}>
-                            <Typography variant="h6" sx={{ fontSize: '1rem' }}>
-                              {cz.zone_name}
-                            </Typography>
-                            <Chip
-                              label={cz.is_active ? 'Active' : 'Ended'}
-                              size="small"
-                              color={cz.is_active ? 'success' : 'default'}
-                            />
-                          </Box>
-                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                            Platform: {cz.zone_platform === 'soundtrack' ? 'Soundtrack Your Brand' : 'Beat Breeze'}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                            Status: {cz.zone_status}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary" display="block">
-                            Active: {formatDate(cz.start_date)}
-                            {cz.end_date && ` - ${formatDate(cz.end_date)}`}
-                          </Typography>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  ))}
-                </Grid>
-              )}
-            </Paper>
-          </Grid>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Location</TableCell>
+                        <TableCell>Platform</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {contract.service_locations && contract.service_locations.length > 0
+                        ? contract.service_locations.map((loc, idx) => (
+                            <TableRow key={loc.id || idx}>
+                              <TableCell>{loc.location_name}</TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={loc.platform === 'soundtrack' ? 'Soundtrack' : 'Beat Breeze'}
+                                  size="small"
+                                  color={loc.platform === 'soundtrack' ? 'primary' : 'secondary'}
+                                  variant="outlined"
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        : contractZones.map((cz) => (
+                            <TableRow key={cz.id}>
+                              <TableCell>{cz.zone_name}</TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={cz.zone_platform === 'soundtrack' ? 'Soundtrack' : 'Beat Breeze'}
+                                  size="small"
+                                  color={cz.zone_platform === 'soundtrack' ? 'primary' : 'secondary'}
+                                  variant="outlined"
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))
+                      }
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Paper>
+            </Grid>
+          )}
 
           {/* Contract Documents */}
           <Grid item xs={12}>
@@ -740,6 +768,21 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
             Mark as Signed
           </Button>
         )}
+        <Button
+          variant="outlined"
+          startIcon={<Visibility />}
+          onClick={handlePreviewPDF}
+          disabled={loading}
+        >
+          Preview PDF
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<GetApp />}
+          onClick={handleDownloadPDF}
+        >
+          Download PDF
+        </Button>
         <Button
           variant="outlined"
           startIcon={<Receipt />}

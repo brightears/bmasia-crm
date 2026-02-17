@@ -364,6 +364,8 @@ export interface Contract {
   quote?: string | null;
   quote_number?: string | null;
   line_items?: ContractLineItem[];
+  // Service Locations (replaces zone picker)
+  service_locations?: ServiceLocation[];
   created_at: string;
   updated_at: string;
 }
@@ -384,6 +386,15 @@ export interface ContractZone {
   notes?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface ServiceLocation {
+  id?: string;
+  location_name: string;
+  platform: 'soundtrack' | 'beatbreeze';
+  sort_order?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface InvoiceLineItem {
