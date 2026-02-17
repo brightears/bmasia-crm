@@ -1619,3 +1619,25 @@ export interface PLTrendData {
   gross_margin: number;
   net_margin: number;
 }
+
+export interface EmailLogEntry {
+  id: string;
+  from_email: string;
+  to_email: string;
+  cc_emails: string;
+  subject: string;
+  status: 'pending' | 'sent' | 'failed' | 'bounced' | 'opened' | 'clicked';
+  status_display: string;
+  email_type: string;
+  email_type_display: string;
+  sent_at: string | null;
+  opened_at: string | null;
+  clicked_at: string | null;
+  error_message: string;
+  company: string;
+  company_name: string;
+  contact: string | null;
+  contact_name: string | null;
+  message_id: string;
+  created_at: string;
+}

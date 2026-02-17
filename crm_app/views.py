@@ -61,7 +61,8 @@ from .serializers import (
     ContractTemplateSerializer, ServicePackageItemSerializer, CorporatePdfTemplateSerializer, ContractDocumentSerializer,
     SeasonalTriggerDateSerializer,
     MonthlyRevenueSnapshotSerializer, MonthlyRevenueTargetSerializer, ContractRevenueEventSerializer, RevenueMonthlyDataSerializer,
-    VendorSerializer, ExpenseCategorySerializer, RecurringExpenseSerializer, ExpenseEntrySerializer, ExpenseEntryCreateSerializer
+    VendorSerializer, ExpenseCategorySerializer, RecurringExpenseSerializer, ExpenseEntrySerializer, ExpenseEntryCreateSerializer,
+    EmailLogSerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -4066,9 +4067,22 @@ class InvoiceViewSet(BaseModelViewSet):
             'recipients': recipients
         })
 
+        # Include email delivery details in response
+        recent_logs = EmailLog.objects.filter(
+            invoice=invoice,
+            email_type='invoice_send'
+        ).order_by('-created_at')[:10]
+
         return Response({
             'message': message,
-            'status': invoice.status
+            'status': invoice.status,
+            'email_details': [{
+                'to_email': log.to_email,
+                'from_email': log.from_email,
+                'status': log.status,
+                'sent_at': log.sent_at.isoformat() if log.sent_at else None,
+                'email_log_id': str(log.id),
+            } for log in recent_logs]
         })
 
     @action(detail=True, methods=['post'])
@@ -4714,10 +4728,23 @@ class QuoteViewSet(BaseModelViewSet):
             'recipients': recipients
         })
 
+        # Include email delivery details in response
+        recent_logs = EmailLog.objects.filter(
+            quote=quote,
+            email_type='quote_send'
+        ).order_by('-created_at')[:10]
+
         return Response({
             'message': message,
             'status': quote.status,
-            'sent_date': str(quote.sent_date) if quote.sent_date else None
+            'sent_date': str(quote.sent_date) if quote.sent_date else None,
+            'email_details': [{
+                'to_email': log.to_email,
+                'from_email': log.from_email,
+                'status': log.status,
+                'sent_at': log.sent_at.isoformat() if log.sent_at else None,
+                'email_log_id': str(log.id),
+            } for log in recent_logs]
         })
 
     @action(detail=True, methods=['post'])
@@ -10411,3 +10438,49 @@ class BalanceSheetViewSet(viewsets.ViewSet):
 
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class EmailLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only API for email delivery tracking"""
+    serializer_class = EmailLogSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['company', 'contact', 'contract', 'invoice', 'quote', 'status', 'email_type']
+    ordering = ['-created_at']
+    ordering_fields = ['created_at', 'sent_at', 'opened_at']
+
+    def get_queryset(self):
+        return EmailLog.objects.select_related(
+            'company', 'contact', 'contract', 'invoice', 'quote'
+        ).all()
+
+
+import base64
+from django.views.decorators.cache import never_cache
+
+# 1x1 transparent GIF (43 bytes)
+TRACKING_PIXEL = base64.b64decode(
+    'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
+)
+
+@csrf_exempt
+@never_cache
+def email_tracking_pixel(request, token):
+    """
+    Unauthenticated endpoint that serves a 1x1 transparent GIF.
+    When loaded by an email client, records the open event.
+    """
+    try:
+        email_log = EmailLog.objects.get(tracking_token=token)
+        if not email_log.opened_at:
+            email_log.opened_at = timezone.now()
+            if email_log.status in ('sent', 'pending'):
+                email_log.status = 'opened'
+            email_log.save(update_fields=['opened_at', 'status'])
+    except EmailLog.DoesNotExist:
+        pass  # Silently ignore invalid tokens
+
+    response = HttpResponse(TRACKING_PIXEL, content_type='image/gif')
+    response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response['Pragma'] = 'no-cache'
+    return response

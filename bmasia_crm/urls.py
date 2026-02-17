@@ -19,7 +19,7 @@ from django.urls import path, include, re_path
 from django.views.generic import RedirectView
 from django.conf import settings
 from crm_app.admin_setup import create_admin_view
-from crm_app.views import debug_soundtrack_api, apply_migration_0025_view
+from crm_app.views import debug_soundtrack_api, apply_migration_0025_view, email_tracking_pixel
 from django.http import HttpResponse
 import subprocess
 import os
@@ -77,6 +77,8 @@ urlpatterns = [
     path('debug-soundtrack/', debug_soundtrack_api, name='debug_soundtrack'),
     # Emergency migration endpoint
     path('api/apply-migration-0025/', apply_migration_0025_view, name='apply_migration_0025'),
+    # Email open tracking pixel (unauthenticated - called by email clients)
+    path('t/<str:token>/', email_tracking_pixel, name='email_tracking_pixel'),
     # For now, redirect root to admin until React frontend is properly deployed
     path('', RedirectView.as_view(url='/admin/', permanent=False)),
 ]

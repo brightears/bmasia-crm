@@ -53,11 +53,13 @@ import {
   History,
   Description,
   CheckCircle,
+  Cancel,
+  Email,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { Invoice } from '../types';
+import { Invoice, EmailLogEntry } from '../types';
 import ApiService from '../services/api';
 
 interface InvoiceDetailProps {
@@ -85,6 +87,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [emailLogs, setEmailLogs] = useState<EmailLogEntry[]>([]);
 
   // Payment form
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
@@ -101,14 +104,32 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
     }
   }, [invoice, paymentDialogOpen]);
 
+  useEffect(() => {
+    if (open && invoice) {
+      ApiService.getEmailLogs({ invoice: invoice.id })
+        .then(setEmailLogs)
+        .catch(() => setEmailLogs([]));
+    }
+  }, [open, invoice]);
+
   const handleSendInvoice = async () => {
     if (!invoice) return;
 
     try {
       setLoading(true);
-      await ApiService.sendInvoice(invoice.id);
-      setSuccess('Invoice sent successfully');
+      const response = await ApiService.sendInvoice(invoice.id);
+      const details = response?.email_details;
+      if (details && details.length > 0) {
+        const recipientList = details.map((d: any) => d.to_email).join(', ');
+        setSuccess(`Invoice sent to ${recipientList}`);
+      } else {
+        setSuccess('Invoice sent successfully');
+      }
       onInvoiceUpdate();
+      // Reload email logs after send
+      ApiService.getEmailLogs({ invoice: invoice.id })
+        .then(setEmailLogs)
+        .catch(() => {});
     } catch (err) {
       setError('Failed to send invoice');
     } finally {
@@ -509,6 +530,62 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
                 </Typography>
               </Paper>
             )}
+
+            {/* Email History */}
+            <Paper sx={{ p: 2, mt: 2 }}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Email fontSize="small" />
+                Email History
+              </Typography>
+              {emailLogs.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No emails sent for this invoice yet
+                </Typography>
+              ) : (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  {emailLogs.map((log) => (
+                    <Box key={log.id} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, p: 1.5, borderRadius: 1, bgcolor: 'grey.50' }}>
+                      <Box sx={{ mt: 0.5 }}>
+                        {log.status === 'sent' && <CheckCircle color="success" fontSize="small" />}
+                        {log.status === 'opened' && <Visibility color="info" fontSize="small" />}
+                        {log.status === 'failed' && <Cancel color="error" fontSize="small" />}
+                        {log.status === 'pending' && <Schedule color="disabled" fontSize="small" />}
+                      </Box>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                          <Typography variant="body2" fontWeight="medium">
+                            {log.email_type_display}
+                          </Typography>
+                          <Chip
+                            label={log.status_display}
+                            size="small"
+                            color={log.status === 'sent' ? 'success' : log.status === 'opened' ? 'info' : log.status === 'failed' ? 'error' : 'default'}
+                            variant="outlined"
+                          />
+                          {log.opened_at && (
+                            <Chip label={`Opened ${new Date(log.opened_at).toLocaleString()}`} size="small" color="info" />
+                          )}
+                        </Box>
+                        <Typography variant="body2" color="text.secondary" noWrap>
+                          To: {log.to_email}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" noWrap>
+                          From: {log.from_email}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {log.sent_at ? new Date(log.sent_at).toLocaleString() : log.created_at ? new Date(log.created_at).toLocaleString() : ''}
+                        </Typography>
+                        {log.status === 'failed' && log.error_message && (
+                          <Typography variant="caption" color="error" display="block">
+                            Error: {log.error_message}
+                          </Typography>
+                        )}
+                      </Box>
+                    </Box>
+                  ))}
+                </Box>
+              )}
+            </Paper>
           </Box>
         </LocalizationProvider>
       </DialogContent>

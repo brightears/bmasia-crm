@@ -55,8 +55,10 @@ import {
   Print,
   LocationOn as LocationOnIcon,
   Visibility,
+  Cancel,
+  Schedule,
 } from '@mui/icons-material';
-import { Contract, Invoice, ContractZone, ServiceLocation } from '../types';
+import { Contract, Invoice, ContractZone, ServiceLocation, EmailLogEntry } from '../types';
 import ApiService from '../services/api';
 import ContractDocuments from './ContractDocuments';
 
@@ -100,6 +102,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
   const [sendingRenewal, setSendingRenewal] = useState(false);
   const [contractZones, setContractZones] = useState<ContractZone[]>([]);
   const [loadingZones, setLoadingZones] = useState(false);
+  const [emailLogs, setEmailLogs] = useState<EmailLogEntry[]>([]);
 
   useEffect(() => {
     if (open && contractId) {
@@ -121,6 +124,13 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
 
       setContract(contractData);
       setInvoices(invoicesData.results);
+
+      try {
+        const logs = await ApiService.getEmailLogs({ contract: contractId });
+        setEmailLogs(logs);
+      } catch {
+        // Non-critical — email logs may not exist yet
+      }
     } catch (err: any) {
       setError('Failed to load contract details');
       console.error('Contract detail error:', err);
@@ -723,6 +733,64 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
               </Paper>
             </Grid>
           )}
+
+          {/* Email History */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Email fontSize="small" />
+                Email History
+              </Typography>
+              {emailLogs.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No emails sent for this contract yet
+                </Typography>
+              ) : (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  {emailLogs.map((log) => (
+                    <Box key={log.id} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, p: 1.5, borderRadius: 1, bgcolor: 'grey.50' }}>
+                      <Box sx={{ mt: 0.5 }}>
+                        {log.status === 'sent' && <CheckCircle color="success" fontSize="small" />}
+                        {log.status === 'opened' && <Visibility color="info" fontSize="small" />}
+                        {log.status === 'failed' && <Cancel color="error" fontSize="small" />}
+                        {log.status === 'pending' && <Schedule color="disabled" fontSize="small" />}
+                      </Box>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                          <Typography variant="body2" fontWeight="medium">
+                            {log.email_type_display}
+                          </Typography>
+                          <Chip
+                            label={log.status_display}
+                            size="small"
+                            color={log.status === 'sent' ? 'success' : log.status === 'opened' ? 'info' : log.status === 'failed' ? 'error' : 'default'}
+                            variant="outlined"
+                          />
+                          {log.opened_at && (
+                            <Chip label={`Opened ${new Date(log.opened_at).toLocaleString()}`} size="small" color="info" />
+                          )}
+                        </Box>
+                        <Typography variant="body2" color="text.secondary" noWrap>
+                          To: {log.to_email}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" noWrap>
+                          From: {log.from_email}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {log.sent_at ? new Date(log.sent_at).toLocaleString() : log.created_at ? new Date(log.created_at).toLocaleString() : ''}
+                        </Typography>
+                        {log.status === 'failed' && log.error_message && (
+                          <Typography variant="caption" color="error" display="block">
+                            Error: {log.error_message}
+                          </Typography>
+                        )}
+                      </Box>
+                    </Box>
+                  ))}
+                </Box>
+              )}
+            </Paper>
+          </Grid>
 
           {/* Contract Documents */}
           <Grid item xs={12}>

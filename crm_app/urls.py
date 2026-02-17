@@ -85,6 +85,9 @@ router.register(r'balance-sheet', views.BalanceSheetViewSet, basename='balance-s
 # Action Center (Today page)
 router.register(r'action-center', views.ActionCenterViewSet, basename='action-center')
 
+# Email delivery tracking (read-only)
+router.register(r'email-logs', views.EmailLogViewSet, basename='email-log')
+
 # The API URLs are now determined automatically by the router.
 urlpatterns = [
     path('v1/', include(router.urls)),

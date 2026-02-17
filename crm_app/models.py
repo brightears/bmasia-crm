@@ -1709,12 +1709,16 @@ class EmailLog(TimestampedModel):
     EMAIL_TYPE_CHOICES = [
         ('renewal', 'Renewal Reminder'),
         ('invoice', 'Invoice'),
+        ('invoice_send', 'Invoice Sent'),
         ('payment', 'Payment Reminder'),
         ('quarterly', 'Quarterly Check-in'),
         ('seasonal', 'Seasonal Campaign'),
         ('support', 'Technical Support'),
         ('manual', 'Manual Email'),
         ('test', 'Test Email'),
+        ('quote_send', 'Quote Sent'),
+        ('quote_followup', 'Quote Follow-up'),
+        ('contract_send', 'Contract Sent'),
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -1741,9 +1745,11 @@ class EmailLog(TimestampedModel):
     # Related objects
     contract = models.ForeignKey(Contract, on_delete=models.SET_NULL, null=True, blank=True, related_name='email_logs')
     invoice = models.ForeignKey(Invoice, on_delete=models.SET_NULL, null=True, blank=True, related_name='email_logs')
-    
+    quote = models.ForeignKey('Quote', on_delete=models.SET_NULL, null=True, blank=True, related_name='email_logs')
+
     # Tracking
     message_id = models.CharField(max_length=255, blank=True, help_text="Email message ID for tracking")
+    tracking_token = models.CharField(max_length=64, unique=True, null=True, blank=True, db_index=True)
     in_reply_to = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='replies')
     
     # Attachments
@@ -1760,6 +1766,12 @@ class EmailLog(TimestampedModel):
     def __str__(self):
         return f"{self.email_type} to {self.to_email} - {self.status}"
     
+    def save(self, *args, **kwargs):
+        if not self.tracking_token:
+            import secrets
+            self.tracking_token = secrets.token_urlsafe(32)
+        super().save(*args, **kwargs)
+
     def mark_as_sent(self):
         """Mark email as sent"""
         self.status = 'sent'

@@ -16,7 +16,8 @@ from .models import (
     SeasonalTriggerDate,
     MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent,
     Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry,
-    ContractServiceLocation
+    ContractServiceLocation,
+    EmailLog
 )
 
 
@@ -2296,3 +2297,23 @@ class ExpenseEntryCreateSerializer(serializers.ModelSerializer):
         if request and hasattr(request, 'user'):
             validated_data['created_by'] = request.user
         return super().create(validated_data)
+
+
+class EmailLogSerializer(serializers.ModelSerializer):
+    """Read-only serializer for email delivery tracking"""
+    company_name = serializers.CharField(source='company.name', read_only=True, default=None)
+    contact_name = serializers.CharField(source='contact.name', read_only=True, default=None)
+    email_type_display = serializers.CharField(source='get_email_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = EmailLog
+        fields = [
+            'id', 'from_email', 'to_email', 'cc_emails', 'subject',
+            'status', 'status_display', 'email_type', 'email_type_display',
+            'sent_at', 'opened_at', 'clicked_at', 'error_message',
+            'company', 'company_name', 'contact', 'contact_name',
+            'contract', 'invoice', 'quote', 'message_id',
+            'created_at',
+        ]
+        read_only_fields = fields

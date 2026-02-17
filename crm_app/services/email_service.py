@@ -133,6 +133,19 @@ class EmailService:
             logger.warning(f"Error getting SMTP connection for {clean_email}: {e}")
             return None
 
+    def _inject_tracking_pixel(self, body_html: str, tracking_token: str) -> str:
+        """Inject a 1x1 tracking pixel at the end of the HTML email body."""
+        import re
+        tracking_url = f"{settings.SITE_URL}/t/{tracking_token}/"
+        pixel_html = f'<img src="{tracking_url}" width="1" height="1" style="display:none;border:0;" alt="" />'
+
+        if re.search(r'</body>', body_html, re.IGNORECASE):
+            body_html = re.sub(r'</body>', f'{pixel_html}</body>', body_html, flags=re.IGNORECASE, count=1)
+        else:
+            body_html += pixel_html
+
+        return body_html
+
     def send_email(
         self,
         to_email: str,
@@ -179,6 +192,10 @@ class EmailService:
         )
 
         try:
+            # Inject tracking pixel into HTML body
+            if email_log.tracking_token:
+                body_html = self._inject_tracking_pixel(body_html, email_log.tracking_token)
+
             # Create email message
             msg = EmailMultiAlternatives(
                 subject=subject,
@@ -189,7 +206,7 @@ class EmailService:
                 reply_to=[reply_to] if reply_to else None,
                 connection=smtp_connection
             )
-            
+
             # Add HTML version
             msg.attach_alternative(body_html, "text/html")
             
@@ -759,6 +776,28 @@ class EmailService:
                 # Find contact for this email
                 contact = quote.company.contacts.filter(email=recipient).first()
 
+                # Determine actual from_email for logging (extract from display format if needed)
+                log_from_email = from_email
+                if '<' in from_email and '>' in from_email:
+                    log_from_email = from_email.split('<')[1].split('>')[0]
+
+                # Create email log BEFORE send (for tracking pixel)
+                email_log = EmailLog.objects.create(
+                    company=quote.company,
+                    contact=contact,
+                    email_type='quote_send',
+                    from_email=log_from_email,
+                    to_email=recipient,
+                    subject=subject,
+                    body_html=body_html,
+                    body_text=body,
+                    status='pending',
+                    quote=quote
+                )
+
+                # Inject tracking pixel
+                tracked_html = self._inject_tracking_pixel(body_html, email_log.tracking_token)
+
                 # Create email message
                 msg = EmailMultiAlternatives(
                     subject=subject,
@@ -768,8 +807,8 @@ class EmailService:
                     connection=smtp_connection
                 )
 
-                # Add HTML version
-                msg.attach_alternative(body_html, "text/html")
+                # Add HTML version with tracking pixel
+                msg.attach_alternative(tracked_html, "text/html")
 
                 # Attach PDF
                 msg.attach(pdf_filename, pdf_data, 'application/pdf')
@@ -782,24 +821,8 @@ class EmailService:
                 # Send email
                 msg.send(fail_silently=False)
 
-                # Determine actual from_email for logging (extract from display format if needed)
-                log_from_email = from_email
-                if '<' in from_email and '>' in from_email:
-                    log_from_email = from_email.split('<')[1].split('>')[0]
-
-                # Log email
-                email_log = EmailLog.objects.create(
-                    company=quote.company,
-                    contact=contact,
-                    email_type='manual',
-                    from_email=log_from_email,
-                    to_email=recipient,
-                    subject=subject,
-                    body_html=body_html,
-                    body_text=body,
-                    status='sent',
-                    sent_at=timezone.now()
-                )
+                # Mark as sent
+                email_log.mark_as_sent()
 
                 success_count += 1
                 logger.info(f"Quote email sent successfully to {recipient}")
@@ -808,6 +831,9 @@ class EmailService:
                 error_msg = str(e)
                 logger.error(f"Failed to send quote email to {recipient}: {error_msg}")
                 error_messages.append(f"{recipient}: {error_msg}")
+                # Mark log as failed if it was created
+                if 'email_log' in locals() and email_log and email_log.status == 'pending':
+                    email_log.mark_as_failed(error_msg)
 
         # Update quote status
         if success_count > 0:
@@ -1027,6 +1053,28 @@ class EmailService:
                 # Find contact for this email
                 contact = contract.company.contacts.filter(email=recipient).first()
 
+                # Determine actual from_email for logging
+                log_from_email = from_email
+                if '<' in from_email and '>' in from_email:
+                    log_from_email = from_email.split('<')[1].split('>')[0]
+
+                # Create email log BEFORE send (for tracking pixel)
+                email_log = EmailLog.objects.create(
+                    company=contract.company,
+                    contact=contact,
+                    email_type='contract_send',
+                    from_email=log_from_email,
+                    to_email=recipient,
+                    subject=subject,
+                    body_html=body_html,
+                    body_text=body,
+                    status='pending',
+                    contract=contract
+                )
+
+                # Inject tracking pixel
+                tracked_html = self._inject_tracking_pixel(body_html, email_log.tracking_token)
+
                 # Create email message
                 msg = EmailMultiAlternatives(
                     subject=subject,
@@ -1036,8 +1084,8 @@ class EmailService:
                     connection=smtp_connection
                 )
 
-                # Add HTML version
-                msg.attach_alternative(body_html, "text/html")
+                # Add HTML version with tracking pixel
+                msg.attach_alternative(tracked_html, "text/html")
 
                 # Attach PDF
                 msg.attach(pdf_filename, pdf_data, 'application/pdf')
@@ -1050,25 +1098,8 @@ class EmailService:
                 # Send email
                 msg.send(fail_silently=False)
 
-                # Determine actual from_email for logging (extract from display format if needed)
-                log_from_email = from_email
-                if '<' in from_email and '>' in from_email:
-                    log_from_email = from_email.split('<')[1].split('>')[0]
-
-                # Log email
-                email_log = EmailLog.objects.create(
-                    company=contract.company,
-                    contact=contact,
-                    email_type='manual',
-                    from_email=log_from_email,
-                    to_email=recipient,
-                    subject=subject,
-                    body_html=body_html,
-                    body_text=body,
-                    status='sent',
-                    sent_at=timezone.now(),
-                    contract=contract
-                )
+                # Mark as sent
+                email_log.mark_as_sent()
 
                 success_count += 1
                 logger.info(f"Contract email sent successfully to {recipient}")
@@ -1077,6 +1108,8 @@ class EmailService:
                 error_msg = str(e)
                 logger.error(f"Failed to send contract email to {recipient}: {error_msg}")
                 error_messages.append(f"{recipient}: {error_msg}")
+                if 'email_log' in locals() and email_log and email_log.status == 'pending':
+                    email_log.mark_as_failed(error_msg)
 
         # Update contract status
         if success_count > 0:
@@ -1243,6 +1276,28 @@ class EmailService:
                 # Find contact for this email
                 contact = company.contacts.filter(email=recipient).first()
 
+                # Determine actual from_email for logging
+                log_from_email = from_email
+                if '<' in from_email and '>' in from_email:
+                    log_from_email = from_email.split('<')[1].split('>')[0]
+
+                # Create email log BEFORE send (for tracking pixel)
+                email_log = EmailLog.objects.create(
+                    company=company,
+                    contact=contact,
+                    email_type='invoice_send',
+                    from_email=log_from_email,
+                    to_email=recipient,
+                    subject=subject,
+                    body_html=body_html,
+                    body_text=body,
+                    status='pending',
+                    invoice=invoice
+                )
+
+                # Inject tracking pixel
+                tracked_html = self._inject_tracking_pixel(body_html, email_log.tracking_token)
+
                 # Create email message
                 msg = EmailMultiAlternatives(
                     subject=subject,
@@ -1252,8 +1307,8 @@ class EmailService:
                     connection=smtp_connection
                 )
 
-                # Add HTML version
-                msg.attach_alternative(body_html, "text/html")
+                # Add HTML version with tracking pixel
+                msg.attach_alternative(tracked_html, "text/html")
 
                 # Attach PDF
                 msg.attach(pdf_filename, pdf_data, 'application/pdf')
@@ -1266,25 +1321,8 @@ class EmailService:
                 # Send email
                 msg.send(fail_silently=False)
 
-                # Determine actual from_email for logging (extract from display format if needed)
-                log_from_email = from_email
-                if '<' in from_email and '>' in from_email:
-                    log_from_email = from_email.split('<')[1].split('>')[0]
-
-                # Log email
-                email_log = EmailLog.objects.create(
-                    company=company,
-                    contact=contact,
-                    email_type='manual',
-                    from_email=log_from_email,
-                    to_email=recipient,
-                    subject=subject,
-                    body_html=body_html,
-                    body_text=body,
-                    status='sent',
-                    sent_at=timezone.now(),
-                    invoice=invoice
-                )
+                # Mark as sent
+                email_log.mark_as_sent()
 
                 success_count += 1
                 logger.info(f"Invoice email sent successfully to {recipient}")
@@ -1293,6 +1331,8 @@ class EmailService:
                 error_msg = str(e)
                 logger.error(f"Failed to send invoice email to {recipient}: {error_msg}")
                 error_messages.append(f"{recipient}: {error_msg}")
+                if 'email_log' in locals() and email_log and email_log.status == 'pending':
+                    email_log.mark_as_failed(error_msg)
 
         # Update invoice status
         if success_count > 0:

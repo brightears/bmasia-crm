@@ -8,7 +8,8 @@ import {
   SeasonalTriggerDate,
   Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry,
   APAgingReport, APAgingSummary, OverdueExpense, MonthlyExpenseSummary,
-  PLStatement, PLComparative, PLTrendData
+  PLStatement, PLComparative, PLTrendData,
+  EmailLogEntry
 } from '../types';
 import { authApi } from './authService';
 import { MockApiService } from './mockData';
@@ -1554,6 +1555,12 @@ class ApiService {
     if (billingEntity) params.billing_entity = billingEntity;
     const response = await authApi.get('/profit-loss/trend/', { params });
     return response.data;
+  }
+
+  // Email Logs
+  async getEmailLogs(params?: { quote?: string; invoice?: string; contract?: string; company?: string }): Promise<EmailLogEntry[]> {
+    const response = await authApi.get('/api/v1/email-logs/', { params });
+    return response.data.results || response.data;
   }
 }
 
