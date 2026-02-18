@@ -25,8 +25,9 @@ const KBArticleCard: React.FC<KBArticleCardProps> = ({ article, onClick }) => {
     return text.substring(0, maxLength).trim() + '...';
   };
 
-  const visibleTags = article.tags.slice(0, 3);
-  const remainingTagsCount = article.tags.length - 3;
+  const tags = article.tags || [];
+  const visibleTags = tags.slice(0, 3);
+  const remainingTagsCount = tags.length - 3;
 
   return (
     <Card
@@ -73,7 +74,7 @@ const KBArticleCard: React.FC<KBArticleCardProps> = ({ article, onClick }) => {
 
           {/* Category Badge */}
           <Chip
-            label={article.category.name}
+            label={article.category?.name || 'Uncategorized'}
             size="small"
             sx={{
               mb: 1.5,
@@ -115,7 +116,7 @@ const KBArticleCard: React.FC<KBArticleCardProps> = ({ article, onClick }) => {
               minHeight: '4.5em',
             }}
           >
-            {article.excerpt || truncateText(article.content.replace(/<[^>]*>/g, ''), 150)}
+            {article.excerpt || truncateText((article.content || '').replace(/<[^>]*>/g, ''), 150)}
           </Typography>
 
           {/* Tags */}

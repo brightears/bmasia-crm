@@ -130,7 +130,7 @@ const KBFeaturedArticles: React.FC<KBFeaturedArticlesProps> = ({
 
                 {/* Category */}
                 <Chip
-                  label={article.category.name}
+                  label={article.category?.name || 'Uncategorized'}
                   size="small"
                   sx={{
                     mb: 2,
@@ -172,7 +172,7 @@ const KBFeaturedArticles: React.FC<KBFeaturedArticlesProps> = ({
                   }}
                 >
                   {article.excerpt ||
-                    article.content.replace(/<[^>]*>/g, '').substring(0, 120) + '...'}
+                    (article.content || '').replace(/<[^>]*>/g, '').substring(0, 120) + '...'}
                 </Typography>
 
                 {/* Stats */}

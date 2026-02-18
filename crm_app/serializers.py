@@ -1631,14 +1631,15 @@ class KBTagSerializer(serializers.ModelSerializer):
 
 class KBArticleListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for KBArticle list views (better performance)"""
-    category_detail = serializers.SerializerMethodField()
+    category = serializers.SerializerMethodField()
+    tags = KBTagSerializer(many=True, read_only=True)
     helpfulness_ratio = serializers.SerializerMethodField()
 
     class Meta:
         model = KBArticle
         fields = [
             'id', 'article_number', 'title', 'slug', 'excerpt',
-            'category_detail', 'status', 'visibility', 'view_count',
+            'category', 'tags', 'status', 'visibility', 'view_count',
             'helpful_count', 'not_helpful_count', 'helpfulness_ratio',
             'published_at', 'featured'
         ]
@@ -1647,10 +1648,10 @@ class KBArticleListSerializer(serializers.ModelSerializer):
             'not_helpful_count', 'helpfulness_ratio', 'published_at'
         ]
 
-    def get_category_detail(self, obj):
+    def get_category(self, obj):
         """Return minimal category info"""
         return {
-            'id': obj.category.id,
+            'id': str(obj.category.id),
             'name': obj.category.name,
             'slug': obj.category.slug
         }
