@@ -1668,7 +1668,11 @@ class KBArticleSerializer(serializers.ModelSerializer):
     author_detail = serializers.SerializerMethodField()
 
     # Write support
-    category_id = serializers.UUIDField(write_only=True, source='category')
+    category_id = serializers.PrimaryKeyRelatedField(
+        queryset=KBCategory.objects.all(),
+        write_only=True,
+        source='category'
+    )
     tag_ids = serializers.ListField(
         child=serializers.UUIDField(),
         write_only=True,
