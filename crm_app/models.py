@@ -3117,7 +3117,7 @@ class KBCategory(TimestampedModel):
     @property
     def article_count(self):
         """Count articles in this category"""
-        return self.articles.filter(status='published').count()
+        return self.articles.count()
 
 
 class KBTag(TimestampedModel):
@@ -3151,7 +3151,7 @@ class KBTag(TimestampedModel):
     @property
     def article_count(self):
         """Count articles with this tag"""
-        return self.articles.filter(status='published').count()
+        return self.articles.count()
 
 
 class KBArticle(TimestampedModel):
