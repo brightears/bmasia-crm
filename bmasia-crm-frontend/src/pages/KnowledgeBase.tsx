@@ -38,6 +38,7 @@ const KnowledgeBase: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedStatus, setSelectedStatus] = useState('');
   const [sortBy, setSortBy] = useState('-created_at');
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(12);
@@ -84,8 +85,11 @@ const KnowledgeBase: React.FC = () => {
         page: page + 1,
         page_size: rowsPerPage,
         ordering: sortBy,
-        status: 'published',
       };
+
+      if (selectedStatus) {
+        params.status = selectedStatus;
+      }
 
       if (searchQuery) {
         params.search = searchQuery;
@@ -110,7 +114,7 @@ const KnowledgeBase: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, rowsPerPage, searchQuery, selectedCategory, selectedTags, sortBy]);
+  }, [page, rowsPerPage, searchQuery, selectedCategory, selectedTags, selectedStatus, sortBy]);
 
   useEffect(() => {
     loadCategories();
@@ -137,6 +141,11 @@ const KnowledgeBase: React.FC = () => {
     setPage(0);
   };
 
+  const handleStatusChange = (status: string) => {
+    setSelectedStatus(status);
+    setPage(0);
+  };
+
   const handleSortChange = (sort: string) => {
     setSortBy(sort);
     setPage(0);
@@ -146,6 +155,7 @@ const KnowledgeBase: React.FC = () => {
     setSearchQuery('');
     setSelectedCategory('');
     setSelectedTags([]);
+    setSelectedStatus('');
     setSortBy('-created_at');
     setPage(0);
   };
@@ -237,6 +247,8 @@ const KnowledgeBase: React.FC = () => {
         onCategoryChange={handleCategoryChange}
         selectedTags={selectedTags}
         onTagsChange={handleTagsChange}
+        selectedStatus={selectedStatus}
+        onStatusChange={handleStatusChange}
         sortBy={sortBy}
         onSortChange={handleSortChange}
         categories={categories}

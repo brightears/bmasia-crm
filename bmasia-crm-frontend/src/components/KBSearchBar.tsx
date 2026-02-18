@@ -21,6 +21,8 @@ interface KBSearchBarProps {
   onCategoryChange: (category: string) => void;
   selectedTags: string[];
   onTagsChange: (tags: string[]) => void;
+  selectedStatus: string;
+  onStatusChange: (status: string) => void;
   sortBy: string;
   onSortChange: (sort: string) => void;
   categories: KBCategory[];
@@ -35,6 +37,8 @@ const KBSearchBar: React.FC<KBSearchBarProps> = ({
   onCategoryChange,
   selectedTags,
   onTagsChange,
+  selectedStatus,
+  onStatusChange,
   sortBy,
   onSortChange,
   categories,
@@ -50,7 +54,7 @@ const KBSearchBar: React.FC<KBSearchBarProps> = ({
     onTagsChange(selectedTags.filter(id => id !== tagId));
   };
 
-  const hasActiveFilters = searchQuery || selectedCategory || selectedTags.length > 0;
+  const hasActiveFilters = searchQuery || selectedCategory || selectedTags.length > 0 || selectedStatus;
 
   return (
     <Box sx={{ mb: 3 }}>
@@ -90,6 +94,21 @@ const KBSearchBar: React.FC<KBSearchBarProps> = ({
                 {category.name} ({category.article_count})
               </MenuItem>
             ))}
+          </Select>
+        </FormControl>
+
+        {/* Status Filter */}
+        <FormControl sx={{ minWidth: 150 }} size="small">
+          <InputLabel>Status</InputLabel>
+          <Select
+            value={selectedStatus}
+            onChange={(e) => onStatusChange(e.target.value)}
+            label="Status"
+          >
+            <MenuItem value="">All Statuses</MenuItem>
+            <MenuItem value="draft">Draft</MenuItem>
+            <MenuItem value="published">Published</MenuItem>
+            <MenuItem value="archived">Archived</MenuItem>
           </Select>
         </FormControl>
 
