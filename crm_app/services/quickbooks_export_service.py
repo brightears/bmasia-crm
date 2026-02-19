@@ -15,9 +15,12 @@ Usage:
     from crm_app.services.quickbooks_export_service import QuickBooksExportService
 
     service = QuickBooksExportService()
-    iif_content = service.generate_iif(invoices, ar_account='Accounts Receivable',
-                                        income_account='Service Revenue',
-                                        tax_account='VAT Payable')
+    iif_content = service.generate_iif(
+        invoices,
+        ar_accounts={'THB': 'Local AR', 'USD': 'Overseas AR'},
+        income_accounts={'syb': 'SYB Revenue', 'bms': 'BMS Revenue', 'default': 'Service Revenue'},
+        tax_account='VAT Payable',
+    )
 """
 
 import logging
@@ -50,16 +53,17 @@ class QuickBooksExportService:
         'AMOUNT', 'QNTY', 'PRICE', 'INVITEM', 'MEMO',
     ]
 
-    def generate_iif(self, invoices, ar_account='Accounts Receivable',
-                     income_account='Service Revenue',
+    def generate_iif(self, invoices, ar_accounts=None, income_accounts=None,
                      tax_account='VAT Payable'):
         """
         Generate IIF content for a queryset of Invoice objects.
 
         Args:
             invoices: QuerySet of Invoice objects (with prefetched line_items and company)
-            ar_account: QuickBooks AR account name (must match QB exactly)
-            income_account: QuickBooks income account name (must match QB exactly)
+            ar_accounts: Dict mapping currency code to QB AR account name
+                         e.g. {'THB': '1005 LOCAL AR', 'USD': '1005.1 OVERSEAS AR'}
+            income_accounts: Dict mapping product key to QB income account name
+                             e.g. {'syb': '4006.1 SYB', 'bms': '4006.2 BMS', 'default': '...'}
             tax_account: QuickBooks VAT/tax payable account name (must match QB exactly)
 
         Returns:
@@ -77,7 +81,7 @@ class QuickBooksExportService:
         invoice_count = 0
         for invoice in invoices:
             try:
-                self._write_invoice(output, invoice, ar_account, income_account, tax_account)
+                self._write_invoice(output, invoice, ar_accounts, income_accounts, tax_account)
                 invoice_count += 1
             except Exception as e:
                 logger.error(f'Failed to export invoice {invoice.invoice_number}: {e}')
@@ -87,12 +91,38 @@ class QuickBooksExportService:
         output.seek(0)
         return output
 
-    def _write_invoice(self, output, invoice, ar_account, income_account, tax_account):
+    def _resolve_ar_account(self, invoice, ar_accounts):
+        """Select AR account based on invoice currency."""
+        if not ar_accounts:
+            return 'Accounts Receivable'
+        currency = (invoice.currency or 'USD').upper()
+        return ar_accounts.get(currency, ar_accounts.get('USD', 'Accounts Receivable'))
+
+    def _resolve_income_account(self, product_service, income_accounts):
+        """Select income account based on product/service type."""
+        if not income_accounts:
+            return 'Service Revenue'
+        if not product_service:
+            return income_accounts.get('default', 'Service Revenue')
+        ps_lower = product_service.lower().strip().replace(' ', '')
+        # Soundtrack matching
+        if 'soundtrack' in ps_lower:
+            return income_accounts.get('syb', income_accounts.get('default', 'Service Revenue'))
+        # Beat Breeze matching
+        if 'beatbreeze' in ps_lower or 'beat' in ps_lower:
+            return income_accounts.get('bms', income_accounts.get('default', 'Service Revenue'))
+        return income_accounts.get('default', 'Service Revenue')
+
+    def _write_invoice(self, output, invoice, ar_accounts, income_accounts, tax_account):
         """Write a single invoice as TRNS + SPL rows + ENDTRNS.
 
         VAT handling: line item SPL rows use pre-tax amounts (qty * unit_price).
         If the invoice has tax, a separate SPL row credits the tax to the
         VAT Payable account. All amounts must sum to zero.
+
+        Account resolution:
+        - AR account: resolved per invoice currency via ar_accounts dict
+        - Income account: resolved per line item product via income_accounts dict
         """
         company_name = self._sanitize_text(invoice.company.name)
         invoice_date = self._format_date(invoice.issue_date)
@@ -103,12 +133,13 @@ class QuickBooksExportService:
         # Total amount (positive for TRNS = debit to AR)
         total_amount = self._format_amount(invoice.total_amount)
 
-        # TRNS row (invoice header)
+        # TRNS row (invoice header) — AR account based on invoice currency
+        ar_account = self._resolve_ar_account(invoice, ar_accounts)
         trns_values = [
             invoice_number,         # TRNSID
             'INVOICE',              # TRNSTYPE
             invoice_date,           # DATE
-            ar_account,             # ACCNT (Accounts Receivable)
+            ar_account,             # ACCNT (currency-specific AR)
             company_name,           # NAME (customer)
             total_amount,           # AMOUNT (positive = debit AR)
             invoice_number,         # DOCNUM
@@ -124,7 +155,7 @@ class QuickBooksExportService:
             for idx, item in enumerate(line_items, start=1):
                 self._write_line_item(
                     output, idx, item, invoice_date,
-                    income_account, company_name
+                    income_accounts, company_name
                 )
                 # Accumulate tax per line item
                 subtotal = item.quantity * item.unit_price
@@ -152,12 +183,13 @@ class QuickBooksExportService:
                 next_idx += 1
 
             # Discount SPL row — if invoice has discount
+            default_income = (income_accounts or {}).get('default', 'Service Revenue')
             if invoice.discount_amount and invoice.discount_amount > 0:
                 disc_spl = [
                     str(next_idx),          # SPLID
                     'INVOICE',              # TRNSTYPE
                     invoice_date,           # DATE
-                    income_account,         # ACCNT
+                    default_income,         # ACCNT (contra-revenue)
                     company_name,           # NAME
                     self._format_amount(invoice.discount_amount),  # AMOUNT (positive = debit)
                     '0',                    # QNTY
@@ -168,13 +200,14 @@ class QuickBooksExportService:
                 output.write('SPL\t' + '\t'.join(disc_spl) + '\n')
         else:
             # Invoice has no line items — split into pre-tax + VAT
+            default_income = (income_accounts or {}).get('default', 'Service Revenue')
             pre_tax = invoice.amount or invoice.total_amount
             tax = invoice.tax_amount or Decimal('0')
             spl_values = [
                 '1',                                    # SPLID
                 'INVOICE',                              # TRNSTYPE
                 invoice_date,                           # DATE
-                income_account,                         # ACCNT
+                default_income,                         # ACCNT
                 company_name,                           # NAME
                 self._format_amount(-pre_tax),          # AMOUNT (negative)
                 '1',                                    # QNTY
@@ -201,8 +234,11 @@ class QuickBooksExportService:
         output.write('ENDTRNS\n')
 
     def _write_line_item(self, output, idx, item, invoice_date,
-                         income_account, company_name):
-        """Write a single SPL row for an invoice line item (pre-tax amount)."""
+                         income_accounts, company_name):
+        """Write a single SPL row for an invoice line item (pre-tax amount).
+
+        Income account is resolved per line item based on product_service field.
+        """
         description = self._sanitize_text(item.description or '')
         quantity = self._format_amount(item.quantity)
         unit_price = self._format_amount(item.unit_price)
@@ -210,12 +246,13 @@ class QuickBooksExportService:
         pre_tax_amount = item.quantity * item.unit_price
         line_amount = self._format_amount(-pre_tax_amount)  # Negative for SPL
         item_name = self._get_item_name(item.product_service)
+        income_account = self._resolve_income_account(item.product_service, income_accounts)
 
         spl_values = [
             str(idx),               # SPLID
             'INVOICE',              # TRNSTYPE
             invoice_date,           # DATE
-            income_account,         # ACCNT
+            income_account,         # ACCNT (product-specific income account)
             company_name,           # NAME
             line_amount,            # AMOUNT (negative = credit income, pre-tax)
             quantity,               # QNTY

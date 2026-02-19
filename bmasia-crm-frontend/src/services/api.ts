@@ -427,8 +427,11 @@ class ApiService {
     status?: string;
     date_from?: string;
     date_to?: string;
-    ar_account?: string;
-    income_account?: string;
+    ar_account_thb?: string;
+    ar_account_usd?: string;
+    income_account_syb?: string;
+    income_account_bms?: string;
+    income_account_default?: string;
     tax_account?: string;
   }): Promise<Blob> {
     const response = await authApi.get('/invoices/export-quickbooks/', {

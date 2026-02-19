@@ -4110,8 +4110,11 @@ class InvoiceViewSet(BaseModelViewSet):
             status: Invoice status filter (comma-separated, e.g. "Sent,Paid")
             date_from: Start date (YYYY-MM-DD)
             date_to: End date (YYYY-MM-DD)
-            ar_account: QB AR account name (default: Accounts Receivable)
-            income_account: QB income account name (default: Service Revenue)
+            ar_account_thb: QB AR account for THB invoices
+            ar_account_usd: QB AR account for USD invoices
+            income_account_syb: QB income account for Soundtrack line items
+            income_account_bms: QB income account for Beat Breeze line items
+            income_account_default: QB income account fallback for other items
             tax_account: QB VAT/tax payable account name (default: VAT Payable)
         """
         from crm_app.services.quickbooks_export_service import QuickBooksExportService
@@ -4126,8 +4129,18 @@ class InvoiceViewSet(BaseModelViewSet):
         status_filter = request.query_params.get('status', '')
         date_from = request.query_params.get('date_from', '')
         date_to = request.query_params.get('date_to', '')
-        ar_account = request.query_params.get('ar_account', 'Accounts Receivable')
-        income_account = request.query_params.get('income_account', 'Service Revenue')
+
+        # Per-currency AR accounts
+        ar_accounts = {
+            'THB': request.query_params.get('ar_account_thb', 'Accounts Receivable'),
+            'USD': request.query_params.get('ar_account_usd', 'Accounts Receivable'),
+        }
+        # Per-product income accounts
+        income_accounts = {
+            'syb': request.query_params.get('income_account_syb', 'Service Revenue'),
+            'bms': request.query_params.get('income_account_bms', 'Service Revenue'),
+            'default': request.query_params.get('income_account_default', 'Service Revenue'),
+        }
         tax_account = request.query_params.get('tax_account', 'VAT Payable')
 
         queryset = Invoice.objects.select_related('company').prefetch_related('line_items')
@@ -4150,7 +4163,7 @@ class InvoiceViewSet(BaseModelViewSet):
             )
 
         service = QuickBooksExportService()
-        iif_buffer = service.generate_iif(queryset, ar_account, income_account, tax_account)
+        iif_buffer = service.generate_iif(queryset, ar_accounts, income_accounts, tax_account)
 
         entity_abbr = 'BMAT' if 'Thailand' in billing_entity else 'BMAL'
         filename = f'invoices-{entity_abbr}-{timezone.now().strftime("%Y%m%d")}.iif'

@@ -130,9 +130,12 @@ const Invoices: React.FC = () => {
   const [qbStatus, setQbStatus] = useState('Sent');
   const [qbDateFrom, setQbDateFrom] = useState('');
   const [qbDateTo, setQbDateTo] = useState('');
-  const [qbArAccount, setQbArAccount] = useState('Accounts Receivable');
-  const [qbIncomeAccount, setQbIncomeAccount] = useState('Service Revenue');
-  const [qbTaxAccount, setQbTaxAccount] = useState('VAT Payable');
+  const [qbArAccountThb, setQbArAccountThb] = useState('');
+  const [qbArAccountUsd, setQbArAccountUsd] = useState('');
+  const [qbIncomeAccountSyb, setQbIncomeAccountSyb] = useState('');
+  const [qbIncomeAccountBms, setQbIncomeAccountBms] = useState('');
+  const [qbIncomeAccountDefault, setQbIncomeAccountDefault] = useState('');
+  const [qbTaxAccount, setQbTaxAccount] = useState('');
 
   const loadInvoices = useCallback(async () => {
     try {
@@ -348,18 +351,39 @@ const Invoices: React.FC = () => {
     }).format(value);
   };
 
-  // Entity-specific QB account defaults
-  const QB_ENTITY_DEFAULTS: Record<string, { ar: string; income: string; tax: string }> = {
-    'BMAsia (Thailand) Co., Ltd.': { ar: 'Accounts Receivable', income: 'Service Revenue', tax: 'VAT Payable' },
-    'BMAsia Limited': { ar: 'Accounts Receivable', income: 'Service Revenue', tax: '' },
+  // Entity-specific QB account defaults (from Pom's actual QuickBooks chart of accounts)
+  const QB_ENTITY_DEFAULTS: Record<string, {
+    ar_thb: string; ar_usd: string;
+    income_syb: string; income_bms: string; income_default: string;
+    tax: string;
+  }> = {
+    'BMAsia (Thailand) Co., Ltd.': {
+      ar_thb: '1005 น LOCAL ACCOUNTS RECEIVABLE',
+      ar_usd: '1005.1 น OVERSEAS ACCOUNTS RECEIVABLE',
+      income_syb: '4006.1 น SYB RESELLER',
+      income_bms: '4006.2 น BMS MUSIC',
+      income_default: '4006.1 น SYB RESELLER',
+      tax: '2030.7 น TAX',
+    },
+    'BMAsia Limited': {
+      ar_thb: '',
+      ar_usd: '1005 น ACCOUNTS RECEIVABLE',
+      income_syb: '4006.1 น SYB RESELLER',
+      income_bms: '4006.2 น BMS MUSIC',
+      income_default: '4006.1 น SYB RESELLER',
+      tax: '',
+    },
   };
 
   const handleQbEntityChange = (entity: string) => {
     setQbEntity(entity);
     const defaults = QB_ENTITY_DEFAULTS[entity];
     if (defaults) {
-      setQbArAccount(defaults.ar);
-      setQbIncomeAccount(defaults.income);
+      setQbArAccountThb(defaults.ar_thb);
+      setQbArAccountUsd(defaults.ar_usd);
+      setQbIncomeAccountSyb(defaults.income_syb);
+      setQbIncomeAccountBms(defaults.income_bms);
+      setQbIncomeAccountDefault(defaults.income_default);
       setQbTaxAccount(defaults.tax);
     }
   };
@@ -376,8 +400,11 @@ const Invoices: React.FC = () => {
         status: qbStatus || undefined,
         date_from: qbDateFrom || undefined,
         date_to: qbDateTo || undefined,
-        ar_account: qbArAccount,
-        income_account: qbIncomeAccount,
+        ar_account_thb: qbArAccountThb || undefined,
+        ar_account_usd: qbArAccountUsd || undefined,
+        income_account_syb: qbIncomeAccountSyb || undefined,
+        income_account_bms: qbIncomeAccountBms || undefined,
+        income_account_default: qbIncomeAccountDefault || undefined,
         tax_account: qbTaxAccount || undefined,
       });
       const url = window.URL.createObjectURL(blob);
@@ -852,31 +879,70 @@ const Invoices: React.FC = () => {
               QuickBooks Account Mapping
             </Typography>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
-              <TextField
-                fullWidth
-                size="small"
-                label="Accounts Receivable (AR)"
-                value={qbArAccount}
-                onChange={(e) => setQbArAccount(e.target.value)}
-                helperText="Debit account — must match your QB AR account name exactly"
-              />
-              <TextField
-                fullWidth
-                size="small"
-                label="Sales / Income Account"
-                value={qbIncomeAccount}
-                onChange={(e) => setQbIncomeAccount(e.target.value)}
-                helperText="Credit account for revenue — must match your QB income account name exactly"
-              />
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+                Accounts Receivable (by currency)
+              </Typography>
               {qbEntity.includes('Thailand') && (
                 <TextField
                   fullWidth
                   size="small"
-                  label="VAT Payable Account"
-                  value={qbTaxAccount}
-                  onChange={(e) => setQbTaxAccount(e.target.value)}
-                  helperText="Credit account for 7% VAT — must match your QB tax liability account name"
+                  label="AR — THB (Local)"
+                  value={qbArAccountThb}
+                  onChange={(e) => setQbArAccountThb(e.target.value)}
+                  helperText="Debit account for THB invoices"
                 />
+              )}
+              <TextField
+                fullWidth
+                size="small"
+                label={qbEntity.includes('Thailand') ? 'AR — USD (Overseas)' : 'AR — USD'}
+                value={qbArAccountUsd}
+                onChange={(e) => setQbArAccountUsd(e.target.value)}
+                helperText="Debit account for USD invoices"
+              />
+
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, mt: 1 }}>
+                Revenue Accounts (by product)
+              </Typography>
+              <TextField
+                fullWidth
+                size="small"
+                label="SYB Revenue (Soundtrack)"
+                value={qbIncomeAccountSyb}
+                onChange={(e) => setQbIncomeAccountSyb(e.target.value)}
+                helperText="Credit account for Soundtrack Your Brand line items"
+              />
+              <TextField
+                fullWidth
+                size="small"
+                label="BMS Revenue (Beat Breeze)"
+                value={qbIncomeAccountBms}
+                onChange={(e) => setQbIncomeAccountBms(e.target.value)}
+                helperText="Credit account for Beat Breeze Music Service line items"
+              />
+              <TextField
+                fullWidth
+                size="small"
+                label="Default Revenue (Other)"
+                value={qbIncomeAccountDefault}
+                onChange={(e) => setQbIncomeAccountDefault(e.target.value)}
+                helperText="Fallback account for hardware, installation, and other items"
+              />
+
+              {qbEntity.includes('Thailand') && (
+                <>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, mt: 1 }}>
+                    Tax
+                  </Typography>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    label="VAT Payable"
+                    value={qbTaxAccount}
+                    onChange={(e) => setQbTaxAccount(e.target.value)}
+                    helperText="Credit account for 7% VAT"
+                  />
+                </>
               )}
             </Box>
 
