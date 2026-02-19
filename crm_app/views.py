@@ -4106,26 +4106,33 @@ class InvoiceViewSet(BaseModelViewSet):
         Export invoices as IIF file for QuickBooks Pro 2016 import.
 
         Query params:
-            billing_entity: Filter by company billing entity
-            status: Invoice status filter (default: Sent)
+            billing_entity: Filter by company billing entity (REQUIRED)
+            status: Invoice status filter (comma-separated, e.g. "Sent,Paid")
             date_from: Start date (YYYY-MM-DD)
             date_to: End date (YYYY-MM-DD)
             ar_account: QB AR account name (default: Accounts Receivable)
             income_account: QB income account name (default: Service Revenue)
+            tax_account: QB VAT/tax payable account name (default: VAT Payable)
         """
         from crm_app.services.quickbooks_export_service import QuickBooksExportService
 
         billing_entity = request.query_params.get('billing_entity', '')
+        if not billing_entity:
+            return Response(
+                {'error': 'billing_entity is required. Select BMAsia Thailand or BMAsia Limited.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         status_filter = request.query_params.get('status', '')
         date_from = request.query_params.get('date_from', '')
         date_to = request.query_params.get('date_to', '')
         ar_account = request.query_params.get('ar_account', 'Accounts Receivable')
         income_account = request.query_params.get('income_account', 'Service Revenue')
+        tax_account = request.query_params.get('tax_account', 'VAT Payable')
 
         queryset = Invoice.objects.select_related('company').prefetch_related('line_items')
 
-        if billing_entity:
-            queryset = queryset.filter(company__billing_entity=billing_entity)
+        queryset = queryset.filter(company__billing_entity=billing_entity)
         if status_filter:
             statuses = [s.strip() for s in status_filter.split(',')]
             queryset = queryset.filter(status__in=statuses)
@@ -4143,10 +4150,12 @@ class InvoiceViewSet(BaseModelViewSet):
             )
 
         service = QuickBooksExportService()
-        iif_buffer = service.generate_iif(queryset, ar_account, income_account)
+        iif_buffer = service.generate_iif(queryset, ar_account, income_account, tax_account)
+
+        entity_abbr = 'BMAT' if 'Thailand' in billing_entity else 'BMAL'
+        filename = f'invoices-{entity_abbr}-{timezone.now().strftime("%Y%m%d")}.iif'
 
         response = HttpResponse(iif_buffer.getvalue(), content_type='text/plain; charset=utf-8')
-        filename = f'invoices_export_{timezone.now().strftime("%Y%m%d")}.iif'
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
 

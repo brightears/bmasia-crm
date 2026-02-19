@@ -2,6 +2,63 @@
 
 ## February 2026
 
+### Feb 19, 2026 - Pom's Finance Feedback: Branch Field, Address Save, QuickBooks Export
+
+**Context**: Finance manager (Khun Pom) raised three issues: (1) Branch field is a dropdown — needs free text for values like "Branch 00001", (2) Company address edits won't save, (3) Invoices must export to QuickBooks Pro 2016 to avoid double data entry.
+
+**Item 1 — Branch Field: Dropdown → Free Text** (`CompanyForm.tsx`):
+- **Problem**: Branch was a `<Select>` dropdown with 3 hardcoded `<MenuItem>` options: "None", "สำนักงานใหญ่ (Head Office)", "Branch"
+- **Backend**: `branch = CharField(max_length=100, blank=True)` — already supports any text. **No backend change needed**
+- **Fix**: Replaced `<FormControl>` + `<Select>` + 3 `<MenuItem>` with simple `<TextField>` with `placeholder="e.g., Branch 00001"` and `helperText`
+- Also added `tax_id` and `branch` fields to `CompanyEdit.tsx` (full-page edit form was missing them entirely)
+
+**Item 2 — Address Editing Won't Save** (`api.ts`, `CompanyEdit.tsx`):
+- **Root Cause**: `updateCompany()` in api.ts line 108 used **PUT** instead of **PATCH** — same bug pattern as the invoice fix (commit `f49b7a63`). PUT requires ALL model fields; the form sets optional fields to `undefined` which Axios strips → DRF rejects with 400
+- **Fix 1**: Changed `authApi.put` → `authApi.patch` in `updateCompany()`
+- **Fix 2**: Moved `city` field from "Basic Information" section to "Address Information" section in CompanyEdit.tsx (was in wrong section)
+
+**Item 3 — QuickBooks Pro 2016 IIF Export**:
+
+*Research*: QuickBooks Pro 2016 uses **IIF (Intuit Interchange Format)** — tab-delimited text format. Only native import format for invoices in QB Desktop.
+
+*Backend — `QuickBooksExportService`* (`crm_app/services/quickbooks_export_service.py` — NEW):
+- `generate_iif(invoices, ar_account, income_account)` → returns StringIO with IIF content
+- IIF structure per invoice: `!TRNS` header → `TRNS` row (positive AR debit) → `!SPL` header → `SPL` rows (negative income credits) → `ENDTRNS`
+- `_sanitize_text()`: strips semicolons (QB stops reading), replaces newlines/tabs with spaces, replaces non-ASCII with `?`, truncates to 255 chars
+- `_get_item_name()`: maps CRM `product_service` to QB item names (e.g., "soundtrack" → "Soundtrack Music Service")
+- `PRODUCT_SERVICE_TO_QB_ITEM` dict: soundtrack, beatbreeze, hardware, installation, support
+- Dates formatted as MM/DD/YYYY (QB requirement)
+- Per-invoice error handling with logging (skips failed invoices, continues export)
+
+*Backend — Export Endpoint* (`crm_app/views.py`):
+- `@action(detail=False, methods=['get'], url_path='export-quickbooks')` on `InvoiceViewSet`
+- Query params: `billing_entity`, `status` (comma-separated, default: Sent), `date_from`, `date_to`, `ar_account`, `income_account`
+- Returns `HttpResponse` with `Content-Disposition: attachment; filename="invoices_export_YYYYMMDD.iif"`, `content_type='text/plain; charset=utf-8'`
+
+*Frontend — API Method* (`api.ts`):
+- `exportQuickBooks(params)` → `authApi.get('/invoices/export-quickbooks/', { params, responseType: 'blob' })`
+
+*Frontend — Export Dialog* (`Invoices.tsx`):
+- "Export to QuickBooks" button next to "New Invoice" (outlined, orange, `<GetApp />` icon)
+- Dialog fields: Billing Entity dropdown, Invoice Status dropdown (Sent/Paid/All, default: Sent), Date From/To pickers
+- Collapsible "QuickBooks Account Settings": AR Account Name + Income Account Name TextFields (default: "Accounts Receivable" / "Service Revenue")
+- Info Alert: "Customer names in CRM must match QuickBooks exactly"
+- Export handler: blob download → saves as `.iif` file. 404 = no matching invoices alert
+
+**Files Modified**:
+- `bmasia-crm-frontend/src/components/CompanyForm.tsx` — Branch Select → TextField
+- `bmasia-crm-frontend/src/pages/CompanyEdit.tsx` — Added tax_id/branch fields, moved City to address section
+- `bmasia-crm-frontend/src/services/api.ts` — `updateCompany()` PUT→PATCH + `exportQuickBooks()` method
+- `bmasia-crm-frontend/src/pages/Invoices.tsx` — QB export button + dialog
+- `crm_app/services/quickbooks_export_service.py` — **NEW** — IIF generation service
+- `crm_app/views.py` — `export_quickbooks` action on InvoiceViewSet
+
+**No migrations. No model changes. No new dependencies.**
+
+**Commit**: `1e49746a`
+
+---
+
 ### Feb 19, 2026 - Client Tech Details Module
 
 **Context**: Keith (tech support) needed a centralized place to record detailed technical specifications for each client outlet — PC specs, remote access IDs, audio equipment, network info, etc. Previously tracked in spreadsheets and personal notes.

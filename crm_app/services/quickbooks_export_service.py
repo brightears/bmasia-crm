@@ -16,7 +16,8 @@ Usage:
 
     service = QuickBooksExportService()
     iif_content = service.generate_iif(invoices, ar_account='Accounts Receivable',
-                                        income_account='Service Revenue')
+                                        income_account='Service Revenue',
+                                        tax_account='VAT Payable')
 """
 
 import logging
@@ -50,7 +51,8 @@ class QuickBooksExportService:
     ]
 
     def generate_iif(self, invoices, ar_account='Accounts Receivable',
-                     income_account='Service Revenue'):
+                     income_account='Service Revenue',
+                     tax_account='VAT Payable'):
         """
         Generate IIF content for a queryset of Invoice objects.
 
@@ -58,6 +60,7 @@ class QuickBooksExportService:
             invoices: QuerySet of Invoice objects (with prefetched line_items and company)
             ar_account: QuickBooks AR account name (must match QB exactly)
             income_account: QuickBooks income account name (must match QB exactly)
+            tax_account: QuickBooks VAT/tax payable account name (must match QB exactly)
 
         Returns:
             StringIO buffer containing IIF content
@@ -74,7 +77,7 @@ class QuickBooksExportService:
         invoice_count = 0
         for invoice in invoices:
             try:
-                self._write_invoice(output, invoice, ar_account, income_account)
+                self._write_invoice(output, invoice, ar_account, income_account, tax_account)
                 invoice_count += 1
             except Exception as e:
                 logger.error(f'Failed to export invoice {invoice.invoice_number}: {e}')
@@ -84,8 +87,13 @@ class QuickBooksExportService:
         output.seek(0)
         return output
 
-    def _write_invoice(self, output, invoice, ar_account, income_account):
-        """Write a single invoice as TRNS + SPL rows + ENDTRNS."""
+    def _write_invoice(self, output, invoice, ar_account, income_account, tax_account):
+        """Write a single invoice as TRNS + SPL rows + ENDTRNS.
+
+        VAT handling: line item SPL rows use pre-tax amounts (qty * unit_price).
+        If the invoice has tax, a separate SPL row credits the tax to the
+        VAT Payable account. All amounts must sum to zero.
+        """
         company_name = self._sanitize_text(invoice.company.name)
         invoice_date = self._format_date(invoice.issue_date)
         due_date = self._format_date(invoice.due_date) if invoice.due_date else ''
@@ -109,39 +117,98 @@ class QuickBooksExportService:
         ]
         output.write('TRNS\t' + '\t'.join(trns_values) + '\n')
 
-        # SPL rows (one per line item — amounts are NEGATIVE = credit income)
-        line_items = invoice.line_items.all()
-        if line_items.exists():
+        # SPL rows — pre-tax amounts per line item + separate VAT row
+        line_items = list(invoice.line_items.all())
+        if line_items:
+            total_tax = Decimal('0')
             for idx, item in enumerate(line_items, start=1):
                 self._write_line_item(
                     output, idx, item, invoice_date,
                     income_account, company_name
                 )
+                # Accumulate tax per line item
+                subtotal = item.quantity * item.unit_price
+                tax = subtotal * (item.tax_rate / Decimal('100'))
+                total_tax += tax
+
+            next_idx = len(line_items) + 1
+
+            # VAT SPL row — only when there's actual tax
+            if total_tax > 0 and tax_account:
+                vat_memo = f'VAT {line_items[0].tax_rate}%'
+                vat_spl = [
+                    str(next_idx),          # SPLID
+                    'INVOICE',              # TRNSTYPE
+                    invoice_date,           # DATE
+                    tax_account,            # ACCNT (VAT Payable)
+                    company_name,           # NAME
+                    self._format_amount(-total_tax),  # AMOUNT (negative = credit)
+                    '0',                    # QNTY
+                    '0.00',                 # PRICE
+                    'Sales Tax',            # INVITEM
+                    vat_memo,               # MEMO
+                ]
+                output.write('SPL\t' + '\t'.join(vat_spl) + '\n')
+                next_idx += 1
+
+            # Discount SPL row — if invoice has discount
+            if invoice.discount_amount and invoice.discount_amount > 0:
+                disc_spl = [
+                    str(next_idx),          # SPLID
+                    'INVOICE',              # TRNSTYPE
+                    invoice_date,           # DATE
+                    income_account,         # ACCNT
+                    company_name,           # NAME
+                    self._format_amount(invoice.discount_amount),  # AMOUNT (positive = debit)
+                    '0',                    # QNTY
+                    '0.00',                 # PRICE
+                    'Discount',             # INVITEM
+                    'Invoice discount',     # MEMO
+                ]
+                output.write('SPL\t' + '\t'.join(disc_spl) + '\n')
         else:
-            # Invoice has no line items — create a single SPL row for the total
+            # Invoice has no line items — split into pre-tax + VAT
+            pre_tax = invoice.amount or invoice.total_amount
+            tax = invoice.tax_amount or Decimal('0')
             spl_values = [
                 '1',                                    # SPLID
                 'INVOICE',                              # TRNSTYPE
                 invoice_date,                           # DATE
                 income_account,                         # ACCNT
                 company_name,                           # NAME
-                self._format_amount(-invoice.total_amount),  # AMOUNT (negative)
+                self._format_amount(-pre_tax),          # AMOUNT (negative)
                 '1',                                    # QNTY
-                total_amount,                           # PRICE
+                self._format_amount(pre_tax),           # PRICE
                 'Service',                              # INVITEM
                 memo,                                   # MEMO
             ]
             output.write('SPL\t' + '\t'.join(spl_values) + '\n')
+            if tax > 0 and tax_account:
+                vat_spl = [
+                    '2',                                # SPLID
+                    'INVOICE',                          # TRNSTYPE
+                    invoice_date,                       # DATE
+                    tax_account,                        # ACCNT (VAT Payable)
+                    company_name,                       # NAME
+                    self._format_amount(-tax),          # AMOUNT (negative)
+                    '0',                                # QNTY
+                    '0.00',                             # PRICE
+                    'Sales Tax',                        # INVITEM
+                    'VAT',                              # MEMO
+                ]
+                output.write('SPL\t' + '\t'.join(vat_spl) + '\n')
 
         output.write('ENDTRNS\n')
 
     def _write_line_item(self, output, idx, item, invoice_date,
                          income_account, company_name):
-        """Write a single SPL row for an invoice line item."""
+        """Write a single SPL row for an invoice line item (pre-tax amount)."""
         description = self._sanitize_text(item.description or '')
         quantity = self._format_amount(item.quantity)
         unit_price = self._format_amount(item.unit_price)
-        line_total = self._format_amount(-item.line_total)  # Negative for SPL
+        # Use pre-tax amount (qty * unit_price), NOT line_total which includes tax
+        pre_tax_amount = item.quantity * item.unit_price
+        line_amount = self._format_amount(-pre_tax_amount)  # Negative for SPL
         item_name = self._get_item_name(item.product_service)
 
         spl_values = [
@@ -150,7 +217,7 @@ class QuickBooksExportService:
             invoice_date,           # DATE
             income_account,         # ACCNT
             company_name,           # NAME
-            line_total,             # AMOUNT (negative = credit income)
+            line_amount,            # AMOUNT (negative = credit income, pre-tax)
             quantity,               # QNTY
             unit_price,             # PRICE
             item_name,              # INVITEM

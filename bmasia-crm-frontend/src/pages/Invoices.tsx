@@ -31,7 +31,6 @@ import {
   DialogContent,
   DialogActions,
   Snackbar,
-  Collapse,
 } from '@mui/material';
 import {
   Add,
@@ -133,7 +132,7 @@ const Invoices: React.FC = () => {
   const [qbDateTo, setQbDateTo] = useState('');
   const [qbArAccount, setQbArAccount] = useState('Accounts Receivable');
   const [qbIncomeAccount, setQbIncomeAccount] = useState('Service Revenue');
-  const [qbShowSettings, setQbShowSettings] = useState(false);
+  const [qbTaxAccount, setQbTaxAccount] = useState('VAT Payable');
 
   const loadInvoices = useCallback(async () => {
     try {
@@ -349,22 +348,44 @@ const Invoices: React.FC = () => {
     }).format(value);
   };
 
+  // Entity-specific QB account defaults
+  const QB_ENTITY_DEFAULTS: Record<string, { ar: string; income: string; tax: string }> = {
+    'BMAsia (Thailand) Co., Ltd.': { ar: 'Accounts Receivable', income: 'Service Revenue', tax: 'VAT Payable' },
+    'BMAsia Limited': { ar: 'Accounts Receivable', income: 'Service Revenue', tax: '' },
+  };
+
+  const handleQbEntityChange = (entity: string) => {
+    setQbEntity(entity);
+    const defaults = QB_ENTITY_DEFAULTS[entity];
+    if (defaults) {
+      setQbArAccount(defaults.ar);
+      setQbIncomeAccount(defaults.income);
+      setQbTaxAccount(defaults.tax);
+    }
+  };
+
   const handleQBExport = async () => {
+    if (!qbEntity) {
+      setError('Please select a billing entity');
+      return;
+    }
     try {
       setQbExporting(true);
       const blob = await ApiService.exportQuickBooks({
-        billing_entity: qbEntity || undefined,
+        billing_entity: qbEntity,
         status: qbStatus || undefined,
         date_from: qbDateFrom || undefined,
         date_to: qbDateTo || undefined,
         ar_account: qbArAccount,
         income_account: qbIncomeAccount,
+        tax_account: qbTaxAccount || undefined,
       });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
+      const entityAbbr = qbEntity.includes('Thailand') ? 'BMAT' : 'BMAL';
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      link.download = `invoices_export_${dateStr}.iif`;
+      link.download = `invoices-${entityAbbr}-${dateStr}.iif`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -374,6 +395,8 @@ const Invoices: React.FC = () => {
     } catch (err: any) {
       if (err.response?.status === 404) {
         setError('No invoices match the selected filters');
+      } else if (err.response?.status === 400) {
+        setError('Please select a billing entity');
       } else {
         setError('Failed to export invoices. Please try again.');
       }
@@ -773,17 +796,17 @@ const Invoices: React.FC = () => {
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Export invoices as an IIF file for import into QuickBooks Pro 2016.
+            Each entity exports to a separate file for its QuickBooks company.
           </Typography>
 
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Billing Entity</InputLabel>
+            <FormControl fullWidth size="small" required error={!qbEntity}>
+              <InputLabel>Billing Entity *</InputLabel>
               <Select
                 value={qbEntity}
-                onChange={(e) => setQbEntity(e.target.value)}
-                label="Billing Entity"
+                onChange={(e) => handleQbEntityChange(e.target.value)}
+                label="Billing Entity *"
               >
-                <MenuItem value="">All Entities</MenuItem>
                 <MenuItem value="BMAsia (Thailand) Co., Ltd.">BMAsia Thailand (THB)</MenuItem>
                 <MenuItem value="BMAsia Limited">BMAsia Limited (USD)</MenuItem>
               </Select>
@@ -825,34 +848,37 @@ const Invoices: React.FC = () => {
               />
             </Box>
 
-            <Button
-              size="small"
-              onClick={() => setQbShowSettings(!qbShowSettings)}
-              sx={{ alignSelf: 'flex-start', color: 'text.secondary', textTransform: 'none' }}
-            >
-              {qbShowSettings ? 'Hide' : 'Show'} QuickBooks Account Settings
-            </Button>
-
-            <Collapse in={qbShowSettings}>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+            <Typography variant="subtitle2" sx={{ mt: 1, mb: -1, color: 'text.secondary' }}>
+              QuickBooks Account Mapping
+            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+              <TextField
+                fullWidth
+                size="small"
+                label="Accounts Receivable (AR)"
+                value={qbArAccount}
+                onChange={(e) => setQbArAccount(e.target.value)}
+                helperText="Debit account — must match your QB AR account name exactly"
+              />
+              <TextField
+                fullWidth
+                size="small"
+                label="Sales / Income Account"
+                value={qbIncomeAccount}
+                onChange={(e) => setQbIncomeAccount(e.target.value)}
+                helperText="Credit account for revenue — must match your QB income account name exactly"
+              />
+              {qbEntity.includes('Thailand') && (
                 <TextField
                   fullWidth
                   size="small"
-                  label="AR Account Name"
-                  value={qbArAccount}
-                  onChange={(e) => setQbArAccount(e.target.value)}
-                  helperText="Must match your QuickBooks Accounts Receivable account name exactly"
+                  label="VAT Payable Account"
+                  value={qbTaxAccount}
+                  onChange={(e) => setQbTaxAccount(e.target.value)}
+                  helperText="Credit account for 7% VAT — must match your QB tax liability account name"
                 />
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="Income Account Name"
-                  value={qbIncomeAccount}
-                  onChange={(e) => setQbIncomeAccount(e.target.value)}
-                  helperText="Must match your QuickBooks income/revenue account name exactly"
-                />
-              </Box>
-            </Collapse>
+              )}
+            </Box>
 
             <Alert severity="info" sx={{ mt: 1 }}>
               Customer names in the CRM must match your QuickBooks customer list exactly for successful import.
@@ -864,7 +890,7 @@ const Invoices: React.FC = () => {
           <Button
             variant="contained"
             onClick={handleQBExport}
-            disabled={qbExporting}
+            disabled={qbExporting || !qbEntity}
             startIcon={qbExporting ? <CircularProgress size={16} /> : <GetApp />}
             sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
           >
