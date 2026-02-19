@@ -39,7 +39,7 @@ from .models import (
     Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
-    Zone, Device, StaticDocument,
+    Zone, Device, ClientTechDetail, StaticDocument,
     ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
     SeasonalTriggerDate,
     MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent,
@@ -58,7 +58,7 @@ from .serializers import (
     KBCategorySerializer, KBTagSerializer, KBArticleSerializer, KBArticleListSerializer,
     KBArticleViewSerializer, KBArticleRatingSerializer, KBArticleRelationSerializer,
     KBArticleAttachmentSerializer, TicketKBArticleSerializer,
-    ZoneSerializer, DeviceSerializer, StaticDocumentSerializer,
+    ZoneSerializer, DeviceSerializer, ClientTechDetailSerializer, StaticDocumentSerializer,
     ContractTemplateSerializer, ServicePackageItemSerializer, CorporatePdfTemplateSerializer, ContractDocumentSerializer,
     SeasonalTriggerDateSerializer,
     MonthlyRevenueSnapshotSerializer, MonthlyRevenueTargetSerializer, ContractRevenueEventSerializer, RevenueMonthlyDataSerializer,
@@ -8010,6 +8010,31 @@ class DeviceViewSet(viewsets.ModelViewSet):
             return Response({'error': 'company_id required'}, status=400)
         devices = self.queryset.filter(company_id=company_id)
         serializer = self.get_serializer(devices, many=True)
+        return Response(serializer.data)
+
+
+class ClientTechDetailViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for ClientTechDetail model — per-outlet technical specifications.
+    Stores remote access IDs, PC specs, audio equipment, etc.
+    """
+    queryset = ClientTechDetail.objects.select_related('company', 'zone')
+    serializer_class = ClientTechDetailSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['company', 'zone', 'system_type']
+    search_fields = ['outlet_name', 'company__name', 'anydesk_id', 'teamviewer_id', 'comments']
+    ordering_fields = ['outlet_name', 'company__name', 'created_at']
+    ordering = ['company__name', 'outlet_name']
+
+    @action(detail=False, methods=['get'])
+    def by_company(self, request):
+        """Get tech details for a specific company"""
+        company_id = request.query_params.get('company_id')
+        if not company_id:
+            return Response({'error': 'company_id required'}, status=400)
+        details = self.queryset.filter(company_id=company_id)
+        serializer = self.get_serializer(details, many=True)
         return Response(serializer.data)
 
 

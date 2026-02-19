@@ -11,7 +11,7 @@ from .models import (
     CustomerSegment, Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
-    Device, StaticDocument,
+    Device, ClientTechDetail, StaticDocument,
     ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
     SeasonalTriggerDate,
     MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent,
@@ -135,6 +135,28 @@ class DeviceSerializer(serializers.ModelSerializer):
     def get_zones(self, obj):
         """Return list of zone names running on this device"""
         return [{'id': str(z.id), 'name': z.name} for z in obj.zones.all()]
+
+
+class ClientTechDetailSerializer(serializers.ModelSerializer):
+    """Serializer for ClientTechDetail model — per-outlet technical specifications"""
+    company_name = serializers.CharField(source='company.name', read_only=True)
+    zone_name = serializers.CharField(source='zone.name', read_only=True, allow_null=True)
+
+    class Meta:
+        model = ClientTechDetail
+        fields = [
+            'id', 'company', 'company_name', 'zone', 'zone_name',
+            'outlet_name',
+            'anydesk_id', 'teamviewer_id', 'ultraviewer_id', 'other_remote_id',
+            'system_type', 'soundcard_channel', 'bms_license', 'additional_hardware',
+            'pc_make', 'pc_model', 'pc_type', 'ram', 'cpu_type', 'cpu_speed',
+            'cpu_cores', 'hdd_c', 'hdd_d', 'network_type',
+            'amplifiers', 'distribution', 'speakers', 'other_equipment',
+            'music_spec_link', 'syb_schedules_link',
+            'comments',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
 
 class ZoneSerializer(serializers.ModelSerializer):

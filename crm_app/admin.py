@@ -22,7 +22,7 @@ from .models import (
     CustomerSegment, Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
-    Device, StaticDocument,
+    Device, ClientTechDetail, StaticDocument,
     CorporatePdfTemplate, ContractTemplate, ServicePackageItem, ContractDocument,
     SeasonalTriggerDate, ZoneOfflineAlert
 )
@@ -1454,6 +1454,42 @@ class DeviceAdmin(admin.ModelAdmin):
     def zone_count(self, obj):
         return obj.zones.count()
     zone_count.short_description = 'Zones'
+
+
+@admin.register(ClientTechDetail)
+class ClientTechDetailAdmin(admin.ModelAdmin):
+    list_display = ['company', 'outlet_name', 'system_type', 'anydesk_id', 'pc_make', 'pc_model', 'created_at']
+    list_filter = ['system_type', 'company']
+    search_fields = ['outlet_name', 'company__name', 'anydesk_id', 'teamviewer_id', 'comments']
+    readonly_fields = ['id', 'created_at', 'updated_at']
+    autocomplete_fields = ['company', 'zone']
+
+    fieldsets = (
+        ('Client & Location', {
+            'fields': ('company', 'zone', 'outlet_name')
+        }),
+        ('Remote Access', {
+            'fields': ('anydesk_id', 'teamviewer_id', 'ultraviewer_id', 'other_remote_id')
+        }),
+        ('System Configuration', {
+            'fields': ('system_type', 'soundcard_channel', 'bms_license', 'additional_hardware')
+        }),
+        ('PC Specifications', {
+            'fields': ('pc_make', 'pc_model', 'pc_type', 'ram', 'cpu_type', 'cpu_speed',
+                       'cpu_cores', 'hdd_c', 'hdd_d', 'network_type')
+        }),
+        ('Audio Equipment', {
+            'fields': ('amplifiers', 'distribution', 'speakers', 'other_equipment'),
+            'classes': ('collapse',)
+        }),
+        ('Links & Notes', {
+            'fields': ('music_spec_link', 'syb_schedules_link', 'comments')
+        }),
+        ('Metadata', {
+            'fields': ('id', 'created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
 
 
 @admin.register(Zone)

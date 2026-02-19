@@ -1419,6 +1419,74 @@ class Device(TimestampedModel):
         return self.zones.count()
 
 
+class ClientTechDetail(TimestampedModel):
+    """
+    Detailed technical specifications for client outlets/zones.
+    One record per outlet — stores remote access IDs, PC specs, audio equipment, etc.
+    """
+    SYSTEM_TYPE_CHOICES = [
+        ('single', 'Single'),
+        ('multi', 'Multi'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    # Relationships
+    company = models.ForeignKey('Company', on_delete=models.CASCADE, related_name='tech_details')
+    zone = models.ForeignKey('Zone', on_delete=models.SET_NULL, null=True, blank=True, related_name='tech_details')
+
+    # Outlet identification
+    outlet_name = models.CharField(max_length=255, help_text="Outlet or zone name")
+
+    # Remote Access
+    anydesk_id = models.CharField(max_length=100, blank=True)
+    teamviewer_id = models.CharField(max_length=100, blank=True)
+    ultraviewer_id = models.CharField(max_length=100, blank=True)
+    other_remote_id = models.CharField(max_length=255, blank=True, help_text="Other remote access ID")
+
+    # System Configuration
+    system_type = models.CharField(max_length=10, choices=SYSTEM_TYPE_CHOICES, blank=True)
+    soundcard_channel = models.CharField(max_length=100, blank=True)
+    bms_license = models.CharField(max_length=255, blank=True)
+    additional_hardware = models.TextField(blank=True, help_text="Additional system hardware details")
+
+    # PC Specifications
+    pc_make = models.CharField(max_length=100, blank=True)
+    pc_model = models.CharField(max_length=100, blank=True)
+    pc_type = models.CharField(max_length=100, blank=True)
+    ram = models.CharField(max_length=50, blank=True, help_text="e.g. 8GB, 16GB DDR4")
+    cpu_type = models.CharField(max_length=100, blank=True)
+    cpu_speed = models.CharField(max_length=50, blank=True, help_text="e.g. 3.4 GHz")
+    cpu_cores = models.CharField(max_length=50, blank=True, help_text="Cores and logical processors")
+    hdd_c = models.CharField(max_length=100, blank=True, help_text="C: drive capacity/type")
+    hdd_d = models.CharField(max_length=100, blank=True, help_text="D: drive capacity/type")
+    network_type = models.CharField(max_length=100, blank=True, help_text="e.g. Ethernet, WiFi, LAN")
+
+    # Audio Equipment
+    amplifiers = models.TextField(blank=True)
+    distribution = models.TextField(blank=True)
+    speakers = models.TextField(blank=True)
+    other_equipment = models.TextField(blank=True)
+
+    # Links
+    music_spec_link = models.URLField(max_length=500, blank=True, help_text="Link to music spec document")
+    syb_schedules_link = models.URLField(max_length=500, blank=True, help_text="Link to SYB schedules")
+
+    # General
+    comments = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['company__name', 'outlet_name']
+        verbose_name = 'Client Tech Detail'
+        verbose_name_plural = 'Client Tech Details'
+        indexes = [
+            models.Index(fields=['company', 'outlet_name']),
+        ]
+
+    def __str__(self):
+        return f"{self.company.name} - {self.outlet_name}"
+
+
 class Zone(TimestampedModel):
     """Track individual music zones for companies"""
     STATUS_CHOICES = [

@@ -47,6 +47,7 @@ router.register(r'kb/ticket-articles', views.TicketKBArticleViewSet, basename='k
 # Equipment Management routes - Equipment types removed, replaced by Device model
 router.register(r'devices', views.DeviceViewSet, basename='device')
 router.register(r'zones', views.ZoneViewSet, basename='zone')
+router.register(r'client-tech-details', views.ClientTechDetailViewSet, basename='client-tech-detail')
 
 # Static Documents routes
 router.register(r'static-documents', views.StaticDocumentViewSet, basename='static-document')
