@@ -1014,6 +1014,13 @@ class ApiService {
     return response.data;
   }
 
+  async downloadKBArticlePDF(id: string): Promise<Blob> {
+    const response = await authApi.get(`/kb/articles/${id}/pdf/`, {
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+
   async searchKBArticles(query: string): Promise<any> {
     const response = await authApi.get('/kb/articles/search/', { params: { q: query } });
     return response.data;
@@ -1184,6 +1191,13 @@ class ApiService {
   async getClientTechDetailsByCompany(companyId: string): Promise<ClientTechDetail[]> {
     const response = await authApi.get<ClientTechDetail[]>('/client-tech-details/by_company/', {
       params: { company_id: companyId }
+    });
+    return response.data;
+  }
+
+  async downloadClientTechDetailPDF(id: string): Promise<Blob> {
+    const response = await authApi.get(`/client-tech-details/${id}/pdf/`, {
+      responseType: 'blob'
     });
     return response.data;
   }

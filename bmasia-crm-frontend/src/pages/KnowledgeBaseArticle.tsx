@@ -24,6 +24,7 @@ import {
   GetApp,
   Article as ArticleIcon,
   Edit,
+  PictureAsPdf,
 } from '@mui/icons-material';
 import { useNavigate, useParams } from 'react-router-dom';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -73,6 +74,25 @@ const KnowledgeBaseArticle: React.FC = () => {
     await ApiService.rateArticle(articleId, isHelpful);
     // Reload article to get updated counts
     await loadArticle();
+  };
+
+  const handleDownloadPDF = async () => {
+    if (!article || !id) return;
+    try {
+      const blob = await ApiService.downloadKBArticlePDF(id);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const safeNumber = (article.article_number || 'KB').replace(/[^a-zA-Z0-9_\-]/g, '_');
+      const safeSlug = (article.slug || 'article').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 60);
+      link.download = `${safeNumber}_${safeSlug}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError('Failed to download PDF');
+    }
   };
 
   const handleRelatedArticleClick = (relatedArticle: KBArticle) => {
@@ -171,19 +191,33 @@ const KnowledgeBaseArticle: React.FC = () => {
         >
           Back to Knowledge Base
         </Button>
-        {canEdit && (
+        <Box sx={{ display: 'flex', gap: 1 }}>
           <Button
-            variant="contained"
-            startIcon={<Edit />}
-            onClick={() => navigate(`/knowledge-base/${id}/edit`)}
+            variant="outlined"
+            startIcon={<PictureAsPdf />}
+            onClick={handleDownloadPDF}
             sx={{
-              bgcolor: '#FFA500',
-              '&:hover': { bgcolor: '#FF8C00' },
+              borderColor: '#FFA500',
+              color: '#FFA500',
+              '&:hover': { borderColor: '#FF8C00', bgcolor: 'rgba(255, 165, 0, 0.08)' },
             }}
           >
-            Edit Article
+            Download PDF
           </Button>
-        )}
+          {canEdit && (
+            <Button
+              variant="contained"
+              startIcon={<Edit />}
+              onClick={() => navigate(`/knowledge-base/${id}/edit`)}
+              sx={{
+                bgcolor: '#FFA500',
+                '&:hover': { bgcolor: '#FF8C00' },
+              }}
+            >
+              Edit Article
+            </Button>
+          )}
+        </Box>
       </Box>
 
       <Grid container spacing={3}>

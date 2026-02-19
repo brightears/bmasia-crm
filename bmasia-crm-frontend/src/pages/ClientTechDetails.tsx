@@ -41,6 +41,7 @@ import {
   Business,
   LocationOn,
   OpenInNew,
+  PictureAsPdf,
 } from '@mui/icons-material';
 import { Company, ClientTechDetail, ApiResponse } from '../types';
 import ApiService from '../services/api';
@@ -175,6 +176,25 @@ const ClientTechDetails: React.FC = () => {
       setError('Failed to delete tech detail');
     } finally {
       setDeleteLoading(false);
+    }
+  };
+
+  const handleDownloadPDF = async (detail: ClientTechDetail) => {
+    try {
+      const blob = await ApiService.downloadClientTechDetailPDF(detail.id);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const safeCompany = (detail.company_name || 'Unknown').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 50);
+      const safeOutlet = (detail.outlet_name || 'Unknown').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 50);
+      link.download = `TechDetail_${safeCompany}_${safeOutlet}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      setActionMenuAnchor(null);
+    } catch (err) {
+      setError('Failed to download PDF');
     }
   };
 
@@ -427,6 +447,12 @@ const ClientTechDetails: React.FC = () => {
           </ListItemIcon>
           <ListItemText>View Details</ListItemText>
         </MenuItem>
+        <MenuItem onClick={() => handleDownloadPDF(actionMenuDetail!)}>
+          <ListItemIcon>
+            <PictureAsPdf fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Download PDF</ListItemText>
+        </MenuItem>
         <MenuItem onClick={() => handleEdit(actionMenuDetail!)}>
           <ListItemIcon>
             <Edit fontSize="small" />
@@ -572,6 +598,13 @@ const ClientTechDetails: React.FC = () => {
             </DetailSection>
           </DialogContent>
           <DialogActions>
+            <Button
+              startIcon={<PictureAsPdf />}
+              onClick={() => handleDownloadPDF(selectedDetail)}
+              sx={{ color: '#FFA500' }}
+            >
+              Download PDF
+            </Button>
             <Button
               startIcon={<Edit />}
               onClick={() => {

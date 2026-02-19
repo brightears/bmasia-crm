@@ -7862,6 +7862,355 @@ class KBArticleViewSet(viewsets.ModelViewSet):
         serializer = KBArticleListSerializer(queryset, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['get'])
+    def pdf(self, request, pk=None):
+        """Generate PDF for a KB article"""
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable, KeepTogether
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_LEFT, TA_CENTER
+        from html.parser import HTMLParser
+        from io import BytesIO
+        from django.conf import settings
+        import base64
+
+        article = self.get_object()
+
+        # --- HTML to ReportLab converter ---
+        class HTMLToFlowables(HTMLParser):
+            """Convert Quill HTML to ReportLab flowables"""
+
+            def __init__(self, pdf_styles):
+                super().__init__()
+                self.pdf_styles = pdf_styles
+                self.flowables = []
+                self.current_text = ''
+                self.tag_stack = []
+                self.list_type = None  # 'ul' or 'ol'
+                self.list_counter = 0
+                self.in_pre = False
+
+            def _flush_text(self, style_name='body'):
+                """Emit accumulated text as a Paragraph"""
+                text = self.current_text.strip()
+                self.current_text = ''
+                if text:
+                    style = self.pdf_styles.get(style_name, self.pdf_styles['body'])
+                    try:
+                        self.flowables.append(Paragraph(text, style))
+                    except Exception:
+                        # If Paragraph fails (bad markup), strip all tags and try again
+                        clean = re.sub(r'<[^>]+>', '', text)
+                        if clean.strip():
+                            self.flowables.append(Paragraph(clean, style))
+                    self.flowables.append(Spacer(1, 3))
+                elif not text and self.current_text == '':
+                    pass  # Nothing to flush
+
+            def handle_starttag(self, tag, attrs):
+                attrs_dict = dict(attrs)
+                tag_lower = tag.lower()
+
+                if tag_lower in ('h1', 'h2', 'h3'):
+                    self._flush_text()
+                    self.tag_stack.append(tag_lower)
+                elif tag_lower == 'p':
+                    self._flush_text()
+                    self.tag_stack.append('p')
+                elif tag_lower in ('strong', 'b'):
+                    self.current_text += '<b>'
+                elif tag_lower in ('em', 'i'):
+                    self.current_text += '<i>'
+                elif tag_lower == 'u':
+                    self.current_text += '<u>'
+                elif tag_lower in ('s', 'strike', 'del'):
+                    self.current_text += '<strike>'
+                elif tag_lower == 'a':
+                    href = attrs_dict.get('href', '')
+                    self.current_text += f'<a href="{href}" color="blue">'
+                elif tag_lower == 'br':
+                    self.current_text += '<br/>'
+                elif tag_lower == 'ul':
+                    self._flush_text()
+                    self.list_type = 'ul'
+                    self.list_counter = 0
+                elif tag_lower == 'ol':
+                    self._flush_text()
+                    self.list_type = 'ol'
+                    self.list_counter = 0
+                elif tag_lower == 'li':
+                    self._flush_text()
+                    self.list_counter += 1
+                    if self.list_type == 'ol':
+                        self.current_text = f'{self.list_counter}. '
+                    else:
+                        self.current_text = '\u2022 '
+                    self.tag_stack.append('li')
+                elif tag_lower == 'blockquote':
+                    self._flush_text()
+                    self.tag_stack.append('blockquote')
+                elif tag_lower == 'pre':
+                    self._flush_text()
+                    self.in_pre = True
+                    self.tag_stack.append('pre')
+                elif tag_lower == 'code':
+                    if not self.in_pre:
+                        self.current_text += '<font face="Courier">'
+                elif tag_lower == 'img':
+                    self._flush_text()
+                    src = attrs_dict.get('src', '')
+                    if src.startswith('data:'):
+                        try:
+                            # Extract base64 data
+                            header, data = src.split(',', 1)
+                            img_data = base64.b64decode(data)
+                            img_buffer = BytesIO(img_data)
+                            img = Image(img_buffer, width=5*inch, height=3*inch, kind='proportional')
+                            img.hAlign = 'LEFT'
+                            self.flowables.append(img)
+                            self.flowables.append(Spacer(1, 6))
+                        except Exception:
+                            self.flowables.append(Paragraph('[Image]', self.pdf_styles['body']))
+                    elif src:
+                        self.flowables.append(Paragraph(f'[Image: {src[:80]}]', self.pdf_styles['small']))
+                elif tag_lower == 'hr':
+                    self._flush_text()
+                    self.flowables.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#e0e0e0'), spaceBefore=6, spaceAfter=6))
+
+            def handle_endtag(self, tag):
+                tag_lower = tag.lower()
+
+                if tag_lower in ('h1', 'h2', 'h3'):
+                    self._flush_text(tag_lower)
+                    if self.tag_stack and self.tag_stack[-1] == tag_lower:
+                        self.tag_stack.pop()
+                elif tag_lower == 'p':
+                    # Check for empty paragraph (Quill's empty line)
+                    text = self.current_text.strip()
+                    if not text or text == '<br/>':
+                        self.current_text = ''
+                        self.flowables.append(Spacer(1, 6))
+                    else:
+                        if self.tag_stack and self.tag_stack[-1] == 'blockquote':
+                            self._flush_text('blockquote')
+                        else:
+                            self._flush_text('body')
+                    if self.tag_stack and self.tag_stack[-1] == 'p':
+                        self.tag_stack.pop()
+                elif tag_lower in ('strong', 'b'):
+                    self.current_text += '</b>'
+                elif tag_lower in ('em', 'i'):
+                    self.current_text += '</i>'
+                elif tag_lower == 'u':
+                    self.current_text += '</u>'
+                elif tag_lower in ('s', 'strike', 'del'):
+                    self.current_text += '</strike>'
+                elif tag_lower == 'a':
+                    self.current_text += '</a>'
+                elif tag_lower == 'li':
+                    self._flush_text('list_item')
+                    if self.tag_stack and self.tag_stack[-1] == 'li':
+                        self.tag_stack.pop()
+                elif tag_lower in ('ul', 'ol'):
+                    self.list_type = None
+                    self.list_counter = 0
+                elif tag_lower == 'blockquote':
+                    self._flush_text('blockquote')
+                    if self.tag_stack and self.tag_stack[-1] == 'blockquote':
+                        self.tag_stack.pop()
+                elif tag_lower == 'pre':
+                    self._flush_text('code')
+                    self.in_pre = False
+                    if self.tag_stack and self.tag_stack[-1] == 'pre':
+                        self.tag_stack.pop()
+                elif tag_lower == 'code':
+                    if not self.in_pre:
+                        self.current_text += '</font>'
+
+            def handle_data(self, data):
+                if self.in_pre:
+                    # Preserve whitespace in code blocks
+                    self.current_text += data.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                else:
+                    self.current_text += data
+
+            def handle_entityref(self, name):
+                entities = {'amp': '&amp;', 'lt': '&lt;', 'gt': '&gt;', 'nbsp': ' ', 'quot': '"'}
+                self.current_text += entities.get(name, f'&{name};')
+
+            def handle_charref(self, name):
+                try:
+                    if name.startswith('x'):
+                        char = chr(int(name[1:], 16))
+                    else:
+                        char = chr(int(name))
+                    self.current_text += char
+                except (ValueError, OverflowError):
+                    self.current_text += f'&#{name};'
+
+            def get_flowables(self):
+                self._flush_text()
+                return self.flowables
+
+        # --- End HTML converter ---
+
+        # Create PDF
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.85*inch)
+
+        # Styles
+        styles_base = getSampleStyleSheet()
+        pdf_styles = {
+            'title': ParagraphStyle('KBTitle', parent=styles_base['Heading1'], fontSize=20, textColor=colors.HexColor('#424242'), fontName='DejaVuSans-Bold', spaceAfter=6),
+            'h1': ParagraphStyle('KBH1', parent=styles_base['Heading1'], fontSize=16, textColor=colors.HexColor('#424242'), fontName='DejaVuSans-Bold', spaceBefore=12, spaceAfter=6),
+            'h2': ParagraphStyle('KBH2', parent=styles_base['Heading2'], fontSize=13, textColor=colors.HexColor('#424242'), fontName='DejaVuSans-Bold', spaceBefore=10, spaceAfter=4),
+            'h3': ParagraphStyle('KBH3', parent=styles_base['Heading3'], fontSize=11, textColor=colors.HexColor('#424242'), fontName='DejaVuSans-Bold', spaceBefore=8, spaceAfter=4),
+            'body': ParagraphStyle('KBBody', parent=styles_base['Normal'], fontSize=10, textColor=colors.HexColor('#333333'), fontName='DejaVuSans', leading=14, spaceAfter=2),
+            'small': ParagraphStyle('KBSmall', parent=styles_base['Normal'], fontSize=8, textColor=colors.HexColor('#999999'), fontName='DejaVuSans', leading=11),
+            'meta': ParagraphStyle('KBMeta', parent=styles_base['Normal'], fontSize=9, textColor=colors.HexColor('#666666'), fontName='DejaVuSans', leading=12),
+            'list_item': ParagraphStyle('KBList', parent=styles_base['Normal'], fontSize=10, textColor=colors.HexColor('#333333'), fontName='DejaVuSans', leading=14, leftIndent=20, spaceAfter=2),
+            'blockquote': ParagraphStyle('KBQuote', parent=styles_base['Normal'], fontSize=10, textColor=colors.HexColor('#555555'), fontName='DejaVuSans', leading=14, leftIndent=20, borderLeftWidth=3, borderLeftColor=colors.HexColor('#FFA500'), borderPadding=8, spaceAfter=4),
+            'code': ParagraphStyle('KBCode', parent=styles_base['Normal'], fontSize=9, textColor=colors.HexColor('#333333'), fontName='Courier', leading=12, leftIndent=10, rightIndent=10, backColor=colors.HexColor('#f5f5f5'), borderPadding=8, spaceAfter=6),
+            'footer': ParagraphStyle('KBFooter', parent=styles_base['Normal'], fontSize=7, textColor=colors.HexColor('#999999'), fontName='DejaVuSans', alignment=TA_CENTER),
+        }
+
+        # Footer callback
+        article_num = article.article_number or ''
+        def draw_kb_footer(canvas_obj, doc_obj):
+            canvas_obj.saveState()
+            page_width = letter[0]
+            canvas_obj.setStrokeColor(colors.HexColor('#e0e0e0'))
+            canvas_obj.line(doc_obj.leftMargin, 0.65*inch, page_width - doc_obj.rightMargin, 0.65*inch)
+            canvas_obj.setFont('DejaVuSans', 7)
+            canvas_obj.setFillColor(colors.HexColor('#999999'))
+            canvas_obj.drawCentredString(page_width / 2, 0.48*inch, f'BMAsia Knowledge Base  |  {article_num}')
+            canvas_obj.drawString(page_width - doc_obj.rightMargin - 30, 0.48*inch, f'Page {doc_obj.page}')
+            canvas_obj.restoreState()
+
+        elements = []
+
+        # Logo
+        logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
+        try:
+            if os.path.exists(logo_path):
+                logo = Image(logo_path, width=140, height=56, kind='proportional')
+                logo.hAlign = 'LEFT'
+                elements.append(logo)
+        except Exception:
+            pass
+
+        # Orange accent line
+        elements.append(Spacer(1, 4))
+        elements.append(HRFlowable(width='100%', thickness=2, color=colors.HexColor('#FFA500'), spaceAfter=10))
+
+        # Title
+        elements.append(Paragraph(article.title or 'Untitled Article', pdf_styles['title']))
+        elements.append(Spacer(1, 4))
+
+        # Metadata box
+        meta_parts = []
+        if article.article_number:
+            meta_parts.append(f'<b>Article:</b> {article.article_number}')
+        if article.category:
+            meta_parts.append(f'<b>Category:</b> {article.category.name}')
+        author_name = article.author.get_full_name() if article.author else 'Unknown'
+        meta_parts.append(f'<b>Author:</b> {author_name}')
+        if article.published_at:
+            meta_parts.append(f'<b>Published:</b> {article.published_at.strftime("%d %B %Y")}')
+        elif article.created_at:
+            meta_parts.append(f'<b>Created:</b> {article.created_at.strftime("%d %B %Y")}')
+        meta_parts.append(f'<b>Status:</b> {article.status.title()}')
+
+        meta_text = '    |    '.join(meta_parts)
+        meta_data = [[Paragraph(meta_text, pdf_styles['meta'])]]
+        meta_table = Table(meta_data, colWidths=[doc.width])
+        meta_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fafafa')),
+            ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+        ]))
+        elements.append(meta_table)
+
+        # Tags
+        tags = article.tags.all()
+        if tags:
+            tag_names = ', '.join(t.name for t in tags)
+            elements.append(Spacer(1, 4))
+            elements.append(Paragraph(f'<b>Tags:</b> {tag_names}', pdf_styles['meta']))
+
+        # Orange divider before content
+        elements.append(Spacer(1, 8))
+        elements.append(HRFlowable(width='100%', thickness=1, color=colors.HexColor('#FFA500'), spaceAfter=12))
+
+        # Article content — convert HTML to flowables
+        content = article.content or ''
+        if content.strip():
+            converter = HTMLToFlowables(pdf_styles)
+            try:
+                converter.feed(content)
+                content_flowables = converter.get_flowables()
+                elements.extend(content_flowables)
+            except Exception:
+                # Fallback: strip HTML and render as plain text
+                plain_text = re.sub(r'<[^>]+>', '', content)
+                if plain_text.strip():
+                    elements.append(Paragraph(plain_text, pdf_styles['body']))
+        else:
+            elements.append(Paragraph('<i>No content</i>', pdf_styles['body']))
+
+        # Attachments section
+        attachments = article.attachments.all()
+        if attachments:
+            elements.append(Spacer(1, 16))
+            att_section = []
+            att_section.append(Paragraph('Attachments', pdf_styles['h3']))
+            att_data = [['Filename', 'Size']]
+            for att in attachments:
+                size_str = f'{att.file_size / 1024:.1f} KB' if att.file_size and att.file_size < 1048576 else f'{att.file_size / 1048576:.1f} MB' if att.file_size else '-'
+                att_data.append([Paragraph(att.filename or 'Unknown', pdf_styles['body']), size_str])
+            att_table = Table(att_data, colWidths=[doc.width * 0.7, doc.width * 0.3])
+            att_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f5f5f5')),
+                ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('LINEBELOW', (0, 0), (-1, -1), 0.5, colors.HexColor('#eeeeee')),
+            ]))
+            att_section.append(att_table)
+            elements.append(KeepTogether(att_section))
+
+        # Article info footer
+        elements.append(Spacer(1, 16))
+        info_parts = []
+        if article.view_count:
+            info_parts.append(f'Views: {article.view_count}')
+        ratio = article.get_helpfulness_ratio()
+        if ratio is not None:
+            info_parts.append(f'Helpfulness: {ratio:.0f}%')
+        if article.updated_at:
+            info_parts.append(f'Last updated: {article.updated_at.strftime("%d %B %Y")}')
+        if info_parts:
+            elements.append(Paragraph(' | '.join(info_parts), pdf_styles['small']))
+
+        # Build PDF
+        doc.build(elements, onFirstPage=draw_kb_footer, onLaterPages=draw_kb_footer)
+
+        pdf_data = buffer.getvalue()
+        buffer.close()
+
+        # Sanitize filename
+        safe_slug = re.sub(r'[^a-zA-Z0-9_\-]', '_', article.slug or 'article')[:60]
+        safe_number = re.sub(r'[^a-zA-Z0-9_\-]', '_', article.article_number or 'KB')
+
+        response = HttpResponse(pdf_data, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{safe_number}_{safe_slug}.pdf"'
+        return response
+
 
 class KBArticleViewViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -8036,6 +8385,190 @@ class ClientTechDetailViewSet(viewsets.ModelViewSet):
         details = self.queryset.filter(company_id=company_id)
         serializer = self.get_serializer(details, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=['get'])
+    def pdf(self, request, pk=None):
+        """Generate PDF for a client tech detail record"""
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable, KeepTogether
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_LEFT, TA_CENTER
+        from io import BytesIO
+        from django.conf import settings
+
+        detail = self.get_object()
+        company = detail.company
+
+        # Helper to show '-' for empty values
+        def val(v):
+            return str(v).strip() if v and str(v).strip() else '-'
+
+        # System type display
+        system_type_display = {'single': 'Single System', 'multi': 'Multi System'}.get(detail.system_type, val(detail.system_type))
+
+        # Create PDF buffer
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.75*inch)
+
+        # Styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle('TechTitle', parent=styles['Heading1'], fontSize=20, textColor=colors.HexColor('#424242'), fontName='DejaVuSans-Bold', spaceAfter=4, alignment=TA_CENTER)
+        section_style = ParagraphStyle('TechSection', parent=styles['Heading2'], fontSize=12, textColor=colors.HexColor('#FFA500'), fontName='DejaVuSans-Bold', spaceBefore=14, spaceAfter=6)
+        label_style = ParagraphStyle('TechLabel', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#757575'), fontName='DejaVuSans-Bold', leading=12)
+        value_style = ParagraphStyle('TechValue', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#424242'), fontName='DejaVuSans', leading=12)
+        mono_style = ParagraphStyle('TechMono', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#424242'), fontName='Courier', leading=12)
+        footer_style = ParagraphStyle('TechFooter', parent=styles['Normal'], fontSize=7, textColor=colors.HexColor('#999999'), fontName='DejaVuSans', alignment=TA_CENTER)
+
+        elements = []
+
+        # Logo
+        logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
+        try:
+            if os.path.exists(logo_path):
+                logo = Image(logo_path, width=140, height=56, kind='proportional')
+                logo.hAlign = 'LEFT'
+                elements.append(logo)
+        except Exception:
+            pass
+
+        # Orange accent line
+        elements.append(Spacer(1, 4))
+        elements.append(HRFlowable(width='100%', thickness=2, color=colors.HexColor('#FFA500'), spaceAfter=10))
+
+        # Title
+        elements.append(Paragraph('CLIENT TECHNICAL DETAILS', title_style))
+        elements.append(Spacer(1, 6))
+
+        # Metadata bar - Company / Outlet / Zone
+        zone_name = detail.zone.name if detail.zone else '-'
+        meta_data = [
+            ['Company', 'Outlet / Zone Name', 'Zone'],
+            [Paragraph(val(company.name), value_style), Paragraph(val(detail.outlet_name), value_style), Paragraph(zone_name, value_style)]
+        ]
+        meta_table = Table(meta_data, colWidths=[doc.width * 0.4, doc.width * 0.35, doc.width * 0.25])
+        meta_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
+            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+            ('TOPPADDING', (0, 0), (-1, 0), 6),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
+            ('TOPPADDING', (0, 1), (-1, -1), 5),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#fafafa')),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+        ]))
+        elements.append(meta_table)
+        elements.append(Spacer(1, 10))
+
+        # Helper to build a section
+        def build_section(title, rows, use_mono=False):
+            """Build a section with heading + label/value table"""
+            section_elements = []
+            section_elements.append(Paragraph(title, section_style))
+
+            table_data = []
+            for label, value in rows:
+                vs = mono_style if use_mono else value_style
+                table_data.append([
+                    Paragraph(label, label_style),
+                    Paragraph(val(value), vs)
+                ])
+
+            if table_data:
+                t = Table(table_data, colWidths=[160, doc.width - 160])
+                style_cmds = [
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                    ('TOPPADDING', (0, 0), (-1, -1), 4),
+                    ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#eeeeee')),
+                ]
+                # Alternating row backgrounds
+                for i in range(len(table_data)):
+                    if i % 2 == 1:
+                        style_cmds.append(('BACKGROUND', (0, i), (-1, i), colors.HexColor('#f5f5f5')))
+                t.setStyle(TableStyle(style_cmds))
+                section_elements.append(t)
+
+            return KeepTogether(section_elements)
+
+        # Section 1: Remote Access
+        elements.append(build_section('Remote Access', [
+            ('AnyDesk ID', detail.anydesk_id),
+            ('TeamViewer ID', detail.teamviewer_id),
+            ('UltraViewer ID', detail.ultraviewer_id),
+            ('Other Remote ID', detail.other_remote_id),
+        ], use_mono=True))
+
+        # Section 2: System Configuration
+        elements.append(build_section('System Configuration', [
+            ('System Type', system_type_display),
+            ('Soundcard Channel', detail.soundcard_channel),
+            ('BMS License', detail.bms_license),
+            ('Additional Hardware', detail.additional_hardware),
+        ]))
+
+        # Section 3: PC Specifications
+        elements.append(build_section('PC Specifications', [
+            ('Make / Brand', detail.pc_make),
+            ('Model', detail.pc_model),
+            ('PC Type', detail.pc_type),
+            ('RAM', detail.ram),
+            ('CPU Type', detail.cpu_type),
+            ('CPU Speed', detail.cpu_speed),
+            ('CPU Cores', detail.cpu_cores),
+            ('HDD C:', detail.hdd_c),
+            ('HDD D:', detail.hdd_d),
+            ('Network Type', detail.network_type),
+        ]))
+
+        # Section 4: Audio Equipment
+        elements.append(build_section('Audio Equipment', [
+            ('Amplifiers', detail.amplifiers),
+            ('Distribution', detail.distribution),
+            ('Speakers', detail.speakers),
+            ('Other Equipment', detail.other_equipment),
+        ]))
+
+        # Section 5: Links
+        link_rows = []
+        if detail.music_spec_link:
+            link_rows.append(('Music Spec Link', detail.music_spec_link))
+        else:
+            link_rows.append(('Music Spec Link', '-'))
+        if detail.syb_schedules_link:
+            link_rows.append(('SYB Schedules Link', detail.syb_schedules_link))
+        else:
+            link_rows.append(('SYB Schedules Link', '-'))
+        elements.append(build_section('Links', link_rows))
+
+        # Section 6: Notes
+        elements.append(build_section('Notes', [
+            ('Comments', detail.comments),
+        ]))
+
+        # Footer
+        elements.append(Spacer(1, 20))
+        elements.append(HRFlowable(width='100%', thickness=0.5, color=colors.HexColor('#e0e0e0'), spaceAfter=6))
+        generated_at = timezone.now().strftime('%d %B %Y, %H:%M UTC')
+        elements.append(Paragraph(f'BMAsia — Generated {generated_at}', footer_style))
+
+        # Build PDF
+        doc.build(elements)
+
+        # Return PDF response
+        pdf_data = buffer.getvalue()
+        buffer.close()
+
+        # Sanitize filename
+        safe_company = re.sub(r'[^a-zA-Z0-9_\-]', '_', company.name or 'Unknown')[:50]
+        safe_outlet = re.sub(r'[^a-zA-Z0-9_\-]', '_', detail.outlet_name or 'Unknown')[:50]
+
+        response = HttpResponse(pdf_data, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="TechDetail_{safe_company}_{safe_outlet}.pdf"'
+        return response
 
 
 class ZoneViewSet(viewsets.ModelViewSet):

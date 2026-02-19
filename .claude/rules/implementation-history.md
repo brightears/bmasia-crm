@@ -2,6 +2,293 @@
 
 ## February 2026
 
+### Feb 19, 2026 - Client Tech Details Module
+
+**Context**: Keith (tech support) needed a centralized place to record detailed technical specifications for each client outlet — PC specs, remote access IDs, audio equipment, network info, etc. Previously tracked in spreadsheets and personal notes.
+
+**New Model: `ClientTechDetail`** (`crm_app/models.py`):
+- Single flat model — one record per outlet (25+ fields, always queried together)
+- `company` FK(Company, CASCADE, related_name='tech_details') **required**
+- `zone` FK(Zone, SET_NULL, null/blank, related_name='tech_details') **optional**
+- `outlet_name` CharField(255) **required**
+- Remote Access: `anydesk_id`, `teamviewer_id`, `ultraviewer_id`, `other_remote_id`
+- System Config: `system_type` (single/multi choices), `soundcard_channel`, `bms_license`, `additional_hardware`
+- PC Specs: `pc_make`, `pc_model`, `pc_type`, `ram`, `cpu_type`, `cpu_speed`, `cpu_cores`, `hdd_c`, `hdd_d`, `network_type`
+- Audio Equipment: `amplifiers`, `distribution`, `speakers`, `other_equipment` (all TextField)
+- Links: `music_spec_link`, `syb_schedules_link` (URLField max_length=500)
+- `comments` TextField
+- Composite index on `['company', 'outlet_name']`
+- Migration: `0073_client_tech_detail.py`
+
+**Backend** (`serializers.py`, `views.py`, `urls.py`, `admin.py`):
+- `ClientTechDetailSerializer` with computed `company_name`, `zone_name` (read-only)
+- `ClientTechDetailViewSet(ModelViewSet)` with `select_related('company', 'zone')`
+- Filters: `company`, `zone`, `system_type`
+- Search: `outlet_name`, `company__name`, `anydesk_id`, `teamviewer_id`, `comments`
+- Custom action: `@action by_company(company_id)` — unpaginated results for a company
+- URL: `router.register(r'client-tech-details', ...)` → `/api/v1/client-tech-details/`
+- Admin: fieldsets grouped by 6 sections, `autocomplete_fields = ['company', 'zone']`
+
+**Frontend Types + API** (`types/index.ts`, `api.ts`):
+- `ClientTechDetail` interface (35 fields)
+- 7 API methods: `getClientTechDetails`, `getClientTechDetail`, `createClientTechDetail`, `updateClientTechDetail` (PATCH), `deleteClientTechDetail`, `getClientTechDetailsByCompany`
+
+**Frontend Form** (`components/ClientTechDetailForm.tsx`):
+- Dialog-based form with 6 Paper card sections: Client & Location, Remote Access (2x2 grid), System Config, PC Specs (3-col grid), Audio Equipment (2x2 multiline), Links & Notes
+- Company Autocomplete (`page_size: 1000, ordering: 'name'`)
+- Zone Select loads dynamically on company change
+- Outlet name auto-fills from zone selection
+- Create/edit modes with error/success handling
+
+**Frontend List Page** (`pages/ClientTechDetails.tsx`):
+- Company Autocomplete filter + text search
+- Paginated table: Client | Outlet | AnyDesk | TeamViewer | System Type | PC Make/Model | Actions
+- Clickable rows open detail dialog (6 sections matching form layout)
+- 3-dot menu: View, Edit, Delete with confirmation dialog
+
+**Navigation**:
+- Sidebar (`Layout.tsx`): `ComputerIcon` → `/tech-details` in Tech Support section (after Zones)
+- Route (`App.tsx`): `/tech-details` with `requiredModule="tickets"`
+
+**Files Modified**:
+- `crm_app/models.py` — ClientTechDetail model
+- `crm_app/serializers.py` — ClientTechDetailSerializer
+- `crm_app/views.py` — ClientTechDetailViewSet
+- `crm_app/urls.py` — Router registration
+- `crm_app/admin.py` — ClientTechDetailAdmin
+- `crm_app/migrations/0073_client_tech_detail.py` — New migration
+- `bmasia-crm-frontend/src/types/index.ts` — ClientTechDetail interface
+- `bmasia-crm-frontend/src/services/api.ts` — 7 CRUD methods
+- `bmasia-crm-frontend/src/components/ClientTechDetailForm.tsx` — NEW form component
+- `bmasia-crm-frontend/src/pages/ClientTechDetails.tsx` — NEW list page
+- `bmasia-crm-frontend/src/components/Layout.tsx` — Sidebar nav item
+- `bmasia-crm-frontend/src/App.tsx` — Route
+
+**Commits**: `57afcfd2` (backend), `515373e0` (frontend)
+
+---
+
+### Feb 19, 2026 - KB White Screen Fix + Category Count Fix
+
+**Problem 1 — White Screen on Knowledge Base page**: After KB article save fix, articles appeared in the listing but `KBArticleCard` crashed with `TypeError: Cannot read properties of undefined (reading 'slice')`. Three crash sources:
+- `article.tags.slice(0, 3)` — `tags` not included in list serializer response
+- `article.category.name` — list serializer returned `category_detail`, not `category`
+- `article.content.replace(...)` — `content` not in list serializer response
+
+**Fix 1 — Backend** (`crm_app/serializers.py`):
+- `KBArticleListSerializer`: renamed `category_detail` → `category` (field name in `Meta.fields`)
+- Added `tags` to `Meta.fields` list
+
+**Fix 1 — Frontend** (`KBArticleCard.tsx`, `KBFeaturedArticles.tsx`):
+- `article.tags.slice(0, 3)` → `(article.tags || []).slice(0, 3)`
+- `article.category.name` → `article.category?.name || 'Uncategorized'`
+- `article.content.replace(...)` → `(article.content || '').replace(...)`
+
+**Problem 2 — Category counts all showing (0)**: User saw 4 articles but all categories showed "(0)". Root cause: `KBCategory.article_count` property filtered `status='published'` — all test articles were drafts.
+
+**Fix 2** (`crm_app/models.py`):
+- `KBCategory.article_count`: `self.articles.filter(status='published').count()` → `self.articles.count()`
+- `KBTag.article_count`: same change
+
+**Files Modified**:
+- `crm_app/serializers.py` — KBArticleListSerializer field name fix + tags added
+- `crm_app/models.py` — KBCategory/KBTag article_count properties
+- `bmasia-crm-frontend/src/components/KBArticleCard.tsx` — Null safety
+- `bmasia-crm-frontend/src/components/KBFeaturedArticles.tsx` — Null safety
+
+**Commits**: `de765be7` (white screen fix), `c5044f3d` (category count fix)
+
+---
+
+### Feb 17, 2026 - KB Article Save Fix
+
+**Problem**: Keith reported "I am having trouble saving articles in the Knowledge Base in the CRM, pretty sure I am filling required fields then when I click save it fails." Every save attempt returned 400 Bad Request.
+
+**Root Cause — Field Name Mismatch** (`KBArticleForm.tsx` vs `KBArticleSerializer`):
+- Frontend `handleSubmit()` and `handleAutoSave()` sent `category` and `tags`
+- Backend `KBArticleSerializer` defines write-only fields with different names:
+  ```python
+  category_id = serializers.UUIDField(write_only=True, source='category')
+  tag_ids = serializers.ListField(child=serializers.UUIDField(), write_only=True)
+  ```
+- DRF rejected the payload because `category` (the read-only nested serializer field) cannot be written to, and `category_id` (the required write field) was missing
+
+**Fix** (`KBArticleForm.tsx`):
+- Changed `category: formData.category` → `category_id: formData.category` in both `handleSubmit()` and `handleAutoSave()`
+- Changed `tags: formData.tags` → `tag_ids: formData.tags` in both methods
+- Added frontend content validation: checks 100-char minimum after HTML strip (matches backend `validate_content()`)
+- Improved error display: DRF field-level validation errors now shown in the Alert instead of generic "Failed to save article"
+
+**Files Modified**:
+- `bmasia-crm-frontend/src/components/KBArticleForm.tsx` — Fixed field names, added content validation, better error display
+
+**Commit**: `10aa5578`
+
+---
+
+### Feb 17, 2026 - Email Delivery Confirmation Bug Fixes
+
+**Bug 1 — 500 on Quote Send** (`NameError: name 'EmailLog' is not defined`):
+- The enhanced send response code in `QuoteViewSet.send()` references `EmailLog` to return `email_details`
+- `EmailLog` was not in the `from .models import (...)` block in views.py
+- **Fix**: Added `EmailLog` to model imports at line 46
+- **Lesson**: When adding code to views.py that references a model, always verify it's in the imports block
+
+**Bug 2 — 404 on Email-Logs API** (doubled URL `/api/v1/api/v1/email-logs/`):
+- `getEmailLogs()` in api.ts used absolute path `/api/v1/email-logs/`
+- Axios baseURL is already `https://bmasia-crm.onrender.com/api/v1` — so the request went to `/api/v1/api/v1/email-logs/`
+- **Fix**: Changed to relative path `/email-logs/`
+- **Lesson**: All api.ts endpoints MUST use relative paths (e.g. `/email-logs/`, not `/api/v1/email-logs/`)
+
+**Files Modified**:
+- `crm_app/views.py` — Added `EmailLog` to model imports
+- `bmasia-crm-frontend/src/services/api.ts` — Fixed `getEmailLogs()` URL path
+
+**Commit**: `27271fe7`
+
+---
+
+### Feb 17, 2026 - Email Delivery Confirmation System (Phases 1 + 2)
+
+**Problem**: When users send quotes, invoices, or contracts from the CRM, they get a basic "Sent successfully" toast but have no way to verify the email was actually delivered or opened. The `EmailLog` model existed with `opened_at`, `clicked_at`, and `bounced` fields — but they were **never populated**. No API endpoint for EmailLog. Missing `quote` FK. Incomplete `email_type` choices.
+
+**Phase 1 — Visibility: Surface Existing EmailLog Data**
+
+**Model Changes** (`crm_app/models.py` ~line 1697):
+- Added `quote` ForeignKey (SET_NULL, nullable) to EmailLog — matches existing `contract`/`invoice` FKs
+- Added `tracking_token` CharField(64, unique, nullable) — auto-generated via `secrets.token_urlsafe(32)` in `save()` override
+- Expanded `EMAIL_TYPE_CHOICES`: added `invoice_send`, `quote_send`, `quote_followup`, `contract_send`
+- Migration: `0072_email_delivery_confirmation.py`
+
+**Email Type Fixes** (`crm_app/services/email_service.py`):
+- `send_quote_email()`: `'manual'` → `'quote_send'` + set `quote=quote` on EmailLog
+- `send_invoice_email()`: `'manual'` → `'invoice_send'`
+- `send_contract_email()`: `'manual'` → `'contract_send'`
+- Restructured all 3 methods: create EmailLog BEFORE send (status='pending'), inject pixel, send, mark sent/failed
+
+**API Endpoint** (`crm_app/serializers.py`, `crm_app/views.py`, `crm_app/urls.py`):
+- New `EmailLogSerializer` with computed fields (`company_name`, `contact_name`, `email_type_display`, `status_display`)
+- New `EmailLogViewSet(ReadOnlyModelViewSet)` — filters: company, contact, contract, invoice, quote, status, email_type
+- Registered at `r'email-logs'` → `/api/v1/email-logs/`
+
+**Enhanced Send Responses** (`crm_app/views.py`):
+- Quote send endpoint: returns `email_details` array with per-recipient info (to_email, from_email, status, sent_at, email_log_id)
+- Invoice send endpoint: same enhancement
+
+**Frontend** (`types/index.ts`, `api.ts`, `QuoteDetail.tsx`, `InvoiceDetail.tsx`, `ContractDetail.tsx`):
+- `EmailLogEntry` interface + `getEmailLogs()` API method
+- Email History section on all 3 detail pages: timeline of sent emails with status icons (green=sent, blue=opened, red=failed, gray=pending)
+- Enhanced send confirmation messages with recipient details
+
+**Phase 2 — Open Tracking via Tracking Pixel**
+
+**Tracking Pixel Endpoint** (`crm_app/views.py`, `bmasia_crm/urls.py`):
+- `email_tracking_pixel(request, token)` — unauthenticated, returns 1x1 transparent GIF (43 bytes)
+- On hit: sets `opened_at=now()`, `status='opened'` if not already opened
+- URL: `/t/<str:token>/` (short, outside `/api/`)
+- `Cache-Control: no-store, no-cache` to prevent false positives from CDN caching
+
+**Pixel Injection** (`crm_app/services/email_service.py`):
+- `_inject_tracking_pixel(body_html, tracking_token)` — inserts `<img>` before `</body>` or appends
+- Called in `send_email()` + all document-specific send methods
+- Pixel URL: `{SITE_URL}/t/{tracking_token}/`
+
+**Expected Reliability**:
+| Client | Works? | Notes |
+|--------|--------|-------|
+| Gmail (web) | Yes | Proxies images; first open reliable |
+| Outlook | Yes | Loads images on open |
+| Apple Mail | Unreliable | Privacy Protection pre-fetches |
+| Images blocked | No | Some corporate clients block |
+
+~60-80% open detection for BMAsia's B2B audience (industry standard).
+
+**Files Modified**:
+- `crm_app/models.py` — EmailLog: quote FK, tracking_token, email_type choices, save() override
+- `crm_app/services/email_service.py` — _inject_tracking_pixel(), restructured send methods, email_type fixes
+- `crm_app/serializers.py` — EmailLogSerializer
+- `crm_app/views.py` — EmailLogViewSet, email_tracking_pixel(), enhanced send responses
+- `crm_app/urls.py` — email-logs route
+- `bmasia_crm/urls.py` — /t/<token>/ tracking route
+- `crm_app/migrations/0072_email_delivery_confirmation.py` — New migration
+- `bmasia-crm-frontend/src/types/index.ts` — EmailLogEntry interface
+- `bmasia-crm-frontend/src/services/api.ts` — getEmailLogs() method
+- `bmasia-crm-frontend/src/components/QuoteDetail.tsx` — Email History + enhanced send confirmation
+- `bmasia-crm-frontend/src/components/InvoiceDetail.tsx` — Email History + enhanced send confirmation
+- `bmasia-crm-frontend/src/components/ContractDetail.tsx` — Email History section
+
+**Commit**: `1e8b6ff1`
+
+---
+
+### Feb 17, 2026 - Quote PDF Preview Button
+
+**Problem**: ContractDetail and InvoiceDetail both had "Preview" buttons that open the PDF in a new browser tab, but QuoteDetail only had "PDF" (download) and "Print" — no preview.
+
+**Fix**: Added Preview button to QuoteDetail using the same pattern as ContractDetail/InvoiceDetail:
+- `handlePreviewPDF()`: calls `ApiService.downloadQuotePDF()` → `createObjectURL(blob)` → `window.open(url, '_blank')`
+- Button placed before existing "PDF" download button with `Visibility` icon
+- No backend changes — `downloadQuotePDF()` and `GET /quotes/{id}/pdf/` already existed
+
+**Button order**: Send Quote | Convert to Contract | Create Invoice | **Preview** | PDF | Print
+
+**Files Modified**:
+- `bmasia-crm-frontend/src/components/QuoteDetail.tsx` — Added Visibility import, handlePreviewPDF handler, Preview button
+
+**Commit**: `79c74f00`
+
+---
+
+### Feb 17, 2026 - Link Service Locations to Line Items (Auto-Sync)
+
+**Problem**: Service locations and line items in ContractForm were completely independent — no validation, no sync. A user could have a "Soundtrack" line item with qty=5 and a single "Beat Breeze" service location without any error. Each service location should represent 1 unit of a music line item's quantity, and the platform must match.
+
+**Solution — Auto-sync via `syncLocationsFromLineItems()`** (`ContractForm.tsx`):
+
+Core sync function that calculates required location counts per platform from line items (using `PRODUCT_OPTIONS.platform` mapping), then adjusts existing locations:
+- If current count < required → add blank rows
+- If current count > required → remove excess (unnamed/blank first, then named from end)
+- Returns `droppedNamedCount` for UI warning
+
+**`useEffect` on `lineItems`**:
+- Fires `syncLocationsFromLineItems()` whenever line items change
+- Guarded by `isFormInitialized` ref — prevents sync on initial form load (edit mode) or `resetForm()`
+- `isFormInitialized.current = true` set via `setTimeout` at end of `populateForm()` and `resetForm()`
+
+**Removed manual controls**:
+- `addServiceLocation()` function — removed (no "Add Location" button)
+- `removeServiceLocation()` function — removed (no delete buttons per row)
+- Platform `<Select>` dropdown → read-only `<Typography>` (platform derived from line item)
+- Manual location generation in `handleQuoteChange()` → replaced by comment (useEffect handles it)
+
+**Updated Service Locations UI**:
+- Helper text: "Auto-generated from music line items above. Adjust line item quantities to add or remove locations."
+- Empty state: "Add a music service line item (Soundtrack Your Brand or Beat Breeze) to generate service locations."
+- Table columns: `#` (row number) | Location Name (editable TextField) | Platform (read-only text)
+- Warning `<Alert>` with `locationsTrimmedWarning` state — shown when named locations dropped by qty decrease
+
+**Submit validation**:
+- Checks all service locations have `location_name` filled in
+- Shows error: "Please fill in all N service location name(s)"
+
+**Edge Cases Handled**:
+| Scenario | Behavior |
+|----------|----------|
+| Edit mode load | `isFormInitialized` guard prevents sync — existing locations load normally |
+| Qty increase (3→5) | 2 blank rows added for that platform |
+| Qty decrease (5→3), named locations | Blank rows removed first; named preserved; warning if named dropped |
+| Product change (Soundtrack → Beat Breeze) | Old platform locations removed, new platform rows created |
+| Product change (Soundtrack → Hardware) | Soundtrack locations removed, no new ones |
+| Multiple same-platform line items | Quantities summed (3+2 = 5 locations) |
+| Quote auto-fill | `handleQuoteChange` sets lineItems → useEffect derives locations |
+
+**Files Modified**:
+- `bmasia-crm-frontend/src/components/ContractForm.tsx` — All changes (sync function, useEffect, UI, validation)
+
+**Commit**: `544114e9` — "Link service locations to line items: auto-sync + validation"
+
+---
+
 ### Feb 16-17, 2026 - Contract Service Locations + PDF Preview
 
 **Problem 1 — Complex Zone Picker**: ContractForm used EnhancedZonePicker showing Soundtrack account IDs, device statuses, API sync info — all tech-support concerns. Sales just needs to enter a zone name (e.g., "Lobby") and pick a platform type (Soundtrack or Beat Breeze).
