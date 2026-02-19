@@ -1192,6 +1192,42 @@ export const DEVICE_TYPE_LABELS: Record<string, string> = {
   other: 'Other',
 };
 
+export interface ClientTechDetail {
+  id: string;
+  company: string;
+  company_name?: string;
+  zone?: string | null;
+  zone_name?: string | null;
+  outlet_name: string;
+  anydesk_id: string;
+  teamviewer_id: string;
+  ultraviewer_id: string;
+  other_remote_id: string;
+  system_type: 'single' | 'multi' | '';
+  soundcard_channel: string;
+  bms_license: string;
+  additional_hardware: string;
+  pc_make: string;
+  pc_model: string;
+  pc_type: string;
+  ram: string;
+  cpu_type: string;
+  cpu_speed: string;
+  cpu_cores: string;
+  hdd_c: string;
+  hdd_d: string;
+  network_type: string;
+  amplifiers: string;
+  distribution: string;
+  speakers: string;
+  other_equipment: string;
+  music_spec_link: string;
+  syb_schedules_link: string;
+  comments: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Zone {
   id: string;
   company: string; // UUID

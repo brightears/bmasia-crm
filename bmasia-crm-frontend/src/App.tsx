@@ -40,6 +40,7 @@ import ZonesUnified from './pages/ZonesUnified';
 import ZoneDetail from './pages/ZoneDetail';
 import ZoneNew from './pages/ZoneNew';
 import ZoneEdit from './pages/ZoneEdit';
+import ClientTechDetails from './pages/ClientTechDetails';
 import Users from './pages/Users';
 import MyProfile from './pages/MyProfile';
 import Settings from './pages/Settings';
@@ -493,6 +494,14 @@ function App() {
           element={<Navigate to="/zones" replace />}
         />
         <Route path="/slas" element={<PlaceholderPage title="Service Level Agreements" />} />
+        <Route
+          path="/tech-details"
+          element={
+            <ProtectedRoute requiredModule="tickets">
+              <ClientTechDetails />
+            </ProtectedRoute>
+          }
+        />
 
         {/* Admin routes */}
         <Route

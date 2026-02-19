@@ -52,6 +52,7 @@ import {
   Support as SupportIcon,
   MenuBook as MenuBookIcon,
   LocationOn,
+  Computer as ComputerIcon,
   AutoMode as AutoModeIcon,
   Settings as SettingsIcon,
   Wifi as WifiIcon,
@@ -176,6 +177,7 @@ const unifiedNavigation = [
       { text: 'Tickets', icon: <SupportIcon />, path: '/tickets' },
       { text: 'Knowledge Base', icon: <MenuBookIcon />, path: '/knowledge-base' },
       { text: 'Zones', icon: <LocationOn />, path: '/zones' },
+      { text: 'Client Tech Details', icon: <ComputerIcon />, path: '/tech-details' },
     ],
   },
   {

@@ -4,6 +4,7 @@ import {
   Contract, Invoice, Quote, DashboardStats, ApiResponse,
   CustomerSegment, SegmentMemberResponse, SegmentValidationResponse,
   EnrollInSequenceResponse, SegmentFilterCriteria, Zone, PreviewZone, ContractZone, Device,
+  ClientTechDetail,
   ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
   SeasonalTriggerDate,
   Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry,
@@ -1150,6 +1151,38 @@ class ApiService {
 
   async getDevicesByCompany(companyId: string): Promise<Device[]> {
     const response = await authApi.get<Device[]>('/devices/by_company/', {
+      params: { company_id: companyId }
+    });
+    return response.data;
+  }
+
+  // Client Tech Details
+  async getClientTechDetails(params?: any): Promise<ApiResponse<ClientTechDetail>> {
+    const response = await authApi.get<ApiResponse<ClientTechDetail>>('/client-tech-details/', { params });
+    return response.data;
+  }
+
+  async getClientTechDetail(id: string): Promise<ClientTechDetail> {
+    const response = await authApi.get<ClientTechDetail>(`/client-tech-details/${id}/`);
+    return response.data;
+  }
+
+  async createClientTechDetail(data: Partial<ClientTechDetail>): Promise<ClientTechDetail> {
+    const response = await authApi.post<ClientTechDetail>('/client-tech-details/', data);
+    return response.data;
+  }
+
+  async updateClientTechDetail(id: string, data: Partial<ClientTechDetail>): Promise<ClientTechDetail> {
+    const response = await authApi.patch<ClientTechDetail>(`/client-tech-details/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteClientTechDetail(id: string): Promise<void> {
+    await authApi.delete(`/client-tech-details/${id}/`);
+  }
+
+  async getClientTechDetailsByCompany(companyId: string): Promise<ClientTechDetail[]> {
+    const response = await authApi.get<ClientTechDetail[]>('/client-tech-details/by_company/', {
       params: { company_id: companyId }
     });
     return response.data;
