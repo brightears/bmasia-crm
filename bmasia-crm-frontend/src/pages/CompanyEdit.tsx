@@ -27,6 +27,8 @@ import ApiService from '../services/api';
 interface CompanyFormData {
   name: string;
   legal_entity_name: string;
+  tax_id: string;
+  branch: string;
   industry: string;
   country: string;
   billing_entity: string;
@@ -106,6 +108,8 @@ const CompanyEdit: React.FC = () => {
   const [formData, setFormData] = useState<CompanyFormData>({
     name: '',
     legal_entity_name: '',
+    tax_id: '',
+    branch: '',
     industry: '',
     country: '',
     billing_entity: 'BMAsia Limited',
@@ -140,6 +144,8 @@ const CompanyEdit: React.FC = () => {
       setFormData({
         name: companyData.name || '',
         legal_entity_name: companyData.legal_entity_name || '',
+        tax_id: companyData.tax_id || '',
+        branch: companyData.branch || '',
         industry: companyData.industry || '',
         country: companyData.country || '',
         billing_entity: companyData.billing_entity || 'BMAsia Limited',
@@ -215,6 +221,8 @@ const CompanyEdit: React.FC = () => {
         ...formData,
         billing_entity: formData.billing_entity,
         legal_entity_name: formData.legal_entity_name || undefined,
+        tax_id: formData.tax_id || undefined,
+        branch: formData.branch || undefined,
         website: formData.website || undefined,
         phone: formData.phone || undefined,
         email: formData.email || undefined,
@@ -452,12 +460,22 @@ const CompanyEdit: React.FC = () => {
           <Grid item xs={12} sm={6}>
             <TextField
               fullWidth
-              label="City"
-              value={formData.city}
-              onChange={(e) => handleFieldChange('city', e.target.value)}
-              error={!!errors.city}
-              helperText={errors.city}
-              placeholder="e.g., Bangkok, Singapore"
+              label="Tax ID"
+              value={formData.tax_id || ''}
+              onChange={(e) => handleFieldChange('tax_id', e.target.value)}
+              helperText="Tax Identification Number (required for Thai tax invoices)"
+              size="medium"
+            />
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <TextField
+              fullWidth
+              label="Branch"
+              value={formData.branch || ''}
+              onChange={(e) => handleFieldChange('branch', e.target.value)}
+              helperText="e.g., Head Office, Branch 00001"
+              placeholder="e.g., Branch 00001"
               size="medium"
             />
           </Grid>
@@ -538,6 +556,19 @@ const CompanyEdit: React.FC = () => {
               value={formData.address_line2}
               onChange={(e) => handleFieldChange('address_line2', e.target.value)}
               placeholder="Apartment, suite, unit, building, floor"
+              size="medium"
+            />
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <TextField
+              fullWidth
+              label="City"
+              value={formData.city}
+              onChange={(e) => handleFieldChange('city', e.target.value)}
+              error={!!errors.city}
+              helperText={errors.city}
+              placeholder="e.g., Bangkok, Singapore"
               size="medium"
             />
           </Grid>

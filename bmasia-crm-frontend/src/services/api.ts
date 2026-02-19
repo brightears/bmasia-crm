@@ -105,7 +105,7 @@ class ApiService {
       return MockApiService.updateCompany(id, data);
     }
 
-    const response = await authApi.put<Company>(`/companies/${id}/`, data);
+    const response = await authApi.patch<Company>(`/companies/${id}/`, data);
     return response.data;
   }
 
@@ -419,6 +419,21 @@ class ApiService {
 
   async getInvoiceStats(): Promise<any> {
     const response = await authApi.get('/invoices/stats/');
+    return response.data;
+  }
+
+  async exportQuickBooks(params: {
+    billing_entity?: string;
+    status?: string;
+    date_from?: string;
+    date_to?: string;
+    ar_account?: string;
+    income_account?: string;
+  }): Promise<Blob> {
+    const response = await authApi.get('/invoices/export-quickbooks/', {
+      params,
+      responseType: 'blob',
+    });
     return response.data;
   }
 

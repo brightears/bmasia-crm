@@ -100,6 +100,73 @@
 
 ---
 
+### Feb 19, 2026 - Tech Support PDF Downloads (KB Articles + Client Tech Details)
+
+**Context**: Sales/marketing side already had PDF download for Quotes, Contracts, and Invoices. Keith's tech support team needed the same capability for Knowledge Base articles and Client Tech Details — lets them share technical documentation and client specs externally without requiring CRM access.
+
+**Client Tech Detail PDF** (`crm_app/views.py` — `ClientTechDetailViewSet.pdf`):
+- `@action(detail=True, methods=['get'])` endpoint at `/api/v1/client-tech-details/{id}/pdf/`
+- Single-page branded PDF with BMAsia logo + orange accent line
+- Title: "CLIENT TECHNICAL DETAILS" — 20pt DejaVuSans-Bold
+- Metadata bar: Orange-header table with Company Name | Outlet Name | Zone
+- 6 sections via `build_section()` helper (orange section headings, alternating row backgrounds):
+  - Remote Access (AnyDesk, TeamViewer, UltraViewer, Other Remote — monospace font)
+  - System Configuration (System Type, Soundcard Channel, BMS License, Additional Hardware)
+  - PC Specifications (Make, Model, Type, RAM, CPU, Speed, Cores, HDD C:, HDD D:, Network)
+  - Audio Equipment (Amplifiers, Distribution, Speakers, Other Equipment)
+  - Links (Music Spec, SYB Schedules — blue monospace links)
+  - Notes (Comments field)
+- Empty fields show "-", label column 160pt, value column flexible
+- Footer: "BMAsia — Generated [date]" centered
+- Filename: `TechDetail_{company}_{outlet}.pdf` (sanitized)
+
+**KB Article PDF** (`crm_app/views.py` — `KBArticleViewSet.pdf`):
+- `@action(detail=True, methods=['get'])` endpoint at `/api/v1/kb/articles/{id}/pdf/`
+- Multi-page PDF with page footer callback (article number + page numbers)
+- **HTML-to-ReportLab converter**: `HTMLToFlowables(HTMLParser)` class using Python stdlib `html.parser` — no new dependencies
+  - Maps ReactQuill HTML tags to ReportLab flowables:
+    - `<p>` → Paragraph with body style
+    - `<h1>`/`<h2>`/`<h3>` → Paragraph with heading styles (16/14/12pt bold)
+    - `<strong>`/`<em>`/`<u>`/`<s>` → ReportLab inline markup (`<b>`, `<i>`, `<u>`, `<strike>`)
+    - `<a href>` → `<a href="..." color="blue">` inline markup
+    - `<br>` → `<br/>` in current paragraph
+    - `<ul>/<ol>` + `<li>` → Indented paragraphs with bullet/number prefix
+    - `<blockquote>` → Indented paragraph with gray background
+    - `<pre>`/`<code>` → Courier font with gray background
+    - `<img src="data:...">` → Base64 decode → ReportLab Image (max 5" wide)
+    - `<hr>` → HRFlowable with orange color
+    - `<p><br></p>` (Quill empty line) → Spacer
+  - Fallback: if parsing fails, strips HTML tags and renders plain text
+- PDF layout: logo + orange accent, title, metadata box (article#, category, author, published, status, tags), orange divider, article body, attachments table (if any), article info section
+- Filename: `KB_{article_number}.pdf` (sanitized)
+
+**Frontend — Client Tech Details** (`ClientTechDetails.tsx`):
+- Added "Download PDF" MenuItem in 3-dot action menu (between "View Details" and "Edit")
+- Added "Download PDF" Button in detail dialog DialogActions (before Edit button, orange color)
+- `handleDownloadPDF(detail)` handler with blob→createElement('a')→click→cleanup pattern
+
+**Frontend — KB Article** (`KnowledgeBaseArticle.tsx`):
+- Added "Download PDF" outlined button next to "Edit Article" in `<Box display="flex" gap={1}>`
+- PDF button visible to ALL authenticated users (not gated behind `canEdit`)
+- `handleDownloadPDF()` handler with same blob download pattern
+- Filename: `{article_number}_{slug}.pdf`
+
+**Frontend API** (`api.ts`):
+- `downloadClientTechDetailPDF(id)` — `authApi.get('/client-tech-details/${id}/pdf/', { responseType: 'blob' })`
+- `downloadKBArticlePDF(id)` — `authApi.get('/kb/articles/${id}/pdf/', { responseType: 'blob' })`
+
+**Files Modified**:
+- `crm_app/views.py` — `pdf` action on `ClientTechDetailViewSet` + `KBArticleViewSet`, `HTMLToFlowables` class
+- `bmasia-crm-frontend/src/services/api.ts` — `downloadClientTechDetailPDF()` + `downloadKBArticlePDF()`
+- `bmasia-crm-frontend/src/pages/ClientTechDetails.tsx` — PDF button in detail dialog + 3-dot menu
+- `bmasia-crm-frontend/src/pages/KnowledgeBaseArticle.tsx` — PDF button next to Edit Article
+
+**No new files. No migrations. No model changes. No new dependencies.**
+
+**Commit**: `cfa03025` — "Add PDF download for Client Tech Details and KB Articles"
+
+---
+
 ### Feb 17, 2026 - KB Article Save Fix
 
 **Problem**: Keith reported "I am having trouble saving articles in the Knowledge Base in the CRM, pretty sure I am filling required fields then when I click save it fails." Every save attempt returned 400 Bad Request.

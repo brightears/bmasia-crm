@@ -416,23 +416,16 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
           </Grid>
 
           <Grid item xs={12} sm={6}>
-            <FormControl fullWidth error={!!errors.branch} size="medium">
-              <InputLabel>Branch</InputLabel>
-              <Select
-                value={formData.branch || ''}
-                onChange={(e) => setFormData(prev => ({ ...prev, branch: e.target.value }))}
-                label="Branch"
-              >
-                <MenuItem value="">None</MenuItem>
-                <MenuItem value="สำนักงานใหญ่ (Head Office)">สำนักงานใหญ่ (Head Office)</MenuItem>
-                <MenuItem value="Branch">Branch</MenuItem>
-              </Select>
-            </FormControl>
-            {errors.branch && (
-              <Typography variant="caption" color="error" sx={{ mt: 0.5, display: 'block' }}>
-                {errors.branch}
-              </Typography>
-            )}
+            <TextField
+              fullWidth
+              label="Branch"
+              value={formData.branch || ''}
+              onChange={(e) => setFormData(prev => ({ ...prev, branch: e.target.value }))}
+              helperText={errors.branch || "e.g., Head Office, Branch 00001"}
+              error={!!errors.branch}
+              size="medium"
+              placeholder="e.g., Branch 00001"
+            />
           </Grid>
 
           <Grid item xs={12} sm={6}>

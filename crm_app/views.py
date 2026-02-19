@@ -4100,6 +4100,56 @@ class InvoiceViewSet(BaseModelViewSet):
 
         return Response({'message': 'Invoice marked as paid'})
 
+    @action(detail=False, methods=['get'], url_path='export-quickbooks')
+    def export_quickbooks(self, request):
+        """
+        Export invoices as IIF file for QuickBooks Pro 2016 import.
+
+        Query params:
+            billing_entity: Filter by company billing entity
+            status: Invoice status filter (default: Sent)
+            date_from: Start date (YYYY-MM-DD)
+            date_to: End date (YYYY-MM-DD)
+            ar_account: QB AR account name (default: Accounts Receivable)
+            income_account: QB income account name (default: Service Revenue)
+        """
+        from crm_app.services.quickbooks_export_service import QuickBooksExportService
+
+        billing_entity = request.query_params.get('billing_entity', '')
+        status_filter = request.query_params.get('status', '')
+        date_from = request.query_params.get('date_from', '')
+        date_to = request.query_params.get('date_to', '')
+        ar_account = request.query_params.get('ar_account', 'Accounts Receivable')
+        income_account = request.query_params.get('income_account', 'Service Revenue')
+
+        queryset = Invoice.objects.select_related('company').prefetch_related('line_items')
+
+        if billing_entity:
+            queryset = queryset.filter(company__billing_entity=billing_entity)
+        if status_filter:
+            statuses = [s.strip() for s in status_filter.split(',')]
+            queryset = queryset.filter(status__in=statuses)
+        if date_from:
+            queryset = queryset.filter(issue_date__gte=date_from)
+        if date_to:
+            queryset = queryset.filter(issue_date__lte=date_to)
+
+        queryset = queryset.order_by('issue_date')
+
+        if not queryset.exists():
+            return Response(
+                {'error': 'No invoices match the selected filters'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        service = QuickBooksExportService()
+        iif_buffer = service.generate_iif(queryset, ar_account, income_account)
+
+        response = HttpResponse(iif_buffer.getvalue(), content_type='text/plain; charset=utf-8')
+        filename = f'invoices_export_{timezone.now().strftime("%Y%m%d")}.iif'
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
         """Generate and download PDF for invoice"""

@@ -31,6 +31,7 @@ import {
   DialogContent,
   DialogActions,
   Snackbar,
+  Collapse,
 } from '@mui/material';
 import {
   Add,
@@ -122,6 +123,17 @@ const Invoices: React.FC = () => {
   const [paymentMethod, setPaymentMethod] = useState('');
   const [transactionId, setTransactionId] = useState('');
   const [paymentNotes, setPaymentNotes] = useState('');
+
+  // QuickBooks export dialog
+  const [qbExportOpen, setQbExportOpen] = useState(false);
+  const [qbExporting, setQbExporting] = useState(false);
+  const [qbEntity, setQbEntity] = useState('');
+  const [qbStatus, setQbStatus] = useState('Sent');
+  const [qbDateFrom, setQbDateFrom] = useState('');
+  const [qbDateTo, setQbDateTo] = useState('');
+  const [qbArAccount, setQbArAccount] = useState('Accounts Receivable');
+  const [qbIncomeAccount, setQbIncomeAccount] = useState('Service Revenue');
+  const [qbShowSettings, setQbShowSettings] = useState(false);
 
   const loadInvoices = useCallback(async () => {
     try {
@@ -337,6 +349,39 @@ const Invoices: React.FC = () => {
     }).format(value);
   };
 
+  const handleQBExport = async () => {
+    try {
+      setQbExporting(true);
+      const blob = await ApiService.exportQuickBooks({
+        billing_entity: qbEntity || undefined,
+        status: qbStatus || undefined,
+        date_from: qbDateFrom || undefined,
+        date_to: qbDateTo || undefined,
+        ar_account: qbArAccount,
+        income_account: qbIncomeAccount,
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      link.download = `invoices_export_${dateStr}.iif`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      setQbExportOpen(false);
+      setSuccess('QuickBooks IIF file exported successfully');
+    } catch (err: any) {
+      if (err.response?.status === 404) {
+        setError('No invoices match the selected filters');
+      } else {
+        setError('Failed to export invoices. Please try again.');
+      }
+    } finally {
+      setQbExporting(false);
+    }
+  };
+
   const formatDate = (dateString: string | null | undefined): string => {
     if (!dateString) return '-';
     return new Date(dateString).toLocaleDateString();
@@ -353,13 +398,27 @@ const Invoices: React.FC = () => {
         <Typography variant="h4" component="h1">
           Invoices
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={handleCreateInvoice}
-        >
-          New Invoice
-        </Button>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            startIcon={<GetApp />}
+            onClick={() => setQbExportOpen(true)}
+            sx={{
+              borderColor: '#FFA500',
+              color: '#FFA500',
+              '&:hover': { borderColor: '#FF8C00', bgcolor: 'rgba(255, 165, 0, 0.08)' },
+            }}
+          >
+            Export to QuickBooks
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={handleCreateInvoice}
+          >
+            New Invoice
+          </Button>
+        </Box>
       </Box>
 
       {error && (
@@ -699,6 +758,117 @@ const Invoices: React.FC = () => {
             disabled={!paymentMethod}
           >
             Mark as Paid
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* QuickBooks Export Dialog */}
+      <Dialog
+        open={qbExportOpen}
+        onClose={() => setQbExportOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Export to QuickBooks</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Export invoices as an IIF file for import into QuickBooks Pro 2016.
+          </Typography>
+
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Billing Entity</InputLabel>
+              <Select
+                value={qbEntity}
+                onChange={(e) => setQbEntity(e.target.value)}
+                label="Billing Entity"
+              >
+                <MenuItem value="">All Entities</MenuItem>
+                <MenuItem value="BMAsia (Thailand) Co., Ltd.">BMAsia Thailand (THB)</MenuItem>
+                <MenuItem value="BMAsia Limited">BMAsia Limited (USD)</MenuItem>
+              </Select>
+            </FormControl>
+
+            <FormControl fullWidth size="small">
+              <InputLabel>Invoice Status</InputLabel>
+              <Select
+                value={qbStatus}
+                onChange={(e) => setQbStatus(e.target.value)}
+                label="Invoice Status"
+              >
+                <MenuItem value="">All Statuses</MenuItem>
+                <MenuItem value="Sent">Sent</MenuItem>
+                <MenuItem value="Paid">Paid</MenuItem>
+                <MenuItem value="Overdue">Overdue</MenuItem>
+                <MenuItem value="Sent,Paid,Overdue">Sent + Paid + Overdue</MenuItem>
+              </Select>
+            </FormControl>
+
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <TextField
+                fullWidth
+                size="small"
+                label="Date From"
+                type="date"
+                value={qbDateFrom}
+                onChange={(e) => setQbDateFrom(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+              />
+              <TextField
+                fullWidth
+                size="small"
+                label="Date To"
+                type="date"
+                value={qbDateTo}
+                onChange={(e) => setQbDateTo(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+              />
+            </Box>
+
+            <Button
+              size="small"
+              onClick={() => setQbShowSettings(!qbShowSettings)}
+              sx={{ alignSelf: 'flex-start', color: 'text.secondary', textTransform: 'none' }}
+            >
+              {qbShowSettings ? 'Hide' : 'Show'} QuickBooks Account Settings
+            </Button>
+
+            <Collapse in={qbShowSettings}>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="AR Account Name"
+                  value={qbArAccount}
+                  onChange={(e) => setQbArAccount(e.target.value)}
+                  helperText="Must match your QuickBooks Accounts Receivable account name exactly"
+                />
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Income Account Name"
+                  value={qbIncomeAccount}
+                  onChange={(e) => setQbIncomeAccount(e.target.value)}
+                  helperText="Must match your QuickBooks income/revenue account name exactly"
+                />
+              </Box>
+            </Collapse>
+
+            <Alert severity="info" sx={{ mt: 1 }}>
+              Customer names in the CRM must match your QuickBooks customer list exactly for successful import.
+            </Alert>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setQbExportOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={handleQBExport}
+            disabled={qbExporting}
+            startIcon={qbExporting ? <CircularProgress size={16} /> : <GetApp />}
+            sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
+          >
+            {qbExporting ? 'Exporting...' : 'Export IIF File'}
           </Button>
         </DialogActions>
       </Dialog>
