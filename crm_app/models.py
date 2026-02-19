@@ -1451,9 +1451,12 @@ class ClientTechDetail(TimestampedModel):
     additional_hardware = models.TextField(blank=True, help_text="Additional system hardware details")
 
     # PC Specifications
+    pc_name = models.CharField(max_length=100, blank=True, help_text="Computer/hostname")
     pc_make = models.CharField(max_length=100, blank=True)
     pc_model = models.CharField(max_length=100, blank=True)
     pc_type = models.CharField(max_length=100, blank=True)
+    operating_system = models.CharField(max_length=100, blank=True, help_text="e.g. Windows 10, Windows 11")
+    os_type = models.CharField(max_length=20, blank=True, help_text="32-bit or 64-bit")
     ram = models.CharField(max_length=50, blank=True, help_text="e.g. 8GB, 16GB DDR4")
     cpu_type = models.CharField(max_length=100, blank=True)
     cpu_speed = models.CharField(max_length=50, blank=True, help_text="e.g. 3.4 GHz")

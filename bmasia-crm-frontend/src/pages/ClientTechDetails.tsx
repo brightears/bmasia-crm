@@ -536,6 +536,9 @@ const ClientTechDetails: React.FC = () => {
 
             {/* Section 4: PC Specs */}
             <DetailSection title="PC Specifications">
+              <DetailRow label="PC Name" value={formatField(selectedDetail.pc_name)} />
+              <DetailRow label="Operating System" value={formatField(selectedDetail.operating_system)} />
+              <DetailRow label="OS Type" value={formatField(selectedDetail.os_type)} />
               <DetailRow label="Make / Brand" value={formatField(selectedDetail.pc_make)} />
               <DetailRow label="Model" value={formatField(selectedDetail.pc_model)} />
               <DetailRow label="PC Type" value={formatField(selectedDetail.pc_type)} />

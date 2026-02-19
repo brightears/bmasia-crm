@@ -1475,7 +1475,9 @@ class ClientTechDetailAdmin(admin.ModelAdmin):
             'fields': ('system_type', 'soundcard_channel', 'bms_license', 'additional_hardware')
         }),
         ('PC Specifications', {
-            'fields': ('pc_make', 'pc_model', 'pc_type', 'ram', 'cpu_type', 'cpu_speed',
+            'fields': ('pc_name', 'pc_make', 'pc_model', 'pc_type',
+                       'operating_system', 'os_type',
+                       'ram', 'cpu_type', 'cpu_speed',
                        'cpu_cores', 'hdd_c', 'hdd_d', 'network_type')
         }),
         ('Audio Equipment', {

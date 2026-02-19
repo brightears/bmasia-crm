@@ -1207,9 +1207,12 @@ export interface ClientTechDetail {
   soundcard_channel: string;
   bms_license: string;
   additional_hardware: string;
+  pc_name: string;
   pc_make: string;
   pc_model: string;
   pc_type: string;
+  operating_system: string;
+  os_type: string;
   ram: string;
   cpu_type: string;
   cpu_speed: string;

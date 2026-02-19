@@ -8571,6 +8571,9 @@ class ClientTechDetailViewSet(viewsets.ModelViewSet):
 
         # Section 3: PC Specifications
         elements.append(build_section('PC Specifications', [
+            ('PC Name', detail.pc_name),
+            ('Operating System', detail.operating_system),
+            ('OS Type', detail.os_type),
             ('Make / Brand', detail.pc_make),
             ('Model', detail.pc_model),
             ('PC Type', detail.pc_type),

@@ -43,9 +43,12 @@ interface FormState {
   soundcard_channel: string;
   bms_license: string;
   additional_hardware: string;
+  pc_name: string;
   pc_make: string;
   pc_model: string;
   pc_type: string;
+  operating_system: string;
+  os_type: string;
   ram: string;
   cpu_type: string;
   cpu_speed: string;
@@ -74,9 +77,12 @@ const emptyForm: FormState = {
   soundcard_channel: '',
   bms_license: '',
   additional_hardware: '',
+  pc_name: '',
   pc_make: '',
   pc_model: '',
   pc_type: '',
+  operating_system: '',
+  os_type: '',
   ram: '',
   cpu_type: '',
   cpu_speed: '',
@@ -127,9 +133,12 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
         soundcard_channel: detail.soundcard_channel || '',
         bms_license: detail.bms_license || '',
         additional_hardware: detail.additional_hardware || '',
+        pc_name: detail.pc_name || '',
         pc_make: detail.pc_make || '',
         pc_model: detail.pc_model || '',
         pc_type: detail.pc_type || '',
+        operating_system: detail.operating_system || '',
+        os_type: detail.os_type || '',
         ram: detail.ram || '',
         cpu_type: detail.cpu_type || '',
         cpu_speed: detail.cpu_speed || '',
@@ -242,9 +251,12 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
         soundcard_channel: form.soundcard_channel,
         bms_license: form.bms_license,
         additional_hardware: form.additional_hardware,
+        pc_name: form.pc_name,
         pc_make: form.pc_make,
         pc_model: form.pc_model,
         pc_type: form.pc_type,
+        operating_system: form.operating_system,
+        os_type: form.os_type,
         ram: form.ram,
         cpu_type: form.cpu_type,
         cpu_speed: form.cpu_speed,
@@ -468,7 +480,40 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
                 PC Specifications
               </Typography>
               <Grid container spacing={2}>
-                {/* Row 1: PC Make, Model, Type */}
+                {/* Row 1: PC Name, Operating System, OS Type */}
+                <Grid item xs={12} sm={4}>
+                  <TextField
+                    fullWidth
+                    label="PC Name"
+                    value={form.pc_name}
+                    onChange={(e) => handleFieldChange('pc_name', e.target.value)}
+                    placeholder="e.g., FRONT-DESK-01"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <TextField
+                    fullWidth
+                    label="Operating System"
+                    value={form.operating_system}
+                    onChange={(e) => handleFieldChange('operating_system', e.target.value)}
+                    placeholder="e.g., Windows 10, Windows 11"
+                  />
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <TextField
+                    fullWidth
+                    select
+                    label="OS Type"
+                    value={form.os_type}
+                    onChange={(e) => handleFieldChange('os_type', e.target.value)}
+                  >
+                    <MenuItem value="">-</MenuItem>
+                    <MenuItem value="32-bit">32-bit</MenuItem>
+                    <MenuItem value="64-bit">64-bit</MenuItem>
+                  </TextField>
+                </Grid>
+
+                {/* Row 2: PC Make, Model, Type */}
                 <Grid item xs={12} sm={4}>
                   <TextField
                     fullWidth
@@ -497,7 +542,7 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
                   />
                 </Grid>
 
-                {/* Row 2: RAM, CPU Type, CPU Speed */}
+                {/* Row 3: RAM, CPU Type, CPU Speed */}
                 <Grid item xs={12} sm={4}>
                   <TextField
                     fullWidth
