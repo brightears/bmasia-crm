@@ -98,13 +98,19 @@ class QuickBooksExportService:
         currency = (invoice.currency or 'USD').upper()
         return ar_accounts.get(currency, ar_accounts.get('USD', 'Accounts Receivable'))
 
-    def _resolve_income_account(self, product_service, income_accounts):
-        """Select income account based on product/service type."""
+    def _resolve_income_account(self, product_service, income_accounts, description=None):
+        """Select income account based on product/service type.
+
+        Falls back to checking description when product_service is empty
+        (handles old invoices where product keywords are in the description).
+        """
         if not income_accounts:
             return 'Service Revenue'
-        if not product_service:
+        # Try product_service first, then fall back to description
+        text_to_check = product_service or description or ''
+        if not text_to_check:
             return income_accounts.get('default', 'Service Revenue')
-        ps_lower = product_service.lower().strip().replace(' ', '')
+        ps_lower = text_to_check.lower().strip().replace(' ', '')
         # Soundtrack matching
         if 'soundtrack' in ps_lower:
             return income_accounts.get('syb', income_accounts.get('default', 'Service Revenue'))
@@ -240,13 +246,23 @@ class QuickBooksExportService:
         Income account is resolved per line item based on product_service field.
         """
         description = self._sanitize_text(item.description or '')
-        quantity = self._format_amount(item.quantity)
+        # Append service period if available
+        if item.service_period_start or item.service_period_end:
+            period_start = self._format_date(item.service_period_start) if item.service_period_start else ''
+            period_end = self._format_date(item.service_period_end) if item.service_period_end else ''
+            if period_start and period_end:
+                description += f' (Period: {period_start} - {period_end})'
+            elif period_start:
+                description += f' (From: {period_start})'
+            elif period_end:
+                description += f' (To: {period_end})'
+        quantity = self._format_amount(-item.quantity)  # Negative for SPL credit rows
         unit_price = self._format_amount(item.unit_price)
         # Use pre-tax amount (qty * unit_price), NOT line_total which includes tax
         pre_tax_amount = item.quantity * item.unit_price
         line_amount = self._format_amount(-pre_tax_amount)  # Negative for SPL
-        item_name = self._get_item_name(item.product_service)
-        income_account = self._resolve_income_account(item.product_service, income_accounts)
+        item_name = self._get_item_name(item.product_service, item.description)
+        income_account = self._resolve_income_account(item.product_service, income_accounts, item.description)
 
         spl_values = [
             str(idx),               # SPLID
@@ -263,10 +279,10 @@ class QuickBooksExportService:
         output.write('SPL\t' + '\t'.join(spl_values) + '\n')
 
     def _format_date(self, date_obj):
-        """Format date as MM/DD/YYYY for QuickBooks."""
+        """Format date as DD/MM/YYYY for QuickBooks (Thailand locale)."""
         if not date_obj:
             return ''
-        return date_obj.strftime('%m/%d/%Y')
+        return date_obj.strftime('%d/%m/%Y')
 
     def _format_amount(self, amount):
         """Format decimal amount to 2 decimal places."""
@@ -298,13 +314,20 @@ class QuickBooksExportService:
         # Truncate
         return text[:255]
 
-    def _get_item_name(self, product_service):
-        """Map CRM product_service to QuickBooks item name."""
-        if not product_service:
+    def _get_item_name(self, product_service, description=None):
+        """Map CRM product_service to QuickBooks item name.
+
+        Falls back to checking description when product_service is empty
+        (handles old invoices where product keywords are in the description).
+        """
+        text_to_check = product_service
+        if not text_to_check:
+            text_to_check = description or ''
+        if not text_to_check:
             return 'Service'
 
         # Check exact match first
-        ps_lower = product_service.lower().strip()
+        ps_lower = text_to_check.lower().strip()
         if ps_lower in PRODUCT_SERVICE_TO_QB_ITEM:
             return PRODUCT_SERVICE_TO_QB_ITEM[ps_lower]
 
@@ -313,5 +336,7 @@ class QuickBooksExportService:
             if key in ps_lower.replace(' ', ''):
                 return qb_name
 
-        # Use the product_service value itself (sanitized)
-        return self._sanitize_text(product_service)
+        # Use the product_service value itself (sanitized), not the description
+        if product_service:
+            return self._sanitize_text(product_service)
+        return 'Service'
