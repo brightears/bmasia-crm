@@ -2,6 +2,175 @@
 
 ## February 2026
 
+### Feb 19, 2026 - QuickBooks IIF Export: 4 Fixes from Pom's Testing
+
+**Context**: Pom imported the IIF file into QuickBooks Pro 2016 and found 4 issues: (1) date format wrong (QB Thailand expects DD/MM/YYYY), (2) old invoices without `product_service` show generic "Service" INVITEM even though description contains product keywords, (3) QNTY shows negative in QB after import, (4) service period dates not exported.
+
+**Fix 1 — Date Format DD/MM/YYYY** (`quickbooks_export_service.py:_format_date`):
+- Changed `date_obj.strftime('%m/%d/%Y')` → `date_obj.strftime('%d/%m/%Y')`
+- QuickBooks uses Windows locale date format — Thailand uses DD/MM/YYYY
+- Affects all DATE fields in IIF: invoice date, due date, service period dates
+
+**Fix 2 — Description-Based Product Fallback** (`quickbooks_export_service.py`):
+- `_resolve_income_account(product_service, income_accounts, description=None)`: when `product_service` is empty, falls back to checking `description` for product keywords ("soundtrack" → SYB account, "beatbreeze"/"beat" → BMS account)
+- `_get_item_name(product_service, description=None)`: same fallback — when `product_service` is empty, checks description for keywords. Returns mapped QB item name (e.g., "Soundtrack Music Service"), NOT the raw description text
+- `_write_line_item()`: passes `item.description` to both methods as fallback parameter
+- Handles old invoices where product info is in the description field rather than the `product_service` dropdown
+
+**Fix 3 — QNTY Sign for SPL Rows** (`quickbooks_export_service.py:_write_line_item`):
+- Changed `self._format_amount(item.quantity)` → `self._format_amount(-item.quantity)`
+- SPL rows have negative AMOUNT (credit to income). QB may calculate display qty from AMOUNT/PRICE — if AMOUNT=-28000, QNTY=2, PRICE=14000, QB shows qty=-2
+- With QNTY=-2: AMOUNT=-28000, QNTY=-2, PRICE=14000 → QB displays qty=2 on the invoice
+- Only affects line item SPL rows (VAT and discount SPL rows already had QNTY=0)
+
+**Fix 4 — Service Period in MEMO** (`quickbooks_export_service.py:_write_line_item`):
+- Appends service period dates to the MEMO (description) field when `service_period_start`/`service_period_end` are set
+- Format: `(Period: DD/MM/YYYY - DD/MM/YYYY)` after the line item description
+- Uses same `_format_date()` (now DD/MM/YYYY) for consistency
+- Handles partial periods: `(From: DD/MM/YYYY)` or `(To: DD/MM/YYYY)` when only one date is set
+
+**Files Modified** (1 file):
+- `crm_app/services/quickbooks_export_service.py` — All 4 fixes
+
+**No frontend changes. No migrations. No model changes.**
+
+**Commit**: `d908d95b`
+
+---
+
+### Feb 19, 2026 - QuickBooks Export: Per-Product Income Accounts & Per-Currency AR
+
+**Context**: Pom tested the QB export and shared her actual chart of accounts. Two issues: (1) all line items credited the same income account, but Soundtrack (SYB) and Beat Breeze (BMS) need separate revenue accounts; (2) all invoices debited the same AR account, but BMAT needs currency-specific AR (THB local vs USD overseas).
+
+**Backend — Per-Product Income Resolution** (`quickbooks_export_service.py`):
+- Replaced `income_account` (string) with `income_accounts` (dict): `{'syb': '...', 'bms': '...', 'default': '...'}`
+- New `_resolve_income_account(product_service, income_accounts)` method:
+  - Normalizes product_service to lowercase, strips spaces
+  - 'soundtrack' → `income_accounts['syb']`
+  - 'beatbreeze' or 'beat' → `income_accounts['bms']`
+  - Fallback → `income_accounts['default']`
+- `_write_line_item()` now calls `_resolve_income_account()` per line item for the ACCNT field
+
+**Backend — Per-Currency AR Resolution** (`quickbooks_export_service.py`):
+- Replaced `ar_account` (string) with `ar_accounts` (dict): `{'THB': '...', 'USD': '...'}`
+- New `_resolve_ar_account(invoice, ar_accounts)` method:
+  - Looks up `invoice.currency` in `ar_accounts` dict
+  - Falls back to USD, then 'Accounts Receivable'
+- `_write_invoice()` calls `_resolve_ar_account()` for the TRNS ACCNT field
+
+**Backend Endpoint** (`views.py`, lines 4108-4140):
+- Replaced 3 params (`ar_account`, `income_account`, `tax_account`) with 6 named params:
+  - `ar_account_thb`, `ar_account_usd`
+  - `income_account_syb`, `income_account_bms`, `income_account_default`
+  - `tax_account` (unchanged)
+- Builds `ar_accounts` and `income_accounts` dicts from query params
+
+**Frontend Dialog** (`Invoices.tsx`):
+- 6 state variables replace 3: `qbArAccountThb`, `qbArAccountUsd`, `qbIncomeAccountSyb`, `qbIncomeAccountBms`, `qbIncomeAccountDefault`, `qbTaxAccount`
+- `QB_ENTITY_DEFAULTS` now contains Pom's actual QB account names:
+  - BMAT: `1005 น LOCAL ACCOUNTS RECEIVABLE` (THB), `1005.1 น OVERSEAS ACCOUNTS RECEIVABLE` (USD), `4006.1 น SYB RESELLER`, `4006.2 น BMS MUSIC`, `2030.7 น TAX`
+  - BMAL: `1005 น ACCOUNTS RECEIVABLE` (USD only), same SYB/BMS revenue accounts
+- Dialog grouped into 3 sections: "Accounts Receivable (by currency)", "Revenue Accounts (by product)", "Tax" (BMAT only)
+- AR THB field only shown for Thailand entity
+
+**Frontend API** (`api.ts`):
+- Updated `exportQuickBooks` params type with new param names
+
+**Files Modified** (4 files):
+- `crm_app/services/quickbooks_export_service.py` — `_resolve_ar_account()`, `_resolve_income_account()`, dict params throughout
+- `crm_app/views.py` — 6 named query params → dicts
+- `bmasia-crm-frontend/src/services/api.ts` — param type update
+- `bmasia-crm-frontend/src/pages/Invoices.tsx` — 6 state vars, entity defaults, grouped dialog fields
+
+**Note**: Pom also listed HKD/GBP/EUR/SGD/CNY AR accounts for BMAL, but the CRM Invoice model only supports USD and THB currencies. Multi-currency expansion is a future task.
+
+**Commit**: `f9f6330a`
+
+---
+
+### Feb 19, 2026 - Client Tech Details: PC Name, Operating System, OS Type
+
+**Context**: Keith requested 3 additional fields he forgot to include in the original Client Tech Details spec: Operating System, OS Type (32/64-bit), PC Name.
+
+**Backend Changes**:
+- **Model** (`crm_app/models.py`): Added 3 fields to ClientTechDetail in PC Specifications section:
+  - `pc_name` — CharField(100), computer/hostname
+  - `operating_system` — CharField(100), e.g. Windows 10, Windows 11
+  - `os_type` — CharField(20), 32-bit or 64-bit
+- **Migration**: `0074_clienttechdetail_os_pcname.py` (manual — no local Django)
+- **Serializer** (`crm_app/serializers.py`): Added `pc_name`, `operating_system`, `os_type` to ClientTechDetailSerializer Meta.fields
+- **Admin** (`crm_app/admin.py`): Added to PC Specifications fieldset (before pc_make)
+- **PDF** (`crm_app/views.py`): Added 3 rows at top of PC Specifications section in tech detail PDF download
+
+**Frontend Changes**:
+- **Types** (`types/index.ts`): Added `pc_name`, `operating_system`, `os_type` to ClientTechDetail interface
+- **Form** (`ClientTechDetailForm.tsx`):
+  - FormState interface + emptyForm constant
+  - loadFormData (edit mode) + handleSave payload
+  - JSX: New Row 1 in PC Specs section — PC Name (text), Operating System (text), OS Type (select dropdown: 32-bit/64-bit)
+  - Existing PC Make/Model/Type moved to Row 2
+- **Detail View** (`ClientTechDetails.tsx`): 3 new DetailRow entries at top of PC Specifications section
+
+**Files Modified** (8 files):
+- `crm_app/models.py`, `crm_app/serializers.py`, `crm_app/admin.py`, `crm_app/views.py`
+- `crm_app/migrations/0074_clienttechdetail_os_pcname.py` (NEW)
+- `bmasia-crm-frontend/src/types/index.ts`
+- `bmasia-crm-frontend/src/components/ClientTechDetailForm.tsx`
+- `bmasia-crm-frontend/src/pages/ClientTechDetails.tsx`
+
+**Commit**: `cad684b0`
+
+---
+
+### Feb 19, 2026 - QuickBooks Export: VAT 7%, Account Mapping, Entity Separation
+
+**Context**: Khun Pom tested the QuickBooks IIF export and provided follow-up feedback: (1) VAT 7% must be a separate line so QuickBooks can track VAT Payable, (2) account name fields need to be visible (not hidden), (3) BMAL and BMAT must export as separate files for separate QB company files.
+
+**Item 1 — VAT as Separate SPL Row** (`quickbooks_export_service.py`):
+- Line item SPL rows now use **pre-tax amounts** (`qty * unit_price`) instead of `line_total` (which includes tax)
+- New VAT SPL row: accumulates tax from all line items, writes single SPL crediting `tax_account` with `-total_tax`
+- Only generated when `total_tax > 0` (Thailand 7%) — BMAL (0% VAT) unchanged
+- Discount SPL row added when `invoice.discount_amount > 0` (positive amount = debit)
+- Math: `TRNS (+total) + SPL revenue (-pre_tax each) + SPL VAT (-tax) + SPL discount (+disc) = 0`
+- Added `tax_account` parameter to `generate_iif()` and `_write_invoice()` (default: 'VAT Payable')
+- Fallback path (no line items) also splits into pre-tax + VAT SPL
+
+**Item 2 — Prominent Account Fields** (`Invoices.tsx`):
+- Removed collapsible `<Collapse>` toggle — account fields always visible in gray box
+- Added "VAT Payable Account" TextField (shown only when Thailand entity selected)
+- `QB_ENTITY_DEFAULTS` constant maps entity → `{ ar, income, tax }` defaults
+- `handleQbEntityChange()` auto-fills all 3 account fields when entity changes
+- Removed `qbShowSettings` state, added `qbTaxAccount` state
+- Removed unused `Collapse` import
+
+**Item 3 — Entity Separation**:
+- Removed `<MenuItem value="">All Entities</MenuItem>` from entity dropdown
+- Entity selection now **required** — export button disabled without it
+- Backend returns 400 if `billing_entity` missing
+- Entity-specific filenames: `invoices-BMAT-YYYYMMDD.iif` / `invoices-BMAL-YYYYMMDD.iif`
+- Both frontend (`link.download`) and backend (`Content-Disposition`) use same naming
+
+**Backend Endpoint Update** (`views.py`):
+- Added `tax_account` query param (default: 'VAT Payable')
+- Made `billing_entity` required (400 error if missing)
+- Passes `tax_account` to `generate_iif()`
+- Entity abbreviation in filename: `'BMAT' if 'Thailand' in billing_entity else 'BMAL'`
+
+**Frontend API** (`api.ts`):
+- Added `tax_account?: string` to `exportQuickBooks()` params type
+
+**Files Modified**:
+- `crm_app/services/quickbooks_export_service.py` — VAT SPL row, pre-tax amounts, tax_account param, discount SPL
+- `crm_app/views.py` — tax_account param, required billing_entity, entity filename
+- `bmasia-crm-frontend/src/services/api.ts` — tax_account param type
+- `bmasia-crm-frontend/src/pages/Invoices.tsx` — Required entity, visible accounts, VAT field, entity defaults
+
+**No migrations. No model changes. No new dependencies.**
+
+**Commit**: `fbdef09b`
+
+---
+
 ### Feb 19, 2026 - Pom's Finance Feedback: Branch Field, Address Save, QuickBooks Export
 
 **Context**: Finance manager (Khun Pom) raised three issues: (1) Branch field is a dropdown — needs free text for values like "Branch 00001", (2) Company address edits won't save, (3) Invoices must export to QuickBooks Pro 2016 to avoid double data entry.

@@ -986,7 +986,7 @@ class ContractAdmin(admin.ModelAdmin):
             # Calculate monthly value manually here to debug
             months = ((obj.end_date.year - obj.start_date.year) * 12 + 
                      (obj.end_date.month - obj.start_date.month))
-            if obj.end_date.day >= obj.start_date.day:
+            if obj.end_date.day > obj.start_date.day:
                 months += 1
             
             if months > 0:

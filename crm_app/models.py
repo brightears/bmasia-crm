@@ -886,7 +886,7 @@ class Contract(TimestampedModel):
             months = ((self.end_date.year - self.start_date.year) * 12 +
                      (self.end_date.month - self.start_date.month))
             # Add 1 because we want inclusive months (e.g., Jan to Dec = 12 months, not 11)
-            if self.end_date.day >= self.start_date.day:
+            if self.end_date.day > self.start_date.day:
                 months += 1
             if months > 0:
                 return round(float(self.value) / months, 2)

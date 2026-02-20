@@ -91,7 +91,7 @@ def _format_duration(start_date, end_date):
         return 'As specified'
     months = ((end_date.year - start_date.year) * 12 +
              (end_date.month - start_date.month))
-    if end_date.day >= start_date.day:
+    if end_date.day > start_date.day:
         months += 1
     if months <= 0:
         return '0 months'
@@ -100,7 +100,7 @@ def _format_duration(start_date, end_date):
     if months < 12:
         return f'{months} months'
     if months == 12:
-        return '12 months'
+        return '1 year'
     if months % 12 == 0:
         years = months // 12
         return f'{years} year{"s" if years > 1 else ""}'
@@ -1388,7 +1388,27 @@ class ContractViewSet(BaseModelViewSet):
             # Signatories
             '{{client_signatory_name}}': contract.customer_signatory_name or '',
             '{{client_signatory_title}}': contract.customer_signatory_title or '',
+
+            # Duration & Multi-year pricing
+            '{{duration}}': _format_duration(contract.start_date, contract.end_date) if contract.start_date and contract.end_date else '',
+            '{{value_amount}}': f"{contract.value:,.2f}" if contract.value else '',
+            '{{annual_value}}': f"{contract.currency} {contract.value:,.2f}" if contract.value else '',
+            '{{total_contract_value}}': '',
+            '{{total_contract_value_amount}}': '',
         }
+
+        # Compute Total Contract Value for multi-year deals
+        if contract.start_date and contract.end_date and contract.value:
+            dur_months = ((contract.end_date.year - contract.start_date.year) * 12 +
+                         (contract.end_date.month - contract.start_date.month))
+            if contract.end_date.day > contract.start_date.day:
+                dur_months += 1
+            if dur_months > 12:
+                years = dur_months / 12
+                tcv = float(contract.value) * years
+                replacements['{{total_contract_value}}'] = f"{contract.currency} {tcv:,.2f}"
+                replacements['{{total_contract_value_amount}}'] = f"{tcv:,.2f}"
+
         for var, value in replacements.items():
             content = content.replace(var, str(value))
         return content
@@ -2189,13 +2209,25 @@ and<br/><br/>
             tax_amount = total_before_tax * (tax_rate / 100)
             total_with_tax = total_before_tax + tax_amount
 
+            # Determine if multi-year for "per year" labeling
+            is_multi_year = False
+            contract_duration_months = 0
+            if contract.start_date and contract.end_date:
+                contract_duration_months = ((contract.end_date.year - contract.start_date.year) * 12 +
+                                           (contract.end_date.month - contract.start_date.month))
+                if contract.end_date.day > contract.start_date.day:
+                    contract_duration_months += 1
+                is_multi_year = contract_duration_months > 12
+
+            per_year_label = " per year" if is_multi_year else ""
+
             # Check if contract has line items for detailed breakdown
             contract_line_items = list(contract.line_items.all()) if hasattr(contract, 'line_items') else []
 
             if contract_line_items:
                 # Line items breakdown
                 elements.append(Paragraph(
-                    f"<b>{clause_num}. Total cost:</b>",
+                    f"<b>{clause_num}. Total cost{per_year_label}:</b>",
                     clause_style
                 ))
                 for li in contract_line_items:
@@ -2205,7 +2237,7 @@ and<br/><br/>
                         f"&nbsp;&nbsp;&nbsp;&nbsp;• {qty}× {li.product_service} @ {contract.currency} {float(li.unit_price):,.2f} = {contract.currency} {li_total:,.2f}",
                         clause_style
                     ))
-                vat_text = f" + {tax_rate:.0f}% VAT ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}</b>" if tax_rate > 0 else ""
+                vat_text = f" + {tax_rate:.0f}% VAT ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}{per_year_label}</b>" if tax_rate > 0 else ""
                 elements.append(Paragraph(
                     f"&nbsp;&nbsp;&nbsp;&nbsp;Subtotal: {contract.currency} {total_before_tax:,.2f}{vat_text}",
                     clause_style
@@ -2214,9 +2246,20 @@ and<br/><br/>
                 # Legacy: flat value with zone count
                 zone_count = contract.get_zone_count()
                 elements.append(Paragraph(
-                    f"<b>{clause_num}.</b> Total cost: {contract.currency} {total_before_tax:,.2f} for {zone_count} zone{'s' if zone_count != 1 else ''} + {tax_rate:.0f}% VAT ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}</b>",
+                    f"<b>{clause_num}.</b> Total cost{per_year_label}: {contract.currency} {total_before_tax:,.2f} for {zone_count} zone{'s' if zone_count != 1 else ''} + {tax_rate:.0f}% VAT ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}{per_year_label}</b>",
                     clause_style
                 ))
+
+            # Total Contract Value for multi-year deals
+            if is_multi_year:
+                years = contract_duration_months / 12
+                tcv = total_with_tax * years
+                duration_label = _format_duration(contract.start_date, contract.end_date)
+                elements.append(Paragraph(
+                    f"&nbsp;&nbsp;&nbsp;&nbsp;<b>Total Contract Value ({duration_label}):</b> {contract.currency} {tcv:,.2f}",
+                    clause_style
+                ))
+
             clause_num += 1
 
             # Clause 7: Terms of Payment
@@ -3028,11 +3071,28 @@ and<br/><br/>
         # Currency symbol
         currency_symbol = {'USD': '$', 'THB': 'THB ', 'EUR': 'EUR ', 'GBP': 'GBP '}.get(contract.currency, contract.currency + ' ')
 
+        # Determine if multi-year for master agreement
+        ma_duration_months = 0
+        ma_is_multi_year = False
+        if contract.start_date and contract.end_date:
+            ma_duration_months = ((contract.end_date.year - contract.start_date.year) * 12 +
+                                 (contract.end_date.month - contract.start_date.month))
+            if contract.end_date.day > contract.start_date.day:
+                ma_duration_months += 1
+            ma_is_multi_year = ma_duration_months > 12
+
+        annual_label = "Annual Value" if ma_is_multi_year else "Total Value"
         details_data = [
             ['Service Type', contract.get_service_type_display() if contract.service_type else 'Professional Services'],
             ['Contract Period', f"{contract.start_date.strftime('%B %d, %Y')} to {contract.end_date.strftime('%B %d, %Y')}"],
-            ['Total Value', f"{currency_symbol}{contract.value:,.2f} {contract.currency}"],
+            [annual_label, f"{currency_symbol}{contract.value:,.2f}"],
         ]
+
+        if ma_is_multi_year:
+            years = ma_duration_months / 12
+            ma_tcv = float(contract.value) * years
+            duration_label = _format_duration(contract.start_date, contract.end_date)
+            details_data.append(['Total Contract Value', f"{currency_symbol}{ma_tcv:,.2f} ({duration_label})"])
 
         if contract.monthly_value > 0:
             details_data.append(['Monthly Value', f"{currency_symbol}{contract.monthly_value:,.2f}"])
@@ -3426,6 +3486,18 @@ and<br/><br/>
             ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
         ]))
         elements.append(price_table)
+
+        # Total Contract Value for multi-year master agreements
+        if ma_is_multi_year:
+            years = ma_duration_months / 12
+            ma_tcv_with_tax = total_with_tax * years
+            duration_label = _format_duration(contract.start_date, contract.end_date)
+            elements.append(Spacer(1, 0.1*inch))
+            elements.append(Paragraph(
+                f"<b>Total Contract Value ({duration_label}):</b> {currency_symbol}{ma_tcv_with_tax:,.2f}",
+                body_style
+            ))
+
         elements.append(Spacer(1, 0.3*inch))
 
         # Account Representation & Customer Service
