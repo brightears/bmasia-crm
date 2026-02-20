@@ -2234,6 +2234,10 @@ class Quote(TimestampedModel):
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Draft')
     quote_type = models.CharField(max_length=20, choices=QUOTE_TYPE_CHOICES, default='new')
+    contract_duration_months = models.PositiveIntegerField(
+        default=12,
+        help_text="Proposed contract duration in months (e.g., 6, 12, 24, 36)"
+    )
     valid_from = models.DateField()
     valid_until = models.DateField()
 

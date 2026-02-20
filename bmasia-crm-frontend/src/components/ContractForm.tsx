@@ -221,6 +221,15 @@ const ContractForm: React.FC<ContractFormProps> = ({
   const [selectedQuoteId, setSelectedQuoteId] = useState<string>('');
   const [selectedCompanyCountry, setSelectedCompanyCountry] = useState<string>('');
   const [focusedPriceIndex, setFocusedPriceIndex] = useState<number | null>(null);
+  const [durationMonths, setDurationMonths] = useState<number>(12);
+  const [isCustomContractDuration, setIsCustomContractDuration] = useState(false);
+
+  const CONTRACT_DURATION_PRESETS = [
+    { label: '6 months', months: 6 },
+    { label: '1 year', months: 12 },
+    { label: '2 years', months: 24 },
+    { label: '3 years', months: 36 },
+  ];
 
   useEffect(() => {
     if (open) {
@@ -311,6 +320,20 @@ const ContractForm: React.FC<ContractFormProps> = ({
       customer_contact_email: contract.customer_contact_email || '',
       customer_contact_title: contract.customer_contact_title || '',
     });
+
+    // Derive duration from existing start/end dates
+    if (contract.start_date && contract.end_date) {
+      const start = new Date(contract.start_date);
+      const end = new Date(contract.end_date);
+      let months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+      if (end.getDate() >= start.getDate()) months += 0; // no adjustment needed
+      const isPreset = [6, 12, 24, 36].includes(months);
+      setDurationMonths(months || 12);
+      setIsCustomContractDuration(!isPreset);
+    } else {
+      setDurationMonths(12);
+      setIsCustomContractDuration(false);
+    }
 
     // Load additional signatories
     setAdditionalSignatories(contract.additional_customer_signatories || []);
@@ -405,6 +428,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
     setError('');
     setShowErrors(false);
     setLocationsTrimmedWarning('');
+    setDurationMonths(12);
+    setIsCustomContractDuration(false);
 
     // Allow sync to run after form reset
     setTimeout(() => { isFormInitialized.current = true; }, 0);
@@ -446,13 +471,31 @@ const ContractForm: React.FC<ContractFormProps> = ({
     })));
   };
 
+  const calculateEndDateFromMonths = (startDate: Date | null, months: number) => {
+    if (!startDate || months <= 0) return null;
+    const date = new Date(startDate);
+    date.setMonth(date.getMonth() + months);
+    return date;
+  };
+
   const handleStartDateChange = (date: Date | null) => {
     setFormData(prev => ({
       ...prev,
       start_date: date,
-      end_date: date && prev.contract_type === 'Annual' ?
-        new Date(date.getFullYear() + 1, date.getMonth(), date.getDate()) :
-        prev.end_date,
+      end_date: date && !isCustomContractDuration
+        ? calculateEndDateFromMonths(date, durationMonths)
+        : prev.end_date,
+    }));
+  };
+
+  const handleDurationChange = (months: number) => {
+    setDurationMonths(months);
+    setIsCustomContractDuration(false);
+    setFormData(prev => ({
+      ...prev,
+      end_date: prev.start_date
+        ? calculateEndDateFromMonths(prev.start_date, months)
+        : prev.end_date,
     }));
   };
 
@@ -465,23 +508,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
   const removeAttachment = (index: number) => {
     setAttachments(prev => prev.filter((_, i) => i !== index));
-  };
-
-  const calculateEndDate = (startDate: Date | null, type: string) => {
-    if (!startDate) return null;
-
-    const date = new Date(startDate);
-    switch (type) {
-      case 'Annual':
-        date.setFullYear(date.getFullYear() + 1);
-        break;
-      case 'Monthly':
-        date.setMonth(date.getMonth() + 1);
-        break;
-      default:
-        return null;
-    }
-    return date;
   };
 
   // Helper to get currency symbol
@@ -647,6 +673,21 @@ const ContractForm: React.FC<ContractFormProps> = ({
         ...prev,
         currency: selectedQuote.currency,
       }));
+
+      // Transfer contract duration from quote
+      if (selectedQuote.contract_duration_months) {
+        const dur = selectedQuote.contract_duration_months;
+        setDurationMonths(dur);
+        const isPreset = [6, 12, 24, 36].includes(dur);
+        setIsCustomContractDuration(!isPreset);
+        // Auto-calculate end_date if start_date is set
+        setFormData(prev => ({
+          ...prev,
+          end_date: prev.start_date
+            ? calculateEndDateFromMonths(prev.start_date, dur)
+            : prev.end_date,
+        }));
+      }
 
       // Auto-fill payment terms if quote has terms
       if (selectedQuote.terms_conditions) {
@@ -846,11 +887,9 @@ const ContractForm: React.FC<ContractFormProps> = ({
                     <Select
                       value={formData.contract_type}
                       onChange={(e) => {
-                        const type = e.target.value;
                         setFormData(prev => ({
                           ...prev,
-                          contract_type: type as any,
-                          end_date: calculateEndDate(prev.start_date, type),
+                          contract_type: e.target.value as any,
                         }));
                       }}
                       label="Contract Type"
@@ -1109,10 +1148,54 @@ const ContractForm: React.FC<ContractFormProps> = ({
                   }}
                 />
 
+                <FormControl sx={{ minWidth: 160 }}>
+                  <InputLabel>Duration</InputLabel>
+                  <Select
+                    value={isCustomContractDuration ? 'custom' : String(durationMonths)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === 'custom') {
+                        setIsCustomContractDuration(true);
+                      } else {
+                        handleDurationChange(Number(val));
+                      }
+                    }}
+                    label="Duration"
+                  >
+                    {CONTRACT_DURATION_PRESETS.map(p => (
+                      <MenuItem key={p.months} value={String(p.months)}>{p.label}</MenuItem>
+                    ))}
+                    <MenuItem value="custom">Custom</MenuItem>
+                  </Select>
+                </FormControl>
+
+                {isCustomContractDuration && (
+                  <TextField
+                    label="Months"
+                    type="number"
+                    value={durationMonths}
+                    onChange={(e) => {
+                      const val = Math.max(1, parseInt(e.target.value) || 1);
+                      setDurationMonths(val);
+                      setFormData(prev => ({
+                        ...prev,
+                        end_date: prev.start_date
+                          ? calculateEndDateFromMonths(prev.start_date, val)
+                          : prev.end_date,
+                      }));
+                    }}
+                    inputProps={{ min: 1, max: 120 }}
+                    sx={{ width: 120 }}
+                  />
+                )}
+
                 <DatePicker
                   label="End Date *"
                   value={formData.end_date}
-                  onChange={(date) => setFormData(prev => ({ ...prev, end_date: date }))}
+                  onChange={(date) => {
+                    setFormData(prev => ({ ...prev, end_date: date }));
+                    setIsCustomContractDuration(true);
+                  }}
                   slotProps={{
                     textField: {
                       fullWidth: true,

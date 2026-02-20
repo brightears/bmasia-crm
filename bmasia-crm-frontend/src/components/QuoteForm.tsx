@@ -133,6 +133,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
     contact: '',
     opportunity: '',
     quote_type: 'new' as 'new' | 'renewal' | 'addon',
+    contract_duration_months: 12,
     status: 'Draft' as Quote['status'],
     valid_from: new Date(),
     valid_until: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
@@ -158,6 +159,14 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
   const [attachments, setAttachments] = useState<File[]>([]);
   const [selectedCompanyCountry, setSelectedCompanyCountry] = useState<string>('');
   const [selectedTermsOption, setSelectedTermsOption] = useState<string>('30_days');
+  const [isCustomDuration, setIsCustomDuration] = useState(false);
+
+  const DURATION_PRESETS = [
+    { label: '6 months', months: 6 },
+    { label: '1 year', months: 12 },
+    { label: '2 years', months: 24 },
+    { label: '3 years', months: 36 },
+  ];
 
   useEffect(() => {
     if (open) {
@@ -168,6 +177,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
           contact: quote.contact || '',
           opportunity: quote.opportunity || '',
           quote_type: quote.quote_type || 'new',
+          contract_duration_months: quote.contract_duration_months || 12,
           status: quote.status,
           valid_from: new Date(quote.valid_from),
           valid_until: new Date(quote.valid_until),
@@ -176,6 +186,11 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
           currency: quote.currency,
         });
         setLineItems(quote.line_items || []);
+
+        // Detect if duration matches a preset
+        const dur = quote.contract_duration_months || 12;
+        const isPreset = [6, 12, 24, 36].includes(dur);
+        setIsCustomDuration(!isPreset);
 
         // Detect terms option from existing text
         const existingTerms = quote.terms_conditions || '';
@@ -205,7 +220,9 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
           quote_number: quoteNumber,
           company: prefillCompany,
           opportunity: prefillOpportunity,
+          contract_duration_months: 12,
         }));
+        setIsCustomDuration(false);
 
         // Set company country for Mini PC visibility
         if (prefillCompany) {
@@ -394,6 +411,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
         contact: formData.contact || undefined,
         opportunity: formData.opportunity || undefined,
         quote_type: formData.quote_type,
+        contract_duration_months: formData.contract_duration_months,
         status: formData.status,
         valid_from: formData.valid_from.toISOString().split('T')[0],
         valid_until: formData.valid_until.toISOString().split('T')[0],
@@ -444,6 +462,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
       contact: '',
       opportunity: '',
       quote_type: 'new' as 'new' | 'renewal' | 'addon',
+      contract_duration_months: 12,
       status: 'Draft',
       valid_from: new Date(),
       valid_until: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
@@ -451,6 +470,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
       notes: '',
       currency: 'USD',
     });
+    setIsCustomDuration(false);
     setLineItems([{
       product_service: defaultProduct?.name || 'Soundtrack Essential (Serviced)',
       description: defaultProduct?.description || '',
@@ -647,6 +667,46 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
                 </Select>
               </FormControl>
             </Grid>
+
+            <Grid item xs={12} md={3}>
+              <FormControl fullWidth>
+                <InputLabel>Contract Duration</InputLabel>
+                <Select
+                  value={isCustomDuration ? 'custom' : String(formData.contract_duration_months)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === 'custom') {
+                      setIsCustomDuration(true);
+                    } else {
+                      setIsCustomDuration(false);
+                      setFormData(prev => ({ ...prev, contract_duration_months: Number(val) }));
+                    }
+                  }}
+                  label="Contract Duration"
+                >
+                  {DURATION_PRESETS.map(p => (
+                    <MenuItem key={p.months} value={String(p.months)}>{p.label}</MenuItem>
+                  ))}
+                  <MenuItem value="custom">Custom</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+
+            {isCustomDuration && (
+              <Grid item xs={12} md={3}>
+                <TextField
+                  fullWidth
+                  label="Duration (months)"
+                  type="number"
+                  value={formData.contract_duration_months}
+                  onChange={(e) => {
+                    const val = Math.max(1, parseInt(e.target.value) || 1);
+                    setFormData(prev => ({ ...prev, contract_duration_months: val }));
+                  }}
+                  inputProps={{ min: 1, max: 120 }}
+                />
+              </Grid>
+            )}
 
             <Grid item xs={12} md={3}>
               <DatePicker

@@ -85,6 +85,48 @@ def convert_uuids_to_strings(obj):
     return obj
 
 
+def _format_duration(start_date, end_date):
+    """Format duration between two dates as human-readable text."""
+    if not start_date or not end_date:
+        return 'As specified'
+    months = ((end_date.year - start_date.year) * 12 +
+             (end_date.month - start_date.month))
+    if end_date.day >= start_date.day:
+        months += 1
+    if months <= 0:
+        return '0 months'
+    if months == 1:
+        return '1 month'
+    if months < 12:
+        return f'{months} months'
+    if months == 12:
+        return '12 months'
+    if months % 12 == 0:
+        years = months // 12
+        return f'{years} year{"s" if years > 1 else ""}'
+    years = months // 12
+    remaining = months % 12
+    return f'{years} year{"s" if years > 1 else ""} and {remaining} month{"s" if remaining > 1 else ""}'
+
+
+def _format_duration_from_months(months):
+    """Format a month count as human-readable text for Quote PDFs."""
+    if not months or months <= 0:
+        return 'As specified'
+    if months == 1:
+        return '1 month'
+    if months < 12:
+        return f'{months} months'
+    if months == 12:
+        return '1 year'
+    if months % 12 == 0:
+        years = months // 12
+        return f'{years} year{"s" if years > 1 else ""}'
+    years = months // 12
+    remaining = months % 12
+    return f'{years} year{"s" if years > 1 else ""} and {remaining} month{"s" if remaining > 1 else ""}'
+
+
 def format_address_multiline(company):
     """Format company address as multi-line HTML for PDF BILL TO sections.
     Builds line-by-line from individual fields to avoid splitting commas within values.
@@ -2087,12 +2129,9 @@ and<br/><br/>
 
             # Clause 4: Duration
             if contract.start_date and contract.end_date:
-                months = ((contract.end_date.year - contract.start_date.year) * 12 +
-                         (contract.end_date.month - contract.start_date.month))
-                if contract.end_date.day >= contract.start_date.day:
-                    months += 1
+                duration_text = _format_duration(contract.start_date, contract.end_date)
                 elements.append(Paragraph(
-                    f"<b>{clause_num}.</b> Duration: {months} months from {contract.start_date.strftime('%d %B %Y')} to {contract.end_date.strftime('%d %B %Y')}",
+                    f"<b>{clause_num}.</b> Duration: {duration_text} from {contract.start_date.strftime('%d %B %Y')} to {contract.end_date.strftime('%d %B %Y')}",
                     clause_style
                 ))
             else:
@@ -3186,7 +3225,7 @@ and<br/><br/>
             ['Hotel', f'{company.legal_entity_name or company.name}'],
             ['Premises', f'{company.full_address if company.full_address else company.country}'],
             ['Effective Date', contract.start_date.strftime('%B %d, %Y')],
-            ['Term', f'12 months from {contract.start_date.strftime("%B %d, %Y")} to {contract.end_date.strftime("%B %d, %Y")}'],
+            ['Term', f'{_format_duration(contract.start_date, contract.end_date)} from {contract.start_date.strftime("%B %d, %Y")} to {contract.end_date.strftime("%B %d, %Y")}'],
             ['Primary contact at Supplier', f'{entity_contact}\n{entity_contact_phone}\n{entity_contact_email}'],
             ['Primary contact at Hotel', f'{customer_contact}\n{customer_phone}\n{customer_email}'],
         ]
@@ -5000,13 +5039,14 @@ class QuoteViewSet(BaseModelViewSet):
 
         # Document metadata table (modern grid layout) - Status removed per customer feedback
         metadata_data = [
-            ['Quote Number', 'Date', 'Valid Until'],
+            ['Quote Number', 'Date', 'Valid Until', 'Contract Duration'],
             [quote.quote_number,
              quote.valid_from.strftime('%b %d, %Y'),
-             quote.valid_until.strftime('%b %d, %Y')]
+             quote.valid_until.strftime('%b %d, %Y'),
+             _format_duration_from_months(quote.contract_duration_months)]
         ]
 
-        metadata_table = Table(metadata_data, colWidths=[2.3*inch, 2.3*inch, 2.3*inch])
+        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.7*inch, 1.7*inch, 1.8*inch])
         metadata_table.setStyle(TableStyle([
             # Header row - orange background
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
@@ -5160,7 +5200,19 @@ class QuoteViewSet(BaseModelViewSet):
             tax_pct = (quote.tax_amount / after_discount * 100) if after_discount > 0 else 0
             totals_data.append([f'{tax_label} ({tax_pct:.0f}%):', f"{currency_symbol}{quote.tax_amount:,.2f}"])
 
-        totals_data.append(['<b>Total:</b>', f"<b>{currency_symbol}{quote.total_value:,.2f}</b>"])
+        # Adjust Total label and add Total Contract Value for multi-year deals
+        duration_months = quote.contract_duration_months or 12
+        if duration_months > 12:
+            duration_label = _format_duration_from_months(duration_months)
+            totals_data.append([f'<b>Total (Annual):</b>', f"<b>{currency_symbol}{quote.total_value:,.2f}</b>"])
+            years = duration_months / 12
+            total_contract_value = float(quote.total_value) * years
+            totals_data.append([f'<b>Total Contract Value ({duration_label}):</b>', f"<b>{currency_symbol}{total_contract_value:,.2f}</b>"])
+        elif duration_months < 12:
+            duration_label = _format_duration_from_months(duration_months)
+            totals_data.append([f'<b>Total ({duration_label}):</b>', f"<b>{currency_symbol}{quote.total_value:,.2f}</b>"])
+        else:
+            totals_data.append(['<b>Total:</b>', f"<b>{currency_symbol}{quote.total_value:,.2f}</b>"])
 
         # Convert to Paragraphs for HTML rendering
         totals_data_parsed = []

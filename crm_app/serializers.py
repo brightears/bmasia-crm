@@ -1030,7 +1030,7 @@ class QuoteSerializer(serializers.ModelSerializer):
         model = Quote
         fields = [
             'id', 'quote_number', 'company', 'company_name', 'contact', 'contact_name',
-            'opportunity', 'opportunity_name', 'status', 'quote_type', 'valid_from', 'valid_until',
+            'opportunity', 'opportunity_name', 'status', 'quote_type', 'contract_duration_months', 'valid_from', 'valid_until',
             'subtotal', 'tax_amount', 'discount_amount', 'total_value', 'currency',
             'terms_conditions', 'notes', 'is_expired', 'days_until_expiry',
             'sent_date', 'accepted_date', 'rejected_date', 'expired_date',
