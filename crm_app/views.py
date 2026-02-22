@@ -1409,7 +1409,8 @@ class ContractViewSet(BaseModelViewSet):
                 tcv = float(contract.value) * years
                 replacements['{{total_contract_value}}'] = f"{contract.currency} {tcv:,.2f}"
                 replacements['{{total_contract_value_amount}}'] = f"{tcv:,.2f}"
-                replacements['{{billing_note}}'] = f"Invoiced annually at {contract.currency} {contract.value:,.2f} per year."
+                vat_suffix = " + 7% VAT" if company and company.billing_entity == 'BMAsia (Thailand) Co., Ltd.' else ""
+                replacements['{{billing_note}}'] = f"Invoiced annually at {contract.currency} {contract.value:,.2f}{vat_suffix} per year."
 
         for var, value in replacements.items():
             content = content.replace(var, str(value))
