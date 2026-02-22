@@ -1758,7 +1758,21 @@ class ContractViewSet(BaseModelViewSet):
 
         # Create PDF buffer
         buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.4*inch)
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.75*inch)
+
+        # Footer callback — draws at fixed bottom position on every page (same pattern as invoice PDF)
+        def draw_contract_footer(canvas_obj, doc_obj):
+            canvas_obj.saveState()
+            page_width = letter[0]
+            canvas_obj.setStrokeColor(colors.HexColor('#e0e0e0'))
+            canvas_obj.setLineWidth(1)
+            canvas_obj.line(doc_obj.leftMargin, 0.65*inch, page_width - doc_obj.rightMargin, 0.65*inch)
+            canvas_obj.setFont('DejaVuSans-Bold', 7)
+            canvas_obj.setFillColor(colors.HexColor('#888888'))
+            canvas_obj.drawCentredString(page_width / 2, 0.48*inch, entity_name)
+            canvas_obj.setFont('DejaVuSans', 7)
+            canvas_obj.drawCentredString(page_width / 2, 0.35*inch, f"{entity_address} | Phone: {entity_phone}")
+            canvas_obj.restoreState()
 
         # Container for PDF elements
         elements = []
@@ -2077,25 +2091,10 @@ class ContractViewSet(BaseModelViewSet):
 
             # Template mode: Skip Additional Terms, Status Indicator, and Signatures
             # (template already contains complete contract with signatures)
-            # Just add a simple footer and build the PDF
-
-            # Footer for template mode
-            elements.append(Spacer(1, 0.3*inch))
-            elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
-
-            footer_style = ParagraphStyle(
-                'FooterText',
-                parent=styles['Normal'],
-                fontSize=8,
-                textColor=colors.HexColor('#888888'),
-                alignment=TA_CENTER,
-                leading=12,
-            )
-            footer_text = f"""<b>{entity_name}</b><br/>{entity_address} | Phone: {entity_phone}"""
-            elements.append(Paragraph(footer_text, footer_style))
+            # Footer is drawn via canvas callback — no flowable footer needed
 
             # Build PDF and return early
-            doc.build(elements)
+            doc.build(elements, onFirstPage=draw_contract_footer, onLaterPages=draw_contract_footer)
             pdf_data = buffer.getvalue()
             buffer.close()
 
@@ -2549,29 +2548,12 @@ and<br/><br/>
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ]))
         signature_elements.append(signature_table)
-        signature_elements.append(Spacer(1, 0.15*inch))
 
-        # Footer - entity-specific with separator (two-line format for cleaner appearance)
-        signature_elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
-
-        footer_style = ParagraphStyle(
-            'FooterText',
-            parent=styles['Normal'],
-            fontSize=8,
-            textColor=colors.HexColor('#888888'),
-            alignment=TA_CENTER,
-            leading=12,
-        )
-
-        # Two-line footer: company name on line 1, address + phone on line 2
-        footer_text = f"""<b>{entity_name}</b><br/>{entity_address} | Phone: {entity_phone}"""
-        signature_elements.append(Paragraph(footer_text, footer_style))
-
-        # Keep signature section and footer together on same page
+        # Keep signature section together on same page (footer drawn via canvas callback)
         elements.append(KeepTogether(signature_elements))
 
         # Build PDF
-        doc.build(elements)
+        doc.build(elements, onFirstPage=draw_contract_footer, onLaterPages=draw_contract_footer)
 
         # Get PDF data
         pdf_data = buffer.getvalue()
@@ -2619,7 +2601,21 @@ and<br/><br/>
 
         # Create PDF buffer
         buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.4*inch)
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.75*inch)
+
+        # Footer callback — draws at fixed bottom position on every page
+        def draw_contract_footer(canvas_obj, doc_obj):
+            canvas_obj.saveState()
+            page_width = letter[0]
+            canvas_obj.setStrokeColor(colors.HexColor('#e0e0e0'))
+            canvas_obj.setLineWidth(1)
+            canvas_obj.line(doc_obj.leftMargin, 0.65*inch, page_width - doc_obj.rightMargin, 0.65*inch)
+            canvas_obj.setFont('DejaVuSans-Bold', 7)
+            canvas_obj.setFillColor(colors.HexColor('#888888'))
+            canvas_obj.drawCentredString(page_width / 2, 0.48*inch, entity_name)
+            canvas_obj.setFont('DejaVuSans', 7)
+            canvas_obj.drawCentredString(page_width / 2, 0.35*inch, f"{entity_address} | Phone: {entity_phone}")
+            canvas_obj.restoreState()
 
         # Container for PDF elements
         elements = []
@@ -2835,19 +2831,9 @@ and<br/><br/>
             ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
         ]))
         elements.append(signature_table)
-        elements.append(Spacer(1, 0.3*inch))
 
-        # Footer
-        elements.append(Spacer(1, 0.15*inch))
-        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
-
-        footer_text = f"""
-        <b>{entity_name}</b> | {entity_address.replace(', ', ' | ')} | Phone: {entity_phone}
-        """
-        elements.append(Paragraph(footer_text, small_style))
-
-        # Build PDF
-        doc.build(elements)
+        # Build PDF (footer drawn via canvas callback)
+        doc.build(elements, onFirstPage=draw_contract_footer, onLaterPages=draw_contract_footer)
 
         # Get PDF data
         pdf_data = buffer.getvalue()
@@ -2914,7 +2900,21 @@ and<br/><br/>
 
         # Create PDF buffer
         buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.4*inch)
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.75*inch)
+
+        # Footer callback — draws at fixed bottom position on every page
+        def draw_contract_footer(canvas_obj, doc_obj):
+            canvas_obj.saveState()
+            page_width = letter[0]
+            canvas_obj.setStrokeColor(colors.HexColor('#e0e0e0'))
+            canvas_obj.setLineWidth(1)
+            canvas_obj.line(doc_obj.leftMargin, 0.65*inch, page_width - doc_obj.rightMargin, 0.65*inch)
+            canvas_obj.setFont('DejaVuSans-Bold', 7)
+            canvas_obj.setFillColor(colors.HexColor('#888888'))
+            canvas_obj.drawCentredString(page_width / 2, 0.48*inch, entity_name)
+            canvas_obj.setFont('DejaVuSans', 7)
+            canvas_obj.drawCentredString(page_width / 2, 0.35*inch, f"{entity_address} | Phone: {entity_phone}")
+            canvas_obj.restoreState()
 
         # Container for PDF elements
         elements = []
@@ -3189,19 +3189,9 @@ and<br/><br/>
             ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
         ]))
         elements.append(signature_table)
-        elements.append(Spacer(1, 0.3*inch))
 
-        # Footer
-        elements.append(Spacer(1, 0.15*inch))
-        elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
-
-        footer_text = f"""
-        <b>{entity_name}</b> | {entity_address.replace(', ', ' | ')} | Phone: {entity_phone}
-        """
-        elements.append(Paragraph(footer_text, small_style))
-
-        # Build PDF
-        doc.build(elements)
+        # Build PDF (footer drawn via canvas callback)
+        doc.build(elements, onFirstPage=draw_contract_footer, onLaterPages=draw_contract_footer)
 
         # Get PDF data
         pdf_data = buffer.getvalue()
