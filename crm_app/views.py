@@ -1393,11 +1393,12 @@ class ContractViewSet(BaseModelViewSet):
             '{{duration}}': _format_duration(contract.start_date, contract.end_date) if contract.start_date and contract.end_date else '',
             '{{value_amount}}': f"{contract.value:,.2f}" if contract.value else '',
             '{{annual_value}}': f"{contract.currency} {contract.value:,.2f}" if contract.value else '',
-            '{{total_contract_value}}': '',
-            '{{total_contract_value_amount}}': '',
+            '{{total_contract_value}}': f"{contract.currency} {contract.value:,.2f}" if contract.value else '',
+            '{{total_contract_value_amount}}': f"{contract.value:,.2f}" if contract.value else '',
+            '{{billing_note}}': '',
         }
 
-        # Compute Total Contract Value for multi-year deals
+        # Compute Total Contract Value and billing note for multi-year deals
         if contract.start_date and contract.end_date and contract.value:
             dur_months = ((contract.end_date.year - contract.start_date.year) * 12 +
                          (contract.end_date.month - contract.start_date.month))
@@ -1408,6 +1409,7 @@ class ContractViewSet(BaseModelViewSet):
                 tcv = float(contract.value) * years
                 replacements['{{total_contract_value}}'] = f"{contract.currency} {tcv:,.2f}"
                 replacements['{{total_contract_value_amount}}'] = f"{tcv:,.2f}"
+                replacements['{{billing_note}}'] = f"Invoiced annually at {contract.currency} {contract.value:,.2f} per year"
 
         for var, value in replacements.items():
             content = content.replace(var, str(value))

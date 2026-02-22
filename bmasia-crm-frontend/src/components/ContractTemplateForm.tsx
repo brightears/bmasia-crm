@@ -71,8 +71,9 @@ const TEMPLATE_VARIABLES = [
   { name: 'currency', description: 'Currency code (THB, USD, etc.)' },
   { name: 'duration', description: 'Contract duration (e.g., "2 years")' },
   { name: 'annual_value', description: 'Annual value with currency (alias for value)' },
-  { name: 'total_contract_value', description: 'Total contract value for multi-year deals' },
-  { name: 'total_contract_value_amount', description: 'Total contract value number only' },
+  { name: 'total_contract_value', description: 'Total contract value (full term, always populated)' },
+  { name: 'total_contract_value_amount', description: 'Total contract value number only (always populated)' },
+  { name: 'billing_note', description: 'Auto: "Invoiced annually at X per year" (multi-year only)' },
   { name: 'billing_frequency', description: 'Billing frequency' },
   { name: 'payment_terms', description: 'Payment terms' },
   // Venue & Zones
