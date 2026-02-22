@@ -211,6 +211,7 @@ const Contracts: React.FC = () => {
   };
 
   const handleContractSave = (contract: Contract) => {
+    const isNew = formMode === 'create';
     setContracts(prev => {
       const existing = prev.find(c => c.id === contract.id);
       if (existing) {
@@ -221,9 +222,13 @@ const Contracts: React.FC = () => {
     });
 
     // If we're in create mode, increment total count
-    if (formMode === 'create') {
+    if (isNew) {
       setTotalCount(prev => prev + 1);
     }
+
+    // Show success confirmation
+    setSuccess(isNew ? 'Contract created successfully' : 'Contract updated successfully');
+    setTimeout(() => setSuccess(''), 4000);
   };
 
   const handleActionMenuOpen = (event: React.MouseEvent<HTMLElement>, contract: Contract) => {

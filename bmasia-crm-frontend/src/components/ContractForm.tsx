@@ -281,7 +281,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
   const loadContractTemplates = async () => {
     try {
-      const response = await ApiService.getContractTemplates({ is_active: true });
+      // Load all templates (including inactive) so edit mode shows the assigned template
+      const response = await ApiService.getContractTemplates({});
       setContractTemplates(response.results || []);
     } catch (err) {
       console.error('Failed to load contract templates:', err);
@@ -341,15 +342,16 @@ const ContractForm: React.FC<ContractFormProps> = ({
     // Load selected template
     setSelectedTemplate(contract.preamble_template || '');
 
-    // Load line items
+    // Prepare line items
+    let contractLineItems: ContractLineItem[];
     if (contract.line_items && contract.line_items.length > 0) {
-      setLineItems(contract.line_items.map(item => ({
+      contractLineItems = contract.line_items.map(item => ({
         ...item,
         line_total: item.line_total || 0,
-      })));
+      }));
     } else {
       const smartTaxRate = contract.currency === 'THB' ? 7 : 0;
-      setLineItems([{ ...defaultContractLineItem, tax_rate: smartTaxRate }]);
+      contractLineItems = [{ ...defaultContractLineItem, tax_rate: smartTaxRate }];
     }
 
     // Load quote selection
@@ -361,25 +363,27 @@ const ContractForm: React.FC<ContractFormProps> = ({
       setSelectedCompanyCountry(editCompany.country || '');
     }
 
-    // Populate service locations
-    // Prefer new service_locations field; fall back to contract_zones for legacy contracts
+    // Load service locations from DB, then sync platforms against line items
+    let dbLocations: ServiceLocationEntry[] = [];
     if (contract.service_locations && contract.service_locations.length > 0) {
-      setServiceLocations(contract.service_locations.map(loc => ({
+      dbLocations = contract.service_locations.map(loc => ({
         location_name: loc.location_name,
         platform: loc.platform,
         tempId: generateTempId(),
-      })));
+      }));
     } else if (contract.contract_zones && contract.contract_zones.length > 0) {
-      // One-time migration path: convert legacy contract_zones to service location rows
       const activeZones = contract.contract_zones.filter(cz => cz.is_active);
-      setServiceLocations(activeZones.map(cz => ({
+      dbLocations = activeZones.map(cz => ({
         location_name: cz.zone_name || '',
         platform: (cz.zone_platform || 'soundtrack') as 'soundtrack' | 'beatbreeze',
         tempId: generateTempId(),
-      })));
-    } else {
-      setServiceLocations([]);
+      }));
     }
+
+    // Sync locations against line items to fix stale platform assignments
+    const { locations: syncedLocations } = syncLocationsFromLineItems(contractLineItems, dbLocations);
+    setServiceLocations(syncedLocations);
+    setLineItems(contractLineItems);
 
     // Allow sync to run after initial form population
     setTimeout(() => { isFormInitialized.current = true; }, 0);
@@ -717,7 +721,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
         return;
       }
 
-      if (!selectedTemplate) {
+      if (!selectedTemplate && mode === 'create') {
         setError('Please select a contract template');
         return;
       }
@@ -804,7 +808,16 @@ const ContractForm: React.FC<ContractFormProps> = ({
       onSave(savedContract);
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Failed to save contract');
+      // Parse DRF field-level errors (e.g., { field_name: ['error'] })
+      const data = err.response?.data;
+      if (data && typeof data === 'object' && !data.detail) {
+        const messages = Object.entries(data)
+          .map(([field, errors]) => `${field}: ${Array.isArray(errors) ? errors.join(', ') : errors}`)
+          .join('; ');
+        setError(messages || 'Failed to save contract');
+      } else {
+        setError(data?.detail || err.message || 'Failed to save contract');
+      }
     } finally {
       setLoading(false);
     }
@@ -937,8 +950,13 @@ const ContractForm: React.FC<ContractFormProps> = ({
                         <em>Select a template</em>
                       </MenuItem>
                       {contractTemplates.map((template) => (
-                        <MenuItem key={template.id} value={template.id}>
+                        <MenuItem key={template.id} value={template.id} disabled={!template.is_active && mode === 'create'}>
                           {template.name}
+                          {!template.is_active && (
+                            <Typography component="span" variant="caption" sx={{ ml: 1, color: 'warning.main' }}>
+                              (inactive)
+                            </Typography>
+                          )}
                           {template.pdf_format !== 'standard' && (
                             <Typography component="span" variant="caption" sx={{ ml: 1, color: 'text.secondary' }}>
                               ({template.pdf_format_display || template.pdf_format})
