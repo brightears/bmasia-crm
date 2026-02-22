@@ -52,6 +52,9 @@ import ContractForm from '../components/ContractForm';
 import ContractDetail from '../components/ContractDetail';
 import EmailSendDialog from '../components/EmailSendDialog';
 
+// Statuses where the contract is locked (signed or terminal)
+const LOCKED_STATUSES = ['Active', 'Renewed', 'Expired', 'Cancelled'];
+
 const statusOptions = [
   { value: '', label: 'All Statuses' },
   { value: 'Draft', label: 'Draft', color: '#9e9e9e' },
@@ -605,11 +608,19 @@ const Contracts: React.FC = () => {
           </ListItemIcon>
           <ListItemText>View Details</ListItemText>
         </MenuItem>
-        <MenuItem onClick={() => handleEditContract(actionMenuContract!)}>
+        <MenuItem
+          onClick={() => handleEditContract(actionMenuContract!)}
+          disabled={LOCKED_STATUSES.includes(actionMenuContract?.status || '')}
+        >
           <ListItemIcon>
             <Edit fontSize="small" />
           </ListItemIcon>
-          <ListItemText>Edit</ListItemText>
+          <ListItemText>
+            Edit
+            {LOCKED_STATUSES.includes(actionMenuContract?.status || '') && (
+              <Typography component="span" variant="caption" color="text.secondary"> (locked)</Typography>
+            )}
+          </ListItemText>
         </MenuItem>
         <MenuItem onClick={() => handleSendEmail(actionMenuContract!)}>
           <ListItemIcon>
