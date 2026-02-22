@@ -1854,15 +1854,29 @@ class ContractViewSet(BaseModelViewSet):
         elements.append(Paragraph("PRINCIPAL TERMS", contract_title_style))
 
         # Document metadata table (modern grid layout)
+        # Use Paragraph for Validity to allow text wrapping within the cell
+        validity_style = ParagraphStyle(
+            'ValidityCell',
+            parent=styles['Normal'],
+            fontSize=10,
+            fontName='DejaVuSans',
+            textColor=colors.HexColor('#424242'),
+            alignment=TA_CENTER,
+            leading=13,
+        )
+        validity_text = Paragraph(
+            f"{contract.start_date.strftime('%b %d, %Y')}<br/>to {contract.end_date.strftime('%b %d, %Y')}",
+            validity_style
+        )
         metadata_data = [
             ['Contract Number', 'Date', 'Status', 'Validity'],
             [contract.contract_number,
              contract.start_date.strftime('%b %d, %Y'),
              contract.status,
-             f"{contract.start_date.strftime('%b %d, %Y')} - {contract.end_date.strftime('%b %d, %Y')}"]
+             validity_text]
         ]
 
-        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.7*inch, 1.7*inch, 1.8*inch])
+        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.5*inch, 1.3*inch, 2.4*inch])
         metadata_table.setStyle(TableStyle([
             # Header row - orange background
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
@@ -2677,15 +2691,24 @@ and<br/><br/>
         elements.append(Paragraph("MASTER SERVICE AGREEMENT", master_title_style))
 
         # Document metadata
+        master_validity_style = ParagraphStyle(
+            'MasterValidityCell', parent=styles['Normal'], fontSize=10,
+            fontName='DejaVuSans', textColor=colors.HexColor('#424242'),
+            alignment=TA_CENTER, leading=13,
+        )
+        master_validity_text = Paragraph(
+            f"{contract.start_date.strftime('%b %d, %Y')}<br/>to {contract.end_date.strftime('%b %d, %Y')}",
+            master_validity_style
+        )
         metadata_data = [
             ['Agreement Number', 'Date', 'Status', 'Validity'],
             [contract.contract_number,
              contract.start_date.strftime('%b %d, %Y'),
              contract.status,
-             f"{contract.start_date.strftime('%b %d, %Y')} - {contract.end_date.strftime('%b %d, %Y')}"]
+             master_validity_text]
         ]
 
-        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.7*inch, 1.7*inch, 1.8*inch])
+        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.5*inch, 1.3*inch, 2.4*inch])
         metadata_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -2963,15 +2986,24 @@ and<br/><br/>
         elements.append(Paragraph("PARTICIPATION AGREEMENT", participation_title_style))
 
         # Document metadata
+        participation_validity_style = ParagraphStyle(
+            'ParticipationValidityCell', parent=styles['Normal'], fontSize=10,
+            fontName='DejaVuSans', textColor=colors.HexColor('#424242'),
+            alignment=TA_CENTER, leading=13,
+        )
+        participation_validity_text = Paragraph(
+            f"{contract.start_date.strftime('%b %d, %Y')}<br/>to {contract.end_date.strftime('%b %d, %Y')}",
+            participation_validity_style
+        )
         metadata_data = [
             ['Agreement Number', 'Date', 'Status', 'Validity'],
             [contract.contract_number,
              contract.start_date.strftime('%b %d, %Y'),
              contract.status,
-             f"{contract.start_date.strftime('%b %d, %Y')} - {contract.end_date.strftime('%b %d, %Y')}"]
+             participation_validity_text]
         ]
 
-        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.7*inch, 1.7*inch, 1.8*inch])
+        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.5*inch, 1.3*inch, 2.4*inch])
         metadata_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
