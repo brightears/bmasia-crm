@@ -43,6 +43,7 @@ import {
   Warning,
 } from '@mui/icons-material';
 import { useNavigate, useParams } from 'react-router-dom';
+import DOMPurify from 'dompurify';
 import { Ticket, User } from '../types';
 import ApiService from '../services/api';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -341,9 +342,26 @@ const TicketDetail: React.FC = () => {
               <Typography variant="h6" gutterBottom>
                 Description
               </Typography>
-              <Typography variant="body1" color="text.secondary" sx={{ whiteSpace: 'pre-wrap' }}>
-                {ticket.description}
-              </Typography>
+              {/<[a-z][\s\S]*>/i.test(ticket.description) ? (
+                <Box
+                  sx={{
+                    color: 'text.secondary',
+                    '& img': { maxWidth: '100%', height: 'auto', borderRadius: 1 },
+                    '& p': { margin: '0 0 8px 0' },
+                    '& ul, & ol': { paddingLeft: 3 },
+                  }}
+                  dangerouslySetInnerHTML={{
+                    __html: DOMPurify.sanitize(ticket.description, {
+                      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 'h1', 'h2', 'h3', 'ul', 'ol', 'li', 'a', 'img', 'code', 'pre', 'blockquote'],
+                      ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class'],
+                    })
+                  }}
+                />
+              ) : (
+                <Typography variant="body1" color="text.secondary" sx={{ whiteSpace: 'pre-wrap' }}>
+                  {ticket.description}
+                </Typography>
+              )}
             </CardContent>
           </Card>
 

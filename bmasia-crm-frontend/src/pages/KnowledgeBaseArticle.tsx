@@ -13,6 +13,10 @@ import {
   CardContent,
   CardActionArea,
   Link as MuiLink,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '@mui/material';
 import { GridLegacy as Grid } from '@mui/material';
 import {
@@ -24,6 +28,7 @@ import {
   GetApp,
   Article as ArticleIcon,
   Edit,
+  Delete,
   PictureAsPdf,
 } from '@mui/icons-material';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -41,6 +46,8 @@ const KnowledgeBaseArticle: React.FC = () => {
   const [article, setArticle] = useState<KBArticle | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const loadArticle = useCallback(async () => {
     if (!id) return;
@@ -181,6 +188,20 @@ const KnowledgeBaseArticle: React.FC = () => {
   // Check if user can edit (All authenticated users)
   const canEdit = !!user; // All authenticated users can edit any article
 
+  const handleDelete = async () => {
+    if (!id) return;
+    try {
+      setDeleteLoading(true);
+      await ApiService.deleteKBArticle(id);
+      navigate('/knowledge-base');
+    } catch (err) {
+      setError('Failed to delete article');
+      setDeleteDialogOpen(false);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   return (
     <Box>
       {/* Back and Edit Buttons */}
@@ -215,6 +236,16 @@ const KnowledgeBaseArticle: React.FC = () => {
               }}
             >
               Edit Article
+            </Button>
+          )}
+          {canEdit && (
+            <Button
+              variant="outlined"
+              startIcon={<Delete />}
+              onClick={() => setDeleteDialogOpen(true)}
+              color="error"
+            >
+              Delete
             </Button>
           )}
         </Box>
@@ -451,6 +482,24 @@ const KnowledgeBaseArticle: React.FC = () => {
           </Paper>
         </Grid>
       </Grid>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Delete Article</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to delete "<strong>{article?.title}</strong>"? This action cannot be undone.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)} disabled={deleteLoading}>
+            Cancel
+          </Button>
+          <Button onClick={handleDelete} color="error" variant="contained" disabled={deleteLoading}>
+            {deleteLoading ? 'Deleting...' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

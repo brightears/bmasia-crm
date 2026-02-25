@@ -1428,6 +1428,10 @@ class ClientTechDetail(TimestampedModel):
         ('single', 'Single'),
         ('multi', 'Multi'),
     ]
+    PLATFORM_TYPE_CHOICES = [
+        ('soundtrack', 'Soundtrack Your Brand'),
+        ('beatbreeze', 'Beat Breeze'),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -1437,6 +1441,7 @@ class ClientTechDetail(TimestampedModel):
 
     # Outlet identification
     outlet_name = models.CharField(max_length=255, help_text="Outlet or zone name")
+    platform_type = models.CharField(max_length=20, choices=PLATFORM_TYPE_CHOICES, blank=True, help_text="Music platform type")
 
     # Remote Access
     anydesk_id = models.CharField(max_length=100, blank=True)

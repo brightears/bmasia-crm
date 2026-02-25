@@ -16,6 +16,8 @@ import {
   Select,
 } from '@mui/material';
 import { Cancel, Save } from '@mui/icons-material';
+import ReactQuill from 'react-quill-new';
+import 'react-quill-new/dist/quill.snow.css';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { addDays } from 'date-fns';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
@@ -41,6 +43,16 @@ const categoryOptions = [
   { value: 'feature_request', label: 'Feature Request', description: 'New features, enhancements' },
   { value: 'general', label: 'General Inquiry', description: 'Questions, information requests' },
 ];
+
+const quillModules = {
+  toolbar: [
+    [{ 'header': [1, 2, 3, false] }],
+    ['bold', 'italic', 'underline'],
+    [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+    ['link', 'image'],
+    ['clean'],
+  ],
+};
 
 const TicketForm: React.FC = () => {
   const navigate = useNavigate();
@@ -207,7 +219,8 @@ const TicketForm: React.FC = () => {
       errors.subject = 'Subject must be 200 characters or less';
     }
 
-    if (!description.trim()) {
+    const strippedDesc = description.replace(/<[^>]*>/g, '').trim();
+    if (!strippedDesc) {
       errors.description = 'Description is required';
     }
 
@@ -405,20 +418,33 @@ const TicketForm: React.FC = () => {
             />
           </Grid>
 
-          {/* Description - Required */}
+          {/* Description - Required (Rich Text) */}
           <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Description *"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              error={Boolean(validationErrors.description)}
-              helperText={validationErrors.description}
-              required
-              multiline
-              rows={6}
-              disabled={loading}
-            />
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+              Description *
+            </Typography>
+            <Box sx={{
+              '& .ql-container': { minHeight: '200px', fontSize: '14px' },
+              '& .ql-editor': { minHeight: '200px' },
+              ...(validationErrors.description && {
+                '& .ql-toolbar': { borderColor: '#d32f2f' },
+                '& .ql-container': { borderColor: '#d32f2f', minHeight: '200px', fontSize: '14px' },
+              }),
+            }}>
+              <ReactQuill
+                theme="snow"
+                value={description}
+                onChange={setDescription}
+                modules={quillModules}
+                placeholder="Describe the issue... You can paste images directly."
+                readOnly={loading}
+              />
+            </Box>
+            {validationErrors.description && (
+              <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
+                {validationErrors.description}
+              </Typography>
+            )}
           </Grid>
 
           {/* Priority - Required */}

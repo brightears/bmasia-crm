@@ -1458,15 +1458,15 @@ class DeviceAdmin(admin.ModelAdmin):
 
 @admin.register(ClientTechDetail)
 class ClientTechDetailAdmin(admin.ModelAdmin):
-    list_display = ['company', 'outlet_name', 'system_type', 'anydesk_id', 'pc_make', 'pc_model', 'created_at']
-    list_filter = ['system_type', 'company']
+    list_display = ['company', 'outlet_name', 'platform_type', 'system_type', 'anydesk_id', 'pc_make', 'pc_model', 'created_at']
+    list_filter = ['platform_type', 'system_type', 'company']
     search_fields = ['outlet_name', 'company__name', 'anydesk_id', 'teamviewer_id', 'comments']
     readonly_fields = ['id', 'created_at', 'updated_at']
     autocomplete_fields = ['company', 'zone']
 
     fieldsets = (
         ('Client & Location', {
-            'fields': ('company', 'zone', 'outlet_name')
+            'fields': ('company', 'zone', 'outlet_name', 'platform_type')
         }),
         ('Remote Access', {
             'fields': ('anydesk_id', 'teamviewer_id', 'ultraviewer_id', 'other_remote_id')

@@ -74,6 +74,9 @@ const ClientTechDetails: React.FC = () => {
   const [deletingLabel, setDeletingLabel] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  // Stats
+  const [stats, setStats] = useState({ total_zones: 0, total_clients: 0 });
+
   // Action menu
   const [actionMenuAnchor, setActionMenuAnchor] = useState<null | HTMLElement>(null);
   const [actionMenuDetail, setActionMenuDetail] = useState<ClientTechDetail | null>(null);
@@ -90,9 +93,17 @@ const ClientTechDetails: React.FC = () => {
       };
       if (search) params.search = search;
       if (selectedCompanyId) params.company = selectedCompanyId;
-      const response: ApiResponse<ClientTechDetail> = await ApiService.getClientTechDetails(params);
+      const [response, statsData] = await Promise.all([
+        ApiService.getClientTechDetails(params),
+        ApiService.getClientTechDetailStats(
+          search || selectedCompanyId
+            ? { ...(search && { search }), ...(selectedCompanyId && { company: selectedCompanyId }) }
+            : undefined
+        ),
+      ]);
       setDetails(response.results || []);
       setTotalCount(response.count || 0);
+      setStats(statsData);
     } catch (err: any) {
       setError('Failed to load tech details');
       console.error('ClientTechDetails error:', err);
@@ -238,6 +249,28 @@ const ClientTechDetails: React.FC = () => {
     return <Typography variant="body2" color="text.secondary">-</Typography>;
   };
 
+  const getPlatformTypeChip = (platformType: string) => {
+    if (platformType === 'soundtrack') {
+      return (
+        <Chip
+          label="SYB"
+          size="small"
+          sx={{ backgroundColor: '#FF8C00', color: 'white', fontWeight: 600 }}
+        />
+      );
+    }
+    if (platformType === 'beatbreeze') {
+      return (
+        <Chip
+          label="Beat Breeze"
+          size="small"
+          sx={{ backgroundColor: '#9c27b0', color: 'white', fontWeight: 600 }}
+        />
+      );
+    }
+    return <Typography variant="body2" color="text.secondary">-</Typography>;
+  };
+
   const formatField = (value: string | null | undefined): string => {
     if (!value || value.trim() === '') return '-';
     return value;
@@ -332,6 +365,22 @@ const ClientTechDetails: React.FC = () => {
         </Box>
       </Paper>
 
+      {/* Summary counts */}
+      <Box sx={{ display: 'flex', gap: 1.5, mb: 2 }}>
+        <Chip
+          icon={<Business />}
+          label={`${stats.total_clients} Clients`}
+          variant="outlined"
+          color="primary"
+        />
+        <Chip
+          icon={<LocationOn />}
+          label={`${stats.total_zones} Zones`}
+          variant="outlined"
+          color="primary"
+        />
+      </Box>
+
       {/* Table */}
       <TableContainer component={Paper}>
         <Table>
@@ -339,10 +388,10 @@ const ClientTechDetails: React.FC = () => {
             <TableRow>
               <TableCell>Client</TableCell>
               <TableCell>Outlet / Zone</TableCell>
-              <TableCell>AnyDesk ID</TableCell>
-              <TableCell>TeamViewer ID</TableCell>
+              <TableCell>AnyDesk</TableCell>
+              <TableCell>UltraViewer</TableCell>
+              <TableCell>Platform</TableCell>
               <TableCell>System Type</TableCell>
-              <TableCell>PC</TableCell>
               <TableCell sx={{ width: 80 }}>Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -400,16 +449,14 @@ const ClientTechDetails: React.FC = () => {
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2" fontFamily="monospace">
-                      {formatField(detail.teamviewer_id)}
+                      {formatField(detail.ultraviewer_id)}
                     </Typography>
+                  </TableCell>
+                  <TableCell>
+                    {getPlatformTypeChip(detail.platform_type)}
                   </TableCell>
                   <TableCell>
                     {getSystemTypeChip(detail.system_type)}
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
-                      {[detail.pc_make, detail.pc_model].filter(Boolean).join(' ') || '-'}
-                    </Typography>
                   </TableCell>
                   <TableCell>
                     <IconButton
@@ -500,6 +547,7 @@ const ClientTechDetails: React.FC = () => {
               {selectedDetail.zone_name && (
                 <DetailRow label="Zone" value={selectedDetail.zone_name} />
               )}
+              <DetailRow label="Platform Type" value={getPlatformTypeChip(selectedDetail.platform_type)} />
             </DetailSection>
 
             {/* Section 2: Remote Access */}

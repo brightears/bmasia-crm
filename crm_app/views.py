@@ -8592,10 +8592,19 @@ class ClientTechDetailViewSet(viewsets.ModelViewSet):
     serializer_class = ClientTechDetailSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['company', 'zone', 'system_type']
+    filterset_fields = ['company', 'zone', 'system_type', 'platform_type']
     search_fields = ['outlet_name', 'company__name', 'anydesk_id', 'teamviewer_id', 'comments']
     ordering_fields = ['outlet_name', 'company__name', 'created_at']
     ordering = ['company__name', 'outlet_name']
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """Get summary counts for tech details (respects filters)"""
+        qs = self.filter_queryset(self.get_queryset())
+        return Response({
+            'total_zones': qs.count(),
+            'total_clients': qs.values('company').distinct().count(),
+        })
 
     @action(detail=False, methods=['get'])
     def by_company(self, request):
@@ -8628,6 +8637,7 @@ class ClientTechDetailViewSet(viewsets.ModelViewSet):
 
         # System type display
         system_type_display = {'single': 'Single System', 'multi': 'Multi System'}.get(detail.system_type, val(detail.system_type))
+        platform_type_display = {'soundtrack': 'Soundtrack Your Brand', 'beatbreeze': 'Beat Breeze'}.get(detail.platform_type, val(detail.platform_type))
 
         # Create PDF buffer
         buffer = BytesIO()
@@ -8725,6 +8735,7 @@ class ClientTechDetailViewSet(viewsets.ModelViewSet):
 
         # Section 2: System Configuration
         elements.append(build_section('System Configuration', [
+            ('Platform Type', platform_type_display),
             ('System Type', system_type_display),
             ('Soundcard Channel', detail.soundcard_channel),
             ('BMS License', detail.bms_license),

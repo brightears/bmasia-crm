@@ -35,6 +35,7 @@ interface FormState {
   company: string;
   zone: string;
   outlet_name: string;
+  platform_type: 'soundtrack' | 'beatbreeze' | '';
   anydesk_id: string;
   teamviewer_id: string;
   ultraviewer_id: string;
@@ -69,6 +70,7 @@ const emptyForm: FormState = {
   company: '',
   zone: '',
   outlet_name: '',
+  platform_type: '',
   anydesk_id: '',
   teamviewer_id: '',
   ultraviewer_id: '',
@@ -125,6 +127,7 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
         company: detail.company || '',
         zone: detail.zone || '',
         outlet_name: detail.outlet_name || '',
+        platform_type: detail.platform_type || '',
         anydesk_id: detail.anydesk_id || '',
         teamviewer_id: detail.teamviewer_id || '',
         ultraviewer_id: detail.ultraviewer_id || '',
@@ -243,6 +246,7 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
         company: form.company,
         zone: form.zone || null,
         outlet_name: form.outlet_name,
+        platform_type: form.platform_type,
         anydesk_id: form.anydesk_id,
         teamviewer_id: form.teamviewer_id,
         ultraviewer_id: form.ultraviewer_id,
@@ -361,7 +365,7 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
                 </Grid>
 
                 {/* Outlet Name */}
-                <Grid item xs={12}>
+                <Grid item xs={12} sm={6}>
                   <TextField
                     fullWidth
                     label="Outlet Name"
@@ -371,6 +375,24 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
                     placeholder="e.g., Restaurant Ground Floor"
                     helperText="Auto-fills from zone selection but can be edited freely"
                   />
+                </Grid>
+
+                {/* Platform Type */}
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth>
+                    <InputLabel>Platform Type</InputLabel>
+                    <Select
+                      value={form.platform_type}
+                      label="Platform Type"
+                      onChange={(e) => handleFieldChange('platform_type', e.target.value as string)}
+                    >
+                      <MenuItem value="">
+                        <em>Not specified</em>
+                      </MenuItem>
+                      <MenuItem value="soundtrack">Soundtrack Your Brand</MenuItem>
+                      <MenuItem value="beatbreeze">Beat Breeze</MenuItem>
+                    </Select>
+                  </FormControl>
                 </Grid>
               </Grid>
             </Paper>

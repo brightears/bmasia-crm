@@ -1200,6 +1200,7 @@ export interface ClientTechDetail {
   zone?: string | null;
   zone_name?: string | null;
   outlet_name: string;
+  platform_type: 'soundtrack' | 'beatbreeze' | '';
   anydesk_id: string;
   teamviewer_id: string;
   ultraviewer_id: string;

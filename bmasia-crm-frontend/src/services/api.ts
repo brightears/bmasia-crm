@@ -1076,6 +1076,10 @@ class ApiService {
     return response.data;
   }
 
+  async deleteKBArticle(id: string): Promise<void> {
+    await authApi.delete(`/kb/articles/${id}/`);
+  }
+
   async uploadKBAttachment(articleId: string, file: File): Promise<any> {
     const formData = new FormData();
     formData.append('file', file);
@@ -1205,6 +1209,11 @@ class ApiService {
 
   async deleteClientTechDetail(id: string): Promise<void> {
     await authApi.delete(`/client-tech-details/${id}/`);
+  }
+
+  async getClientTechDetailStats(params?: any): Promise<{ total_zones: number; total_clients: number }> {
+    const response = await authApi.get<{ total_zones: number; total_clients: number }>('/client-tech-details/stats/', { params });
+    return response.data;
   }
 
   async getClientTechDetailsByCompany(companyId: string): Promise<ClientTechDetail[]> {
