@@ -1474,6 +1474,9 @@ class ClientTechDetailAdmin(admin.ModelAdmin):
         ('System Configuration', {
             'fields': ('system_type', 'soundcard_channel', 'bms_license', 'additional_hardware')
         }),
+        ('Dates & Licensing', {
+            'fields': ('install_date', 'commencement_date', 'activation_date', 'lim_source', 'expiry_date')
+        }),
         ('PC Specifications', {
             'fields': ('pc_name', 'pc_make', 'pc_model', 'pc_type',
                        'operating_system', 'os_type',

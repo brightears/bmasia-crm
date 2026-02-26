@@ -268,6 +268,24 @@ const ClientTechDetails: React.FC = () => {
         />
       );
     }
+    if (platformType === 'bms') {
+      return (
+        <Chip
+          label="BMS"
+          size="small"
+          sx={{ backgroundColor: '#1565C0', color: 'white', fontWeight: 600 }}
+        />
+      );
+    }
+    if (platformType === 'dm') {
+      return (
+        <Chip
+          label="DM"
+          size="small"
+          sx={{ backgroundColor: '#2e7d32', color: 'white', fontWeight: 600 }}
+        />
+      );
+    }
     return <Typography variant="body2" color="text.secondary">-</Typography>;
   };
 
@@ -580,6 +598,23 @@ const ClientTechDetails: React.FC = () => {
               <DetailRow label="Soundcard Channel" value={formatField(selectedDetail.soundcard_channel)} />
               <DetailRow label="BMS License" value={formatField(selectedDetail.bms_license)} />
               <DetailRow label="Additional Hardware" value={formatField(selectedDetail.additional_hardware)} />
+            </DetailSection>
+
+            {/* Section 3b: Dates & Licensing */}
+            <DetailSection title="Dates and Licensing">
+              <DetailRow label="Install Date" value={selectedDetail.install_date
+                ? new Date(selectedDetail.install_date + 'T00:00:00').toLocaleDateString('en-GB')
+                : '-'} />
+              <DetailRow label="Commencement Date" value={selectedDetail.commencement_date
+                ? new Date(selectedDetail.commencement_date + 'T00:00:00').toLocaleDateString('en-GB')
+                : '-'} />
+              <DetailRow label="Activation Date (SYB)" value={selectedDetail.activation_date
+                ? new Date(selectedDetail.activation_date + 'T00:00:00').toLocaleDateString('en-GB')
+                : '-'} />
+              <DetailRow label="LIM Source" value={formatField(selectedDetail.lim_source)} />
+              <DetailRow label="Expiry Date" value={selectedDetail.expiry_date
+                ? new Date(selectedDetail.expiry_date + 'T00:00:00').toLocaleDateString('en-GB')
+                : '-'} />
             </DetailSection>
 
             {/* Section 4: PC Specs */}

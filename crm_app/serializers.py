@@ -149,6 +149,7 @@ class ClientTechDetailSerializer(serializers.ModelSerializer):
             'outlet_name', 'platform_type',
             'anydesk_id', 'teamviewer_id', 'ultraviewer_id', 'other_remote_id',
             'system_type', 'soundcard_channel', 'bms_license', 'additional_hardware',
+            'install_date', 'commencement_date', 'activation_date', 'lim_source', 'expiry_date',
             'pc_name', 'pc_make', 'pc_model', 'pc_type',
             'operating_system', 'os_type',
             'ram', 'cpu_type', 'cpu_speed',

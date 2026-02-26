@@ -1431,6 +1431,8 @@ class ClientTechDetail(TimestampedModel):
     PLATFORM_TYPE_CHOICES = [
         ('soundtrack', 'Soundtrack Your Brand'),
         ('beatbreeze', 'Beat Breeze'),
+        ('bms', 'BMS'),
+        ('dm', 'DM'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -1454,6 +1456,13 @@ class ClientTechDetail(TimestampedModel):
     soundcard_channel = models.CharField(max_length=100, blank=True)
     bms_license = models.CharField(max_length=255, blank=True)
     additional_hardware = models.TextField(blank=True, help_text="Additional system hardware details")
+
+    # Dates & Licensing
+    install_date = models.DateField(null=True, blank=True, help_text="Date of installation")
+    commencement_date = models.DateField(null=True, blank=True, help_text="Service commencement date")
+    activation_date = models.DateField(null=True, blank=True, help_text="Activation date (SYB)")
+    lim_source = models.CharField(max_length=255, blank=True, help_text="LIM source reference")
+    expiry_date = models.DateField(null=True, blank=True, help_text="Expiry date")
 
     # PC Specifications
     pc_name = models.CharField(max_length=100, blank=True, help_text="Computer/hostname")

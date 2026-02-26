@@ -1200,7 +1200,7 @@ export interface ClientTechDetail {
   zone?: string | null;
   zone_name?: string | null;
   outlet_name: string;
-  platform_type: 'soundtrack' | 'beatbreeze' | '';
+  platform_type: 'soundtrack' | 'beatbreeze' | 'bms' | 'dm' | '';
   anydesk_id: string;
   teamviewer_id: string;
   ultraviewer_id: string;
@@ -1209,6 +1209,11 @@ export interface ClientTechDetail {
   soundcard_channel: string;
   bms_license: string;
   additional_hardware: string;
+  install_date?: string | null;
+  commencement_date?: string | null;
+  activation_date?: string | null;
+  lim_source?: string;
+  expiry_date?: string | null;
   pc_name: string;
   pc_make: string;
   pc_model: string;

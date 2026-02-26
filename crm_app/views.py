@@ -8637,7 +8637,10 @@ class ClientTechDetailViewSet(viewsets.ModelViewSet):
 
         # System type display
         system_type_display = {'single': 'Single System', 'multi': 'Multi System'}.get(detail.system_type, val(detail.system_type))
-        platform_type_display = {'soundtrack': 'Soundtrack Your Brand', 'beatbreeze': 'Beat Breeze'}.get(detail.platform_type, val(detail.platform_type))
+        platform_type_display = {'soundtrack': 'Soundtrack Your Brand', 'beatbreeze': 'Beat Breeze', 'bms': 'BMS', 'dm': 'DM'}.get(detail.platform_type, val(detail.platform_type))
+
+        def fmt_date(d):
+            return d.strftime('%d/%m/%Y') if d else '-'
 
         # Create PDF buffer
         buffer = BytesIO()
@@ -8740,6 +8743,15 @@ class ClientTechDetailViewSet(viewsets.ModelViewSet):
             ('Soundcard Channel', detail.soundcard_channel),
             ('BMS License', detail.bms_license),
             ('Additional Hardware', detail.additional_hardware),
+        ]))
+
+        # Section 2b: Dates & Licensing
+        elements.append(build_section('Dates & Licensing', [
+            ('Install Date', fmt_date(detail.install_date)),
+            ('Commencement Date', fmt_date(detail.commencement_date)),
+            ('Activation Date (SYB)', fmt_date(detail.activation_date)),
+            ('LIM Source', detail.lim_source),
+            ('Expiry Date', fmt_date(detail.expiry_date)),
         ]))
 
         # Section 3: PC Specifications

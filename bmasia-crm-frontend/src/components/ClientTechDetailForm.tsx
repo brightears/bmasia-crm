@@ -19,6 +19,9 @@ import {
   Snackbar,
   GridLegacy as Grid,
 } from '@mui/material';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Company, Zone, ClientTechDetail } from '../types';
 import ApiService from '../services/api';
 
@@ -35,7 +38,7 @@ interface FormState {
   company: string;
   zone: string;
   outlet_name: string;
-  platform_type: 'soundtrack' | 'beatbreeze' | '';
+  platform_type: 'soundtrack' | 'beatbreeze' | 'bms' | 'dm' | '';
   anydesk_id: string;
   teamviewer_id: string;
   ultraviewer_id: string;
@@ -44,6 +47,7 @@ interface FormState {
   soundcard_channel: string;
   bms_license: string;
   additional_hardware: string;
+  lim_source: string;
   pc_name: string;
   pc_make: string;
   pc_model: string;
@@ -79,6 +83,7 @@ const emptyForm: FormState = {
   soundcard_channel: '',
   bms_license: '',
   additional_hardware: '',
+  lim_source: '',
   pc_name: '',
   pc_make: '',
   pc_model: '',
@@ -116,6 +121,10 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successOpen, setSuccessOpen] = useState(false);
+  const [installDate, setInstallDate] = useState<Date | null>(null);
+  const [commencementDate, setCommencementDate] = useState<Date | null>(null);
+  const [activationDate, setActivationDate] = useState<Date | null>(null);
+  const [expiryDate, setExpiryDate] = useState<Date | null>(null);
 
   // Populate form when dialog opens
   useEffect(() => {
@@ -136,6 +145,7 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
         soundcard_channel: detail.soundcard_channel || '',
         bms_license: detail.bms_license || '',
         additional_hardware: detail.additional_hardware || '',
+        lim_source: detail.lim_source || '',
         pc_name: detail.pc_name || '',
         pc_make: detail.pc_make || '',
         pc_model: detail.pc_model || '',
@@ -157,6 +167,11 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
         syb_schedules_link: detail.syb_schedules_link || '',
         comments: detail.comments || '',
       });
+      // Set date fields
+      setInstallDate(detail.install_date ? new Date(detail.install_date + 'T00:00:00') : null);
+      setCommencementDate(detail.commencement_date ? new Date(detail.commencement_date + 'T00:00:00') : null);
+      setActivationDate(detail.activation_date ? new Date(detail.activation_date + 'T00:00:00') : null);
+      setExpiryDate(detail.expiry_date ? new Date(detail.expiry_date + 'T00:00:00') : null);
       // Set selected company object for Autocomplete
       const company = companies.find(c => c.id === detail.company) || null;
       setSelectedCompany(company);
@@ -168,6 +183,10 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
       // Create mode: reset everything
       setForm({ ...emptyForm });
       setZones([]);
+      setInstallDate(null);
+      setCommencementDate(null);
+      setActivationDate(null);
+      setExpiryDate(null);
       setError(null);
 
       if (initialCompanyId) {
@@ -255,6 +274,11 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
         soundcard_channel: form.soundcard_channel,
         bms_license: form.bms_license,
         additional_hardware: form.additional_hardware,
+        install_date: installDate ? installDate.toISOString().split('T')[0] : null,
+        commencement_date: commencementDate ? commencementDate.toISOString().split('T')[0] : null,
+        activation_date: activationDate ? activationDate.toISOString().split('T')[0] : null,
+        lim_source: form.lim_source,
+        expiry_date: expiryDate ? expiryDate.toISOString().split('T')[0] : null,
         pc_name: form.pc_name,
         pc_make: form.pc_make,
         pc_model: form.pc_model,
@@ -303,6 +327,7 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
 
   return (
     <>
+      <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
         <DialogTitle>
           {isEditMode ? 'Edit Client Tech Detail' : 'New Client Tech Detail'}
@@ -391,6 +416,8 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
                       </MenuItem>
                       <MenuItem value="soundtrack">Soundtrack Your Brand</MenuItem>
                       <MenuItem value="beatbreeze">Beat Breeze</MenuItem>
+                      <MenuItem value="bms">BMS</MenuItem>
+                      <MenuItem value="dm">DM</MenuItem>
                     </Select>
                   </FormControl>
                 </Grid>
@@ -496,7 +523,68 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
               </Grid>
             </Paper>
 
-            {/* Section 4: PC Specifications */}
+            {/* Section 4: Dates and Licensing */}
+            <Paper sx={{ p: 2, mb: 2 }}>
+              <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
+                Dates and Licensing
+              </Typography>
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={6}>
+                  <DatePicker
+                    label="Install Date"
+                    value={installDate}
+                    onChange={(val) => setInstallDate(val)}
+                    slotProps={{
+                      textField: { fullWidth: true },
+                      field: { clearable: true },
+                    }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <DatePicker
+                    label="Commencement Date"
+                    value={commencementDate}
+                    onChange={(val) => setCommencementDate(val)}
+                    slotProps={{
+                      textField: { fullWidth: true },
+                      field: { clearable: true },
+                    }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <DatePicker
+                    label="Activation Date (SYB)"
+                    value={activationDate}
+                    onChange={(val) => setActivationDate(val)}
+                    slotProps={{
+                      textField: { fullWidth: true },
+                      field: { clearable: true },
+                    }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    fullWidth
+                    label="LIM Source"
+                    value={form.lim_source}
+                    onChange={(e) => handleFieldChange('lim_source', e.target.value)}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={6}>
+                  <DatePicker
+                    label="Expiry Date"
+                    value={expiryDate}
+                    onChange={(val) => setExpiryDate(val)}
+                    slotProps={{
+                      textField: { fullWidth: true },
+                      field: { clearable: true },
+                    }}
+                  />
+                </Grid>
+              </Grid>
+            </Paper>
+
+            {/* Section 5: PC Specifications */}
             <Paper sx={{ p: 2, mb: 2 }}>
               <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
                 PC Specifications
@@ -744,6 +832,7 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
           </Button>
         </DialogActions>
       </Dialog>
+      </LocalizationProvider>
 
       <Snackbar
         open={successOpen}
