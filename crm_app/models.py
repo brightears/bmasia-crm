@@ -1434,6 +1434,10 @@ class ClientTechDetail(TimestampedModel):
         ('bms', 'BMS'),
         ('dm', 'DM'),
     ]
+    SYB_ACCOUNT_TYPE_CHOICES = [
+        ('essential', 'Essential'),
+        ('unlimited', 'Unlimited'),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -1444,6 +1448,7 @@ class ClientTechDetail(TimestampedModel):
     # Outlet identification
     outlet_name = models.CharField(max_length=255, help_text="Outlet or zone name")
     platform_type = models.CharField(max_length=20, choices=PLATFORM_TYPE_CHOICES, blank=True, help_text="Music platform type")
+    syb_account_type = models.CharField(max_length=20, choices=SYB_ACCOUNT_TYPE_CHOICES, blank=True, help_text="SYB subscription tier")
 
     # Remote Access
     anydesk_id = models.CharField(max_length=100, blank=True)

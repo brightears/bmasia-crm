@@ -39,6 +39,7 @@ interface FormState {
   zone: string;
   outlet_name: string;
   platform_type: 'soundtrack' | 'beatbreeze' | 'bms' | 'dm' | '';
+  syb_account_type: 'essential' | 'unlimited' | '';
   anydesk_id: string;
   teamviewer_id: string;
   ultraviewer_id: string;
@@ -75,6 +76,7 @@ const emptyForm: FormState = {
   zone: '',
   outlet_name: '',
   platform_type: '',
+  syb_account_type: '',
   anydesk_id: '',
   teamviewer_id: '',
   ultraviewer_id: '',
@@ -137,6 +139,7 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
         zone: detail.zone || '',
         outlet_name: detail.outlet_name || '',
         platform_type: detail.platform_type || '',
+        syb_account_type: detail.syb_account_type || '',
         anydesk_id: detail.anydesk_id || '',
         teamviewer_id: detail.teamviewer_id || '',
         ultraviewer_id: detail.ultraviewer_id || '',
@@ -266,6 +269,7 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
         zone: form.zone || null,
         outlet_name: form.outlet_name,
         platform_type: form.platform_type,
+        syb_account_type: form.syb_account_type,
         anydesk_id: form.anydesk_id,
         teamviewer_id: form.teamviewer_id,
         ultraviewer_id: form.ultraviewer_id,
@@ -418,6 +422,24 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
                       <MenuItem value="beatbreeze">Beat Breeze</MenuItem>
                       <MenuItem value="bms">BMS</MenuItem>
                       <MenuItem value="dm">DM</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+
+                {/* SYB Account Type */}
+                <Grid item xs={12} sm={6}>
+                  <FormControl fullWidth>
+                    <InputLabel>SYB Account Type</InputLabel>
+                    <Select
+                      value={form.syb_account_type}
+                      label="SYB Account Type"
+                      onChange={(e) => handleFieldChange('syb_account_type', e.target.value as string)}
+                    >
+                      <MenuItem value="">
+                        <em>Not specified</em>
+                      </MenuItem>
+                      <MenuItem value="essential">Essential</MenuItem>
+                      <MenuItem value="unlimited">Unlimited</MenuItem>
                     </Select>
                   </FormControl>
                 </Grid>

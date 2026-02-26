@@ -8638,6 +8638,7 @@ class ClientTechDetailViewSet(viewsets.ModelViewSet):
         # System type display
         system_type_display = {'single': 'Single System', 'multi': 'Multi System'}.get(detail.system_type, val(detail.system_type))
         platform_type_display = {'soundtrack': 'Soundtrack Your Brand', 'beatbreeze': 'Beat Breeze', 'bms': 'BMS', 'dm': 'DM'}.get(detail.platform_type, val(detail.platform_type))
+        syb_account_display = {'essential': 'Essential', 'unlimited': 'Unlimited'}.get(detail.syb_account_type, val(detail.syb_account_type))
 
         def fmt_date(d):
             return d.strftime('%d/%m/%Y') if d else '-'
@@ -8739,6 +8740,7 @@ class ClientTechDetailViewSet(viewsets.ModelViewSet):
         # Section 2: System Configuration
         elements.append(build_section('System Configuration', [
             ('Platform Type', platform_type_display),
+            ('SYB Account Type', syb_account_display),
             ('System Type', system_type_display),
             ('Soundcard Channel', detail.soundcard_channel),
             ('BMS License', detail.bms_license),

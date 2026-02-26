@@ -146,7 +146,7 @@ class ClientTechDetailSerializer(serializers.ModelSerializer):
         model = ClientTechDetail
         fields = [
             'id', 'company', 'company_name', 'zone', 'zone_name',
-            'outlet_name', 'platform_type',
+            'outlet_name', 'platform_type', 'syb_account_type',
             'anydesk_id', 'teamviewer_id', 'ultraviewer_id', 'other_remote_id',
             'system_type', 'soundcard_channel', 'bms_license', 'additional_hardware',
             'install_date', 'commencement_date', 'activation_date', 'lim_source', 'expiry_date',

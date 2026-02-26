@@ -566,6 +566,10 @@ const ClientTechDetails: React.FC = () => {
                 <DetailRow label="Zone" value={selectedDetail.zone_name} />
               )}
               <DetailRow label="Platform Type" value={getPlatformTypeChip(selectedDetail.platform_type)} />
+              <DetailRow label="SYB Account Type" value={
+                selectedDetail.syb_account_type === 'essential' ? 'Essential' :
+                selectedDetail.syb_account_type === 'unlimited' ? 'Unlimited' : '-'
+              } />
             </DetailSection>
 
             {/* Section 2: Remote Access */}

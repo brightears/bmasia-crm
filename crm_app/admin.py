@@ -1466,7 +1466,7 @@ class ClientTechDetailAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('Client & Location', {
-            'fields': ('company', 'zone', 'outlet_name', 'platform_type')
+            'fields': ('company', 'zone', 'outlet_name', 'platform_type', 'syb_account_type')
         }),
         ('Remote Access', {
             'fields': ('anydesk_id', 'teamviewer_id', 'ultraviewer_id', 'other_remote_id')

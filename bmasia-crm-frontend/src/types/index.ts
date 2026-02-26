@@ -1201,6 +1201,7 @@ export interface ClientTechDetail {
   zone_name?: string | null;
   outlet_name: string;
   platform_type: 'soundtrack' | 'beatbreeze' | 'bms' | 'dm' | '';
+  syb_account_type?: 'essential' | 'unlimited' | '';
   anydesk_id: string;
   teamviewer_id: string;
   ultraviewer_id: string;
