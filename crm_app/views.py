@@ -853,6 +853,19 @@ class OpportunityViewSet(BaseModelViewSet):
                 related_opportunity=instance,
             )
 
+        # Auto-enroll in prospect sequences (new_opportunity trigger)
+        try:
+            from crm_app.services.prospect_enrollment_service import ProspectEnrollmentService
+            enrolled = ProspectEnrollmentService.auto_enroll_new_opportunity(instance)
+            if enrolled:
+                import logging
+                logging.getLogger(__name__).info(
+                    f"Auto-enrolled {enrolled} sequence(s) for opportunity {instance.id}"
+                )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Auto-enrollment failed for opportunity {instance.id}: {e}")
+
     @action(detail=False, methods=['get'])
     def pipeline(self, request):
         """Get sales pipeline data"""
@@ -4938,6 +4951,19 @@ class QuoteViewSet(BaseModelViewSet):
             'action': 'Email sent',
             'recipients': recipients
         })
+
+        # Auto-enroll in prospect sequences (quote_sent trigger)
+        try:
+            from crm_app.services.prospect_enrollment_service import ProspectEnrollmentService
+            enrolled = ProspectEnrollmentService.auto_enroll_quote_sent(quote)
+            if enrolled:
+                import logging
+                logging.getLogger(__name__).info(
+                    f"Auto-enrolled {enrolled} sequence(s) for quote {quote.quote_number}"
+                )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Auto-enrollment failed for quote {quote.quote_number}: {e}")
 
         # Include email delivery details in response
         recent_logs = EmailLog.objects.filter(

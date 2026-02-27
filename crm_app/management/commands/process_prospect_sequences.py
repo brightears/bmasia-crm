@@ -25,6 +25,7 @@ from crm_app.models import (
 )
 from crm_app.services.email_service import email_service
 from crm_app.services.ai_service import AIEmailService
+from crm_app.services.prospect_enrollment_service import ProspectEnrollmentService
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,20 @@ class Command(BaseCommand):
             return
 
         ai_service = AIEmailService()
+
+        # 0. Auto-enroll stale deals
+        if not dry_run:
+            try:
+                stale_enrolled = ProspectEnrollmentService.auto_enroll_stale_deals()
+                if stale_enrolled:
+                    self.stdout.write(self.style.SUCCESS(
+                        f"Auto-enrolled {stale_enrolled} stale deal(s)"
+                    ))
+            except Exception as e:
+                logger.error(f"Stale deal auto-enrollment failed: {e}")
+                self.stdout.write(self.style.ERROR(f"Stale deal enrollment error: {e}"))
+        else:
+            self.stdout.write("  Would check for stale deals to auto-enroll")
 
         # 1. Expire old AI drafts (24h TTL)
         expired_count = self._expire_old_drafts(now, dry_run)
