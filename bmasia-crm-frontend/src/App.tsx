@@ -52,6 +52,8 @@ import CashFlow from './pages/CashFlow';
 import BalanceSheet from './pages/BalanceSheet';
 import ContractTemplates from './pages/ContractTemplates';
 import ActionCenter from './pages/ActionCenter';
+import ProspectSequences from './pages/ProspectSequences';
+import AIEmailDrafts from './pages/AIEmailDrafts';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 
 // Temporary placeholder components for new routes
@@ -170,6 +172,22 @@ function App() {
           element={
             <ProtectedRoute requiredModule="opportunities">
               <OpportunityDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/prospect-sequences"
+          element={
+            <ProtectedRoute requiredModule="opportunities">
+              <ProspectSequences />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/ai-drafts"
+          element={
+            <ProtectedRoute requiredModule="opportunities">
+              <AIEmailDrafts />
             </ProtectedRoute>
           }
         />

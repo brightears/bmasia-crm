@@ -269,6 +269,9 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
 
+# Anthropic / Claude API Configuration
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+
 # Soundtrack API Configuration
 SOUNDTRACK_API_TOKEN = config('SOUNDTRACK_API_TOKEN', default='')
 SOUNDTRACK_CLIENT_ID = config('SOUNDTRACK_CLIENT_ID', default='')

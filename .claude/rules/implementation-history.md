@@ -3,10 +3,15 @@
 > **Full history**: See `docs/IMPLEMENTATION_ARCHIVE.md` for detailed implementation records.
 > **Lessons learned**: Key gotchas are documented in MEMORY.md.
 
-## This Week (Feb 19-23, 2026)
+## This Week (Feb 19-27, 2026)
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
+| Feb 27 | AI Sales Automation: backend (Phase 1+2) | `models.py`, `serializers.py`, `views.py`, `urls.py`, `admin.py` | In Progress |
+| Feb 26 | Client Tech: SYB Account Type (Essential/Unlimited) | `models.py`, `ClientTechDetailForm.tsx`, `ClientTechDetails.tsx` | `6f05849a` |
+| Feb 26 | Client Tech: BMS/DM platforms + 5 date fields | `models.py`, `ClientTechDetailForm.tsx`, `ClientTechDetails.tsx` | `df2f4a37` |
+| Feb 25 | Keith's Tech Support: 5 improvements | `ClientTechDetails.tsx`, `TicketForm.tsx`, `KnowledgeBaseArticle.tsx` | `65c83909` |
+| Feb 25 | Documentation restructure (87k→2.8k) | `implementation-history.md`, `IMPLEMENTATION_ARCHIVE.md` | `45e7c87c` |
 | Feb 22 | Contract PDF footer: canvas-based (no overflow) | `views.py` | `0bc3dcfd` |
 | Feb 22 | Contract PDF validity date: 2-line format | `views.py` | `de3cfc95` |
 | Feb 22 | Contract edit restrictions by status | `Contracts.tsx`, `ContractDetail.tsx` | `29081fb0` |
@@ -42,6 +47,10 @@
 
 | Migration | Purpose |
 |-----------|---------|
+| `0079` | Sales automation (5 models + Opportunity.stage_changed_at) |
+| `0078` | ClientTechDetail syb_account_type |
+| `0077` | ClientTechDetail BMS/DM platforms + date fields |
+| `0076` | ClientTechDetail platform_type |
 | `0075` | Quote contract_duration_months |
 | `0074` | ClientTechDetail OS/PC Name fields |
 | `0073` | ClientTechDetail model |

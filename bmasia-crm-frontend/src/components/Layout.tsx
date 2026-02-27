@@ -58,6 +58,8 @@ import {
   Wifi as WifiIcon,
   AttachMoney as AttachMoneyIcon,
   CameraAlt as CameraAltIcon,
+  AutoFixHigh as AutoFixHighIcon,
+  SmartToy as SmartToyIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -124,8 +126,8 @@ const departmentColors: Record<string, { primary: string; light: string; dark: s
   },
 };
 
-// Unified navigation for all users
-const unifiedNavigation = [
+// Unified navigation for all users — base structure (AI Drafts badge injected dynamically)
+const buildNavigation = (aiDraftsPendingCount: number) => [
   {
     title: 'Overview',
     items: [
@@ -139,6 +141,18 @@ const unifiedNavigation = [
       { text: 'Companies', icon: <BusinessIcon />, path: '/companies' },
       { text: 'Contacts', icon: <PeopleIcon />, path: '/contacts' },
       { text: 'Opportunities', icon: <TrendingUpIcon />, path: '/opportunities' },
+    ],
+  },
+  {
+    title: 'Sales Automation',
+    items: [
+      { text: 'Sequences', icon: <AutoFixHighIcon />, path: '/prospect-sequences' },
+      {
+        text: 'AI Drafts',
+        icon: <SmartToyIcon />,
+        path: '/ai-drafts',
+        badge: aiDraftsPendingCount > 0 ? aiDraftsPendingCount : undefined,
+      },
     ],
   },
   {
@@ -331,10 +345,26 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [drawerCollapsed, setDrawerCollapsed] = useState(isTablet);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [aiDraftsPendingCount, setAiDraftsPendingCount] = useState(0);
 
   const { darkMode, toggleDarkMode } = useThemeContext();
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const dailyQuote = getDailyQuote();
+
+  // Fetch AI drafts pending count on mount and every 60 seconds
+  React.useEffect(() => {
+    const fetchPendingCount = async () => {
+      try {
+        const data = await ApiService.getAIEmailDraftPendingCount();
+        setAiDraftsPendingCount(data.count || 0);
+      } catch {
+        // Silently fail if endpoint not yet available
+      }
+    };
+    fetchPendingCount();
+    const interval = setInterval(fetchPendingCount, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -351,7 +381,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   // Get unified navigation and default color
   const userRole = user?.role || 'Admin';
-  const navigation = unifiedNavigation;
+  const navigation = buildNavigation(aiDraftsPendingCount);
   const departmentColor = departmentColors[userRole] || defaultDepartmentColor;
 
   const handleDrawerToggle = () => {

@@ -24,7 +24,8 @@ from .models import (
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
     Device, ClientTechDetail, StaticDocument,
     CorporatePdfTemplate, ContractTemplate, ServicePackageItem, ContractDocument,
-    SeasonalTriggerDate, ZoneOfflineAlert
+    SeasonalTriggerDate, ZoneOfflineAlert,
+    ProspectSequence, ProspectSequenceStep, ProspectEnrollment, ProspectStepExecution, AIEmailDraft
 )
 
 
@@ -3774,3 +3775,46 @@ class ContractDocumentAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+
+# ============================================================
+# Sales Automation Admin
+# ============================================================
+
+class ProspectSequenceStepInline(admin.TabularInline):
+    model = ProspectSequenceStep
+    extra = 1
+    ordering = ['step_number']
+
+
+@admin.register(ProspectSequence)
+class ProspectSequenceAdmin(admin.ModelAdmin):
+    list_display = ['name', 'trigger_type', 'is_active', 'step_count', 'created_at']
+    list_filter = ['trigger_type', 'is_active']
+    search_fields = ['name', 'description']
+    inlines = [ProspectSequenceStepInline]
+    readonly_fields = ['id', 'created_at', 'updated_at']
+
+
+@admin.register(ProspectEnrollment)
+class ProspectEnrollmentAdmin(admin.ModelAdmin):
+    list_display = ['contact', 'sequence', 'opportunity', 'status', 'current_step', 'enrolled_at']
+    list_filter = ['status', 'sequence']
+    search_fields = ['contact__name', 'opportunity__name', 'opportunity__company__name']
+    readonly_fields = ['id', 'created_at', 'updated_at', 'enrolled_at']
+    autocomplete_fields = ['contact', 'opportunity', 'sequence']
+
+
+@admin.register(ProspectStepExecution)
+class ProspectStepExecutionAdmin(admin.ModelAdmin):
+    list_display = ['enrollment', 'step', 'status', 'scheduled_for', 'executed_at']
+    list_filter = ['status']
+    readonly_fields = ['id', 'created_at', 'updated_at']
+
+
+@admin.register(AIEmailDraft)
+class AIEmailDraftAdmin(admin.ModelAdmin):
+    list_display = ['subject', 'status', 'reviewer', 'reviewed_at', 'expires_at', 'auto_approved']
+    list_filter = ['status', 'auto_approved']
+    search_fields = ['subject']
+    readonly_fields = ['id', 'created_at', 'updated_at']

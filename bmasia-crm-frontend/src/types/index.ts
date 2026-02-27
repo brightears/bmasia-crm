@@ -1688,3 +1688,93 @@ export interface EmailLogEntry {
   message_id: string;
   created_at: string;
 }
+
+// Sales Automation Types
+export interface ProspectSequenceStep {
+  id: string;
+  step_number: number;
+  delay_days: number;
+  action_type: 'email' | 'ai_email' | 'task' | 'stage_update';
+  email_subject_template: string;
+  email_body_template: string;
+  ai_prompt_instructions: string;
+  task_title_template: string;
+  task_type: string;
+  stage_to_set: string;
+}
+
+export interface ProspectSequence {
+  id: string;
+  name: string;
+  description: string;
+  trigger_type: 'manual' | 'new_opportunity' | 'quote_sent' | 'stale_deal';
+  target_stages: string[];
+  is_active: boolean;
+  billing_entity: string;
+  max_enrollments_per_company: number;
+  stale_days_threshold: number;
+  steps: ProspectSequenceStep[];
+  active_enrollments: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProspectEnrollment {
+  id: string;
+  sequence: string;
+  sequence_name: string;
+  opportunity: string;
+  opportunity_name: string;
+  contact: string;
+  contact_name: string;
+  company_name: string;
+  status: 'active' | 'paused' | 'completed' | 'cancelled' | 'replied';
+  current_step: number;
+  total_steps: number;
+  enrolled_at: string;
+  paused_at: string | null;
+  completed_at: string | null;
+  cancelled_at: string | null;
+  pause_reason: string;
+  enrollment_source: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProspectStepExecution {
+  id: string;
+  enrollment: string;
+  step: string;
+  step_number: number;
+  action_type: string;
+  scheduled_for: string;
+  executed_at: string | null;
+  status: 'pending' | 'pending_approval' | 'sent' | 'skipped' | 'failed' | 'expired';
+  has_ai_draft: boolean;
+  error_message: string;
+  created_at: string;
+}
+
+export interface AIEmailDraft {
+  id: string;
+  execution: string;
+  subject: string;
+  body_html: string;
+  status: 'pending_review' | 'approved' | 'rejected' | 'edited' | 'expired';
+  reviewer: string | null;
+  reviewer_name: string;
+  reviewed_at: string | null;
+  expires_at: string;
+  edited_subject: string;
+  edited_body_html: string;
+  auto_approved: boolean;
+  is_expired: boolean;
+  // Denormalized from execution chain
+  opportunity_name: string;
+  contact_name: string;
+  contact_email: string;
+  company_name: string;
+  sequence_name: string;
+  step_number: number;
+  created_at: string;
+}

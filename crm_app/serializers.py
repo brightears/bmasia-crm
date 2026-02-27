@@ -17,7 +17,8 @@ from .models import (
     MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent,
     Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry,
     ContractServiceLocation,
-    EmailLog
+    EmailLog,
+    ProspectSequence, ProspectSequenceStep, ProspectEnrollment, ProspectStepExecution, AIEmailDraft
 )
 
 
@@ -465,7 +466,7 @@ class OpportunitySerializer(serializers.ModelSerializer):
             'probability', 'owner', 'owner_name', 'lead_source', 'contact_method',
             'last_contact_date', 'follow_up_date', 'expected_close_date',
             'actual_close_date', 'notes', 'is_active', 'competitors',
-            'pain_points', 'decision_criteria', 'weighted_value', 'days_in_stage',
+            'pain_points', 'decision_criteria', 'stage_changed_at', 'weighted_value', 'days_in_stage',
             'is_overdue', 'activities', 'recent_activities', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -2347,3 +2348,94 @@ class EmailLogSerializer(serializers.ModelSerializer):
             'created_at',
         ]
         read_only_fields = fields
+
+
+# ============================================================
+# Sales Automation Serializers
+# ============================================================
+
+class ProspectSequenceStepSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ProspectSequenceStep
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ProspectSequenceSerializer(serializers.ModelSerializer):
+    steps = ProspectSequenceStepSerializer(many=True, read_only=True)
+    step_count = serializers.IntegerField(read_only=True)
+    active_enrollments = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProspectSequence
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_active_enrollments(self, obj):
+        return obj.enrollments.filter(status='active').count()
+
+
+class ProspectEnrollmentSerializer(serializers.ModelSerializer):
+    sequence_name = serializers.CharField(source='sequence.name', read_only=True)
+    opportunity_name = serializers.CharField(source='opportunity.name', read_only=True)
+    contact_name = serializers.CharField(source='contact.name', read_only=True)
+    contact_email = serializers.CharField(source='contact.email', read_only=True)
+    company_name = serializers.CharField(source='opportunity.company.name', read_only=True)
+    total_steps = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProspectEnrollment
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at', 'enrolled_at']
+
+    def get_total_steps(self, obj):
+        return obj.sequence.steps.count()
+
+
+class ProspectStepExecutionSerializer(serializers.ModelSerializer):
+    step_number = serializers.IntegerField(source='step.step_number', read_only=True)
+    action_type = serializers.CharField(source='step.action_type', read_only=True)
+    has_ai_draft = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProspectStepExecution
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_has_ai_draft(self, obj):
+        return hasattr(obj, 'ai_draft')
+
+
+class AIEmailDraftSerializer(serializers.ModelSerializer):
+    execution_id = serializers.UUIDField(source='execution.id', read_only=True)
+    opportunity_name = serializers.SerializerMethodField()
+    contact_name = serializers.SerializerMethodField()
+    contact_email = serializers.SerializerMethodField()
+    company_name = serializers.SerializerMethodField()
+    sequence_name = serializers.SerializerMethodField()
+    step_number = serializers.SerializerMethodField()
+    reviewer_name = serializers.CharField(source='reviewer.get_full_name', read_only=True, allow_null=True)
+    is_expired = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = AIEmailDraft
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def get_opportunity_name(self, obj):
+        return obj.execution.enrollment.opportunity.name
+
+    def get_contact_name(self, obj):
+        return obj.execution.enrollment.contact.name
+
+    def get_contact_email(self, obj):
+        return obj.execution.enrollment.contact.email
+
+    def get_company_name(self, obj):
+        return obj.execution.enrollment.opportunity.company.name
+
+    def get_sequence_name(self, obj):
+        return obj.execution.enrollment.sequence.name
+
+    def get_step_number(self, obj):
+        return obj.execution.step.step_number

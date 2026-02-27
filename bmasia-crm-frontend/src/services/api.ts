@@ -1637,6 +1637,83 @@ class ApiService {
     const response = await authApi.get('/email-logs/', { params });
     return response.data.results || response.data;
   }
+
+  // Prospect Sequences
+  async getProspectSequences(): Promise<any> {
+    const response = await authApi.get('/prospect-sequences/');
+    return response.data;
+  }
+
+  async getProspectSequence(id: string): Promise<any> {
+    const response = await authApi.get(`/prospect-sequences/${id}/`);
+    return response.data;
+  }
+
+  async createProspectSequence(data: any): Promise<any> {
+    const response = await authApi.post('/prospect-sequences/', data);
+    return response.data;
+  }
+
+  async updateProspectSequence(id: string, data: any): Promise<any> {
+    const response = await authApi.patch(`/prospect-sequences/${id}/`, data);
+    return response.data;
+  }
+
+  async deleteProspectSequence(id: string): Promise<void> {
+    await authApi.delete(`/prospect-sequences/${id}/`);
+  }
+
+  async enrollInSequence(sequenceId: string, data: { opportunity_id: string; contact_id: string }): Promise<any> {
+    const response = await authApi.post(`/prospect-sequences/${sequenceId}/enroll/`, data);
+    return response.data;
+  }
+
+  // Prospect Enrollments
+  async getProspectEnrollments(params?: any): Promise<any> {
+    const response = await authApi.get('/prospect-enrollments/', { params });
+    return response.data;
+  }
+
+  async pauseEnrollment(id: string): Promise<any> {
+    const response = await authApi.post(`/prospect-enrollments/${id}/pause/`);
+    return response.data;
+  }
+
+  async resumeEnrollment(id: string): Promise<any> {
+    const response = await authApi.post(`/prospect-enrollments/${id}/resume/`);
+    return response.data;
+  }
+
+  async cancelEnrollment(id: string): Promise<any> {
+    const response = await authApi.post(`/prospect-enrollments/${id}/cancel/`);
+    return response.data;
+  }
+
+  // AI Email Drafts
+  async getAIEmailDrafts(params?: any): Promise<any> {
+    const response = await authApi.get('/ai-email-drafts/', { params });
+    return response.data;
+  }
+
+  async approveAIEmailDraft(id: string): Promise<any> {
+    const response = await authApi.post(`/ai-email-drafts/${id}/approve/`);
+    return response.data;
+  }
+
+  async rejectAIEmailDraft(id: string, data?: { pause_sequence?: boolean }): Promise<any> {
+    const response = await authApi.post(`/ai-email-drafts/${id}/reject/`, data);
+    return response.data;
+  }
+
+  async editAndApproveAIEmailDraft(id: string, data: { subject: string; body_html: string }): Promise<any> {
+    const response = await authApi.post(`/ai-email-drafts/${id}/edit_and_approve/`, data);
+    return response.data;
+  }
+
+  async getAIEmailDraftPendingCount(): Promise<{ count: number }> {
+    const response = await authApi.get('/ai-email-drafts/pending_count/');
+    return response.data;
+  }
 }
 
 export interface EmailSendData {

@@ -553,7 +553,8 @@ class Opportunity(TimestampedModel):
     competitors = models.CharField(max_length=500, blank=True, help_text="Comma-separated competitor names")
     pain_points = models.TextField(blank=True)
     decision_criteria = models.TextField(blank=True)
-    
+    stage_changed_at = models.DateTimeField(null=True, blank=True, help_text="Timestamp of last stage change")
+
     class Meta:
         ordering = ['-expected_value', '-created_at']
         indexes = [
@@ -573,11 +574,24 @@ class Opportunity(TimestampedModel):
             return (self.expected_value * self.probability) / 100
         return 0
     
+    def save(self, *args, **kwargs):
+        if self.pk:
+            try:
+                old = Opportunity.objects.get(pk=self.pk)
+                if old.stage != self.stage:
+                    self.stage_changed_at = timezone.now()
+            except Opportunity.DoesNotExist:
+                pass
+        if not self.stage_changed_at:
+            self.stage_changed_at = timezone.now()
+        super().save(*args, **kwargs)
+
     @property
     def days_in_stage(self):
         """Calculate days since last stage change"""
-        return (timezone.now().date() - self.updated_at.date()).days
-    
+        ref = self.stage_changed_at or self.updated_at
+        return (timezone.now().date() - ref.date()).days
+
     @property
     def is_overdue(self):
         """Check if follow-up is overdue"""
@@ -4735,3 +4749,223 @@ class BalanceSheetSnapshot(TimestampedModel):
         """Return quarter display name"""
         quarter_names = {1: 'Q1', 2: 'Q2', 3: 'Q3', 4: 'Q4'}
         return quarter_names.get(self.quarter, f'Q{self.quarter}')
+
+
+# ============================================================
+# Sales Automation Models
+# ============================================================
+
+class ProspectSequence(TimestampedModel):
+    """Configurable sales outreach sequence for prospect follow-ups"""
+    TRIGGER_TYPE_CHOICES = [
+        ('manual', 'Manual Enrollment'),
+        ('new_opportunity', 'New Opportunity Created'),
+        ('quote_sent', 'Quote Sent'),
+        ('stale_deal', 'Stale Deal Re-engagement'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255, help_text="Sequence name, e.g. 'New Lead Follow-up'")
+    description = models.TextField(blank=True)
+    trigger_type = models.CharField(max_length=20, choices=TRIGGER_TYPE_CHOICES, default='manual')
+    target_stages = models.JSONField(default=list, blank=True, help_text="Opportunity stages this sequence targets, e.g. ['Contacted', 'Quotation Sent']")
+    is_active = models.BooleanField(default=True)
+    billing_entity = models.CharField(max_length=100, blank=True, help_text="Filter by billing entity, blank=all")
+    max_enrollments_per_company = models.IntegerField(default=1, help_text="Max active enrollments per company")
+    stale_days_threshold = models.IntegerField(default=14, help_text="Days before a deal is considered stale (for stale_deal trigger)")
+
+    class Meta:
+        ordering = ['name']
+        verbose_name = 'Prospect Sequence'
+        verbose_name_plural = 'Prospect Sequences'
+
+    def __str__(self):
+        return f"{self.name} ({self.get_trigger_type_display()})"
+
+    @property
+    def step_count(self):
+        return self.steps.count()
+
+
+class ProspectSequenceStep(TimestampedModel):
+    """Individual step in a prospect sequence"""
+    ACTION_TYPE_CHOICES = [
+        ('email', 'Send Email'),
+        ('ai_email', 'AI-Generated Email'),
+        ('task', 'Create Task'),
+        ('stage_update', 'Update Stage'),
+    ]
+    TASK_TYPE_CHOICES = [
+        ('Call', 'Phone Call'),
+        ('Email', 'Email'),
+        ('Follow-up', 'Follow-up'),
+        ('Meeting', 'Meeting'),
+        ('Other', 'Other'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    sequence = models.ForeignKey(ProspectSequence, on_delete=models.CASCADE, related_name='steps')
+    step_number = models.IntegerField(help_text="Order of this step in the sequence")
+    delay_days = models.IntegerField(default=0, help_text="Days to wait after previous step (or enrollment) before executing")
+    action_type = models.CharField(max_length=20, choices=ACTION_TYPE_CHOICES, default='email')
+
+    # Email fields (for action_type='email')
+    email_subject_template = models.CharField(max_length=500, blank=True, help_text="Email subject (supports {{variable}} templates)")
+    email_body_template = models.TextField(blank=True, help_text="Email body HTML (supports {{variable}} templates)")
+
+    # AI email fields (for action_type='ai_email')
+    ai_prompt_instructions = models.TextField(blank=True, help_text="Instructions for AI: tone, focus, what to emphasize")
+
+    # Task fields (for action_type='task')
+    task_title_template = models.CharField(max_length=200, blank=True, help_text="Task title template")
+    task_type = models.CharField(max_length=20, choices=TASK_TYPE_CHOICES, blank=True)
+
+    # Stage update fields (for action_type='stage_update')
+    stage_to_set = models.CharField(max_length=50, blank=True, help_text="Stage to set on the opportunity")
+
+    class Meta:
+        ordering = ['sequence', 'step_number']
+        unique_together = ['sequence', 'step_number']
+        verbose_name = 'Sequence Step'
+        verbose_name_plural = 'Sequence Steps'
+
+    def __str__(self):
+        return f"Step {self.step_number}: {self.get_action_type_display()} (after {self.delay_days} days)"
+
+
+class ProspectEnrollment(TimestampedModel):
+    """Tracks a contact's journey through a prospect sequence"""
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('paused', 'Paused'),
+        ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
+        ('replied', 'Replied'),
+    ]
+    PAUSE_REASON_CHOICES = [
+        ('reply_received', 'Reply Received'),
+        ('manual', 'Manually Paused'),
+        ('meeting_booked', 'Meeting Booked'),
+        ('out_of_office', 'Out of Office'),
+        ('error', 'Error Occurred'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    sequence = models.ForeignKey(ProspectSequence, on_delete=models.CASCADE, related_name='enrollments')
+    opportunity = models.ForeignKey('Opportunity', on_delete=models.CASCADE, related_name='prospect_enrollments')
+    contact = models.ForeignKey('Contact', on_delete=models.CASCADE, related_name='prospect_enrollments')
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    current_step = models.IntegerField(default=0, help_text="Current step number (0 = not started)")
+
+    enrolled_at = models.DateTimeField(auto_now_add=True)
+    paused_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    pause_reason = models.CharField(max_length=20, choices=PAUSE_REASON_CHOICES, blank=True)
+    enrollment_source = models.CharField(max_length=20, default='manual', help_text="'manual' or 'auto_trigger'")
+
+    class Meta:
+        ordering = ['-enrolled_at']
+        indexes = [
+            models.Index(fields=['status', 'sequence']),
+            models.Index(fields=['opportunity', 'status']),
+            models.Index(fields=['contact', 'status']),
+        ]
+        verbose_name = 'Prospect Enrollment'
+        verbose_name_plural = 'Prospect Enrollments'
+
+    def __str__(self):
+        return f"{self.contact.name} in {self.sequence.name} ({self.status})"
+
+
+class ProspectStepExecution(TimestampedModel):
+    """Per-step execution log for prospect sequences"""
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('pending_approval', 'Pending Approval'),
+        ('sent', 'Sent'),
+        ('skipped', 'Skipped'),
+        ('failed', 'Failed'),
+        ('expired', 'Expired'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    enrollment = models.ForeignKey(ProspectEnrollment, on_delete=models.CASCADE, related_name='executions')
+    step = models.ForeignKey(ProspectSequenceStep, on_delete=models.CASCADE, related_name='executions')
+
+    scheduled_for = models.DateTimeField(help_text="When this step should be executed")
+    executed_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+
+    email_log = models.ForeignKey('EmailLog', on_delete=models.SET_NULL, null=True, blank=True, related_name='prospect_executions')
+    task_created = models.ForeignKey('Task', on_delete=models.SET_NULL, null=True, blank=True, related_name='prospect_executions')
+
+    # AI draft fields
+    ai_draft_subject = models.CharField(max_length=500, blank=True)
+    ai_draft_body = models.TextField(blank=True)
+
+    error_message = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['scheduled_for']
+        indexes = [
+            models.Index(fields=['status', 'scheduled_for']),
+            models.Index(fields=['enrollment', 'status']),
+        ]
+        verbose_name = 'Step Execution'
+        verbose_name_plural = 'Step Executions'
+
+    def __str__(self):
+        return f"Execution of {self.step} - {self.status}"
+
+
+class AIEmailDraft(TimestampedModel):
+    """AI-generated email draft pending human approval"""
+    STATUS_CHOICES = [
+        ('pending_review', 'Pending Review'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+        ('edited', 'Edited & Approved'),
+        ('expired', 'Expired'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    execution = models.OneToOneField(ProspectStepExecution, on_delete=models.CASCADE, related_name='ai_draft')
+
+    subject = models.CharField(max_length=500)
+    body_html = models.TextField()
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending_review')
+    reviewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_drafts')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(help_text="Draft expires and is skipped after this time (24h TTL)")
+
+    edited_subject = models.CharField(max_length=500, blank=True, help_text="Edited subject (if reviewer modified)")
+    edited_body_html = models.TextField(blank=True, help_text="Edited body (if reviewer modified)")
+
+    auto_approved = models.BooleanField(default=False, help_text="Whether this was auto-approved by graduated trust")
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', 'expires_at']),
+        ]
+        verbose_name = 'AI Email Draft'
+        verbose_name_plural = 'AI Email Drafts'
+
+    def __str__(self):
+        return f"Draft: {self.subject[:50]} ({self.status})"
+
+    @property
+    def is_expired(self):
+        return timezone.now() > self.expires_at and self.status == 'pending_review'
+
+    def get_final_subject(self):
+        """Return edited subject if available, otherwise original"""
+        return self.edited_subject or self.subject
+
+    def get_final_body(self):
+        """Return edited body if available, otherwise original"""
+        return self.edited_body_html or self.body_html

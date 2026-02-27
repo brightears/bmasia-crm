@@ -44,7 +44,8 @@ from .models import (
     SeasonalTriggerDate,
     MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent,
     Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry,
-    EmailLog
+    EmailLog,
+    ProspectSequence, ProspectSequenceStep, ProspectEnrollment, ProspectStepExecution, AIEmailDraft
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
@@ -63,7 +64,8 @@ from .serializers import (
     SeasonalTriggerDateSerializer,
     MonthlyRevenueSnapshotSerializer, MonthlyRevenueTargetSerializer, ContractRevenueEventSerializer, RevenueMonthlyDataSerializer,
     VendorSerializer, ExpenseCategorySerializer, RecurringExpenseSerializer, ExpenseEntrySerializer, ExpenseEntryCreateSerializer,
-    EmailLogSerializer
+    EmailLogSerializer,
+    ProspectSequenceSerializer, ProspectSequenceStepSerializer, ProspectEnrollmentSerializer, ProspectStepExecutionSerializer, AIEmailDraftSerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -8581,6 +8583,290 @@ class DeviceViewSet(viewsets.ModelViewSet):
         devices = self.queryset.filter(company_id=company_id)
         serializer = self.get_serializer(devices, many=True)
         return Response(serializer.data)
+
+
+# ============================================================
+# Sales Automation ViewSets
+# ============================================================
+
+class ProspectSequenceViewSet(viewsets.ModelViewSet):
+    queryset = ProspectSequence.objects.prefetch_related('steps').all()
+    serializer_class = ProspectSequenceSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['trigger_type', 'is_active']
+    search_fields = ['name', 'description']
+
+    @action(detail=True, methods=['post'])
+    def enroll(self, request, pk=None):
+        """Manually enroll a contact in this sequence"""
+        sequence = self.get_object()
+        opportunity_id = request.data.get('opportunity_id')
+        contact_id = request.data.get('contact_id')
+
+        if not opportunity_id or not contact_id:
+            return Response({'error': 'opportunity_id and contact_id are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            opportunity = Opportunity.objects.get(pk=opportunity_id)
+            contact = Contact.objects.get(pk=contact_id)
+        except (Opportunity.DoesNotExist, Contact.DoesNotExist):
+            return Response({'error': 'Opportunity or Contact not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Check for existing active enrollment
+        existing = ProspectEnrollment.objects.filter(
+            sequence=sequence, opportunity=opportunity, contact=contact, status='active'
+        ).exists()
+        if existing:
+            return Response({'error': 'Contact is already enrolled in this sequence'}, status=status.HTTP_400_BAD_REQUEST)
+
+        enrollment = ProspectEnrollment.objects.create(
+            sequence=sequence,
+            opportunity=opportunity,
+            contact=contact,
+            status='active',
+            enrollment_source='manual',
+        )
+
+        # Schedule first step
+        first_step = sequence.steps.order_by('step_number').first()
+        if first_step:
+            ProspectStepExecution.objects.create(
+                enrollment=enrollment,
+                step=first_step,
+                scheduled_for=timezone.now() + timedelta(days=first_step.delay_days),
+            )
+
+        serializer = ProspectEnrollmentSerializer(enrollment)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ProspectEnrollmentViewSet(viewsets.ModelViewSet):
+    queryset = ProspectEnrollment.objects.select_related(
+        'sequence', 'opportunity', 'opportunity__company', 'contact'
+    ).prefetch_related('executions').all()
+    serializer_class = ProspectEnrollmentSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['status', 'sequence', 'opportunity', 'contact']
+    search_fields = ['contact__name', 'opportunity__name', 'opportunity__company__name']
+
+    @action(detail=True, methods=['post'])
+    def pause(self, request, pk=None):
+        """Pause an active enrollment"""
+        enrollment = self.get_object()
+        if enrollment.status != 'active':
+            return Response({'error': 'Only active enrollments can be paused'}, status=status.HTTP_400_BAD_REQUEST)
+        enrollment.status = 'paused'
+        enrollment.paused_at = timezone.now()
+        enrollment.pause_reason = request.data.get('reason', 'manual')
+        enrollment.save()
+        return Response(ProspectEnrollmentSerializer(enrollment).data)
+
+    @action(detail=True, methods=['post'])
+    def resume(self, request, pk=None):
+        """Resume a paused enrollment"""
+        enrollment = self.get_object()
+        if enrollment.status != 'paused':
+            return Response({'error': 'Only paused enrollments can be resumed'}, status=status.HTTP_400_BAD_REQUEST)
+        enrollment.status = 'active'
+        enrollment.paused_at = None
+        enrollment.pause_reason = ''
+        enrollment.save()
+        # Re-schedule the next pending step from now
+        next_exec = enrollment.executions.filter(status='pending').order_by('scheduled_for').first()
+        if next_exec:
+            next_exec.scheduled_for = timezone.now()
+            next_exec.save()
+        return Response(ProspectEnrollmentSerializer(enrollment).data)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        """Cancel an enrollment"""
+        enrollment = self.get_object()
+        if enrollment.status in ('completed', 'cancelled'):
+            return Response({'error': 'Enrollment is already finished'}, status=status.HTTP_400_BAD_REQUEST)
+        enrollment.status = 'cancelled'
+        enrollment.cancelled_at = timezone.now()
+        enrollment.save()
+        # Cancel all pending executions
+        enrollment.executions.filter(status__in=['pending', 'pending_approval']).update(status='skipped')
+        return Response(ProspectEnrollmentSerializer(enrollment).data)
+
+
+class AIEmailDraftViewSet(viewsets.ModelViewSet):
+    queryset = AIEmailDraft.objects.select_related(
+        'execution', 'execution__enrollment', 'execution__enrollment__opportunity',
+        'execution__enrollment__opportunity__company', 'execution__enrollment__contact',
+        'execution__enrollment__sequence', 'execution__step', 'reviewer'
+    ).all()
+    serializer_class = AIEmailDraftSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['status']
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        """Approve an AI draft and send the email"""
+        draft = self.get_object()
+        if draft.status != 'pending_review':
+            return Response({'error': 'Only pending drafts can be approved'}, status=status.HTTP_400_BAD_REQUEST)
+
+        draft.status = 'approved'
+        draft.reviewer = request.user
+        draft.reviewed_at = timezone.now()
+        draft.save()
+
+        # Send the email
+        execution = draft.execution
+        enrollment = execution.enrollment
+        try:
+            from .services.email_service import EmailService
+            email_service = EmailService()
+            subject = draft.get_final_subject()
+            body = draft.get_final_body()
+
+            success, message = email_service.send_email(
+                to_email=enrollment.contact.email,
+                subject=subject,
+                body_html=body,
+                body_text=re.sub(r'<[^>]+>', '', body),
+                company=enrollment.opportunity.company,
+                contact=enrollment.contact,
+                email_type='sequence',
+            )
+
+            if success:
+                execution.status = 'sent'
+                execution.executed_at = timezone.now()
+                execution.save()
+
+                # Schedule next step
+                self._schedule_next_step(enrollment, execution.step)
+            else:
+                execution.status = 'failed'
+                execution.error_message = message
+                execution.save()
+                return Response({'error': f'Failed to send: {message}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        except Exception as e:
+            execution.status = 'failed'
+            execution.error_message = str(e)
+            execution.save()
+            return Response({'error': f'Failed to send: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(AIEmailDraftSerializer(draft).data)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        """Reject an AI draft"""
+        draft = self.get_object()
+        if draft.status != 'pending_review':
+            return Response({'error': 'Only pending drafts can be rejected'}, status=status.HTTP_400_BAD_REQUEST)
+
+        draft.status = 'rejected'
+        draft.reviewer = request.user
+        draft.reviewed_at = timezone.now()
+        draft.save()
+
+        # Mark execution as skipped
+        execution = draft.execution
+        execution.status = 'skipped'
+        execution.save()
+
+        # Check if we should pause the sequence
+        pause_sequence = request.data.get('pause_sequence', False)
+        if pause_sequence:
+            enrollment = execution.enrollment
+            enrollment.status = 'paused'
+            enrollment.paused_at = timezone.now()
+            enrollment.pause_reason = 'manual'
+            enrollment.save()
+        else:
+            # Schedule next step
+            self._schedule_next_step(execution.enrollment, execution.step)
+
+        return Response(AIEmailDraftSerializer(draft).data)
+
+    @action(detail=True, methods=['post'])
+    def edit_and_approve(self, request, pk=None):
+        """Edit the draft content and then approve + send"""
+        draft = self.get_object()
+        if draft.status != 'pending_review':
+            return Response({'error': 'Only pending drafts can be edited'}, status=status.HTTP_400_BAD_REQUEST)
+
+        draft.edited_subject = request.data.get('subject', '')
+        draft.edited_body_html = request.data.get('body_html', '')
+        draft.status = 'edited'
+        draft.reviewer = request.user
+        draft.reviewed_at = timezone.now()
+        draft.save()
+
+        # Send the email (same as approve, but uses edited content)
+        execution = draft.execution
+        enrollment = execution.enrollment
+        try:
+            from .services.email_service import EmailService
+            email_service = EmailService()
+            subject = draft.get_final_subject()
+            body = draft.get_final_body()
+
+            success, message = email_service.send_email(
+                to_email=enrollment.contact.email,
+                subject=subject,
+                body_html=body,
+                body_text=re.sub(r'<[^>]+>', '', body),
+                company=enrollment.opportunity.company,
+                contact=enrollment.contact,
+                email_type='sequence',
+            )
+
+            if success:
+                execution.status = 'sent'
+                execution.executed_at = timezone.now()
+                execution.save()
+
+                self._schedule_next_step(enrollment, execution.step)
+            else:
+                execution.status = 'failed'
+                execution.error_message = message
+                execution.save()
+                return Response({'error': f'Failed to send: {message}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        except Exception as e:
+            execution.status = 'failed'
+            execution.error_message = str(e)
+            execution.save()
+            return Response({'error': f'Failed to send: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(AIEmailDraftSerializer(draft).data)
+
+    @action(detail=False, methods=['get'])
+    def pending_count(self, request):
+        """Get count of pending drafts (for sidebar badge)"""
+        count = AIEmailDraft.objects.filter(status='pending_review', expires_at__gt=timezone.now()).count()
+        return Response({'count': count})
+
+    def _schedule_next_step(self, enrollment, current_step):
+        """Schedule the next step in the sequence after the current one"""
+        next_step = enrollment.sequence.steps.filter(
+            step_number__gt=current_step.step_number
+        ).order_by('step_number').first()
+
+        if next_step:
+            enrollment.current_step = current_step.step_number
+            enrollment.save()
+            ProspectStepExecution.objects.create(
+                enrollment=enrollment,
+                step=next_step,
+                scheduled_for=timezone.now() + timedelta(days=next_step.delay_days),
+            )
+        else:
+            # Sequence complete
+            enrollment.status = 'completed'
+            enrollment.completed_at = timezone.now()
+            enrollment.current_step = current_step.step_number
+            enrollment.save()
 
 
 class ClientTechDetailViewSet(viewsets.ModelViewSet):

@@ -89,6 +89,11 @@ router.register(r'action-center', views.ActionCenterViewSet, basename='action-ce
 # Email delivery tracking (read-only)
 router.register(r'email-logs', views.EmailLogViewSet, basename='email-log')
 
+# Sales Automation routes
+router.register(r'prospect-sequences', views.ProspectSequenceViewSet, basename='prospect-sequence')
+router.register(r'prospect-enrollments', views.ProspectEnrollmentViewSet, basename='prospect-enrollment')
+router.register(r'ai-email-drafts', views.AIEmailDraftViewSet, basename='ai-email-draft')
+
 # The API URLs are now determined automatically by the router.
 urlpatterns = [
     path('v1/', include(router.urls)),
