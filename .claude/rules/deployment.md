@@ -23,6 +23,7 @@
 - Email Sequences Cron: `crn-d66mhcbnv86c73d6e4kg` (every 20 min)
 - Soundtrack Sync Cron: `crn-d5ea7j2li9vc73dccnb0` (hourly)
 - Task Digest Cron: `crn-d65drn75r7bs73cpu72g` (daily 02:00 UTC / 9 AM Bangkok)
+- Prospect Sequences Cron: `crn-d6ghca94tr6s73b8ievg` (every 20 min)
 
 ### Python Version
 - Pinned to **3.12.8** via `.python-version` + `runtime.txt`

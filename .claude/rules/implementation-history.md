@@ -7,7 +7,7 @@
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
-| Feb 27 | AI Sales Automation: backend (Phase 1+2) | `models.py`, `serializers.py`, `views.py`, `urls.py`, `admin.py` | In Progress |
+| Feb 27 | AI Sales Automation: full stack (Phase 1+2) | `models.py`, `ai_service.py`, `views.py`, `ProspectSequences.tsx`, `AIEmailDrafts.tsx` | `1956eddd`, `43b04513` |
 | Feb 26 | Client Tech: SYB Account Type (Essential/Unlimited) | `models.py`, `ClientTechDetailForm.tsx`, `ClientTechDetails.tsx` | `6f05849a` |
 | Feb 26 | Client Tech: BMS/DM platforms + 5 date fields | `models.py`, `ClientTechDetailForm.tsx`, `ClientTechDetails.tsx` | `df2f4a37` |
 | Feb 25 | Keith's Tech Support: 5 improvements | `ClientTechDetails.tsx`, `TicketForm.tsx`, `KnowledgeBaseArticle.tsx` | `65c83909` |
@@ -47,6 +47,7 @@
 
 | Migration | Purpose |
 |-----------|---------|
+| `0080` | Default prospect sequences (data migration) |
 | `0079` | Sales automation (5 models + Opportunity.stage_changed_at) |
 | `0078` | ClientTechDetail syb_account_type |
 | `0077` | ClientTechDetail BMS/DM platforms + date fields |
