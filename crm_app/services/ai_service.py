@@ -20,6 +20,12 @@ except ImportError:
     logger.warning("anthropic package not installed — AI email generation disabled")
 
 
+# Model configuration — tiered by task complexity
+# Sonnet: email body, replies (quality content that represents the brand)
+# Haiku: subject lines only (short, simple task)
+MODEL_CONTENT = "claude-sonnet-4-6"  # For email body, replies
+MODEL_SIMPLE = "claude-haiku-4-5-20251001"  # For subject lines
+
 SYSTEM_PROMPT = """You are a professional sales email writer for BMAsia, a leading background music and digital media solutions provider in Asia-Pacific.
 
 BMAsia offers:
@@ -82,7 +88,7 @@ class AIEmailService:
             prompt = self._build_prompt(opportunity, contact, step, context or {})
 
             response = self.client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=MODEL_CONTENT,
                 max_tokens=1500,
                 system=SYSTEM_PROMPT,
                 messages=[
@@ -127,7 +133,7 @@ Sequence: {step.sequence.name}
 Return ONLY the subject line text, nothing else. Do not include "Subject:" prefix."""
 
             response = self.client.messages.create(
-                model="claude-haiku-4-5-20251001",
+                model=MODEL_SIMPLE,
                 max_tokens=100,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -249,7 +255,7 @@ Body: {original_email.get('body', 'N/A')[:1000]}
 Write a helpful, professional reply. If the prospect asks about pricing, provide general information but suggest scheduling a call for specific quotes. Never commit to specific discounts."""
 
             response = self.client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=MODEL_CONTENT,
                 max_tokens=1500,
                 system=SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": prompt}]
