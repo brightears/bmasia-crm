@@ -1689,6 +1689,12 @@ class ApiService {
     return response.data;
   }
 
+  // Prospect Replies
+  async getProspectReplies(params?: any): Promise<any> {
+    const response = await authApi.get('/prospect-replies/', { params });
+    return response.data;
+  }
+
   // AI Email Drafts
   async getAIEmailDrafts(params?: any): Promise<any> {
     const response = await authApi.get('/ai-email-drafts/', { params });

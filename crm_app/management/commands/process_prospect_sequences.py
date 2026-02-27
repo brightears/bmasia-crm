@@ -192,6 +192,12 @@ class Command(BaseCommand):
         execution.executed_at = now
         if success:
             execution.status = 'sent'
+            # Link the EmailLog to this execution for reply matching
+            latest_log = EmailLog.objects.filter(
+                contact=contact, company=company, email_type='sequence', status='sent'
+            ).order_by('-created_at').first()
+            if latest_log:
+                execution.email_log = latest_log
             # Update enrollment current_step
             enrollment = execution.enrollment
             enrollment.current_step = step.step_number
@@ -200,7 +206,7 @@ class Command(BaseCommand):
         else:
             execution.status = 'failed'
             execution.error_message = message
-        execution.save(update_fields=['status', 'executed_at', 'error_message'])
+        execution.save(update_fields=['status', 'executed_at', 'error_message', 'email_log_id'])
 
     def _create_ai_draft(self, execution, contact, opportunity, step, ai_service, now):
         """Generate AI email and create a draft for approval"""

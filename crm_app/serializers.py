@@ -18,7 +18,8 @@ from .models import (
     Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry,
     ContractServiceLocation,
     EmailLog,
-    ProspectSequence, ProspectSequenceStep, ProspectEnrollment, ProspectStepExecution, AIEmailDraft
+    ProspectSequence, ProspectSequenceStep, ProspectEnrollment, ProspectStepExecution,
+    ProspectReply, AIEmailDraft
 )
 
 
@@ -2405,6 +2406,33 @@ class ProspectEnrollmentSerializer(serializers.ModelSerializer):
 
     def get_total_steps(self, obj):
         return obj.sequence.steps.count()
+
+
+class ProspectReplySerializer(serializers.ModelSerializer):
+    enrollment_id = serializers.UUIDField(source='enrollment.id', read_only=True)
+    sequence_name = serializers.CharField(source='enrollment.sequence.name', read_only=True)
+    contact_name = serializers.SerializerMethodField()
+    company_name = serializers.SerializerMethodField()
+    opportunity_id = serializers.UUIDField(source='enrollment.opportunity.id', read_only=True)
+
+    class Meta:
+        model = ProspectReply
+        fields = [
+            'id', 'enrollment_id', 'sequence_name', 'contact_name', 'company_name',
+            'opportunity_id', 'imap_message_id', 'from_email', 'subject', 'body_text',
+            'received_at', 'classification', 'classification_confidence',
+            'classification_method', 'enrollment_paused', 'stage_updated',
+            'needs_human_review', 'created_at',
+        ]
+        read_only_fields = fields
+
+    def get_contact_name(self, obj):
+        contact = obj.enrollment.contact
+        return f"{contact.first_name} {contact.last_name}" if contact else ''
+
+    def get_company_name(self, obj):
+        company = obj.enrollment.opportunity.company
+        return company.name if company else ''
 
 
 class AIEmailDraftSerializer(serializers.ModelSerializer):

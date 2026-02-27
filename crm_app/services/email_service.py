@@ -225,7 +225,16 @@ class EmailService:
             
             # Send email
             msg.send(fail_silently=False)
-            
+
+            # Capture SMTP Message-ID for reply matching
+            try:
+                smtp_message_id = msg.message()['Message-ID']
+                if smtp_message_id:
+                    email_log.message_id = smtp_message_id
+                    email_log.save(update_fields=['message_id'])
+            except Exception:
+                pass  # Non-critical — reply matching falls back to subject line
+
             # Mark as sent
             email_log.mark_as_sent()
             

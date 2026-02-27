@@ -40,9 +40,10 @@ import {
   Email,
   Phone,
   TrendingUp,
+  Reply,
 } from '@mui/icons-material';
 import ApiService from '../services/api';
-import { Opportunity, OpportunityActivity, Quote, Contract, Task, ProspectEnrollment, ProspectStepExecution } from '../types';
+import { Opportunity, OpportunityActivity, Quote, Contract, Task, ProspectEnrollment, ProspectStepExecution, ProspectReply } from '../types';
 import OpportunityForm from '../components/OpportunityForm';
 import ActivityTimeline from '../components/ActivityTimeline';
 import ActivityForm from '../components/ActivityForm';
@@ -66,6 +67,7 @@ const OpportunityDetail: React.FC = () => {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [enrollments, setEnrollments] = useState<ProspectEnrollment[]>([]);
+  const [replies, setReplies] = useState<ProspectReply[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentTab, setCurrentTab] = useState(0);
@@ -109,8 +111,16 @@ const OpportunityDetail: React.FC = () => {
         const tasksData = await ApiService.getTasks({ related_opportunity: id });
         setTasks(tasksData.results || []);
       } else if (tabIndex === 5) {
-        const enrollData = await ApiService.getProspectEnrollments({ opportunity: id });
-        setEnrollments(enrollData.results || enrollData);
+        const [enrollData, replyData] = await Promise.all([
+          ApiService.getProspectEnrollments({ opportunity: id }),
+          ApiService.getProspectReplies({ ordering: '-received_at' }),
+        ]);
+        const enrolls = enrollData.results || enrollData;
+        setEnrollments(enrolls);
+        // Filter replies to only those belonging to this opportunity's enrollments
+        const enrollmentIds = new Set(enrolls.map((e: ProspectEnrollment) => e.id));
+        const allReplies = replyData.results || replyData;
+        setReplies(allReplies.filter((r: ProspectReply) => enrollmentIds.has(r.enrollment_id)));
       }
     } catch (err) {
       console.error('Error loading tab data:', err);
@@ -667,6 +677,15 @@ const OpportunityDetail: React.FC = () => {
                               enrollment.status === 'replied' ? 'info' : 'default'
                             }
                           />
+                          {replies.filter(r => r.enrollment_id === enrollment.id).length > 0 && (
+                            <Chip
+                              icon={<Reply />}
+                              label={`${replies.filter(r => r.enrollment_id === enrollment.id).length} ${replies.filter(r => r.enrollment_id === enrollment.id).length === 1 ? 'reply' : 'replies'}`}
+                              size="small"
+                              color="info"
+                              variant="outlined"
+                            />
+                          )}
                         </Box>
                         <Box>
                           {enrollment.status === 'active' && (
@@ -784,6 +803,47 @@ const OpportunityDetail: React.FC = () => {
                             </TableBody>
                           </Table>
                         </TableContainer>
+                      )}
+
+                      {/* Replies Section */}
+                      {replies.filter(r => r.enrollment_id === enrollment.id).length > 0 && (
+                        <Box mt={2}>
+                          <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Reply fontSize="small" /> Replies Detected
+                          </Typography>
+                          {replies
+                            .filter(r => r.enrollment_id === enrollment.id)
+                            .map((reply) => (
+                            <Paper key={reply.id} variant="outlined" sx={{ p: 1.5, mb: 1, bgcolor: 'grey.50' }}>
+                              <Box display="flex" justifyContent="space-between" alignItems="center" mb={0.5}>
+                                <Box display="flex" alignItems="center" gap={1}>
+                                  <Typography variant="body2" fontWeight={600}>
+                                    {reply.from_email}
+                                  </Typography>
+                                  <Chip
+                                    label={reply.classification.replace(/_/g, ' ')}
+                                    size="small"
+                                    color={
+                                      reply.classification === 'interested' || reply.classification === 'meeting_request' ? 'success' :
+                                      reply.classification === 'not_interested' ? 'error' :
+                                      reply.classification === 'question' || reply.classification === 'objection' ? 'warning' :
+                                      reply.classification === 'out_of_office' ? 'info' : 'default'
+                                    }
+                                  />
+                                  {reply.needs_human_review && (
+                                    <Chip label="Needs Review" size="small" color="warning" variant="outlined" />
+                                  )}
+                                </Box>
+                                <Typography variant="caption" color="text.secondary">
+                                  {formatDate(reply.received_at)}
+                                </Typography>
+                              </Box>
+                              <Typography variant="body2" color="text.secondary" noWrap>
+                                {reply.subject}
+                              </Typography>
+                            </Paper>
+                          ))}
+                        </Box>
                       )}
                     </Paper>
                   ))}

@@ -7,6 +7,9 @@
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
+| Feb 27 | AI Sales Automation Phase 4: Reply detection & smart routing | `reply_detection_service.py`, `check_prospect_replies.py`, `0081_prospect_reply_model.py` | pending |
+| Feb 27 | AI Sales Automation: product knowledge training | `ai_service.py` (SYSTEM_PROMPT enrichment) | `60913e4f` |
+| Feb 27 | AI Sales Automation: OpportunityDetail Automation tab | `OpportunityDetail.tsx`, `serializers.py` | `c87bd9c2` |
 | Feb 27 | AI Sales Automation: auto-enrollment triggers | `prospect_enrollment_service.py`, `views.py`, `process_prospect_sequences.py` | `50c9dbcb` |
 | Feb 27 | AI Sales Automation: default sequences + cron | `0080_default_prospect_sequences.py`, `deployment.md` | `406893e1` |
 | Feb 27 | AI Sales Automation: full stack (Phase 1+2+3) | `models.py`, `ai_service.py`, `views.py`, `ProspectSequences.tsx`, `AIEmailDrafts.tsx` | `1956eddd`, `43b04513` |
@@ -49,6 +52,7 @@
 
 | Migration | Purpose |
 |-----------|---------|
+| `0081` | ProspectReply model + EmailLog 'sequence' type |
 | `0080` | Default prospect sequences (data migration) |
 | `0079` | Sales automation (5 models + Opportunity.stage_changed_at) |
 | `0078` | ClientTechDetail syb_account_type |

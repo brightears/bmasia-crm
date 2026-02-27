@@ -1823,6 +1823,7 @@ class EmailLog(TimestampedModel):
         ('quote_send', 'Quote Sent'),
         ('quote_followup', 'Quote Follow-up'),
         ('contract_send', 'Contract Sent'),
+        ('sequence', 'Prospect Sequence'),
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -4919,6 +4920,60 @@ class ProspectStepExecution(TimestampedModel):
 
     def __str__(self):
         return f"Execution of {self.step} - {self.status}"
+
+
+class ProspectReply(TimestampedModel):
+    """Tracks replies from prospects detected via IMAP"""
+    CLASSIFICATION_CHOICES = [
+        ('interested', 'Interested'),
+        ('not_interested', 'Not Interested'),
+        ('question', 'Question'),
+        ('objection', 'Objection'),
+        ('meeting_request', 'Meeting Request'),
+        ('out_of_office', 'Out of Office'),
+        ('unsubscribe', 'Unsubscribe Request'),
+        ('referral', 'Referral'),
+        ('bounce', 'Bounce/Error'),
+        ('other', 'Other'),
+        ('unclassified', 'Unclassified'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    enrollment = models.ForeignKey(ProspectEnrollment, on_delete=models.CASCADE, related_name='replies')
+    email_log = models.ForeignKey(
+        EmailLog, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='prospect_replies', help_text="The outbound email this replies to"
+    )
+
+    # IMAP data
+    imap_message_id = models.CharField(max_length=500, unique=True, help_text="Message-ID header for dedup")
+    from_email = models.EmailField()
+    subject = models.CharField(max_length=500)
+    body_text = models.TextField(blank=True)
+    received_at = models.DateTimeField()
+
+    # Classification
+    classification = models.CharField(max_length=20, choices=CLASSIFICATION_CHOICES, default='unclassified')
+    classification_confidence = models.FloatField(default=0.0, help_text="0.0-1.0")
+    classification_method = models.CharField(max_length=20, blank=True, help_text="'rule' or 'ai'")
+
+    # Actions taken
+    enrollment_paused = models.BooleanField(default=False)
+    task_created = models.ForeignKey('Task', on_delete=models.SET_NULL, null=True, blank=True)
+    stage_updated = models.BooleanField(default=False)
+    needs_human_review = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-received_at']
+        indexes = [
+            models.Index(fields=['enrollment', '-received_at']),
+            models.Index(fields=['classification', 'needs_human_review']),
+        ]
+        verbose_name = 'Prospect Reply'
+        verbose_name_plural = 'Prospect Replies'
+
+    def __str__(self):
+        return f"Reply from {self.from_email} ({self.classification})"
 
 
 class AIEmailDraft(TimestampedModel):

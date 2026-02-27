@@ -45,7 +45,8 @@ from .models import (
     MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent,
     Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry,
     EmailLog,
-    ProspectSequence, ProspectSequenceStep, ProspectEnrollment, ProspectStepExecution, AIEmailDraft
+    ProspectSequence, ProspectSequenceStep, ProspectEnrollment, ProspectStepExecution,
+    ProspectReply, AIEmailDraft
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
@@ -65,7 +66,8 @@ from .serializers import (
     MonthlyRevenueSnapshotSerializer, MonthlyRevenueTargetSerializer, ContractRevenueEventSerializer, RevenueMonthlyDataSerializer,
     VendorSerializer, ExpenseCategorySerializer, RecurringExpenseSerializer, ExpenseEntrySerializer, ExpenseEntryCreateSerializer,
     EmailLogSerializer,
-    ProspectSequenceSerializer, ProspectSequenceStepSerializer, ProspectEnrollmentSerializer, ProspectStepExecutionSerializer, AIEmailDraftSerializer
+    ProspectSequenceSerializer, ProspectSequenceStepSerializer, ProspectEnrollmentSerializer,
+    ProspectStepExecutionSerializer, ProspectReplySerializer, AIEmailDraftSerializer
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
@@ -8720,6 +8722,21 @@ class ProspectEnrollmentViewSet(viewsets.ModelViewSet):
         return Response(ProspectEnrollmentSerializer(enrollment).data)
 
 
+class ProspectReplyViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = ProspectReply.objects.select_related(
+        'enrollment', 'enrollment__sequence', 'enrollment__opportunity',
+        'enrollment__opportunity__company', 'enrollment__contact',
+        'email_log', 'task_created',
+    ).all()
+    serializer_class = ProspectReplySerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['enrollment', 'classification', 'needs_human_review']
+    search_fields = ['from_email', 'subject']
+    ordering_fields = ['received_at', 'classification']
+    ordering = ['-received_at']
+
+
 class AIEmailDraftViewSet(viewsets.ModelViewSet):
     queryset = AIEmailDraft.objects.select_related(
         'execution', 'execution__enrollment', 'execution__enrollment__opportunity',
@@ -8765,6 +8782,16 @@ class AIEmailDraftViewSet(viewsets.ModelViewSet):
             if success:
                 execution.status = 'sent'
                 execution.executed_at = timezone.now()
+                # Link EmailLog for reply matching
+                from .models import EmailLog
+                latest_log = EmailLog.objects.filter(
+                    contact=enrollment.contact,
+                    company=enrollment.opportunity.company,
+                    email_type='sequence',
+                    status='sent',
+                ).order_by('-created_at').first()
+                if latest_log:
+                    execution.email_log = latest_log
                 execution.save()
 
                 # Schedule next step

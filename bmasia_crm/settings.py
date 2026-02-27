@@ -272,6 +272,11 @@ if not DEBUG:
 # Anthropic / Claude API Configuration
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 
+# Prospect reply detection (IMAP)
+PROSPECT_REPLY_EMAIL = config('PROSPECT_REPLY_EMAIL', default='norbert@bmasiamusic.com')
+PROSPECT_REPLY_IMAP_PASSWORD = config('PROSPECT_REPLY_IMAP_PASSWORD', default='')
+PROSPECT_IMAP_HOST = config('PROSPECT_IMAP_HOST', default='imap.gmail.com')
+
 # Soundtrack API Configuration
 SOUNDTRACK_API_TOKEN = config('SOUNDTRACK_API_TOKEN', default='')
 SOUNDTRACK_CLIENT_ID = config('SOUNDTRACK_CLIENT_ID', default='')

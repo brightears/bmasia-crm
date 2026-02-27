@@ -1756,6 +1756,27 @@ export interface ProspectStepExecution {
   created_at: string;
 }
 
+export interface ProspectReply {
+  id: string;
+  enrollment_id: string;
+  sequence_name: string;
+  contact_name: string;
+  company_name: string;
+  opportunity_id: string;
+  imap_message_id: string;
+  from_email: string;
+  subject: string;
+  body_text: string;
+  received_at: string;
+  classification: 'interested' | 'not_interested' | 'question' | 'objection' | 'meeting_request' | 'out_of_office' | 'unsubscribe' | 'referral' | 'bounce' | 'other' | 'unclassified';
+  classification_confidence: number;
+  classification_method: string;
+  enrollment_paused: boolean;
+  stage_updated: boolean;
+  needs_human_review: boolean;
+  created_at: string;
+}
+
 export interface AIEmailDraft {
   id: string;
   execution: string;
