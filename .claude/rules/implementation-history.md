@@ -7,7 +7,7 @@
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
-| Feb 27 | AI Sales Automation: auto-enrollment triggers | `prospect_enrollment_service.py`, `views.py`, `process_prospect_sequences.py` | pending |
+| Feb 27 | AI Sales Automation: auto-enrollment triggers | `prospect_enrollment_service.py`, `views.py`, `process_prospect_sequences.py` | `50c9dbcb` |
 | Feb 27 | AI Sales Automation: default sequences + cron | `0080_default_prospect_sequences.py`, `deployment.md` | `406893e1` |
 | Feb 27 | AI Sales Automation: full stack (Phase 1+2+3) | `models.py`, `ai_service.py`, `views.py`, `ProspectSequences.tsx`, `AIEmailDrafts.tsx` | `1956eddd`, `43b04513` |
 | Feb 26 | Client Tech: SYB Account Type (Essential/Unlimited) | `models.py`, `ClientTechDetailForm.tsx`, `ClientTechDetails.tsx` | `6f05849a` |

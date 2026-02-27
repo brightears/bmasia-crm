@@ -33,9 +33,16 @@ import {
   Person,
   Business,
   Add,
+  Pause,
+  PlayArrow,
+  Cancel,
+  AutoAwesome,
+  Email,
+  Phone,
+  TrendingUp,
 } from '@mui/icons-material';
 import ApiService from '../services/api';
-import { Opportunity, OpportunityActivity, Quote, Contract, Task } from '../types';
+import { Opportunity, OpportunityActivity, Quote, Contract, Task, ProspectEnrollment, ProspectStepExecution } from '../types';
 import OpportunityForm from '../components/OpportunityForm';
 import ActivityTimeline from '../components/ActivityTimeline';
 import ActivityForm from '../components/ActivityForm';
@@ -58,6 +65,7 @@ const OpportunityDetail: React.FC = () => {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [enrollments, setEnrollments] = useState<ProspectEnrollment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentTab, setCurrentTab] = useState(0);
@@ -100,6 +108,9 @@ const OpportunityDetail: React.FC = () => {
       } else if (tabIndex === 4) {
         const tasksData = await ApiService.getTasks({ related_opportunity: id });
         setTasks(tasksData.results || []);
+      } else if (tabIndex === 5) {
+        const enrollData = await ApiService.getProspectEnrollments({ opportunity: id });
+        setEnrollments(enrollData.results || enrollData);
       }
     } catch (err) {
       console.error('Error loading tab data:', err);
@@ -301,6 +312,7 @@ const OpportunityDetail: React.FC = () => {
           <Tab label="Quotes" />
           <Tab label="Contracts" />
           <Tab label="Tasks" />
+          <Tab label="Automation" />
         </Tabs>
 
         <Box p={3}>
@@ -625,6 +637,161 @@ const OpportunityDetail: React.FC = () => {
                 <Box textAlign="center" py={4}>
                   <Typography variant="body1" color="text.secondary">
                     No tasks linked to this opportunity
+                  </Typography>
+                </Box>
+              )}
+            </Box>
+          )}
+
+          {/* Automation Tab */}
+          {currentTab === 5 && (
+            <Box>
+              {enrollments.length > 0 ? (
+                <>
+                  {enrollments.map((enrollment) => (
+                    <Paper key={enrollment.id} variant="outlined" sx={{ p: 2, mb: 2 }}>
+                      {/* Enrollment Header */}
+                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <AutoAwesome fontSize="small" color="primary" />
+                          <Typography variant="subtitle1" fontWeight={600}>
+                            {enrollment.sequence_name}
+                          </Typography>
+                          <Chip
+                            label={enrollment.status}
+                            size="small"
+                            color={
+                              enrollment.status === 'active' ? 'primary' :
+                              enrollment.status === 'paused' ? 'warning' :
+                              enrollment.status === 'completed' ? 'success' :
+                              enrollment.status === 'replied' ? 'info' : 'default'
+                            }
+                          />
+                        </Box>
+                        <Box>
+                          {enrollment.status === 'active' && (
+                            <Button
+                              size="small"
+                              startIcon={<Pause />}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                await ApiService.pauseEnrollment(enrollment.id);
+                                loadTabData(5);
+                              }}
+                            >
+                              Pause
+                            </Button>
+                          )}
+                          {enrollment.status === 'paused' && (
+                            <Button
+                              size="small"
+                              startIcon={<PlayArrow />}
+                              color="success"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                await ApiService.resumeEnrollment(enrollment.id);
+                                loadTabData(5);
+                              }}
+                            >
+                              Resume
+                            </Button>
+                          )}
+                          {(enrollment.status === 'active' || enrollment.status === 'paused') && (
+                            <Button
+                              size="small"
+                              startIcon={<Cancel />}
+                              color="error"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                await ApiService.cancelEnrollment(enrollment.id);
+                                loadTabData(5);
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          )}
+                        </Box>
+                      </Box>
+
+                      {/* Enrollment Info */}
+                      <Box display="flex" gap={3} mb={2}>
+                        <Typography variant="body2" color="text.secondary">
+                          Contact: {enrollment.contact_name}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Enrolled: {formatDate(enrollment.enrolled_at)}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Step {enrollment.current_step} of {enrollment.total_steps}
+                        </Typography>
+                        {enrollment.pause_reason && (
+                          <Typography variant="body2" color="text.secondary">
+                            Pause reason: {enrollment.pause_reason.replace(/_/g, ' ')}
+                          </Typography>
+                        )}
+                      </Box>
+
+                      {/* Step Executions */}
+                      {enrollment.step_executions && enrollment.step_executions.length > 0 && (
+                        <TableContainer>
+                          <Table size="small">
+                            <TableHead>
+                              <TableRow>
+                                <TableCell>Step</TableCell>
+                                <TableCell>Type</TableCell>
+                                <TableCell>Scheduled</TableCell>
+                                <TableCell>Executed</TableCell>
+                                <TableCell>Status</TableCell>
+                              </TableRow>
+                            </TableHead>
+                            <TableBody>
+                              {Array.from(enrollment.step_executions)
+                                .sort((a: ProspectStepExecution, b: ProspectStepExecution) => a.step_number - b.step_number)
+                                .map((exec: ProspectStepExecution) => (
+                                <TableRow key={exec.id}>
+                                  <TableCell>{exec.step_number}</TableCell>
+                                  <TableCell>
+                                    <Box display="flex" alignItems="center" gap={0.5}>
+                                      {exec.action_type === 'email' || exec.action_type === 'ai_email' ? (
+                                        <Email fontSize="small" color="action" />
+                                      ) : exec.action_type === 'task' ? (
+                                        <Phone fontSize="small" color="action" />
+                                      ) : (
+                                        <TrendingUp fontSize="small" color="action" />
+                                      )}
+                                      {exec.action_type === 'ai_email' ? 'AI Email' :
+                                       exec.action_type === 'email' ? 'Email' :
+                                       exec.action_type === 'task' ? 'Task' :
+                                       exec.action_type === 'stage_update' ? 'Stage Update' : exec.action_type}
+                                    </Box>
+                                  </TableCell>
+                                  <TableCell>{formatDate(exec.scheduled_for)}</TableCell>
+                                  <TableCell>{exec.executed_at ? formatDate(exec.executed_at) : '—'}</TableCell>
+                                  <TableCell>
+                                    <Chip
+                                      label={exec.status === 'pending_approval' ? 'Pending Approval' : exec.status}
+                                      size="small"
+                                      color={
+                                        exec.status === 'sent' ? 'success' :
+                                        exec.status === 'pending_approval' ? 'warning' :
+                                        exec.status === 'failed' ? 'error' :
+                                        exec.status === 'pending' ? 'default' : 'default'
+                                      }
+                                    />
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </TableContainer>
+                      )}
+                    </Paper>
+                  ))}
+                </>
+              ) : (
+                <Box textAlign="center" py={4}>
+                  <Typography variant="body1" color="text.secondary">
+                    No automation sequences for this opportunity
                   </Typography>
                 </Box>
               )}

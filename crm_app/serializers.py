@@ -2375,23 +2375,6 @@ class ProspectSequenceSerializer(serializers.ModelSerializer):
         return obj.enrollments.filter(status='active').count()
 
 
-class ProspectEnrollmentSerializer(serializers.ModelSerializer):
-    sequence_name = serializers.CharField(source='sequence.name', read_only=True)
-    opportunity_name = serializers.CharField(source='opportunity.name', read_only=True)
-    contact_name = serializers.CharField(source='contact.name', read_only=True)
-    contact_email = serializers.CharField(source='contact.email', read_only=True)
-    company_name = serializers.CharField(source='opportunity.company.name', read_only=True)
-    total_steps = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ProspectEnrollment
-        fields = '__all__'
-        read_only_fields = ['id', 'created_at', 'updated_at', 'enrolled_at']
-
-    def get_total_steps(self, obj):
-        return obj.sequence.steps.count()
-
-
 class ProspectStepExecutionSerializer(serializers.ModelSerializer):
     step_number = serializers.IntegerField(source='step.step_number', read_only=True)
     action_type = serializers.CharField(source='step.action_type', read_only=True)
@@ -2404,6 +2387,24 @@ class ProspectStepExecutionSerializer(serializers.ModelSerializer):
 
     def get_has_ai_draft(self, obj):
         return hasattr(obj, 'ai_draft')
+
+
+class ProspectEnrollmentSerializer(serializers.ModelSerializer):
+    sequence_name = serializers.CharField(source='sequence.name', read_only=True)
+    opportunity_name = serializers.CharField(source='opportunity.name', read_only=True)
+    contact_name = serializers.CharField(source='contact.name', read_only=True)
+    contact_email = serializers.CharField(source='contact.email', read_only=True)
+    company_name = serializers.CharField(source='opportunity.company.name', read_only=True)
+    total_steps = serializers.SerializerMethodField()
+    step_executions = ProspectStepExecutionSerializer(source='executions', many=True, read_only=True)
+
+    class Meta:
+        model = ProspectEnrollment
+        fields = '__all__'
+        read_only_fields = ['id', 'created_at', 'updated_at', 'enrolled_at']
+
+    def get_total_steps(self, obj):
+        return obj.sequence.steps.count()
 
 
 class AIEmailDraftSerializer(serializers.ModelSerializer):

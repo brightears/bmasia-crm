@@ -1737,6 +1737,7 @@ export interface ProspectEnrollment {
   cancelled_at: string | null;
   pause_reason: string;
   enrollment_source: string;
+  step_executions?: ProspectStepExecution[];
   created_at: string;
   updated_at: string;
 }
