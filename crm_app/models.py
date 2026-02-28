@@ -873,6 +873,11 @@ class Contract(TimestampedModel):
         help_text="Date when this lifecycle type became effective"
     )
 
+    # Follow-up tracking (for unsigned contracts in "Sent" status)
+    sent_date = models.DateField(null=True, blank=True, help_text="Auto-set when status changes to Sent")
+    first_followup_sent = models.BooleanField(default=False)
+    second_followup_sent = models.BooleanField(default=False)
+
     class Meta:
         ordering = ['-start_date']
         indexes = [
@@ -882,9 +887,15 @@ class Contract(TimestampedModel):
             models.Index(fields=['lifecycle_type', 'lifecycle_effective_date']),
         ]
     
+    def save(self, *args, **kwargs):
+        """Auto-set sent_date when status changes to Sent"""
+        if self.status == 'Sent' and not self.sent_date:
+            self.sent_date = timezone.now().date()
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.contract_number} - {self.company.name}"
-    
+
     @property
     def days_until_expiry(self):
         """Calculate days until contract expires"""
@@ -1830,6 +1841,7 @@ class EmailLog(TimestampedModel):
         ('quote_send', 'Quote Sent'),
         ('quote_followup', 'Quote Follow-up'),
         ('contract_send', 'Contract Sent'),
+        ('contract_followup', 'Contract Follow-up'),
         ('sequence', 'Prospect Sequence'),
     ]
     

@@ -588,6 +588,103 @@ class EmailService:
         logger.info(f"Quote follow-ups: {results}")
         return results
 
+    def send_contract_followups(self) -> Dict[str, int]:
+        """Send follow-up reminders for sent contracts that haven't been signed"""
+        if not self.is_business_hours():
+            logger.info("Skipping contract follow-ups - outside business hours")
+            return {'skipped': 0}
+
+        results = {
+            'sent': 0,
+            'failed': 0,
+            'skipped': 0
+        }
+
+        # Find contracts in 'Sent' status with a sent_date
+        sent_contracts = Contract.objects.filter(
+            status='Sent',
+            sent_date__isnull=False
+        ).select_related('company')
+
+        today = timezone.now().date()
+
+        for contract in sent_contracts:
+            days_since_sent = (today - contract.sent_date).days
+
+            # Determine which follow-up to send
+            if days_since_sent >= 10 and not contract.second_followup_sent:
+                followup_type = 'second'
+                contract.second_followup_sent = True
+            elif days_since_sent >= 5 and not contract.first_followup_sent:
+                followup_type = 'first'
+                contract.first_followup_sent = True
+            else:
+                results['skipped'] += 1
+                continue
+
+            contract.save(update_fields=['first_followup_sent', 'second_followup_sent'])
+
+            # Get contact to email
+            contact = contract.company.contacts.filter(
+                is_active=True,
+                email__isnull=False,
+            ).first()
+
+            if not contact or not contact.email:
+                results['skipped'] += 1
+                continue
+
+            # Build email content
+            currency_symbol = 'THB' if contract.currency == 'THB' else '$'
+            contract_value = f"{currency_symbol}{contract.value:,.2f}"
+
+            if followup_type == 'first':
+                subject = f"Following up on Contract {contract.contract_number}"
+                body = f"""
+                <p>Dear {contact.name},</p>
+                <p>I hope this message finds you well. I wanted to follow up on the contract we sent you recently.</p>
+                <p><strong>Contract:</strong> {contract.contract_number}<br/>
+                <strong>Amount:</strong> {contract_value}<br/>
+                <strong>Period:</strong> {contract.start_date.strftime('%B %d, %Y')} - {contract.end_date.strftime('%B %d, %Y')}</p>
+                <p>If you have any questions or need any changes, please don't hesitate to reach out. We're happy to walk you through the details.</p>
+                <p>Best regards,<br/>BMAsia Team</p>
+                """
+            else:
+                subject = f"Contract {contract.contract_number} — Friendly Reminder"
+                body = f"""
+                <p>Dear {contact.name},</p>
+                <p>Just a friendly reminder about the contract we sent for your review.</p>
+                <p><strong>Contract:</strong> {contract.contract_number}<br/>
+                <strong>Amount:</strong> {contract_value}<br/>
+                <strong>Period:</strong> {contract.start_date.strftime('%B %d, %Y')} - {contract.end_date.strftime('%B %d, %Y')}</p>
+                <p>We'd love to get things set up for you. If there's anything we can clarify or adjust, please let us know.</p>
+                <p>Best regards,<br/>BMAsia Team</p>
+                """
+
+            try:
+                success, message = self.send_email(
+                    to_email=contact.email,
+                    subject=subject,
+                    body_html=body,
+                    body_text=f"Follow-up on Contract {contract.contract_number}",
+                    company=contract.company,
+                    contact=contact,
+                    email_type='contract_followup',
+                )
+
+                if success:
+                    results['sent'] += 1
+                    logger.info(f"Sent {followup_type} follow-up for contract {contract.contract_number}")
+                else:
+                    results['failed'] += 1
+                    logger.warning(f"Failed to send follow-up for contract {contract.contract_number}: {message}")
+            except Exception as e:
+                results['failed'] += 1
+                logger.error(f"Error sending follow-up for contract {contract.contract_number}: {e}")
+
+        logger.info(f"Contract follow-ups: {results}")
+        return results
+
     def send_quarterly_checkins(self) -> Dict[str, int]:
         """Send quarterly check-in emails"""
         results = {
