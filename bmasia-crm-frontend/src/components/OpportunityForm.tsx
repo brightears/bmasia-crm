@@ -198,6 +198,14 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
     }
 
     setErrors(newErrors);
+    if (Object.keys(newErrors).length > 0) {
+      // Scroll to first error field so user can see it
+      const firstErrorField = Object.keys(newErrors)[0];
+      const el = document.querySelector(`[name="${firstErrorField}"], [data-field="${firstErrorField}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
     return Object.keys(newErrors).length === 0;
   };
 
@@ -233,9 +241,21 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
       onSave(result);
       onClose();
     } catch (err: any) {
-      const errorMessage = err.response?.data?.detail || 
-                          err.response?.data?.message || 
-                          'Failed to save opportunity';
+      const data = err.response?.data;
+      let errorMessage = 'Failed to save opportunity';
+      if (data) {
+        if (typeof data === 'string') {
+          errorMessage = data;
+        } else if (data.detail) {
+          errorMessage = data.detail;
+        } else if (typeof data === 'object') {
+          // DRF validation errors: { field: ["error"] }
+          const fieldErrors = Object.entries(data)
+            .map(([field, msgs]) => `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}`)
+            .join('; ');
+          errorMessage = fieldErrors || errorMessage;
+        }
+      }
       setError(errorMessage);
     } finally {
       setLoading(false);
