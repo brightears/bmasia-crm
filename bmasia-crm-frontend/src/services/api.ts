@@ -316,7 +316,7 @@ class ApiService {
   }
 
   async updateContract(id: string, data: Partial<Contract>): Promise<Contract> {
-    const response = await authApi.put<Contract>(`/contracts/${id}/`, data);
+    const response = await authApi.patch<Contract>(`/contracts/${id}/`, data);
     return response.data;
   }
 
