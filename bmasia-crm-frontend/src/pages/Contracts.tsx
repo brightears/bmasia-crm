@@ -52,8 +52,8 @@ import ContractForm from '../components/ContractForm';
 import ContractDetail from '../components/ContractDetail';
 import EmailSendDialog from '../components/EmailSendDialog';
 
-// Statuses where the contract is locked (signed or terminal)
-const LOCKED_STATUSES = ['Active', 'Renewed', 'Expired', 'Cancelled'];
+// Statuses where the contract is locked (terminal states only — Active is editable for date/term changes)
+const LOCKED_STATUSES = ['Renewed', 'Expired', 'Cancelled'];
 
 const statusOptions = [
   { value: '', label: 'All Statuses' },

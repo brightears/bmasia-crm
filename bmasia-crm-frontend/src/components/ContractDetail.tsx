@@ -325,10 +325,9 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
       </DialogTitle>
 
       <DialogContent dividers>
-        {['Active', 'Renewed', 'Expired', 'Cancelled'].includes(contract.status) && (
+        {['Renewed', 'Expired', 'Cancelled'].includes(contract.status) && (
           <Alert severity="info" icon={<Info />} sx={{ mb: 2 }}>
             This contract is <strong>{contract.status.toLowerCase()}</strong> and cannot be edited.
-            {contract.status === 'Active' && ' To change terms, create a new contract or amendment.'}
             {contract.status === 'Renewed' && ' The renewal contract is the current version.'}
             {(contract.status === 'Expired' || contract.status === 'Cancelled') && ' This is a historical record.'}
           </Alert>
@@ -873,7 +872,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
         >
           Create Invoice
         </Button>
-        {!['Active', 'Renewed', 'Expired', 'Cancelled'].includes(contract.status) && (
+        {!['Renewed', 'Expired', 'Cancelled'].includes(contract.status) && (
           <Button
             variant="contained"
             startIcon={<Edit />}
