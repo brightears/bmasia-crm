@@ -840,6 +840,12 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
                               value={item.quantity}
                               onChange={(e) => updateLineItem(index, 'quantity', parseFloat(e.target.value) || 0)}
                               inputProps={{ min: 0, step: 1 }}
+                              sx={{
+                                '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button': {
+                                  WebkitAppearance: 'none', margin: 0
+                                },
+                                '& input[type=number]': { MozAppearance: 'textfield' }
+                              }}
                             />
                           </TableCell>
                           <TableCell>
@@ -857,6 +863,12 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
                                     </Typography>
                                   </InputAdornment>
                                 ),
+                              }}
+                              sx={{
+                                '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button': {
+                                  WebkitAppearance: 'none', margin: 0
+                                },
+                                '& input[type=number]': { MozAppearance: 'textfield' }
                               }}
                             />
                           </TableCell>
@@ -878,6 +890,10 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
                                   color: 'text.primary',
                                   fontWeight: 500,
                                 },
+                                '& input::-webkit-outer-spin-button, & input::-webkit-inner-spin-button': {
+                                  WebkitAppearance: 'none', margin: 0
+                                },
+                                '& input[type=number]': { MozAppearance: 'textfield' }
                               }}
                             />
                           </TableCell>
