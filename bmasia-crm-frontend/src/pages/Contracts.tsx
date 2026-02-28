@@ -572,6 +572,9 @@ const Contracts: React.FC = () => {
         open={detailOpen}
         onClose={() => setDetailOpen(false)}
         onEdit={handleEditContract}
+        onContractUpdated={(updated) => {
+          setContracts(prev => prev.map(c => c.id === updated.id ? updated : c));
+        }}
         contractId={detailContractId}
       />
 

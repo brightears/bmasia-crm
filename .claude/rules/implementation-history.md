@@ -7,6 +7,9 @@
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
+| Feb 28 | Fix "Mark as Signed": PUT→PATCH in updateContract() | `api.ts` | `6119bc4b` |
+| Feb 28 | Contract follow-ups for unsigned contracts (Day 5 + Day 10) | `models.py`, `email_service.py`, `send_emails.py`, `0083_contract_followup_fields.py` | `881e79b4` |
+| Feb 28 | Fix OpportunityForm: choice expansion + scroll-to-error | `models.py`, `OpportunityForm.tsx`, `0082_opportunity_choice_expansion.py` | `325ed350`, `47aac8cc` |
 | Feb 28 | AI Sales Automation Phase 4: Reply detection & smart routing | `reply_detection_service.py`, `check_prospect_replies.py`, `0081_prospect_reply_model.py` | `bee2bb8d` |
 | Feb 27 | AI Sales Automation: product knowledge training | `ai_service.py` (SYSTEM_PROMPT enrichment) | `60913e4f` |
 | Feb 27 | AI Sales Automation: OpportunityDetail Automation tab | `OpportunityDetail.tsx`, `serializers.py` | `c87bd9c2` |
@@ -41,6 +44,7 @@
 
 ## Key Recent Patterns
 
+- **Model choices ↔ frontend options**: Must stay in sync. Mismatch causes 400 errors (e.g. `lead_source`, `contact_method`)
 - **PDF footers**: Use canvas-based `onPage` callbacks, not flowables (can't split across pages)
 - **Partial updates**: Always use PATCH, not PUT (DRF requires all fields with PUT)
 - **Write-only serializer fields**: Frontend sends `field_id`, not `field` (e.g., `category_id`)
@@ -52,6 +56,8 @@
 
 | Migration | Purpose |
 |-----------|---------|
+| `0083` | Contract follow-up fields (sent_date, first/second_followup_sent) |
+| `0082` | Opportunity lead_source + contact_method choice expansion |
 | `0081` | ProspectReply model + EmailLog 'sequence' type |
 | `0080` | Default prospect sequences (data migration) |
 | `0079` | Sales automation (5 models + Opportunity.stage_changed_at) |

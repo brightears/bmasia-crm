@@ -66,6 +66,7 @@ interface ContractDetailProps {
   open: boolean;
   onClose: () => void;
   onEdit: (contract: Contract) => void;
+  onContractUpdated?: (contract: Contract) => void;
   contractId: string | null;
 }
 
@@ -90,6 +91,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
   open,
   onClose,
   onEdit,
+  onContractUpdated,
   contractId,
 }) => {
   const navigate = useNavigate();
@@ -818,6 +820,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
                 await ApiService.updateContract(contract.id, { status: 'Sent' });
                 const updated = await ApiService.getContract(contract.id);
                 setContract(updated);
+                onContractUpdated?.(updated);
               } catch (err) {
                 console.error('Failed to send contract:', err);
               }
@@ -836,6 +839,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
                 await ApiService.updateContract(contract.id, { status: 'Active' });
                 const updated = await ApiService.getContract(contract.id);
                 setContract(updated);
+                onContractUpdated?.(updated);
               } catch (err) {
                 console.error('Failed to mark as signed:', err);
               }
