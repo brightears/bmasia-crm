@@ -511,22 +511,29 @@ class Opportunity(TimestampedModel):
     
     LEAD_SOURCE_CHOICES = [
         ('Website', 'Website'),
+        ('Website Inquiry', 'Website Inquiry'),
         ('Referral', 'Referral'),
         ('Cold Call', 'Cold Call'),
         ('Email Campaign', 'Email Campaign'),
         ('Social Media', 'Social Media'),
         ('Trade Show', 'Trade Show'),
         ('Partner', 'Partner'),
+        ('Direct Mail', 'Direct Mail'),
+        ('Webinar', 'Webinar'),
         ('Other', 'Other'),
     ]
-    
+
     CONTACT_METHOD_CHOICES = [
         ('Email', 'Email'),
         ('Phone', 'Phone Call'),
         ('Meeting', 'In-Person Meeting'),
+        ('In-person Meeting', 'In-Person Meeting'),
         ('Video Call', 'Video Call'),
+        ('Chat', 'Chat'),
+        ('Social Media', 'Social Media'),
         ('Demo', 'Product Demo'),
         ('Presentation', 'Presentation'),
+        ('Other', 'Other'),
     ]
 
     SERVICE_TYPE_CHOICES = [
