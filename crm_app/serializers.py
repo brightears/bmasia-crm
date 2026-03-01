@@ -99,7 +99,10 @@ class ContactSerializer(serializers.ModelSerializer):
             # Granular email preferences
             'receives_renewal_emails', 'receives_seasonal_emails',
             'receives_payment_emails', 'receives_quarterly_emails',
-            'receives_soundtrack_alerts'
+            'receives_soundtrack_alerts',
+            # Document email preferences
+            'receives_quote_emails', 'receives_contract_emails',
+            'receives_invoice_emails'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
     

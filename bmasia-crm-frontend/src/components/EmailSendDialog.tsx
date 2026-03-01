@@ -25,6 +25,7 @@ import { Contact } from '../types';
 
 export interface EmailSendData {
   recipients: string[];
+  cc: string[];
   subject: string;
   body: string;
 }
@@ -61,6 +62,8 @@ const EmailSendDialog: React.FC<EmailSendDialogProps> = ({
   documentDetails = {},
 }) => {
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
+  const [ccContacts, setCcContacts] = useState<string[]>([]);
+  const [ccExternal, setCcExternal] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [loading, setLoading] = useState(false);
@@ -69,12 +72,28 @@ const EmailSendDialog: React.FC<EmailSendDialogProps> = ({
   // Initialize default values when dialog opens or document changes
   useEffect(() => {
     if (open && contacts.length > 0) {
-      // Pre-select primary and billing contacts
+      // Pre-select contacts based on document-type preference
+      const prefKey = documentType === 'quote' ? 'receives_quote_emails'
+        : documentType === 'contract' ? 'receives_contract_emails'
+        : 'receives_invoice_emails';
+
       const defaultContacts = contacts
-        .filter(c => c.contact_type === 'Primary' || c.contact_type === 'Billing')
+        .filter(c => c[prefKey] === true)
         .map(c => c.email);
 
-      setSelectedContacts(defaultContacts.length > 0 ? defaultContacts : [contacts[0].email]);
+      // Fallback to Primary + Billing if no preferences set, then first contact
+      if (defaultContacts.length > 0) {
+        setSelectedContacts(defaultContacts);
+      } else {
+        const fallback = contacts
+          .filter(c => c.contact_type === 'Primary' || c.contact_type === 'Billing')
+          .map(c => c.email);
+        setSelectedContacts(fallback.length > 0 ? fallback : [contacts[0].email]);
+      }
+
+      // Reset CC
+      setCcContacts([]);
+      setCcExternal('');
 
       // Set default subject
       const subjectPrefix = documentType.charAt(0).toUpperCase() + documentType.slice(1);
@@ -151,12 +170,30 @@ BMAsia Music Team`;
   };
 
   const handleContactToggle = (email: string) => {
-    setSelectedContacts(prev =>
+    setSelectedContacts(prev => {
+      const newSelected = prev.includes(email)
+        ? prev.filter(e => e !== email)
+        : [...prev, email];
+      // Remove from CC if being added to To
+      if (newSelected.includes(email)) {
+        setCcContacts(ccPrev => ccPrev.filter(e => e !== email));
+      }
+      return newSelected;
+    });
+  };
+
+  const handleCcContactToggle = (email: string) => {
+    setCcContacts(prev =>
       prev.includes(email)
         ? prev.filter(e => e !== email)
         : [...prev, email]
     );
   };
+
+  // Contacts not selected as To recipients — available for CC
+  const availableCcContacts = contacts.filter(
+    c => !selectedContacts.includes(c.email)
+  );
 
   const handleSend = async () => {
     // Validation
@@ -175,12 +212,21 @@ BMAsia Music Team`;
       return;
     }
 
+    // Parse and validate external CC emails
+    const externalCcList = ccExternal
+      .split(',')
+      .map(e => e.trim())
+      .filter(e => e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+
+    const allCc = [...ccContacts, ...externalCcList];
+
     try {
       setLoading(true);
       setError('');
 
       await onSendEmail({
         recipients: selectedContacts,
+        cc: allCc,
         subject: subject.trim(),
         body: body.trim(),
       });
@@ -249,10 +295,10 @@ BMAsia Music Team`;
           </Typography>
         </Box>
 
-        {/* Recipients */}
-        <Box sx={{ mb: 3 }}>
+        {/* To Recipients */}
+        <Box sx={{ mb: 2 }}>
           <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
-            Recipients *
+            To *
           </Typography>
           {contacts.length === 0 ? (
             <Alert severity="warning">
@@ -291,6 +337,62 @@ BMAsia Music Team`;
               ))}
             </FormGroup>
           )}
+        </Box>
+
+        {/* CC Recipients */}
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+            CC
+          </Typography>
+
+          {/* Company contacts available for CC */}
+          {availableCcContacts.length > 0 && (
+            <FormGroup>
+              {availableCcContacts.map((contact) => (
+                <FormControlLabel
+                  key={contact.id}
+                  control={
+                    <Checkbox
+                      checked={ccContacts.includes(contact.email)}
+                      onChange={() => handleCcContactToggle(contact.email)}
+                      disabled={loading}
+                      size="small"
+                      sx={{
+                        color: '#90CAF9',
+                        '&.Mui-checked': {
+                          color: '#2196F3',
+                        },
+                      }}
+                    />
+                  }
+                  label={
+                    <Box>
+                      <Typography variant="body2" sx={{ fontSize: '0.85rem' }}>
+                        {contact.name} ({contact.email})
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {contact.contact_type}
+                        {contact.title ? ` - ${contact.title}` : ''}
+                      </Typography>
+                    </Box>
+                  }
+                />
+              ))}
+            </FormGroup>
+          )}
+
+          {/* External CC addresses */}
+          <TextField
+            fullWidth
+            size="small"
+            label="Additional CC emails"
+            value={ccExternal}
+            onChange={(e) => setCcExternal(e.target.value)}
+            disabled={loading}
+            placeholder="external@example.com, another@example.com"
+            sx={{ mt: 1 }}
+            helperText="Separate multiple emails with commas"
+          />
         </Box>
 
         {/* Subject */}

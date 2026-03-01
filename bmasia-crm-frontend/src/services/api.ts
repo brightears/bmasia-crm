@@ -1724,6 +1724,7 @@ class ApiService {
 
 export interface EmailSendData {
   recipients: string[];
+  cc: string[];
   subject: string;
   body: string;
 }

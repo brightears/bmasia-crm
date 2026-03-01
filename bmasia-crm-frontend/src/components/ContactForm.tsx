@@ -52,6 +52,10 @@ interface ContactFormData {
   receives_payment_emails: boolean;
   receives_quarterly_emails: boolean;
   receives_soundtrack_alerts: boolean;
+  // Document email preferences
+  receives_quote_emails: boolean;
+  receives_contract_emails: boolean;
+  receives_invoice_emails: boolean;
 }
 
 const ContactForm: React.FC<ContactFormProps> = ({
@@ -81,6 +85,10 @@ const ContactForm: React.FC<ContactFormProps> = ({
     receives_payment_emails: true,
     receives_quarterly_emails: true,
     receives_soundtrack_alerts: false,
+    // Document email preferences
+    receives_quote_emails: true,
+    receives_contract_emails: true,
+    receives_invoice_emails: true,
   });
 
   const [loading, setLoading] = useState(false);
@@ -114,6 +122,10 @@ const ContactForm: React.FC<ContactFormProps> = ({
         receives_payment_emails: contact.receives_payment_emails ?? true,
         receives_quarterly_emails: contact.receives_quarterly_emails ?? true,
         receives_soundtrack_alerts: contact.receives_soundtrack_alerts ?? false,
+        // Document email preferences
+        receives_quote_emails: contact.receives_quote_emails ?? true,
+        receives_contract_emails: contact.receives_contract_emails ?? true,
+        receives_invoice_emails: contact.receives_invoice_emails ?? true,
       });
     } else {
       // Reset form for new contact
@@ -137,6 +149,10 @@ const ContactForm: React.FC<ContactFormProps> = ({
         receives_payment_emails: true,
         receives_quarterly_emails: true,
         receives_soundtrack_alerts: false,
+        // Document email preferences
+        receives_quote_emails: true,
+        receives_contract_emails: true,
+        receives_invoice_emails: true,
       });
     }
     setError('');
@@ -223,6 +239,10 @@ const ContactForm: React.FC<ContactFormProps> = ({
         receives_payment_emails: formData.receives_payment_emails,
         receives_quarterly_emails: formData.receives_quarterly_emails,
         receives_soundtrack_alerts: formData.receives_soundtrack_alerts,
+        // Document email preferences
+        receives_quote_emails: formData.receives_quote_emails,
+        receives_contract_emails: formData.receives_contract_emails,
+        receives_invoice_emails: formData.receives_invoice_emails,
       };
 
       console.log('=== Contact Form Submit ===');
@@ -577,6 +597,52 @@ const ContactForm: React.FC<ContactFormProps> = ({
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: -0.5 }}>
               Receive alerts when music zones go offline (for IT/Technical contacts)
             </Typography>
+          </Grid>
+
+          {/* Document Email Preferences */}
+          <Grid item xs={12}>
+            <Typography variant="subtitle2" sx={{ mt: 1, fontWeight: 600 }}>
+              Document Recipients
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              Controls which contacts are pre-selected when sending quotes, contracts, or invoices
+            </Typography>
+          </Grid>
+
+          <Grid item xs={12} sm={4}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={formData.receives_quote_emails}
+                  onChange={(e) => handleFieldChange('receives_quote_emails', e.target.checked)}
+                />
+              }
+              label="Quotes"
+            />
+          </Grid>
+
+          <Grid item xs={12} sm={4}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={formData.receives_contract_emails}
+                  onChange={(e) => handleFieldChange('receives_contract_emails', e.target.checked)}
+                />
+              }
+              label="Contracts"
+            />
+          </Grid>
+
+          <Grid item xs={12} sm={4}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={formData.receives_invoice_emails}
+                  onChange={(e) => handleFieldChange('receives_invoice_emails', e.target.checked)}
+                />
+              }
+              label="Invoices"
+            />
           </Grid>
 
           <Divider sx={{ width: '100%', my: 2 }} />

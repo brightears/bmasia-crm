@@ -164,6 +164,9 @@ export interface Contact {
   receives_payment_emails?: boolean;
   receives_quarterly_emails?: boolean;
   receives_soundtrack_alerts?: boolean;
+  receives_quote_emails?: boolean;
+  receives_contract_emails?: boolean;
+  receives_invoice_emails?: boolean;
 
   // These fields are not in the backend yet but used in frontend for convenience
   first_name?: string; // Computed from name

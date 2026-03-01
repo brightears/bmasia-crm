@@ -1134,6 +1134,7 @@ class ContractViewSet(BaseModelViewSet):
 
         # Extract email parameters from request
         recipients = request.data.get('recipients', [])
+        cc = request.data.get('cc', [])
         subject = request.data.get('subject')
         body = request.data.get('body')
 
@@ -1141,6 +1142,7 @@ class ContractViewSet(BaseModelViewSet):
         success, message = email_service.send_contract_email(
             contract_id=contract.id,
             recipients=recipients if recipients else None,
+            cc=cc if cc else None,
             subject=subject if subject else None,
             body=body if body else None,
             sender='admin',  # Legacy parameter, will use request.user
@@ -4193,6 +4195,7 @@ class InvoiceViewSet(BaseModelViewSet):
 
         # Extract email parameters from request
         recipients = request.data.get('recipients', [])
+        cc = request.data.get('cc', [])
         subject = request.data.get('subject')
         body = request.data.get('body')
 
@@ -4200,6 +4203,7 @@ class InvoiceViewSet(BaseModelViewSet):
         success, message = email_service.send_invoice_email(
             invoice_id=invoice.id,
             recipients=recipients if recipients else None,
+            cc=cc if cc else None,
             subject=subject if subject else None,
             body=body if body else None,
             sender='admin',  # Legacy parameter, will use request.user
@@ -4918,6 +4922,7 @@ class QuoteViewSet(BaseModelViewSet):
 
         # Extract email parameters from request
         recipients = request.data.get('recipients', [])
+        cc = request.data.get('cc', [])
         subject = request.data.get('subject')
         body = request.data.get('body')
 
@@ -4925,6 +4930,7 @@ class QuoteViewSet(BaseModelViewSet):
         success, message = email_service.send_quote_email(
             quote_id=quote.id,
             recipients=recipients if recipients else None,
+            cc=cc if cc else None,
             subject=subject if subject else None,
             body=body if body else None,
             sender='admin',  # Legacy parameter, will use request.user

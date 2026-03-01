@@ -741,6 +741,7 @@ class EmailService:
         self,
         quote_id,
         recipients=None,
+        cc=None,
         subject=None,
         body=None,
         sender='admin',
@@ -894,6 +895,7 @@ class EmailService:
                     email_type='quote_send',
                     from_email=log_from_email,
                     to_email=recipient,
+                    cc_emails=','.join(cc) if cc else '',
                     subject=subject,
                     body_html=body_html,
                     body_text=body,
@@ -910,6 +912,7 @@ class EmailService:
                     body=body,
                     from_email=from_email,
                     to=[recipient],
+                    cc=cc or [],
                     connection=smtp_connection
                 )
 
@@ -956,6 +959,7 @@ class EmailService:
         self,
         contract_id,
         recipients=None,
+        cc=None,
         subject=None,
         body=None,
         sender='admin',
@@ -1171,6 +1175,7 @@ class EmailService:
                     email_type='contract_send',
                     from_email=log_from_email,
                     to_email=recipient,
+                    cc_emails=','.join(cc) if cc else '',
                     subject=subject,
                     body_html=body_html,
                     body_text=body,
@@ -1187,6 +1192,7 @@ class EmailService:
                     body=body,
                     from_email=from_email,
                     to=[recipient],
+                    cc=cc or [],
                     connection=smtp_connection
                 )
 
@@ -1231,6 +1237,7 @@ class EmailService:
         self,
         invoice_id,
         recipients=None,
+        cc=None,
         subject=None,
         body=None,
         sender='admin',
@@ -1394,6 +1401,7 @@ class EmailService:
                     email_type='invoice_send',
                     from_email=log_from_email,
                     to_email=recipient,
+                    cc_emails=','.join(cc) if cc else '',
                     subject=subject,
                     body_html=body_html,
                     body_text=body,
@@ -1410,6 +1418,7 @@ class EmailService:
                     body=body,
                     from_email=from_email,
                     to=[recipient],
+                    cc=cc or [],
                     connection=smtp_connection
                 )
 

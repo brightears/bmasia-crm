@@ -300,6 +300,11 @@ class Contact(TimestampedModel):
     receives_quarterly_emails = models.BooleanField(default=True, help_text="Receives quarterly check-in emails")
     receives_soundtrack_alerts = models.BooleanField(default=False, help_text="Receives alerts when music zones go offline")
 
+    # Document email preferences (controls pre-selection in EmailSendDialog)
+    receives_quote_emails = models.BooleanField(default=True, help_text="Pre-selected when sending quotes")
+    receives_contract_emails = models.BooleanField(default=True, help_text="Pre-selected when sending contracts")
+    receives_invoice_emails = models.BooleanField(default=True, help_text="Pre-selected when sending invoices")
+
     class Meta:
         unique_together = ['company', 'email']
         ordering = ['name']
