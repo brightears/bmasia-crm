@@ -7,6 +7,7 @@
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
+| Mar 2 | Receipt/Tax Invoice: auto-generate on mark paid + PDF + email | `models.py`, `views.py`, `email_service.py`, `InvoiceDetail.tsx`, `0085` | `754ecc6c` |
 | Mar 2 | Fix contract email PDF empty body (was using broken fallback) | `email_service.py` | `e8b87d3a` |
 | Mar 1 | Contact document preferences + CC field in EmailSendDialog | `ContactForm.tsx`, `EmailSendDialog.tsx`, `email_service.py`, `0084` | `9d290559` |
 | Feb 28 | Allow editing Active contracts (for date/term changes) | `Contracts.tsx`, `ContractDetail.tsx` | `c71d67a8` |
@@ -57,12 +58,14 @@
 - **Contract status lifecycle**: Draft → Sent → Active → Renewed/Expired/Cancelled
 - **Service locations**: Auto-derived from line items via `syncLocationsFromLineItems()`
 - **QuickBooks IIF**: DD/MM/YYYY dates, negative QNTY for SPL rows, VAT as separate row
-- **Email PDF generation**: All 3 send methods (quote/contract/invoice) must use `RequestFactory` → viewset `pdf()` to generate full PDF. Never use inline fallback generators
+- **Email PDF generation**: All send methods (quote/contract/invoice/receipt) must use `RequestFactory` → viewset `pdf()` to generate full PDF. Never use inline fallback generators
+- **Invoice PDF shared builder**: `_build_invoice_pdf(invoice, is_receipt=False)` — parameterizes title, metadata, filename for both invoice and receipt PDFs
 
 ## Quick Migration Reference (Recent)
 
 | Migration | Purpose |
 |-----------|---------|
+| `0085` | Invoice receipt_number + receipt_sent fields |
 | `0084` | Contact document email preferences (receives_quote/contract/invoice_emails) |
 | `0083` | Contract follow-up fields (sent_date, first/second_followup_sent) |
 | `0082` | Opportunity lead_source + contact_method choice expansion |
