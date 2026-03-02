@@ -649,6 +649,15 @@ const Invoices: React.FC = () => {
                         fontWeight: 600
                       }}
                     />
+                    {invoice.status === 'Paid' && invoice.receipt_number && (
+                      <Typography
+                        variant="caption"
+                        display="block"
+                        sx={{ mt: 0.5, color: invoice.receipt_sent ? 'success.main' : 'text.secondary' }}
+                      >
+                        {invoice.receipt_sent ? 'Receipt sent' : 'Receipt pending'}
+                      </Typography>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Typography variant="body2">
@@ -725,6 +734,29 @@ const Invoices: React.FC = () => {
               <Payment fontSize="small" />
             </ListItemIcon>
             <ListItemText>Mark as Paid</ListItemText>
+          </MenuItem>
+        )}
+        {actionMenuInvoice?.status === 'Paid' && actionMenuInvoice?.receipt_number && (
+          <MenuItem onClick={async () => {
+            try {
+              const blob = await ApiService.downloadReceiptPDF(actionMenuInvoice.id);
+              const url = window.URL.createObjectURL(blob);
+              const link = document.createElement('a');
+              link.href = url;
+              link.download = `Receipt_Tax_Invoice_${actionMenuInvoice.receipt_number}.pdf`;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+              window.URL.revokeObjectURL(url);
+            } catch {
+              setError('Failed to download receipt');
+            }
+            setActionMenuAnchor(null);
+          }}>
+            <ListItemIcon>
+              <Receipt fontSize="small" sx={{ color: '#4CAF50' }} />
+            </ListItemIcon>
+            <ListItemText>Download Receipt</ListItemText>
           </MenuItem>
         )}
         <Divider />

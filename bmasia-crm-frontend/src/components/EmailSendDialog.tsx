@@ -33,7 +33,7 @@ export interface EmailSendData {
 interface EmailSendDialogProps {
   open: boolean;
   onClose: () => void;
-  documentType: 'quote' | 'contract' | 'invoice';
+  documentType: 'quote' | 'contract' | 'invoice' | 'receipt';
   documentId: string;
   documentNumber: string;
   companyName: string;
@@ -145,6 +145,18 @@ Please find attached invoice ${documentNumber} for ${companyName}.
 ${totalValue ? `Total Amount: ${currency || 'USD'} ${formatCurrency(totalValue)}` : ''}
 
 Payment is requested at your earliest convenience.
+
+Best regards,
+BMAsia Music Team`;
+
+      case 'receipt':
+        return `Dear Valued Customer,
+
+Thank you for your payment. Please find attached your Receipt/Tax Invoice ${documentNumber} for ${companyName}.
+
+${totalValue ? `Amount Paid: ${currency || 'USD'} ${formatCurrency(totalValue)}` : ''}
+
+If you have any questions, please don't hesitate to contact us.
 
 Best regards,
 BMAsia Music Team`;

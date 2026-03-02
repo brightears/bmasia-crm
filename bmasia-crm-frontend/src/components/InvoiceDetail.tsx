@@ -59,8 +59,9 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { Invoice, EmailLogEntry } from '../types';
+import { Invoice, EmailLogEntry, Contact } from '../types';
 import ApiService from '../services/api';
+import EmailSendDialog, { EmailSendData } from './EmailSendDialog';
 
 interface InvoiceDetailProps {
   open: boolean;
@@ -89,6 +90,10 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
   const [success, setSuccess] = useState('');
   const [emailLogs, setEmailLogs] = useState<EmailLogEntry[]>([]);
 
+  // Receipt email
+  const [receiptEmailDialogOpen, setReceiptEmailDialogOpen] = useState(false);
+  const [companyContacts, setCompanyContacts] = useState<Contact[]>([]);
+
   // Payment form
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState(0);
@@ -109,6 +114,12 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
       ApiService.getEmailLogs({ invoice: invoice.id })
         .then(setEmailLogs)
         .catch(() => setEmailLogs([]));
+      // Load company contacts for receipt email dialog
+      if (invoice.company) {
+        ApiService.getCompany(invoice.company)
+          .then((company: any) => setCompanyContacts(company.contacts || []))
+          .catch(() => setCompanyContacts([]));
+      }
     }
   }, [open, invoice]);
 
@@ -161,8 +172,17 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
       const receiptMsg = result.receipt_number
         ? ` Receipt ${result.receipt_number} generated.`
         : '';
-      setSuccess(`Invoice marked as paid.${receiptMsg}`);
+      const emailMsg = result.receipt_email_status === 'sent'
+        ? ' Receipt email sent automatically.'
+        : result.receipt_email_status?.startsWith('failed')
+          ? ' Receipt email failed — use Send Receipt to retry.'
+          : '';
+      setSuccess(`Invoice marked as paid.${receiptMsg}${emailMsg}`);
       onInvoiceUpdate();
+      // Reload email logs to show receipt email attempt
+      ApiService.getEmailLogs({ invoice: invoice.id })
+        .then(setEmailLogs)
+        .catch(() => {});
     } catch (err) {
       setError('Failed to mark invoice as paid');
     } finally {
@@ -240,6 +260,16 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSendReceipt = async (data: EmailSendData) => {
+    if (!invoice) return;
+    await ApiService.sendReceiptEmail(invoice.id, data);
+    // Reload email logs after send
+    ApiService.getEmailLogs({ invoice: invoice.id })
+      .then(setEmailLogs)
+      .catch(() => {});
+    onInvoiceUpdate();
   };
 
   const handleAddPayment = async () => {
@@ -415,6 +445,46 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
                           <ListItemText
                             primary="Receipt No."
                             secondary={invoice.receipt_number}
+                          />
+                        </ListItem>
+                      )}
+                      {invoice.status === 'Paid' && invoice.paid_date && (
+                        <ListItem>
+                          <ListItemIcon>
+                            <Payment />
+                          </ListItemIcon>
+                          <ListItemText
+                            primary="Paid Date"
+                            secondary={formatDate(invoice.paid_date)}
+                          />
+                        </ListItem>
+                      )}
+                      {invoice.status === 'Paid' && (
+                        <ListItem>
+                          <ListItemIcon>
+                            <Payment />
+                          </ListItemIcon>
+                          <ListItemText
+                            primary="Payment Method"
+                            secondary={invoice.payment_method || '-'}
+                          />
+                        </ListItem>
+                      )}
+                      {invoice.status === 'Paid' && invoice.receipt_number && (
+                        <ListItem>
+                          <ListItemIcon>
+                            <Email />
+                          </ListItemIcon>
+                          <ListItemText
+                            primary="Receipt Email"
+                            secondary={
+                              <Chip
+                                label={invoice.receipt_sent ? 'Sent' : 'Not Sent'}
+                                color={invoice.receipt_sent ? 'success' : 'default'}
+                                variant="outlined"
+                                size="small"
+                              />
+                            }
                           />
                         </ListItem>
                       )}
@@ -712,6 +782,15 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
             >
               Download Receipt
             </Button>
+            <Button
+              onClick={() => setReceiptEmailDialogOpen(true)}
+              variant="contained"
+              startIcon={<Send />}
+              disabled={loading}
+              sx={{ bgcolor: '#4CAF50', '&:hover': { bgcolor: '#388E3C' } }}
+            >
+              {invoice.receipt_sent ? 'Resend Receipt' : 'Send Receipt'}
+            </Button>
           </>
         )}
       </DialogActions>
@@ -802,6 +881,32 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Receipt Email Dialog */}
+      {invoice && invoice.status === 'Paid' && invoice.receipt_number && (
+        <EmailSendDialog
+          open={receiptEmailDialogOpen}
+          onClose={() => setReceiptEmailDialogOpen(false)}
+          documentType="receipt"
+          documentId={invoice.id}
+          documentNumber={invoice.receipt_number}
+          companyName={invoice.company_name || ''}
+          contacts={companyContacts}
+          onSendSuccess={() => {
+            setReceiptEmailDialogOpen(false);
+            setSuccess('Receipt email sent successfully');
+            onInvoiceUpdate();
+            ApiService.getEmailLogs({ invoice: invoice.id })
+              .then(setEmailLogs)
+              .catch(() => {});
+          }}
+          onSendEmail={handleSendReceipt}
+          documentDetails={{
+            currency: invoice.currency,
+            totalValue: invoice.total_amount,
+          }}
+        />
+      )}
     </Dialog>
   );
 };
