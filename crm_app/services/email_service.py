@@ -1065,95 +1065,29 @@ class EmailService:
         else:
             body_html = body.replace('\n', '<br/>')
 
-        # Generate PDF by directly calling the PDF generation logic (avoids viewset complications)
+        # Generate PDF using the same viewset logic as the download endpoint
         try:
-            from crm_app.services.pdf_generator import generate_contract_pdf
+            from django.test import RequestFactory
+            from rest_framework.request import Request as DRFRequest
+            from crm_app.views import ContractViewSet
+            from django.contrib.auth.models import AnonymousUser
 
-            # Try using PDF generator service if it exists
-            pdf_data = generate_contract_pdf(contract)
+            factory = RequestFactory()
+            django_request = factory.get(f'/api/contracts/{contract.id}/pdf/')
+            django_request.user = AnonymousUser()
+            pdf_request = DRFRequest(django_request)
+
+            viewset = ContractViewSet()
+            viewset.request = pdf_request
+            viewset.kwargs = {'pk': contract.id}
+            viewset.action = 'pdf'
+
+            pdf_response = viewset.pdf(pdf_request, pk=contract.id)
+            pdf_data = pdf_response.content
             pdf_filename = f"Contract_{contract.contract_number}.pdf"
-        except ImportError:
-            # Fallback: Generate inline using the same logic as the view
-            try:
-                from reportlab.lib.pagesizes import letter
-                from reportlab.lib import colors
-                from reportlab.lib.units import inch
-                from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable
-                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-                from reportlab.lib.enums import TA_CENTER
-                from io import BytesIO
-                import os
-
-                company = contract.company
-
-                # Get entity-specific details based on billing_entity
-                billing_entity = company.billing_entity
-                if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
-                    entity_name = 'BMAsia (Thailand) Co., Ltd.'
-                    entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
-                    entity_phone = '+66 2153 3520'
-                    entity_tax = '0105548025073'
-                    entity_bank = 'TMBThanachart Bank, Thonglor Soi 17 Branch'
-                    entity_swift = 'TMBKTHBK'
-                    entity_account = '916-1-00579-9'
-                else:  # BMAsia Limited (Hong Kong)
-                    entity_name = 'BMAsia Limited'
-                    entity_address = '22nd Floor, Tai Yau Building, 181 Johnston Road, Wanchai, Hong Kong'
-                    entity_phone = '+66 2153 3520'
-                    entity_tax = None
-                    entity_bank = 'HSBC, HK'
-                    entity_swift = 'HSBCHKHHHKH'
-                    entity_account = '808-021570-838'
-
-                # Create PDF buffer
-                buffer = BytesIO()
-                doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.4*inch)
-                elements = []
-                styles = getSampleStyleSheet()
-
-                # Add logo
-                logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
-                try:
-                    if os.path.exists(logo_path):
-                        logo = Image(logo_path, width=160, height=64, kind='proportional')
-                        logo.hAlign = 'LEFT'
-                        elements.append(logo)
-                except Exception:
-                    pass
-
-                elements.append(Spacer(1, 0.1*inch))
-                elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#FFA500'), spaceBefore=0, spaceAfter=0))
-                elements.append(Spacer(1, 0.2*inch))
-
-                # Contract title
-                contract_title_style = ParagraphStyle(
-                    'ContractTitle',
-                    parent=styles['Heading1'],
-                    fontSize=24,
-                    textColor=colors.HexColor('#FFA500'),
-                    spaceAfter=20,
-                    alignment=TA_CENTER,
-                    fontName='DejaVuSans-Bold'
-                )
-                elements.append(Paragraph("CONTRACT AGREEMENT", contract_title_style))
-
-                # Basic contract info (simplified version)
-                body_style = ParagraphStyle('Body', parent=styles['Normal'], fontSize=10)
-                elements.append(Paragraph(f"<b>Contract Number:</b> {contract.contract_number}", body_style))
-                elements.append(Paragraph(f"<b>Company:</b> {company.legal_entity_name or company.name}", body_style))
-                elements.append(Paragraph(f"<b>Period:</b> {contract.start_date.strftime('%b %d, %Y')} - {contract.end_date.strftime('%b %d, %Y')}", body_style))
-                elements.append(Paragraph(f"<b>Value:</b> {contract.currency} {contract.value:,.2f}", body_style))
-                elements.append(Paragraph(f"<b>Status:</b> {contract.status}", body_style))
-
-                # Build PDF
-                doc.build(elements)
-                pdf_data = buffer.getvalue()
-                buffer.close()
-                pdf_filename = f"Contract_{contract.contract_number}.pdf"
-
-            except Exception as e:
-                logger.error(f"Failed to generate PDF for contract {contract.contract_number}: {e}")
-                return False, f"Failed to generate PDF: {str(e)}"
+        except Exception as e:
+            logger.error(f"Failed to generate PDF for contract {contract.contract_number}: {e}")
+            return False, f"Failed to generate PDF: {str(e)}"
 
         # Send to each recipient
         success_count = 0
