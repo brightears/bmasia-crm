@@ -517,6 +517,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             'discount_amount', 'total_amount', 'currency', 'payment_terms', 'payment_terms_text',
             'property_name', 'payment_method', 'transaction_id', 'notes', 'days_overdue', 'is_overdue',
             'first_reminder_sent', 'second_reminder_sent', 'final_notice_sent',
+            'receipt_number', 'receipt_sent',
             'line_items', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']

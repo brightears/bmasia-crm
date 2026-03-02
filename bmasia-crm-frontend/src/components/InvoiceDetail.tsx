@@ -157,8 +157,11 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
 
     try {
       setLoading(true);
-      await ApiService.markInvoicePaid(invoice.id);
-      setSuccess('Invoice marked as paid');
+      const result = await ApiService.markInvoicePaid(invoice.id);
+      const receiptMsg = result.receipt_number
+        ? ` Receipt ${result.receipt_number} generated.`
+        : '';
+      setSuccess(`Invoice marked as paid.${receiptMsg}`);
       onInvoiceUpdate();
     } catch (err) {
       setError('Failed to mark invoice as paid');
@@ -198,6 +201,42 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
       window.URL.revokeObjectURL(url);
     } catch (err) {
       setError('Failed to download PDF');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownloadReceipt = async () => {
+    if (!invoice) return;
+
+    try {
+      setLoading(true);
+      const blob = await ApiService.downloadReceiptPDF(invoice.id);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Receipt_Tax_Invoice_${invoice.receipt_number}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError('Failed to download receipt PDF');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePreviewReceipt = async () => {
+    if (!invoice) return;
+
+    try {
+      setLoading(true);
+      const blob = await ApiService.downloadReceiptPDF(invoice.id);
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    } catch (err) {
+      setError('Failed to preview receipt PDF');
     } finally {
       setLoading(false);
     }
@@ -368,6 +407,17 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
                           }
                         />
                       </ListItem>
+                      {invoice.receipt_number && (
+                        <ListItem>
+                          <ListItemIcon>
+                            <Receipt />
+                          </ListItemIcon>
+                          <ListItemText
+                            primary="Receipt No."
+                            secondary={invoice.receipt_number}
+                          />
+                        </ListItem>
+                      )}
                     </List>
                   </CardContent>
                 </Card>
@@ -641,6 +691,28 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
           >
             Mark as Paid
           </Button>
+        )}
+        {invoice && invoice.status === 'Paid' && invoice.receipt_number && (
+          <>
+            <Button
+              onClick={handlePreviewReceipt}
+              variant="outlined"
+              startIcon={<Receipt />}
+              disabled={loading}
+              sx={{ borderColor: '#4CAF50', color: '#4CAF50' }}
+            >
+              Preview Receipt
+            </Button>
+            <Button
+              onClick={handleDownloadReceipt}
+              variant="outlined"
+              startIcon={<GetApp />}
+              disabled={loading}
+              sx={{ borderColor: '#4CAF50', color: '#4CAF50' }}
+            >
+              Download Receipt
+            </Button>
+          </>
         )}
       </DialogActions>
 

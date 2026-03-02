@@ -1248,6 +1248,11 @@ class Invoice(TimestampedModel):
     transaction_id = models.CharField(max_length=100, blank=True)
     notes = models.TextField(blank=True)
 
+    # Receipt/Tax Invoice
+    receipt_number = models.CharField(max_length=50, unique=True, null=True, blank=True,
+                                       help_text='Auto-generated when marked as paid')
+    receipt_sent = models.BooleanField(default=False)
+
     # Reminder tracking
     first_reminder_sent = models.BooleanField(default=False)
     second_reminder_sent = models.BooleanField(default=False)
@@ -1848,6 +1853,7 @@ class EmailLog(TimestampedModel):
         ('contract_send', 'Contract Sent'),
         ('contract_followup', 'Contract Follow-up'),
         ('sequence', 'Prospect Sequence'),
+        ('receipt_send', 'Receipt/Tax Invoice Sent'),
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

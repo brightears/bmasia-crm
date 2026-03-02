@@ -1393,6 +1393,182 @@ class EmailService:
             detailed_errors = '; '.join(error_messages) if error_messages else 'Unknown error'
             return False, f"Failed to send invoice to any recipients. Errors: {detailed_errors}"
 
+    def send_receipt_email(
+        self,
+        invoice_id,
+        recipients=None,
+        cc=None,
+        subject=None,
+        body=None,
+        sender='admin',
+        request=None
+    ) -> Tuple[bool, str]:
+        """
+        Send receipt/tax invoice email with PDF attachment.
+        Mirrors send_invoice_email but uses receipt_pdf endpoint and receipt-specific defaults.
+        """
+        from django.conf import settings
+        from django.core.mail import get_connection
+
+        # Get invoice
+        try:
+            invoice = Invoice.objects.select_related('company', 'contract').get(id=invoice_id)
+        except Invoice.DoesNotExist:
+            return False, f"Invoice with ID {invoice_id} not found"
+
+        if not invoice.receipt_number:
+            return False, "No receipt number generated for this invoice"
+
+        company = invoice.company
+
+        # Get recipients - prioritize billing contacts
+        if not recipients:
+            recipients = list(company.contacts.filter(
+                email__isnull=False,
+                is_active=True
+            ).filter(
+                Q(receives_invoice_emails=True) |
+                Q(contact_type='Billing')
+            ).values_list('email', flat=True).distinct())
+
+            if not recipients:
+                recipients = list(company.contacts.filter(
+                    email__isnull=False,
+                    is_active=True
+                ).values_list('email', flat=True))
+
+        if not recipients:
+            return False, "No recipients found for this receipt"
+
+        # Get user's SMTP configuration (per-user SMTP)
+        smtp_connection = None
+        if request and request.user.is_authenticated:
+            user_smtp = request.user.get_smtp_config()
+            if user_smtp:
+                try:
+                    smtp_connection = get_connection(
+                        host=user_smtp['host'],
+                        port=user_smtp['port'],
+                        username=user_smtp['email'],
+                        password=user_smtp['password'],
+                        use_tls=user_smtp['use_tls'],
+                    )
+                    from_email = user_smtp['email']
+                    sender_name = request.user.get_full_name() or request.user.username
+                except Exception as e:
+                    logger.error(f"Failed to create user SMTP connection: {e}")
+                    sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+                    from_email = f"{sender_config['display']} <{sender_config['email']}>"
+                    sender_name = sender_config['name']
+            else:
+                sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+                from_email = f"{sender_config['display']} <{sender_config['email']}>"
+                sender_name = sender_config['name']
+        else:
+            sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
+            from_email = f"{sender_config['display']} <{sender_config['email']}>"
+            sender_name = sender_config['name']
+
+        # Default subject and body for receipt
+        if not subject:
+            subject = f"Receipt/Tax Invoice {invoice.receipt_number} from BMAsia Music"
+        if not body:
+            body = (
+                f"Dear Valued Customer,\n\n"
+                f"Thank you for your payment. Please find attached your Receipt/Tax Invoice "
+                f"{invoice.receipt_number} for {company.legal_entity_name or company.name}.\n\n"
+                f"Amount Paid: {invoice.currency} {invoice.total_amount:,.2f}\n"
+                f"Payment Date: {invoice.paid_date.strftime('%B %d, %Y') if invoice.paid_date else 'N/A'}\n"
+                f"Original Invoice: {invoice.invoice_number}\n\n"
+                f"Best regards,\n{sender_name}\nBMAsia Music"
+            )
+        body_html = body.replace('\n', '<br/>')
+
+        # Generate receipt PDF using the viewset's receipt_pdf action
+        try:
+            from django.test import RequestFactory
+            from rest_framework.request import Request as DRFRequest
+            from crm_app.views import InvoiceViewSet
+            from django.contrib.auth.models import AnonymousUser
+
+            factory = RequestFactory()
+            django_request = factory.get(f'/api/invoices/{invoice.id}/receipt-pdf/')
+            django_request.user = AnonymousUser()
+            pdf_request = DRFRequest(django_request)
+
+            viewset = InvoiceViewSet()
+            viewset.request = pdf_request
+            viewset.kwargs = {'pk': invoice.id}
+            viewset.action = 'receipt_pdf'
+
+            pdf_response = viewset.receipt_pdf(pdf_request, pk=invoice.id)
+            pdf_data = pdf_response.content
+            pdf_filename = f"Receipt_Tax_Invoice_{invoice.receipt_number}.pdf"
+        except Exception as e:
+            logger.error(f"Failed to generate receipt PDF for {invoice.receipt_number}: {e}")
+            return False, f"Failed to generate receipt PDF: {str(e)}"
+
+        # Send to each recipient
+        success_count = 0
+        error_messages = []
+        for recipient in recipients:
+            try:
+                contact = company.contacts.filter(email=recipient).first()
+
+                log_from_email = from_email
+                if '<' in from_email and '>' in from_email:
+                    log_from_email = from_email.split('<')[1].split('>')[0]
+
+                email_log = EmailLog.objects.create(
+                    company=company,
+                    contact=contact,
+                    email_type='receipt_send',
+                    from_email=log_from_email,
+                    to_email=recipient,
+                    cc_emails=','.join(cc) if cc else '',
+                    subject=subject,
+                    body_html=body_html,
+                    body_text=body,
+                    status='pending',
+                    invoice=invoice
+                )
+
+                tracked_html = self._inject_tracking_pixel(body_html, email_log.tracking_token)
+
+                msg = EmailMultiAlternatives(
+                    subject=subject,
+                    body=body,
+                    from_email=from_email,
+                    to=[recipient],
+                    cc=cc or [],
+                    connection=smtp_connection
+                )
+                msg.attach_alternative(tracked_html, "text/html")
+                msg.attach(pdf_filename, pdf_data, 'application/pdf')
+                msg.extra_headers['X-BMAsia-Email-ID'] = f'receipt_{invoice.id}'
+                if contact:
+                    msg.extra_headers['List-Unsubscribe'] = self._get_unsubscribe_url(contact)
+
+                msg.send(fail_silently=False)
+                email_log.mark_as_sent()
+                success_count += 1
+                logger.info(f"Receipt email sent successfully to {recipient}")
+
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Failed to send receipt email to {recipient}: {error_msg}")
+                error_messages.append(f"{recipient}: {error_msg}")
+                if 'email_log' in locals() and email_log and email_log.status == 'pending':
+                    email_log.mark_as_failed(error_msg)
+
+        if success_count > 0:
+            invoice.receipt_sent = True
+            invoice.save()
+            return True, f"Receipt sent successfully to {success_count} recipient(s)"
+        else:
+            detailed_errors = '; '.join(error_messages) if error_messages else 'Unknown error'
+            return False, f"Failed to send receipt to any recipients. Errors: {detailed_errors}"
+
     def send_manual_renewal_reminder(
         self,
         contract_id,

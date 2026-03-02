@@ -4245,17 +4245,125 @@ class InvoiceViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=['post'])
     def mark_paid(self, request, pk=None):
-        """Mark invoice as paid"""
+        """Mark invoice as paid and auto-generate receipt/tax invoice"""
+        from crm_app.services.email_service import EmailService
+
         invoice = self.get_object()
+        old_status = invoice.status
         invoice.status = 'Paid'
         invoice.paid_date = timezone.now().date()
+
+        # Auto-generate receipt number
+        entity = invoice.company.billing_entity or ''
+        prefix = 'REC-TH' if 'Thailand' in entity else 'REC-HK'
+        year = timezone.now().year
+        pattern = f'{prefix}-{year}-'
+        last = Invoice.objects.filter(
+            receipt_number__startswith=pattern
+        ).order_by('-receipt_number').first()
+        if last:
+            try:
+                last_seq = int(last.receipt_number.split('-')[-1])
+                next_seq = last_seq + 1
+            except (ValueError, IndexError):
+                next_seq = 1
+        else:
+            next_seq = 1
+        invoice.receipt_number = f'{pattern}{str(next_seq).zfill(4)}'
         invoice.save()
 
         self.log_action('UPDATE', invoice, {
-            'status': {'old': invoice.status, 'new': 'Paid'}
+            'status': {'old': old_status, 'new': 'Paid'},
+            'receipt_number': invoice.receipt_number,
         })
 
-        return Response({'message': 'Invoice marked as paid'})
+        # Auto-send receipt email (best-effort — don't fail mark_paid if email fails)
+        receipt_email_status = 'not_sent'
+        try:
+            email_service = EmailService()
+            success, message = email_service.send_receipt_email(
+                invoice_id=invoice.id,
+                request=request
+            )
+            receipt_email_status = 'sent' if success else f'failed: {message}'
+        except Exception as e:
+            logger.warning(f"Receipt email failed for {invoice.invoice_number}: {e}")
+            receipt_email_status = f'failed: {str(e)}'
+
+        return Response({
+            'message': 'Invoice marked as paid',
+            'receipt_number': invoice.receipt_number,
+            'receipt_email_status': receipt_email_status,
+        })
+
+    @action(detail=False, methods=['get'], url_path='next-receipt-number')
+    def next_receipt_number(self, request):
+        """Generate next sequential receipt number based on billing entity.
+        Format: REC-TH-2026-0001 (Thailand) or REC-HK-2026-0001 (HK/International)
+        """
+        from datetime import datetime
+        entity = request.query_params.get('entity', '')
+        prefix = 'REC-TH' if 'Thailand' in entity else 'REC-HK'
+        year = datetime.now().year
+        pattern = f'{prefix}-{year}-'
+        last = Invoice.objects.filter(
+            receipt_number__startswith=pattern
+        ).order_by('-receipt_number').first()
+        if last:
+            try:
+                last_seq = int(last.receipt_number.split('-')[-1])
+                next_seq = last_seq + 1
+            except (ValueError, IndexError):
+                next_seq = 1
+        else:
+            next_seq = 1
+        receipt_number = f'{pattern}{str(next_seq).zfill(4)}'
+        return Response({'receipt_number': receipt_number})
+
+    @action(detail=True, methods=['post'], url_path='send-receipt')
+    def send_receipt(self, request, pk=None):
+        """Send receipt/tax invoice via email with PDF attachment"""
+        from crm_app.services.email_service import EmailService
+
+        invoice = self.get_object()
+        if not invoice.receipt_number:
+            return Response(
+                {'error': 'No receipt generated for this invoice'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        email_service = EmailService()
+        recipients = request.data.get('recipients', [])
+        cc = request.data.get('cc', [])
+        subject = request.data.get('subject')
+        body = request.data.get('body')
+
+        success, message = email_service.send_receipt_email(
+            invoice_id=invoice.id,
+            recipients=recipients if recipients else None,
+            cc=cc if cc else None,
+            subject=subject if subject else None,
+            body=body if body else None,
+            request=request
+        )
+
+        if not success:
+            return Response(
+                {'error': message},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        invoice.refresh_from_db()
+        self.log_action('UPDATE', invoice, {
+            'action': 'Receipt email sent',
+            'receipt_number': invoice.receipt_number,
+            'recipients': recipients
+        })
+
+        return Response({
+            'message': message,
+            'receipt_number': invoice.receipt_number,
+        })
 
     @action(detail=False, methods=['get'], url_path='export-quickbooks')
     def export_quickbooks(self, request):
@@ -4332,6 +4440,19 @@ class InvoiceViewSet(BaseModelViewSet):
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
         """Generate and download PDF for invoice"""
+        invoice = self.get_object()
+        return self._build_invoice_pdf(invoice, is_receipt=False)
+
+    @action(detail=True, methods=['get'], url_path='receipt-pdf')
+    def receipt_pdf(self, request, pk=None):
+        """Generate and download Receipt/Tax Invoice PDF"""
+        invoice = self.get_object()
+        if not invoice.receipt_number:
+            return Response({'error': 'No receipt generated for this invoice'}, status=status.HTTP_400_BAD_REQUEST)
+        return self._build_invoice_pdf(invoice, is_receipt=True)
+
+    def _build_invoice_pdf(self, invoice, is_receipt=False):
+        """Shared PDF builder for both invoice and receipt/tax invoice"""
         from reportlab.lib.pagesizes import letter
         from reportlab.lib import colors
         from reportlab.lib.units import inch
@@ -4343,7 +4464,6 @@ class InvoiceViewSet(BaseModelViewSet):
         import os
         from decimal import Decimal
 
-        invoice = self.get_object()
         company = invoice.company
 
         # Get entity-specific details based on billing_entity
@@ -4456,16 +4576,26 @@ class InvoiceViewSet(BaseModelViewSet):
             alignment=TA_CENTER,
             fontName='DejaVuSans-Bold'
         )
-        elements.append(Paragraph("INVOICE", invoice_title_style))
+        doc_title = "RECEIPT / TAX INVOICE" if is_receipt else "INVOICE"
+        elements.append(Paragraph(doc_title, invoice_title_style))
 
         # Document metadata table (modern grid layout)
-        metadata_data = [
-            ['Invoice Number', 'Issue Date', 'Due Date', 'Status'],
-            [invoice.invoice_number,
-             invoice.issue_date.strftime('%b %d, %Y'),
-             invoice.due_date.strftime('%b %d, %Y'),
-             invoice.status]
-        ]
+        if is_receipt:
+            metadata_data = [
+                ['Receipt No.', 'Invoice Ref.', 'Payment Date', 'Status'],
+                [invoice.receipt_number,
+                 invoice.invoice_number,
+                 invoice.paid_date.strftime('%b %d, %Y') if invoice.paid_date else '—',
+                 'PAID']
+            ]
+        else:
+            metadata_data = [
+                ['Invoice Number', 'Issue Date', 'Due Date', 'Status'],
+                [invoice.invoice_number,
+                 invoice.issue_date.strftime('%b %d, %Y'),
+                 invoice.due_date.strftime('%b %d, %Y'),
+                 invoice.status]
+            ]
 
         metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.7*inch, 1.7*inch, 1.8*inch])
         metadata_table.setStyle(TableStyle([
@@ -4777,12 +4907,17 @@ class InvoiceViewSet(BaseModelViewSet):
 
         # Create response
         response = HttpResponse(pdf_data, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="Invoice_{invoice.invoice_number}.pdf"'
+        if is_receipt:
+            response['Content-Disposition'] = f'attachment; filename="Receipt_Tax_Invoice_{invoice.receipt_number}.pdf"'
+        else:
+            response['Content-Disposition'] = f'attachment; filename="Invoice_{invoice.invoice_number}.pdf"'
 
         # Log activity
+        doc_type = 'Receipt/Tax Invoice' if is_receipt else 'Invoice'
         self.log_action('VIEW', invoice, {
-            'action': 'PDF generated and downloaded',
+            'action': f'{doc_type} PDF generated and downloaded',
             'invoice_number': invoice.invoice_number,
+            'receipt_number': invoice.receipt_number if is_receipt else None,
             'status': invoice.status
         })
 

@@ -459,6 +459,8 @@ export interface Invoice {
   first_reminder_sent: boolean;
   second_reminder_sent: boolean;
   final_notice_sent: boolean;
+  receipt_number?: string;
+  receipt_sent?: boolean;
   line_items: InvoiceLineItem[];
   payments: InvoicePayment[];
   remaining_amount: number;

@@ -3,10 +3,15 @@
 > **Full history**: See `docs/IMPLEMENTATION_ARCHIVE.md` for detailed implementation records.
 > **Lessons learned**: Key gotchas are documented in MEMORY.md.
 
-## This Week (Feb 19-28, 2026)
+## This Week (Feb 28 - Mar 2, 2026)
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
+| Mar 2 | Fix contract email PDF empty body (was using broken fallback) | `email_service.py` | `e8b87d3a` |
+| Mar 1 | Contact document preferences + CC field in EmailSendDialog | `ContactForm.tsx`, `EmailSendDialog.tsx`, `email_service.py`, `0084` | `9d290559` |
+| Feb 28 | Allow editing Active contracts (for date/term changes) | `Contracts.tsx`, `ContractDetail.tsx` | `c71d67a8` |
+| Feb 28 | Remove number input spinner arrows from QuoteForm line items | `QuoteForm.tsx` | `b762c8d7` |
+| Feb 28 | Fix contract list stale after status change in detail modal | `ContractDetail.tsx`, `Contracts.tsx` | `adc2d437` |
 | Feb 28 | Fix "Mark as Signed": PUT→PATCH in updateContract() | `api.ts` | `6119bc4b` |
 | Feb 28 | Contract follow-ups for unsigned contracts (Day 5 + Day 10) | `models.py`, `email_service.py`, `send_emails.py`, `0083_contract_followup_fields.py` | `881e79b4` |
 | Feb 28 | Fix OpportunityForm: choice expansion + scroll-to-error | `models.py`, `OpportunityForm.tsx`, `0082_opportunity_choice_expansion.py` | `325ed350`, `47aac8cc` |
@@ -44,6 +49,7 @@
 
 ## Key Recent Patterns
 
+- **Detail modal → list sync**: Status changes in detail modals must notify parent list via callback (e.g. `onContractUpdated`)
 - **Model choices ↔ frontend options**: Must stay in sync. Mismatch causes 400 errors (e.g. `lead_source`, `contact_method`)
 - **PDF footers**: Use canvas-based `onPage` callbacks, not flowables (can't split across pages)
 - **Partial updates**: Always use PATCH, not PUT (DRF requires all fields with PUT)
@@ -51,11 +57,13 @@
 - **Contract status lifecycle**: Draft → Sent → Active → Renewed/Expired/Cancelled
 - **Service locations**: Auto-derived from line items via `syncLocationsFromLineItems()`
 - **QuickBooks IIF**: DD/MM/YYYY dates, negative QNTY for SPL rows, VAT as separate row
+- **Email PDF generation**: All 3 send methods (quote/contract/invoice) must use `RequestFactory` → viewset `pdf()` to generate full PDF. Never use inline fallback generators
 
 ## Quick Migration Reference (Recent)
 
 | Migration | Purpose |
 |-----------|---------|
+| `0084` | Contact document email preferences (receives_quote/contract/invoice_emails) |
 | `0083` | Contract follow-up fields (sent_date, first/second_followup_sent) |
 | `0082` | Opportunity lead_source + contact_method choice expansion |
 | `0081` | ProspectReply model + EmailLog 'sequence' type |

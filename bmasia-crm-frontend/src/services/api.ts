@@ -412,6 +412,17 @@ class ApiService {
     return response.data;
   }
 
+  async downloadReceiptPDF(id: string): Promise<Blob> {
+    const response = await authApi.get(`/invoices/${id}/receipt-pdf/`, {
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+
+  async sendReceiptEmail(invoiceId: string, data: EmailSendData): Promise<void> {
+    await authApi.post(`/invoices/${invoiceId}/send-receipt/`, data);
+  }
+
   async addInvoicePayment(invoiceId: string, data: Partial<any>): Promise<any> {
     const response = await authApi.post(`/invoices/${invoiceId}/payments/`, data);
     return response.data;
