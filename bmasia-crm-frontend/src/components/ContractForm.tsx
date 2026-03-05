@@ -1213,6 +1213,14 @@ const ContractForm: React.FC<ContractFormProps> = ({
                   onChange={(date) => {
                     setFormData(prev => ({ ...prev, end_date: date }));
                     setIsCustomContractDuration(true);
+                    // Sync durationMonths with actual date span
+                    if (date && formData.start_date) {
+                      const start = new Date(formData.start_date);
+                      const end = new Date(date);
+                      const months = (end.getFullYear() - start.getFullYear()) * 12 +
+                                     (end.getMonth() - start.getMonth());
+                      setDurationMonths(Math.max(1, months));
+                    }
                   }}
                   slotProps={{
                     textField: {

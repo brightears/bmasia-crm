@@ -215,6 +215,8 @@ class BaseModelViewSet(viewsets.ModelViewSet):
     def log_action(self, action, instance, changes=None):
         """Create audit log entry"""
         request = self.request
+        if not request.user.is_authenticated:
+            return  # Skip for internal/anonymous requests (e.g. PDF via RequestFactory)
         AuditLog.objects.create(
             user=request.user,
             action=action,
