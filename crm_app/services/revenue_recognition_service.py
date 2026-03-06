@@ -259,9 +259,13 @@ class RevenueRecognitionService:
     def generate_schedule_from_invoice(self, invoice) -> List:
         """Auto-create recognition schedules from an invoice's line items."""
         created = []
-        entity = self.normalize_billing_entity(
-            invoice.contract.company.billing_entity if invoice.contract and invoice.contract.company else ''
-        )
+        # Determine billing entity from contract→company or direct company
+        entity_name = ''
+        if invoice.contract and invoice.contract.company:
+            entity_name = invoice.contract.company.billing_entity or ''
+        elif invoice.company:
+            entity_name = invoice.company.billing_entity or ''
+        entity = self.normalize_billing_entity(entity_name)
 
         for item in invoice.line_items.all():
             svc_start = item.service_period_start or invoice.service_period_start
@@ -278,12 +282,12 @@ class RevenueRecognitionService:
                 invoice=invoice,
                 invoice_line_item=item,
                 invoice_number=invoice.invoice_number,
-                invoice_date=invoice.invoice_date,
-                client_name=invoice.contract.company.name if invoice.contract and invoice.contract.company else invoice.bill_to or '',
+                invoice_date=invoice.issue_date,
+                client_name=invoice.contract.company.name if invoice.contract and invoice.contract.company else (invoice.company.name if invoice.company else ''),
                 billing_entity=entity,
                 currency=invoice.currency or 'THB',
                 product=product,
-                amount=item.total or Decimal('0'),
+                amount=item.line_total or Decimal('0'),
                 quantity=item.quantity or 1,
                 sales_price=item.unit_price,
                 service_period_start=svc_start,

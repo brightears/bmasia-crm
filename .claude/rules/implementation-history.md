@@ -7,6 +7,8 @@
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
+| Mar 6 | Fix revenue accrual 0% recognition: parallel list for import quarterly data + cumulative balance fix + frontend hint banner | `revenue_recognition_service.py`, `RevenueAccrual.tsx` | `21333cdc` |
+| Mar 6 | Fix email sequences cron: SequenceEnrollment.trigger_entity_id UUID→CharField for seasonal string keys | `models.py`, `0087` | `d38fffe4` |
 | Mar 6 | Revenue Accrual module: models, service, API, frontend, Excel import, Balance Sheet integration | `models.py`, `revenue_recognition_service.py`, `views.py`, `RevenueAccrual.tsx`, `0086` | `2c58ff5b` |
 | Mar 6 | 8 corporate templates: Hilton HPA, Minor PPSA, Ascott Supply Agreement, Centara PPSA (Thailand + International each) + {{rate_per_zone}} variable | `views.py`, `ContractTemplateForm.tsx`, API | `d7b55717` |
 | Mar 6 | Fix email sequences cron crash: invalid Contact field names (is_primary_contact → is_primary) | `auto_enrollment_service.py` | `8b1ae239` |
@@ -66,11 +68,14 @@
 - **Email PDF generation**: All send methods (quote/contract/invoice/receipt) must use `RequestFactory` → viewset `pdf()` to generate full PDF. Never use inline fallback generators. `BaseModelViewSet.log_action()` skips audit log for AnonymousUser
 - **Invoice PDF shared builder**: `_build_invoice_pdf(invoice, is_receipt=False)` — parameterizes title, metadata, filename for both invoice and receipt PDFs
 - **Contact model fields**: `is_primary` (NOT `is_primary_contact`). No `is_decision_maker` field exists. Use `contact_type` for role-based logic
+- **bulk_create() loses object attrs**: Never store data as `obj._custom_attr` before `bulk_create()` — use parallel list instead
+- **Render cron deploys**: Cron jobs are SEPARATE services — deploying backend does NOT deploy crons. Must trigger each cron's deploy via its own service ID
 
 ## Quick Migration Reference (Recent)
 
 | Migration | Purpose |
 |-----------|---------|
+| `0087` | SequenceEnrollment trigger_entity_id UUID→CharField |
 | `0086` | Revenue Recognition module (Schedule + Entry models, deferred_revenue on BS) |
 | `0085` | Invoice receipt_number + receipt_sent fields |
 | `0084` | Contact document email preferences (receives_quote/contract/invoice_emails) |

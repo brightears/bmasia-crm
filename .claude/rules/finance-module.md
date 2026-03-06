@@ -23,9 +23,11 @@ Accrual-based revenue recognition matching Pom's spreadsheet format.
 - **Formula**: `daily_rate = amount / total_service_days; quarterly_income = daily_rate × quarter_days`
 - **Balance Sheet**: `deferred_revenue` field on `BalanceSheetSnapshot`, auto-calculated from entries
 - **API**: `/api/v1/revenue-recognition/` (summary, schedules, import, generate, regenerate, cancel, deferred-revenue, export)
-- **Frontend**: KPI cards, stacked bar chart, Pom-format quarterly table, Excel import dialog
-- **Import**: Supports both HK (day-based) and TH (month/day-based) Excel formats
+- **Frontend**: KPI cards, stacked bar chart, Pom-format quarterly table, Excel import dialog, info banner when 0% recognized
+- **Import**: Supports both HK (day-based) and TH (month/day-based) Excel formats. Uses parallel list for quarterly data (NOT object attributes — bulk_create loses them)
+- **Auto-generation**: `generate_schedule_from_invoice()` creates recognition schedules from invoice line items when service period dates are set. Hooked into invoice creation flow.
 - **Migration**: `0086_revenue_recognition_module.py`
+- **Key fix**: Import quarterly data stored in parallel list (not object attrs). Cumulative balance pre-calculates from prior years. Commit `21333cdc`
 
 ## PDF/Excel Export (Phase 7) - COMPLETE
 

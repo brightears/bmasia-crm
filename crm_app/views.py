@@ -4165,6 +4165,41 @@ class InvoiceViewSet(BaseModelViewSet):
     ordering = ['-issue_date']
     filterset_fields = ['company', 'contract', 'status', 'issue_date', 'due_date', 'payment_method', 'contract__company']
 
+    def _generate_revenue_recognition(self, invoice):
+        """Auto-generate revenue recognition schedules from invoice line items."""
+        import logging
+        log = logging.getLogger(__name__)
+        try:
+            from crm_app.services.revenue_recognition_service import RevenueRecognitionService
+            service = RevenueRecognitionService()
+            # Only generate if any line item has service period dates
+            has_service_dates = invoice.line_items.filter(
+                service_period_start__isnull=False,
+                service_period_end__isnull=False,
+            ).exists()
+            if not has_service_dates:
+                # Fall back to invoice-level service dates
+                if not invoice.service_period_start or not invoice.service_period_end:
+                    return
+            service.generate_schedule_from_invoice(invoice)
+            log.info(f"Auto-generated revenue recognition for invoice {invoice.invoice_number}")
+        except Exception as e:
+            log.warning(f"Revenue recognition auto-gen failed for invoice {invoice.id}: {e}")
+
+    def perform_create(self, serializer):
+        """Create invoice + auto-generate revenue recognition schedules."""
+        instance = serializer.save()
+        self.log_action('CREATE', instance)
+        self._generate_revenue_recognition(instance)
+
+    def perform_update(self, serializer):
+        """Update invoice + regenerate revenue recognition schedules."""
+        instance = serializer.save()
+        self.log_action('UPDATE', instance)
+        # Delete old schedules and regenerate (line items may have changed)
+        RevenueRecognitionSchedule.objects.filter(invoice=instance).delete()
+        self._generate_revenue_recognition(instance)
+
     @action(detail=False, methods=['get'])
     def overdue(self, request):
         """Get overdue invoices"""
