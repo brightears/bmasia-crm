@@ -343,7 +343,7 @@ class AutoEnrollmentService:
                     receives_notifications=True,
                     receives_quarterly_emails=True,
                     unsubscribed=False
-                ).order_by('-is_primary_contact', '-is_decision_maker').first()
+                ).order_by('-is_primary').first()
 
                 if not contact:
                     logger.warning(f"No active contact for contract {contract.contract_number} (company: {contract.company.name})")
@@ -447,7 +447,7 @@ class AutoEnrollmentService:
                     receives_notifications=True,
                     receives_seasonal_emails=True,
                     unsubscribed=False
-                ).order_by('-is_primary_contact', '-is_decision_maker').first()
+                ).order_by('-is_primary').first()
 
                 if not contact:
                     continue
