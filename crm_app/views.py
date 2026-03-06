@@ -1417,6 +1417,7 @@ class ContractViewSet(BaseModelViewSet):
             '{{total_contract_value}}': f"{contract.currency} {contract.value:,.2f}" if contract.value else '',
             '{{total_contract_value_amount}}': f"{contract.value:,.2f}" if contract.value else '',
             '{{billing_note}}': '',
+            '{{rate_per_zone}}': '',
         }
 
         # Compute Total Contract Value and billing note for multi-year deals
@@ -1432,6 +1433,13 @@ class ContractViewSet(BaseModelViewSet):
                 replacements['{{total_contract_value_amount}}'] = f"{tcv:,.2f}"
                 vat_suffix = " + 7% VAT" if company and company.billing_entity == 'BMAsia (Thailand) Co., Ltd.' else ""
                 replacements['{{billing_note}}'] = f"Invoiced annually at {contract.currency} {contract.value:,.2f}{vat_suffix} per year."
+
+        # Compute rate per zone
+        if contract.value:
+            zone_count = int(zone_count_str) if zone_count_str.isdigit() and int(zone_count_str) > 0 else 0
+            if zone_count > 0:
+                rate = float(contract.value) / zone_count
+                replacements['{{rate_per_zone}}'] = f"{contract.currency} {rate:,.2f}"
 
         for var, value in replacements.items():
             content = content.replace(var, str(value))
