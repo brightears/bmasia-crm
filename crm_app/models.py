@@ -2567,10 +2567,11 @@ class SequenceEnrollment(TimestampedModel):
         blank=True,
         help_text="Type of entity that triggered enrollment: contract, invoice, company"
     )
-    trigger_entity_id = models.UUIDField(
+    trigger_entity_id = models.CharField(
+        max_length=255,
         null=True,
         blank=True,
-        help_text="ID of the triggering entity for deduplication"
+        help_text="ID of the triggering entity for deduplication (UUID or string key)"
     )
 
     class Meta:
