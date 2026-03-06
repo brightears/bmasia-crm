@@ -3,10 +3,14 @@
 > **Full history**: See `docs/IMPLEMENTATION_ARCHIVE.md` for detailed implementation records.
 > **Lessons learned**: Key gotchas are documented in MEMORY.md.
 
-## This Week (Feb 28 - Mar 2, 2026)
+## This Week (Feb 28 - Mar 6, 2026)
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
+| Mar 6 | 8 corporate templates: Hilton HPA, Minor PPSA, Ascott Supply Agreement, Centara PPSA (Thailand + International each) + {{rate_per_zone}} variable | `views.py`, `ContractTemplateForm.tsx`, API | `d7b55717` |
+| Mar 6 | Fix email sequences cron crash: invalid Contact field names (is_primary_contact → is_primary) | `auto_enrollment_service.py` | `8b1ae239` |
+| Mar 3 | Fix contract PDF AnonymousUser crash + custom duration sync | `views.py`, `ContractForm.tsx` | `c5ffe0bd` |
+| Mar 2 | Paid invoice UX: receipt visibility, send/resend, status indicators | `InvoiceDetail.tsx`, `Invoices.tsx`, `EmailSendDialog.tsx` | `91eb7c1a` |
 | Mar 2 | Receipt/Tax Invoice: auto-generate on mark paid + PDF + email | `models.py`, `views.py`, `email_service.py`, `InvoiceDetail.tsx`, `0085` | `754ecc6c` |
 | Mar 2 | Fix contract email PDF empty body (was using broken fallback) | `email_service.py` | `e8b87d3a` |
 | Mar 1 | Contact document preferences + CC field in EmailSendDialog | `ContactForm.tsx`, `EmailSendDialog.tsx`, `email_service.py`, `0084` | `9d290559` |
@@ -58,8 +62,9 @@
 - **Contract status lifecycle**: Draft → Sent → Active → Renewed/Expired/Cancelled
 - **Service locations**: Auto-derived from line items via `syncLocationsFromLineItems()`
 - **QuickBooks IIF**: DD/MM/YYYY dates, negative QNTY for SPL rows, VAT as separate row
-- **Email PDF generation**: All send methods (quote/contract/invoice/receipt) must use `RequestFactory` → viewset `pdf()` to generate full PDF. Never use inline fallback generators
+- **Email PDF generation**: All send methods (quote/contract/invoice/receipt) must use `RequestFactory` → viewset `pdf()` to generate full PDF. Never use inline fallback generators. `BaseModelViewSet.log_action()` skips audit log for AnonymousUser
 - **Invoice PDF shared builder**: `_build_invoice_pdf(invoice, is_receipt=False)` — parameterizes title, metadata, filename for both invoice and receipt PDFs
+- **Contact model fields**: `is_primary` (NOT `is_primary_contact`). No `is_decision_maker` field exists. Use `contact_type` for role-based logic
 
 ## Quick Migration Reference (Recent)
 
