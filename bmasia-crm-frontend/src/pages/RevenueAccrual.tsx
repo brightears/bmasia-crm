@@ -974,6 +974,28 @@ const RevenueAccrual: React.FC = () => {
         </Alert>
       )}
 
+      {/* Regeneration hint when data exists but no recognition */}
+      {summary && summary.schedule_count > 0 && summary.recognition_pct === 0 && (
+        <Alert
+          severity="info"
+          sx={{ mb: 2 }}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={handleRegenerate}
+              disabled={regenerating}
+              startIcon={regenerating ? <CircularProgress size={14} /> : <RefreshIcon />}
+            >
+              Regenerate Now
+            </Button>
+          }
+        >
+          {summary.schedule_count} schedules imported but no recognition entries calculated yet.
+          Click <strong>Regenerate</strong> to compute quarterly income from schedule dates.
+        </Alert>
+      )}
+
       {/* KPI Cards */}
       {summary && (
         <Grid container spacing={3} sx={{ mb: 3 }}>

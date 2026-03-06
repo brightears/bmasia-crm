@@ -13,6 +13,19 @@ Comprehensive financial reporting module for BMAsia CRM. Replaces manual spreads
 | 4 | Profit & Loss | ✅ Complete | `/finance/pl` |
 | 5 | Cash Flow | ✅ Complete | `/finance/cash-flow` |
 | 6 | Balance Sheet | ✅ Complete | `/finance/balance-sheet` |
+| 8 | Revenue Accrual / Recognition | ✅ Complete | `/finance/revenue-accrual` |
+
+## Revenue Accrual / Recognition (Phase 8) - COMPLETE
+
+Accrual-based revenue recognition matching Pom's spreadsheet format.
+- **Models**: `RevenueRecognitionSchedule`, `RevenueRecognitionEntry`
+- **Service**: `revenue_recognition_service.py` — recognition engine, Excel import, quarterly summaries
+- **Formula**: `daily_rate = amount / total_service_days; quarterly_income = daily_rate × quarter_days`
+- **Balance Sheet**: `deferred_revenue` field on `BalanceSheetSnapshot`, auto-calculated from entries
+- **API**: `/api/v1/revenue-recognition/` (summary, schedules, import, generate, regenerate, cancel, deferred-revenue, export)
+- **Frontend**: KPI cards, stacked bar chart, Pom-format quarterly table, Excel import dialog
+- **Import**: Supports both HK (day-based) and TH (month/day-based) Excel formats
+- **Migration**: `0086_revenue_recognition_module.py`
 
 ## PDF/Excel Export (Phase 7) - COMPLETE
 

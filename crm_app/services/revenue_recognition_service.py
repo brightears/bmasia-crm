@@ -143,6 +143,21 @@ class RevenueRecognitionService:
         entries = []
         cumulative = Decimal('0')
 
+        # Pre-calculate cumulative from prior years (for correct balance when
+        # generating a subset of years, e.g. years=[2025] for a 2024-2025 schedule)
+        first_year = min(years)
+        for prior_year in range(schedule.service_period_start.year, first_year):
+            for q in range(1, 5):
+                cumulative += self.calculate_quarterly_recognition(
+                    amount=schedule.amount,
+                    duration_months=schedule.duration_months,
+                    service_start=schedule.service_period_start,
+                    service_end=schedule.service_period_end,
+                    invoice_date=schedule.invoice_date,
+                    year=prior_year,
+                    quarter=q,
+                )
+
         for year in sorted(years):
             for quarter in range(1, 5):
                 recognized = self.calculate_quarterly_recognition(
@@ -525,6 +540,7 @@ class RevenueRecognitionService:
 
         stats = {'created': 0, 'skipped': 0, 'errors': [], 'total_amount': Decimal('0')}
         schedules_to_create = []
+        quarterly_data_list = []  # parallel list — avoids relying on object attrs after bulk_create
 
         for row_idx in range(header_row + 1, ws.max_row + 1):
             try:
@@ -623,8 +639,8 @@ class RevenueRecognitionService:
                                 'balance': bal_val or Decimal('0'),
                             }
 
-                schedule._imported_quarterly = quarterly_data
-                schedule._import_year = import_year
+                # Store in parallel list (not on object — bulk_create may lose attrs)
+                quarterly_data_list.append((quarterly_data, import_year))
 
             except Exception as e:
                 stats['errors'].append(f"Row {row_idx}: {str(e)}")
@@ -636,9 +652,9 @@ class RevenueRecognitionService:
 
         # Create entries — use imported quarterly data if available, else calculate
         entries_to_create = []
-        for schedule in created_schedules:
-            quarterly_data = getattr(schedule, '_imported_quarterly', {})
-            yr = getattr(schedule, '_import_year', None) or schedule.service_period_start.year
+        for i, schedule in enumerate(created_schedules):
+            quarterly_data, yr = quarterly_data_list[i]
+            yr = yr or schedule.service_period_start.year
 
             if quarterly_data:
                 # Use Pom's exact numbers from the Excel

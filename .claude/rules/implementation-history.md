@@ -7,6 +7,7 @@
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
+| Mar 6 | Revenue Accrual module: models, service, API, frontend, Excel import, Balance Sheet integration | `models.py`, `revenue_recognition_service.py`, `views.py`, `RevenueAccrual.tsx`, `0086` | `2c58ff5b` |
 | Mar 6 | 8 corporate templates: Hilton HPA, Minor PPSA, Ascott Supply Agreement, Centara PPSA (Thailand + International each) + {{rate_per_zone}} variable | `views.py`, `ContractTemplateForm.tsx`, API | `d7b55717` |
 | Mar 6 | Fix email sequences cron crash: invalid Contact field names (is_primary_contact → is_primary) | `auto_enrollment_service.py` | `8b1ae239` |
 | Mar 3 | Fix contract PDF AnonymousUser crash + custom duration sync | `views.py`, `ContractForm.tsx` | `c5ffe0bd` |
@@ -70,6 +71,7 @@
 
 | Migration | Purpose |
 |-----------|---------|
+| `0086` | Revenue Recognition module (Schedule + Entry models, deferred_revenue on BS) |
 | `0085` | Invoice receipt_number + receipt_sent fields |
 | `0084` | Contact document email preferences (receives_quote/contract/invoice_emails) |
 | `0083` | Contract follow-up fields (sent_date, first/second_followup_sent) |
