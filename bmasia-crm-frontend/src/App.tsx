@@ -50,6 +50,7 @@ import AccountsPayable from './pages/AccountsPayable';
 import ProfitLoss from './pages/ProfitLoss';
 import CashFlow from './pages/CashFlow';
 import BalanceSheet from './pages/BalanceSheet';
+import RevenueAccrual from './pages/RevenueAccrual';
 import ContractTemplates from './pages/ContractTemplates';
 import ActionCenter from './pages/ActionCenter';
 import ProspectSequences from './pages/ProspectSequences';
@@ -276,6 +277,14 @@ function App() {
           element={
             <ProtectedRoute requiredModule="invoices">
               <BalanceSheet />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/finance/revenue-accrual"
+          element={
+            <ProtectedRoute requiredModule="invoices">
+              <RevenueAccrual />
             </ProtectedRoute>
           }
         />

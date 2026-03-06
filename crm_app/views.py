@@ -46,7 +46,8 @@ from .models import (
     Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry,
     EmailLog,
     ProspectSequence, ProspectSequenceStep, ProspectEnrollment, ProspectStepExecution,
-    ProspectReply, AIEmailDraft
+    ProspectReply, AIEmailDraft,
+    RevenueRecognitionSchedule, RevenueRecognitionEntry,
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
@@ -11735,6 +11736,324 @@ class BalanceSheetViewSet(viewsets.ViewSet):
             return response
 
         except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class RevenueRecognitionViewSet(viewsets.ViewSet):
+    """
+    ViewSet for Revenue Recognition / Revenue Accrual module.
+
+    Endpoints:
+    - GET  /api/v1/revenue-recognition/summary/       - Quarterly summary (Pom's format)
+    - GET  /api/v1/revenue-recognition/schedules/      - List schedules with entries
+    - GET  /api/v1/revenue-recognition/schedules/{id}/ - Single schedule detail
+    - POST /api/v1/revenue-recognition/import/         - Upload Pom's Excel
+    - POST /api/v1/revenue-recognition/generate/       - Auto-generate from CRM invoices
+    - POST /api/v1/revenue-recognition/regenerate/     - Recalculate all entries
+    - PATCH /api/v1/revenue-recognition/schedules/{id}/ - Modify schedule
+    - POST /api/v1/revenue-recognition/schedules/{id}/cancel/ - Cancel schedule
+    - GET  /api/v1/revenue-recognition/deferred-revenue/ - Balance for B/S
+    - GET  /api/v1/revenue-recognition/export/excel/   - Export in Pom's format
+    """
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['get'], url_path='summary')
+    def summary(self, request):
+        """GET quarterly summary with KPIs and per-product breakdown."""
+        from crm_app.services.revenue_recognition_service import RevenueRecognitionService
+
+        year = request.query_params.get('year')
+        billing_entity = request.query_params.get('billing_entity')
+
+        if not year or not billing_entity:
+            return Response({'error': 'year and billing_entity are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+        except ValueError:
+            return Response({'error': 'year must be an integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+        product = request.query_params.get('product')
+        currency = request.query_params.get('currency')
+
+        try:
+            service = RevenueRecognitionService()
+            data = service.get_quarterly_summary(year, billing_entity, product, currency)
+            return Response(data)
+        except Exception as e:
+            logger.exception("Revenue recognition summary error")
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='schedules')
+    def schedules(self, request):
+        """GET detailed schedule list with quarterly entries."""
+        from crm_app.services.revenue_recognition_service import RevenueRecognitionService
+
+        year = request.query_params.get('year')
+        billing_entity = request.query_params.get('billing_entity')
+
+        if not year or not billing_entity:
+            return Response({'error': 'year and billing_entity are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+        except ValueError:
+            return Response({'error': 'year must be an integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+        product = request.query_params.get('product')
+        currency = request.query_params.get('currency')
+        sched_status = request.query_params.get('status', 'active')
+
+        try:
+            service = RevenueRecognitionService()
+            rows = service.get_schedules_detail(year, billing_entity, product, currency, sched_status)
+            return Response(rows)
+        except Exception as e:
+            logger.exception("Revenue recognition schedules error")
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path=r'schedules/(?P<pk>\d+)')
+    def schedule_detail(self, request, pk=None):
+        """GET single schedule with all entries."""
+        try:
+            schedule = RevenueRecognitionSchedule.objects.prefetch_related('entries').get(pk=pk)
+        except RevenueRecognitionSchedule.DoesNotExist:
+            return Response({'error': 'Schedule not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        entries = []
+        for e in schedule.entries.all():
+            entries.append({
+                'year': e.year,
+                'quarter': e.quarter,
+                'recognized_amount': float(e.recognized_amount),
+                'balance': float(e.balance),
+                'is_manually_overridden': e.is_manually_overridden,
+                'override_reason': e.override_reason,
+            })
+
+        data = {
+            'id': schedule.id,
+            'invoice_number': schedule.invoice_number,
+            'invoice_date': schedule.invoice_date.isoformat(),
+            'client_name': schedule.client_name,
+            'memo': schedule.memo,
+            'billing_entity': schedule.billing_entity,
+            'currency': schedule.currency,
+            'product': schedule.product,
+            'revenue_class': schedule.revenue_class,
+            'amount': float(schedule.amount),
+            'quantity': float(schedule.quantity),
+            'sales_price': float(schedule.sales_price) if schedule.sales_price else None,
+            'service_period_start': schedule.service_period_start.isoformat(),
+            'service_period_end': schedule.service_period_end.isoformat(),
+            'duration_months': float(schedule.duration_months),
+            'status': schedule.status,
+            'is_imported': schedule.is_imported,
+            'entries': entries,
+        }
+        return Response(data)
+
+    @action(detail=False, methods=['post'], url_path='import')
+    def import_excel(self, request):
+        """POST upload Pom's Excel file to create schedules + entries."""
+        from crm_app.services.revenue_recognition_service import RevenueRecognitionService
+
+        file_obj = request.FILES.get('file')
+        billing_entity = request.data.get('billing_entity')
+        currency = request.data.get('currency')
+
+        if not file_obj:
+            return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not billing_entity:
+            return Response({'error': 'billing_entity is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not currency:
+            return Response({'error': 'currency is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = RevenueRecognitionService()
+            result = service.import_from_excel(file_obj, billing_entity, currency)
+            if 'error' in result:
+                return Response(result, status=status.HTTP_400_BAD_REQUEST)
+            return Response(result, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            logger.exception("Revenue recognition import error")
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'], url_path='generate')
+    def generate(self, request):
+        """POST auto-generate schedules from CRM invoices."""
+        from crm_app.services.revenue_recognition_service import RevenueRecognitionService
+
+        billing_entity = request.data.get('billing_entity')
+        year = request.data.get('year')
+
+        if not billing_entity:
+            return Response({'error': 'billing_entity is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = RevenueRecognitionService()
+            invoices = Invoice.objects.filter(
+                status__in=['Sent', 'Paid', 'Overdue'],
+            ).select_related('contract__company').prefetch_related('line_items')
+
+            if year:
+                invoices = invoices.filter(invoice_date__year=int(year))
+
+            # Filter by entity via contract company
+            if billing_entity == 'bmasia_th':
+                invoices = invoices.filter(
+                    Q(contract__company__billing_entity__icontains='Thailand') |
+                    Q(contract__company__billing_entity__icontains='bmasia_th')
+                )
+            elif billing_entity == 'bmasia_hk':
+                invoices = invoices.filter(
+                    Q(contract__company__billing_entity__icontains='Limited') |
+                    Q(contract__company__billing_entity__icontains='bmasia_hk')
+                )
+
+            total_created = 0
+            for invoice in invoices:
+                # Skip if already has schedules
+                if invoice.recognition_schedules.exists():
+                    continue
+                created = service.generate_schedule_from_invoice(invoice)
+                total_created += len(created)
+
+            return Response({
+                'message': f'Generated {total_created} schedules from {invoices.count()} invoices',
+                'created': total_created,
+            })
+        except Exception as e:
+            logger.exception("Revenue recognition generate error")
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'], url_path='regenerate')
+    def regenerate(self, request):
+        """POST recalculate all entries for a year + entity."""
+        from crm_app.services.revenue_recognition_service import RevenueRecognitionService
+
+        year = request.data.get('year')
+        billing_entity = request.data.get('billing_entity')
+
+        if not year or not billing_entity:
+            return Response({'error': 'year and billing_entity are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            service = RevenueRecognitionService()
+            count = service.regenerate_all_entries(int(year), billing_entity)
+            return Response({'message': f'Regenerated {count} entries', 'entries': count})
+        except Exception as e:
+            logger.exception("Revenue recognition regenerate error")
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['patch'], url_path=r'schedules/(?P<pk>\d+)/update')
+    def update_schedule(self, request, pk=None):
+        """PATCH modify a schedule and recalculate entries."""
+        from crm_app.services.revenue_recognition_service import RevenueRecognitionService
+        from decimal import Decimal
+        from datetime import datetime
+
+        try:
+            schedule = RevenueRecognitionSchedule.objects.get(pk=pk)
+        except RevenueRecognitionSchedule.DoesNotExist:
+            return Response({'error': 'Schedule not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        new_amount = request.data.get('amount')
+        new_end_date = request.data.get('service_period_end')
+
+        try:
+            service = RevenueRecognitionService()
+            result = service.handle_modification(
+                schedule_id=int(pk),
+                new_amount=Decimal(str(new_amount)) if new_amount else None,
+                new_end_date=datetime.strptime(new_end_date, '%Y-%m-%d').date() if new_end_date else None,
+            )
+            return Response(result)
+        except Exception as e:
+            logger.exception("Revenue recognition update error")
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['post'], url_path=r'schedules/(?P<pk>\d+)/cancel')
+    def cancel_schedule(self, request, pk=None):
+        """POST cancel a schedule and remove future entries."""
+        from crm_app.services.revenue_recognition_service import RevenueRecognitionService
+
+        try:
+            service = RevenueRecognitionService()
+            result = service.handle_cancellation(int(pk))
+            return Response(result)
+        except RevenueRecognitionSchedule.DoesNotExist:
+            return Response({'error': 'Schedule not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.exception("Revenue recognition cancel error")
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='deferred-revenue')
+    def deferred_revenue(self, request):
+        """GET deferred revenue balance for balance sheet integration."""
+        from crm_app.services.revenue_recognition_service import RevenueRecognitionService
+
+        year = request.query_params.get('year')
+        quarter = request.query_params.get('quarter')
+        billing_entity = request.query_params.get('billing_entity')
+
+        if not year or not quarter or not billing_entity:
+            return Response(
+                {'error': 'year, quarter, and billing_entity are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            service = RevenueRecognitionService()
+            currency = request.query_params.get('currency')
+            balance = service.get_deferred_revenue_balance(
+                int(year), int(quarter), billing_entity, currency
+            )
+            return Response({
+                'deferred_revenue': float(balance),
+                'year': int(year),
+                'quarter': int(quarter),
+                'billing_entity': billing_entity,
+            })
+        except Exception as e:
+            logger.exception("Deferred revenue error")
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'], url_path='export/excel')
+    def export_excel(self, request):
+        """GET export revenue accrual report in Pom's Excel format."""
+        from crm_app.services.revenue_recognition_service import RevenueRecognitionService
+        from crm_app.services.finance_export_service import FinanceExportService
+
+        year = request.query_params.get('year')
+        billing_entity = request.query_params.get('billing_entity')
+
+        if not year or not billing_entity:
+            return Response({'error': 'year and billing_entity are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            year = int(year)
+            service = RevenueRecognitionService()
+            rows = service.get_schedules_detail(year, billing_entity)
+            summary = service.get_quarterly_summary(year, billing_entity)
+
+            export_service = FinanceExportService()
+            excel_buffer = export_service.generate_revenue_accrual_excel(
+                rows, summary, year, billing_entity,
+                summary.get('currency', 'THB' if billing_entity == 'bmasia_th' else 'USD')
+            )
+
+            entity_label = 'BMAT' if billing_entity == 'bmasia_th' else 'BMAL'
+            filename = f"Revenue_Accrual_{entity_label}_{year}.xlsx"
+
+            response = HttpResponse(
+                excel_buffer.getvalue(),
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+        except Exception as e:
+            logger.exception("Revenue accrual export error")
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

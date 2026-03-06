@@ -69,6 +69,7 @@ interface BalanceSheetResponse {
     current_liabilities: {
       accounts_payable: number;
       accrued_expenses: number;
+      deferred_revenue: number;
       other_current_liabilities: number;
       total: number;
     };
@@ -278,6 +279,10 @@ const BalanceSheetTable: React.FC<BalanceSheetTableProps> = ({ statement, curren
           <TableRow>
             <TableCell sx={{ pl: 4 }}>Accrued Expenses</TableCell>
             <TableCell align="right">{formatCurrency(statement.liabilities.current_liabilities.accrued_expenses, currency)}</TableCell>
+          </TableRow>
+          <TableRow>
+            <TableCell sx={{ pl: 4 }}>Deferred Revenue (Advance Received)</TableCell>
+            <TableCell align="right">{formatCurrency(statement.liabilities.current_liabilities.deferred_revenue || 0, currency)}</TableCell>
           </TableRow>
           <TableRow>
             <TableCell sx={{ pl: 4 }}>Other Current Liabilities</TableCell>

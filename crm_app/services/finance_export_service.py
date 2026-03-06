@@ -1559,3 +1559,186 @@ class FinanceExportService:
         wb.save(buffer)
         buffer.seek(0)
         return buffer
+
+    # =========================================================================
+    # REVENUE ACCRUAL EXPORT
+    # =========================================================================
+
+    def generate_revenue_accrual_excel(
+        self, rows, summary, year, billing_entity, currency='THB'
+    ):
+        """
+        Generate Revenue Accrual Excel matching Pom's spreadsheet format.
+
+        Columns: Type, Date, Num, Name, Memo, Item, Class, Qty, Sales Price, Amount,
+                 Start Date, End Date, Duration,
+                 INCOME Q1, BALANCE Q1, INCOME Q2, BALANCE Q2,
+                 INCOME Q3, BALANCE Q3, INCOME Q4, BALANCE Q4
+        """
+        wb = Workbook()
+        ws = wb.active
+
+        entity_info = BILLING_ENTITY_INFO.get(billing_entity, BILLING_ENTITY_INFO.get('bmasia_th', {}))
+        entity_name = entity_info.get('name', billing_entity)
+        entity_short = 'BMAT' if billing_entity == 'bmasia_th' else 'BMAL'
+
+        ws.title = f"Advance Received {entity_short} {year}"
+        currency_format = '#,##0.00' if currency in ('USD', 'THB') else '#,##0.00'
+
+        # Styling
+        header_font = Font(bold=True, size=10)
+        header_fill = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
+        header_font_white = Font(bold=True, size=10, color="FFFFFF")
+        subtotal_fill = PatternFill(start_color="FFF3E0", end_color="FFF3E0", fill_type="solid")
+        total_fill = PatternFill(start_color="E65100", end_color="E65100", fill_type="solid")
+        total_font = Font(bold=True, size=10, color="FFFFFF")
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin'),
+        )
+
+        # Title rows
+        ws['A1'] = entity_name
+        ws['A1'].font = Font(bold=True, size=14)
+        ws['A2'] = f"Advance Received Balance as of 31 Dec {year}"
+        ws['A2'].font = Font(bold=True, size=12)
+        ws['A3'] = f"January through December {year}"
+        ws['A3'].font = Font(size=10, italic=True)
+
+        # Headers (row 5)
+        headers = [
+            'Type', 'Date', 'Num', 'Name', 'Memo', 'Item', 'Class',
+            'Qty', 'Sales Price', 'Amount', 'Start Date', 'End Date', 'Duration (Mo)',
+            f'INCOME Q1/{year}', f'BALANCE Q1/{year}',
+            f'INCOME Q2/{year}', f'BALANCE Q2/{year}',
+            f'INCOME Q3/{year}', f'BALANCE Q3/{year}',
+            f'INCOME Q4/{year}', f'BALANCE Q4/{year}',
+        ]
+
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=5, column=col_idx, value=header)
+            cell.font = header_font_white
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal='center', wrap_text=True)
+            cell.border = thin_border
+
+        # Data rows
+        row_num = 6
+        product_totals = {}
+
+        for item in rows:
+            product = item.get('product', 'OTHER')
+            if product not in product_totals:
+                product_totals[product] = {
+                    'amount': 0, 'q1_inc': 0, 'q1_bal': 0,
+                    'q2_inc': 0, 'q2_bal': 0, 'q3_inc': 0, 'q3_bal': 0,
+                    'q4_inc': 0, 'q4_bal': 0,
+                }
+
+            pt = product_totals[product]
+            pt['amount'] += item.get('amount', 0)
+            for q in range(1, 5):
+                pt[f'q{q}_inc'] += item.get(f'q{q}_income', 0)
+                pt[f'q{q}_bal'] += item.get(f'q{q}_balance', 0)
+
+            row_data = [
+                'Invoice',
+                item.get('invoice_date', ''),
+                item.get('invoice_number', ''),
+                item.get('client_name', ''),
+                item.get('memo', ''),
+                product,
+                item.get('revenue_class', ''),
+                item.get('quantity', 1),
+                item.get('sales_price', ''),
+                item.get('amount', 0),
+                item.get('service_period_start', ''),
+                item.get('service_period_end', ''),
+                item.get('duration_months', 0),
+                item.get('q1_income', 0),
+                item.get('q1_balance', 0),
+                item.get('q2_income', 0),
+                item.get('q2_balance', 0),
+                item.get('q3_income', 0),
+                item.get('q3_balance', 0),
+                item.get('q4_income', 0),
+                item.get('q4_balance', 0),
+            ]
+
+            for col_idx, value in enumerate(row_data, 1):
+                cell = ws.cell(row=row_num, column=col_idx, value=value)
+                cell.border = thin_border
+                # Currency formatting for amount columns
+                if col_idx in (9, 10, 14, 15, 16, 17, 18, 19, 20, 21):
+                    cell.number_format = currency_format
+                    cell.alignment = Alignment(horizontal='right')
+
+            row_num += 1
+
+        # Product subtotal rows
+        for product, totals in sorted(product_totals.items()):
+            ws.cell(row=row_num, column=6, value=f"{product} Total")
+            ws.cell(row=row_num, column=6).font = Font(bold=True, size=10)
+            ws.cell(row=row_num, column=10, value=totals['amount'])
+            ws.cell(row=row_num, column=10).number_format = currency_format
+
+            subtotal_values = {
+                14: totals['q1_inc'], 15: totals['q1_bal'],
+                16: totals['q2_inc'], 17: totals['q2_bal'],
+                18: totals['q3_inc'], 19: totals['q3_bal'],
+                20: totals['q4_inc'], 21: totals['q4_bal'],
+            }
+            for col_idx, val in subtotal_values.items():
+                cell = ws.cell(row=row_num, column=col_idx, value=val)
+                cell.number_format = currency_format
+
+            for col_idx in range(1, 22):
+                ws.cell(row=row_num, column=col_idx).fill = subtotal_fill
+                ws.cell(row=row_num, column=col_idx).border = thin_border
+                ws.cell(row=row_num, column=col_idx).font = Font(bold=True, size=10)
+
+            row_num += 1
+
+        # Grand total row
+        ws.cell(row=row_num, column=6, value="GRAND TOTAL")
+        ws.cell(row=row_num, column=10, value=summary.get('total_invoice_amount', 0))
+        ws.cell(row=row_num, column=10).number_format = currency_format
+
+        quarterly = summary.get('quarterly', {})
+        grand_q = {
+            14: quarterly.get('Q1', {}).get('income', 0),
+            15: quarterly.get('Q1', {}).get('balance', 0),
+            16: quarterly.get('Q2', {}).get('income', 0),
+            17: quarterly.get('Q2', {}).get('balance', 0),
+            18: quarterly.get('Q3', {}).get('income', 0),
+            19: quarterly.get('Q3', {}).get('balance', 0),
+            20: quarterly.get('Q4', {}).get('income', 0),
+            21: quarterly.get('Q4', {}).get('balance', 0),
+        }
+        for col_idx, val in grand_q.items():
+            cell = ws.cell(row=row_num, column=col_idx, value=val)
+            cell.number_format = currency_format
+
+        for col_idx in range(1, 22):
+            ws.cell(row=row_num, column=col_idx).fill = total_fill
+            ws.cell(row=row_num, column=col_idx).border = thin_border
+            ws.cell(row=row_num, column=col_idx).font = total_font
+
+        # Column widths
+        col_widths = {
+            1: 8, 2: 12, 3: 16, 4: 30, 5: 30, 6: 8, 7: 12,
+            8: 6, 9: 12, 10: 14, 11: 12, 12: 12, 13: 8,
+            14: 14, 15: 14, 16: 14, 17: 14, 18: 14, 19: 14, 20: 14, 21: 14,
+        }
+        for col, width in col_widths.items():
+            ws.column_dimensions[get_column_letter(col)].width = width
+
+        # Freeze panes (headers always visible)
+        ws.freeze_panes = 'A6'
+
+        buffer = BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+        return buffer

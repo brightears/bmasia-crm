@@ -1731,6 +1731,67 @@ class ApiService {
     const response = await authApi.get('/ai-email-drafts/pending_count/');
     return response.data;
   }
+
+  // Revenue Recognition / Revenue Accrual
+  async getRevenueRecognitionSummary(params: { year: number; billing_entity: string; product?: string; currency?: string }): Promise<any> {
+    const response = await authApi.get('/revenue-recognition/summary/', { params });
+    return response.data;
+  }
+
+  async getRevenueRecognitionSchedules(params: { year: number; billing_entity: string; product?: string; currency?: string; status?: string }): Promise<any> {
+    const response = await authApi.get('/revenue-recognition/schedules/', { params });
+    return response.data;
+  }
+
+  async getRevenueRecognitionScheduleDetail(id: number): Promise<any> {
+    const response = await authApi.get(`/revenue-recognition/schedules/${id}/`);
+    return response.data;
+  }
+
+  async importRevenueRecognition(file: File, billingEntity: string, currency: string): Promise<any> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('billing_entity', billingEntity);
+    formData.append('currency', currency);
+    const response = await authApi.post('/revenue-recognition/import/', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  }
+
+  async generateRevenueRecognition(billingEntity: string, year?: number): Promise<any> {
+    const response = await authApi.post('/revenue-recognition/generate/', {
+      billing_entity: billingEntity,
+      year,
+    });
+    return response.data;
+  }
+
+  async regenerateRevenueRecognition(year: number, billingEntity: string): Promise<any> {
+    const response = await authApi.post('/revenue-recognition/regenerate/', {
+      year,
+      billing_entity: billingEntity,
+    });
+    return response.data;
+  }
+
+  async cancelRevenueSchedule(id: number): Promise<any> {
+    const response = await authApi.post(`/revenue-recognition/schedules/${id}/cancel/`);
+    return response.data;
+  }
+
+  async getDeferredRevenue(params: { year: number; quarter: number; billing_entity: string; currency?: string }): Promise<any> {
+    const response = await authApi.get('/revenue-recognition/deferred-revenue/', { params });
+    return response.data;
+  }
+
+  async exportRevenueAccrualExcel(year: number, billingEntity: string): Promise<Blob> {
+    const response = await authApi.get('/revenue-recognition/export/excel/', {
+      params: { year, billing_entity: billingEntity },
+      responseType: 'blob',
+    });
+    return response.data;
+  }
 }
 
 export interface EmailSendData {

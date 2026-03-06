@@ -83,6 +83,9 @@ router.register(r'cash-flow', views.CashFlowViewSet, basename='cash-flow')
 # Balance Sheet routes (Phase 6 - Finance Module)
 router.register(r'balance-sheet', views.BalanceSheetViewSet, basename='balance-sheet')
 
+# Revenue Recognition / Revenue Accrual
+router.register(r'revenue-recognition', views.RevenueRecognitionViewSet, basename='revenue-recognition')
+
 # Action Center (Today page)
 router.register(r'action-center', views.ActionCenterViewSet, basename='action-center')
 

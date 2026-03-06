@@ -183,6 +183,7 @@ const buildNavigation = (aiDraftsPendingCount: number) => [
       { text: 'Profit & Loss', icon: <ReceiptIcon />, path: '/finance/pl' },
       { text: 'Cash Flow', icon: <ReceiptIcon />, path: '/finance/cash-flow' },
       { text: 'Balance Sheet', icon: <ReceiptIcon />, path: '/finance/balance-sheet' },
+      { text: 'Revenue Accrual', icon: <ReceiptIcon />, path: '/finance/revenue-accrual' },
     ],
   },
   {

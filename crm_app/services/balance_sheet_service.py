@@ -156,8 +156,11 @@ class BalanceSheetService:
         )
         accrued_expenses = self._get_accrued_expenses(snapshot)
         other_current_liabilities = self._get_other_current_liabilities(snapshot)
+        deferred_revenue = self._get_deferred_revenue(
+            year, quarter, billing_entity, currency, snapshot
+        )
 
-        total_current_liabilities = accounts_payable + accrued_expenses + other_current_liabilities
+        total_current_liabilities = accounts_payable + accrued_expenses + other_current_liabilities + deferred_revenue
 
         # Long-term Liabilities
         long_term_debt = self._get_long_term_debt(snapshot)
@@ -223,6 +226,7 @@ class BalanceSheetService:
                         'details': ap_details
                     },
                     'accrued_expenses': float(accrued_expenses),
+                    'deferred_revenue': float(deferred_revenue),
                     'other_current_liabilities': float(other_current_liabilities),
                     'total': float(total_current_liabilities)
                 },
@@ -623,6 +627,26 @@ class BalanceSheetService:
         if snapshot:
             return snapshot.other_current_liabilities or Decimal('0')
         return Decimal('0')
+
+    def _get_deferred_revenue(
+        self,
+        year: int,
+        quarter: int,
+        billing_entity: str,
+        currency: str,
+        snapshot: Optional['BalanceSheetSnapshot']
+    ) -> Decimal:
+        """Get deferred revenue (advance received). Override from snapshot, else calculate from recognition entries."""
+        if snapshot and snapshot.deferred_revenue is not None:
+            return snapshot.deferred_revenue
+
+        # Calculate from revenue recognition entries
+        try:
+            from crm_app.services.revenue_recognition_service import RevenueRecognitionService
+            service = RevenueRecognitionService()
+            return service.get_deferred_revenue_balance(year, quarter, billing_entity, currency)
+        except Exception:
+            return Decimal('0')
 
     def _get_long_term_debt(self, snapshot: Optional['BalanceSheetSnapshot']) -> Decimal:
         """Get long-term debt from snapshot (manual entry)."""

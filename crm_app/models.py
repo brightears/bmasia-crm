@@ -4713,6 +4713,10 @@ class BalanceSheetSnapshot(TimestampedModel):
         max_digits=15, decimal_places=2, default=0,
         help_text="Manual entry: Short-term portions of loans, etc."
     )
+    deferred_revenue = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+        help_text="Override: Advance received / deferred revenue (calculated from revenue recognition schedules)"
+    )
 
     # Long-term Liabilities
     long_term_debt = models.DecimalField(
@@ -5054,3 +5058,132 @@ class AIEmailDraft(TimestampedModel):
     def get_final_body(self):
         """Return edited body if available, otherwise original"""
         return self.edited_body_html or self.body_html
+
+
+# ============================================================
+# Revenue Recognition Models
+# ============================================================
+
+class RevenueRecognitionSchedule(TimestampedModel):
+    """One schedule per invoice line item — maps to one row in Pom's spreadsheet.
+    Tracks service-period-based revenue recognition for accrual accounting."""
+
+    PRODUCT_CHOICES = [
+        ('SYB', 'SYB (Soundtrack Your Brand)'),
+        ('LIM', 'LIM (Licence Inclusive Music)'),
+        ('SONOS', 'SONOS'),
+        ('OTHER', 'Other'),
+    ]
+
+    REVENUE_CLASS_CHOICES = [
+        ('New', 'New'),
+        ('Renew', 'Renew'),
+        ('Add Outlet', 'Add Outlet'),
+        ('Upgrade', 'Upgrade'),
+        ('Other', 'Other'),
+    ]
+
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('cancelled', 'Cancelled'),
+        ('modified', 'Modified'),
+    ]
+
+    BILLING_ENTITY_CHOICES = [
+        ('bmasia_th', 'BMAsia (Thailand) Co., Ltd.'),
+        ('bmasia_hk', 'BMAsia Limited'),
+    ]
+
+    # Link to CRM invoice (nullable for imported historical data)
+    invoice = models.ForeignKey(
+        'Invoice', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='recognition_schedules'
+    )
+    invoice_line_item = models.ForeignKey(
+        'InvoiceLineItem', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='recognition_schedules'
+    )
+
+    # Denormalized fields (for imports + display without joins)
+    invoice_number = models.CharField(max_length=50, db_index=True)
+    invoice_date = models.DateField()
+    client_name = models.CharField(max_length=255)
+    memo = models.CharField(max_length=500, blank=True)
+
+    # Classification
+    billing_entity = models.CharField(max_length=20, choices=BILLING_ENTITY_CHOICES)
+    currency = models.CharField(max_length=3, default='THB')
+    product = models.CharField(max_length=10, choices=PRODUCT_CHOICES, default='SYB')
+    revenue_class = models.CharField(max_length=20, choices=REVENUE_CLASS_CHOICES, default='New')
+
+    # Financial
+    amount = models.DecimalField(
+        max_digits=15, decimal_places=2,
+        help_text="Pre-tax invoice amount to recognize over the service period"
+    )
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=1)
+    sales_price = models.DecimalField(
+        max_digits=15, decimal_places=2, null=True, blank=True,
+        help_text="Unit price (for display — amount = qty × price)"
+    )
+
+    # Service period
+    service_period_start = models.DateField()
+    service_period_end = models.DateField()
+    duration_months = models.DecimalField(
+        max_digits=6, decimal_places=2,
+        help_text="Duration in months (can be fractional)"
+    )
+
+    # Status
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    is_imported = models.BooleanField(default=False, help_text="True if created from Excel import")
+
+    class Meta:
+        ordering = ['invoice_date', 'client_name']
+        indexes = [
+            models.Index(fields=['billing_entity', 'status']),
+            models.Index(fields=['invoice_date']),
+            models.Index(fields=['product']),
+            models.Index(fields=['service_period_start', 'service_period_end']),
+        ]
+        verbose_name = 'Revenue Recognition Schedule'
+        verbose_name_plural = 'Revenue Recognition Schedules'
+
+    def __str__(self):
+        return f"{self.invoice_number} | {self.client_name} | {self.product} | {self.currency} {self.amount}"
+
+
+class RevenueRecognitionEntry(TimestampedModel):
+    """One entry per schedule per quarter — stores recognized revenue amount."""
+
+    schedule = models.ForeignKey(
+        RevenueRecognitionSchedule, on_delete=models.CASCADE,
+        related_name='entries'
+    )
+    year = models.IntegerField()
+    quarter = models.IntegerField(help_text="1-4")
+
+    recognized_amount = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Revenue recognized in this quarter"
+    )
+    balance = models.DecimalField(
+        max_digits=15, decimal_places=2, default=0,
+        help_text="Remaining deferred revenue after this quarter"
+    )
+
+    is_manually_overridden = models.BooleanField(default=False)
+    override_reason = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        unique_together = ['schedule', 'year', 'quarter']
+        ordering = ['year', 'quarter']
+        indexes = [
+            models.Index(fields=['year', 'quarter']),
+        ]
+        verbose_name = 'Revenue Recognition Entry'
+        verbose_name_plural = 'Revenue Recognition Entries'
+
+    def __str__(self):
+        return f"{self.schedule.invoice_number} | {self.year} Q{self.quarter} | {self.recognized_amount}"
