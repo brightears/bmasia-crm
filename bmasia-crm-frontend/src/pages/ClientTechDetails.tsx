@@ -42,6 +42,11 @@ import {
   LocationOn,
   OpenInNew,
   PictureAsPdf,
+  ContentCopy,
+  KeyboardArrowDown,
+  KeyboardArrowRight,
+  UnfoldMore,
+  UnfoldLess,
 } from '@mui/icons-material';
 import { Company, ClientTechDetail, ApiResponse } from '../types';
 import ApiService from '../services/api';
@@ -81,6 +86,10 @@ const ClientTechDetails: React.FC = () => {
   const [actionMenuAnchor, setActionMenuAnchor] = useState<null | HTMLElement>(null);
   const [actionMenuDetail, setActionMenuDetail] = useState<ClientTechDetail | null>(null);
 
+  // Group by company — expand/collapse
+  const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
+  const [allExpanded, setAllExpanded] = useState(true);
+
   // ---- Data loading ----
 
   const loadData = useCallback(async () => {
@@ -89,7 +98,7 @@ const ClientTechDetails: React.FC = () => {
       const params: any = {
         page: page + 1,
         page_size: rowsPerPage,
-        ordering: '-created_at',
+        ordering: 'company__name,outlet_name',
       };
       if (search) params.search = search;
       if (selectedCompanyId) params.company = selectedCompanyId;
@@ -224,6 +233,66 @@ const ClientTechDetails: React.FC = () => {
     setActionMenuAnchor(null);
     setActionMenuDetail(null);
   };
+
+  const handleDuplicate = async (detail: ClientTechDetail) => {
+    setActionMenuAnchor(null);
+    try {
+      const cloned = await ApiService.cloneClientTechDetail(detail.id);
+      setSuccess(`Duplicated "${detail.outlet_name}" — edit the copy below`);
+      await loadData();
+      setSelectedDetail(cloned);
+      setFormOpen(true);
+    } catch (err) {
+      setError('Failed to duplicate tech detail');
+    }
+  };
+
+  const toggleCompany = (companyName: string) => {
+    setExpandedCompanies((prev) => {
+      const next = new Set(prev);
+      if (next.has(companyName)) {
+        next.delete(companyName);
+      } else {
+        next.add(companyName);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllExpanded = () => {
+    if (allExpanded) {
+      // Collapse all multi-outlet companies
+      setExpandedCompanies(new Set());
+      setAllExpanded(false);
+    } else {
+      // Expand all
+      const allNames = new Set(details.map((d) => d.company_name || ''));
+      setExpandedCompanies(allNames);
+      setAllExpanded(true);
+    }
+  };
+
+  // Group details by company for rendering
+  const groupedDetails = React.useMemo(() => {
+    const groups: { companyName: string; items: ClientTechDetail[] }[] = [];
+    const map = new Map<string, ClientTechDetail[]>();
+    for (const d of details) {
+      const key = d.company_name || 'Unknown';
+      if (!map.has(key)) {
+        map.set(key, []);
+        groups.push({ companyName: key, items: map.get(key)! });
+      }
+      map.get(key)!.push(d);
+    }
+    return groups;
+  }, [details]);
+
+  // Auto-expand all companies when data changes
+  React.useEffect(() => {
+    if (allExpanded) {
+      setExpandedCompanies(new Set(details.map((d) => d.company_name || '')));
+    }
+  }, [details, allExpanded]);
 
   // ---- Helpers ----
 
@@ -383,8 +452,8 @@ const ClientTechDetails: React.FC = () => {
         </Box>
       </Paper>
 
-      {/* Summary counts */}
-      <Box sx={{ display: 'flex', gap: 1.5, mb: 2 }}>
+      {/* Summary counts + expand/collapse */}
+      <Box sx={{ display: 'flex', gap: 1.5, mb: 2, alignItems: 'center' }}>
         <Chip
           icon={<Business />}
           label={`${stats.total_clients} Clients`}
@@ -397,6 +466,15 @@ const ClientTechDetails: React.FC = () => {
           variant="outlined"
           color="primary"
         />
+        <Box sx={{ flex: 1 }} />
+        <Button
+          size="small"
+          startIcon={allExpanded ? <UnfoldLess /> : <UnfoldMore />}
+          onClick={toggleAllExpanded}
+          sx={{ textTransform: 'none' }}
+        >
+          {allExpanded ? 'Collapse All' : 'Expand All'}
+        </Button>
       </Box>
 
       {/* Table */}
@@ -404,12 +482,12 @@ const ClientTechDetails: React.FC = () => {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Client</TableCell>
               <TableCell>Outlet / Zone</TableCell>
               <TableCell>AnyDesk</TableCell>
               <TableCell>UltraViewer</TableCell>
               <TableCell>Platform</TableCell>
               <TableCell>System Type</TableCell>
+              <TableCell />
               <TableCell sx={{ width: 80 }}>Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -437,55 +515,93 @@ const ClientTechDetails: React.FC = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              details.map((detail) => (
-                <TableRow
-                  key={detail.id}
-                  hover
-                  sx={{ cursor: 'pointer' }}
-                  onClick={() => handleView(detail)}
-                >
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Business sx={{ mr: 1, color: 'text.secondary', fontSize: 16 }} />
-                      <Typography variant="body2" fontWeight="medium">
-                        {detail.company_name || '-'}
-                      </Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <LocationOn sx={{ mr: 0.5, color: 'text.secondary', fontSize: 16 }} />
-                      <Typography variant="body2">
-                        {formatField(detail.outlet_name)}
-                      </Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" fontFamily="monospace">
-                      {formatField(detail.anydesk_id)}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" fontFamily="monospace">
-                      {formatField(detail.ultraviewer_id)}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    {getPlatformTypeChip(detail.platform_type)}
-                  </TableCell>
-                  <TableCell>
-                    {getSystemTypeChip(detail.system_type)}
-                  </TableCell>
-                  <TableCell>
-                    <IconButton
-                      size="small"
-                      onClick={(e) => handleActionMenuOpen(e, detail)}
+              groupedDetails.map((group) => {
+                const isMulti = group.items.length > 1;
+                const isExpanded = expandedCompanies.has(group.companyName);
+
+                return (
+                  <React.Fragment key={group.companyName}>
+                    {/* Company header row */}
+                    <TableRow
+                      sx={{
+                        backgroundColor: '#f5f5f5',
+                        cursor: isMulti ? 'pointer' : 'default',
+                        '&:hover': isMulti ? { backgroundColor: '#ebebeb' } : {},
+                      }}
+                      onClick={() => isMulti && toggleCompany(group.companyName)}
                     >
-                      <MoreVert />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))
+                      <TableCell colSpan={7} sx={{ py: 1 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          {isMulti ? (
+                            isExpanded ? (
+                              <KeyboardArrowDown sx={{ fontSize: 20, color: 'text.secondary' }} />
+                            ) : (
+                              <KeyboardArrowRight sx={{ fontSize: 20, color: 'text.secondary' }} />
+                            )
+                          ) : (
+                            <Box sx={{ width: 20 }} />
+                          )}
+                          <Business sx={{ fontSize: 18, color: 'text.secondary' }} />
+                          <Typography variant="body2" fontWeight={600}>
+                            {group.companyName}
+                          </Typography>
+                          <Chip
+                            label={`${group.items.length} outlet${group.items.length > 1 ? 's' : ''}`}
+                            size="small"
+                            variant="outlined"
+                            sx={{ height: 22, fontSize: '0.75rem' }}
+                          />
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+
+                    {/* Outlet rows — always show for single-outlet, toggle for multi */}
+                    {(isExpanded || !isMulti) &&
+                      group.items.map((detail) => (
+                        <TableRow
+                          key={detail.id}
+                          hover
+                          sx={{ cursor: 'pointer' }}
+                          onClick={() => handleView(detail)}
+                        >
+                          <TableCell sx={{ pl: 6 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                              <LocationOn sx={{ mr: 0.5, color: 'text.secondary', fontSize: 16 }} />
+                              <Typography variant="body2">
+                                {formatField(detail.outlet_name)}
+                              </Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" fontFamily="monospace" fontSize="0.8rem">
+                              {formatField(detail.anydesk_id)}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" fontFamily="monospace" fontSize="0.8rem">
+                              {formatField(detail.ultraviewer_id)}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            {getPlatformTypeChip(detail.platform_type)}
+                          </TableCell>
+                          <TableCell>
+                            {getSystemTypeChip(detail.system_type)}
+                          </TableCell>
+                          <TableCell />
+                          <TableCell>
+                            <IconButton
+                              size="small"
+                              onClick={(e) => handleActionMenuOpen(e, detail)}
+                            >
+                              <MoreVert />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                  </React.Fragment>
+                );
+              })
             )}
           </TableBody>
         </Table>
@@ -517,6 +633,12 @@ const ClientTechDetails: React.FC = () => {
             <PictureAsPdf fontSize="small" />
           </ListItemIcon>
           <ListItemText>Download PDF</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleDuplicate(actionMenuDetail!)}>
+          <ListItemIcon>
+            <ContentCopy fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Duplicate</ListItemText>
         </MenuItem>
         <MenuItem onClick={() => handleEdit(actionMenuDetail!)}>
           <ListItemIcon>

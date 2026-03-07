@@ -1241,6 +1241,11 @@ class ApiService {
     return response.data;
   }
 
+  async cloneClientTechDetail(id: string): Promise<ClientTechDetail> {
+    const response = await authApi.post(`/client-tech-details/${id}/clone/`);
+    return response.data;
+  }
+
   // Contract Content Management
   async getContractTemplates(params?: any): Promise<ApiResponse<any>> {
     const response = await authApi.get('/contract-templates/', { params });

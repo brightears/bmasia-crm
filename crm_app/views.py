@@ -9142,6 +9142,23 @@ class ClientTechDetailViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(details, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['post'])
+    def clone(self, request, pk=None):
+        """Duplicate a tech detail record — copies all fields except id, zone, outlet_name."""
+        source = self.get_object()
+        clone_fields = {}
+        skip = {'id', 'created_at', 'updated_at', 'zone', 'zone_id'}
+        for field in source._meta.fields:
+            if field.name in skip:
+                continue
+            if field.name == 'outlet_name':
+                clone_fields[field.name] = f"{getattr(source, field.name)} (Copy)"
+            else:
+                clone_fields[field.name] = getattr(source, field.name)
+        new_detail = ClientTechDetail.objects.create(**clone_fields)
+        serializer = self.get_serializer(new_detail)
+        return Response(serializer.data, status=201)
+
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
         """Generate PDF for a client tech detail record"""

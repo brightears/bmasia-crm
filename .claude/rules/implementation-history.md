@@ -7,6 +7,8 @@
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
+| Mar 7 | Fix HK revenue accrual timeout: N+1 query elimination (4,372→2 queries) + independent frontend fetches + 30s timeout | `revenue_recognition_service.py`, `RevenueAccrual.tsx`, `api.ts` | `4354b30b` |
+| Mar 7 | Auto-generate revenue recognition on invoice create/update | `views.py` | `b3f7024b` |
 | Mar 6 | Fix revenue accrual 0% recognition: parallel list for import quarterly data + cumulative balance fix + frontend hint banner | `revenue_recognition_service.py`, `RevenueAccrual.tsx` | `21333cdc` |
 | Mar 6 | Fix email sequences cron: SequenceEnrollment.trigger_entity_id UUID→CharField for seasonal string keys | `models.py`, `0087` | `d38fffe4` |
 | Mar 6 | Revenue Accrual module: models, service, API, frontend, Excel import, Balance Sheet integration | `models.py`, `revenue_recognition_service.py`, `views.py`, `RevenueAccrual.tsx`, `0086` | `2c58ff5b` |
