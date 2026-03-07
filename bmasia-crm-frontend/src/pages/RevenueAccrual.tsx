@@ -758,13 +758,18 @@ const RevenueAccrual: React.FC = () => {
       const params: any = { year, billing_entity: billingEntity };
       if (product) params.product = product;
 
-      const [summaryData, schedulesData] = await Promise.all([
-        apiService.getRevenueRecognitionSummary(params),
-        apiService.getRevenueRecognitionSchedules(params),
-      ]);
-
+      // Fetch summary first (fast, always works)
+      const summaryData = await apiService.getRevenueRecognitionSummary(params);
       setSummary(summaryData);
-      setSchedules(Array.isArray(schedulesData) ? schedulesData : schedulesData.results || []);
+
+      // Fetch schedules independently — don't block summary on failure
+      try {
+        const schedulesData = await apiService.getRevenueRecognitionSchedules(params);
+        setSchedules(Array.isArray(schedulesData) ? schedulesData : schedulesData.results || []);
+      } catch (schedErr: any) {
+        console.warn('Schedules load failed (summary still available):', schedErr?.message);
+        setSchedules([]);
+      }
     } catch (err: any) {
       const msg =
         err?.response?.data?.error ||

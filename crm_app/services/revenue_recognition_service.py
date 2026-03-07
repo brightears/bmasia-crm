@@ -468,9 +468,14 @@ class RevenueRecognitionService:
                 'is_imported': s.is_imported,
             }
 
-            # Attach quarterly entries for this year
+            # Build lookup from prefetched entries (no extra DB queries)
+            entry_map = {}
+            for e in s.entries.all():
+                if e.year == year:
+                    entry_map[e.quarter] = e
+
             for q in range(1, 5):
-                entry = s.entries.filter(year=year, quarter=q).first()
+                entry = entry_map.get(q)
                 row[f'q{q}_income'] = float(entry.recognized_amount) if entry else 0
                 row[f'q{q}_balance'] = float(entry.balance) if entry else float(s.amount)
 

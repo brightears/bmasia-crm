@@ -1739,7 +1739,7 @@ class ApiService {
   }
 
   async getRevenueRecognitionSchedules(params: { year: number; billing_entity: string; product?: string; currency?: string; status?: string }): Promise<any> {
-    const response = await authApi.get('/revenue-recognition/schedules/', { params });
+    const response = await authApi.get('/revenue-recognition/schedules/', { params, timeout: 30000 });
     return response.data;
   }
 
