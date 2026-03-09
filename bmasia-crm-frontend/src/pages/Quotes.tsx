@@ -169,7 +169,7 @@ const Quotes: React.FC = () => {
 
   const loadCompanies = async () => {
     try {
-      const response = await ApiService.getCompanies({ page_size: 100 });
+      const response = await ApiService.getCompanies({ page_size: 1000, ordering: 'name' });
       setCompanies(response.results);
     } catch (err) {
       console.error('Failed to load companies:', err);

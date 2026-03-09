@@ -26,6 +26,7 @@ import {
   GridLegacy as Grid,
   InputAdornment,
   Chip,
+  Autocomplete,
 } from '@mui/material';
 import {
   Add,
@@ -562,23 +563,22 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
             </Grid>
 
             <Grid item xs={12} md={3}>
-              <FormControl fullWidth required>
-                <InputLabel>Company</InputLabel>
-                <Select
-                  value={formData.company}
-                  onChange={(e) => handleInputChange('company', e.target.value)}
-                  label="Company"
-                >
-                  {companies.map((company) => (
-                    <MenuItem key={company.id} value={company.id}>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Business sx={{ mr: 1, fontSize: 16 }} />
-                        {company.name}
-                      </Box>
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <Autocomplete
+                options={companies}
+                getOptionLabel={(option) => option.name}
+                value={companies.find((c) => c.id === formData.company) || null}
+                onChange={(_e, newValue) => handleInputChange('company', newValue?.id || '')}
+                renderOption={(props, option) => (
+                  <li {...props} key={option.id}>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <Business sx={{ mr: 1, fontSize: 16 }} />
+                      {option.name}
+                    </Box>
+                  </li>
+                )}
+                renderInput={(params) => <TextField {...params} label="Company" required />}
+                isOptionEqualToValue={(option, value) => option.id === value.id}
+              />
             </Grid>
 
             <Grid item xs={12} md={3}>
