@@ -88,13 +88,13 @@ const ClientTechDetails: React.FC = () => {
 
   // Group by company — expand/collapse
   const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
-  const [allExpanded, setAllExpanded] = useState(true);
+  const [allExpanded, setAllExpanded] = useState(false);
 
   // ---- Data loading ----
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const params: any = {
         page: page + 1,
         page_size: rowsPerPage,
@@ -191,7 +191,7 @@ const ClientTechDetails: React.FC = () => {
       setSuccess('Tech detail deleted');
       setDeleteDialogOpen(false);
       setDeletingId('');
-      loadData();
+      loadData(true);
     } catch (err) {
       setError('Failed to delete tech detail');
     } finally {
@@ -220,7 +220,7 @@ const ClientTechDetails: React.FC = () => {
 
   const handleFormSave = () => {
     setFormOpen(false);
-    loadData();
+    loadData(true);
   };
 
   const handleActionMenuOpen = (event: React.MouseEvent<HTMLElement>, detail: ClientTechDetail) => {
@@ -239,7 +239,7 @@ const ClientTechDetails: React.FC = () => {
     try {
       const cloned = await ApiService.cloneClientTechDetail(detail.id);
       setSuccess(`Duplicated "${detail.outlet_name}" — edit the copy below`);
-      await loadData();
+      await loadData(true);
       setSelectedDetail(cloned);
       setFormOpen(true);
     } catch (err) {
@@ -286,13 +286,6 @@ const ClientTechDetails: React.FC = () => {
     }
     return groups;
   }, [details]);
-
-  // Auto-expand all companies when data changes
-  React.useEffect(() => {
-    if (allExpanded) {
-      setExpandedCompanies(new Set(details.map((d) => d.company_name || '')));
-    }
-  }, [details, allExpanded]);
 
   // ---- Helpers ----
 
