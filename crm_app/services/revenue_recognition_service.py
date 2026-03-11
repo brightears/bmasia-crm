@@ -2,14 +2,22 @@
 Revenue Recognition Service for BMAsia CRM
 
 Implements accrual-based revenue recognition matching Pom's spreadsheet format.
-Revenue is recognized based on actual calendar days within the service period.
+Dual-mode calculation based on billing entity and service start date.
 
-Formula (verified against Pom's Excel):
-    daily_rate = invoice_amount / total_service_days
-    quarterly_income = daily_rate × service_days_in_quarter
+Formula:
+    BMAL (Hong Kong) — always day-based:
+        daily_rate = invoice_amount / total_service_days
+        quarterly_income = daily_rate × service_days_in_quarter
+
+    BMAT (Thailand) — depends on service start date:
+        If service starts on 1st of month — monthly calculation:
+            monthly_rate = invoice_amount / total_service_months
+            quarterly_income = monthly_rate × months_in_quarter
+        If service starts on non-1st — day-based (same as BMAL)
+
     balance = invoice_amount - cumulative_recognized_income
+    Zero-balance guarantee: last entry absorbs rounding residual so balance = 0.
 
-Service days = actual calendar days (inclusive: end - start + 1).
 Revenue must NOT be recognized before invoice date.
 
 Usage:
@@ -79,22 +87,42 @@ class RevenueRecognitionService:
     def calculate_quarterly_recognition(
         self,
         amount: Decimal,
-        duration_months: Decimal,
         service_start: date,
         service_end: date,
         invoice_date: date,
         year: int,
-        quarter: int
+        quarter: int,
+        billing_entity: str = '',
     ) -> Decimal:
         """
-        Calculate recognized revenue for a specific quarter using Pom's exact formula.
+        Calculate recognized revenue for a specific quarter.
 
-        Verified against Pom's Excel:
-            daily_rate = amount / total_service_days
-            quarterly_income = daily_rate × service_days_in_quarter
+        Routes to monthly or daily calculation based on entity and start date:
+        - BMAT (Thailand) + service starts on 1st → monthly calculation
+        - All other cases → daily calculation
+        """
+        if billing_entity == 'bmasia_th' and service_start.day == 1:
+            return self._calculate_monthly_recognition(
+                amount, service_start, service_end, invoice_date, year, quarter
+            )
+        return self._calculate_daily_recognition(
+            amount, service_start, service_end, invoice_date, year, quarter
+        )
 
-        Service days = actual calendar days (inclusive).
-        Revenue must NOT be recognized before invoice_date.
+    def _calculate_daily_recognition(
+        self,
+        amount: Decimal,
+        service_start: date,
+        service_end: date,
+        invoice_date: date,
+        year: int,
+        quarter: int,
+    ) -> Decimal:
+        """
+        Day-based revenue recognition (used by BMAL always, BMAT when non-1st start).
+
+        Formula: daily_rate = amount / total_service_days
+                 quarterly_income = daily_rate × service_days_in_quarter
         """
         q_start_month, q_start_day, q_end_month, q_end_day = QUARTER_DATES[quarter]
         q_start = date(year, q_start_month, q_start_day)
@@ -122,9 +150,68 @@ class RevenueRecognitionService:
         if quarter_days <= 0:
             return Decimal('0')
 
-        # Pom's formula: (amount / total_days) × quarter_days
         daily_rate = amount / Decimal(str(total_service_days))
         recognized = daily_rate * Decimal(str(quarter_days))
+
+        return recognized.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+    def _calculate_monthly_recognition(
+        self,
+        amount: Decimal,
+        service_start: date,
+        service_end: date,
+        invoice_date: date,
+        year: int,
+        quarter: int,
+    ) -> Decimal:
+        """
+        Month-based revenue recognition (used by BMAT when service starts on 1st).
+
+        Formula: monthly_rate = amount / total_service_months
+                 quarterly_income = monthly_rate × months_in_quarter
+
+        Months are counted at (year, month) granularity — inclusive of both
+        start and end months.
+        """
+        q_start_month, _, q_end_month, _ = QUARTER_DATES[quarter]
+
+        # Total service months (inclusive of both start and end months)
+        total_months = (
+            (service_end.year - service_start.year) * 12
+            + (service_end.month - service_start.month)
+            + 1
+        )
+        if total_months <= 0:
+            return Decimal('0')
+
+        # Work at (year, month) tuple level for clean comparisons
+        svc_start_ym = (service_start.year, service_start.month)
+        svc_end_ym = (service_end.year, service_end.month)
+        q_start_ym = (year, q_start_month)
+        q_end_ym = (year, q_end_month)
+        inv_ym = (invoice_date.year, invoice_date.month)
+
+        # Effective overlap: max of (quarter start, service start, invoice month)
+        eff_start_ym = max(q_start_ym, svc_start_ym, inv_ym)
+        # min of (quarter end, service end)
+        eff_end_ym = min(q_end_ym, svc_end_ym)
+
+        # No overlap
+        if eff_start_ym > eff_end_ym:
+            return Decimal('0')
+
+        # Count months in this quarter's effective overlap
+        months_in_quarter = (
+            (eff_end_ym[0] - eff_start_ym[0]) * 12
+            + (eff_end_ym[1] - eff_start_ym[1])
+            + 1
+        )
+
+        if months_in_quarter <= 0:
+            return Decimal('0')
+
+        monthly_rate = amount / Decimal(str(total_months))
+        recognized = monthly_rate * Decimal(str(months_in_quarter))
 
         return recognized.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
@@ -150,24 +237,24 @@ class RevenueRecognitionService:
             for q in range(1, 5):
                 cumulative += self.calculate_quarterly_recognition(
                     amount=schedule.amount,
-                    duration_months=schedule.duration_months,
                     service_start=schedule.service_period_start,
                     service_end=schedule.service_period_end,
                     invoice_date=schedule.invoice_date,
                     year=prior_year,
                     quarter=q,
+                    billing_entity=schedule.billing_entity,
                 )
 
         for year in sorted(years):
             for quarter in range(1, 5):
                 recognized = self.calculate_quarterly_recognition(
                     amount=schedule.amount,
-                    duration_months=schedule.duration_months,
                     service_start=schedule.service_period_start,
                     service_end=schedule.service_period_end,
                     invoice_date=schedule.invoice_date,
                     year=year,
-                    quarter=quarter
+                    quarter=quarter,
+                    billing_entity=schedule.billing_entity,
                 )
 
                 if recognized > 0 or cumulative > 0:
@@ -181,6 +268,17 @@ class RevenueRecognitionService:
                         recognized_amount=recognized,
                         balance=balance.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP),
                     ))
+
+        # Zero-balance guarantee: adjust last entry so balance = 0 at end of service.
+        # Only fix small rounding residuals (< 1 unit) to avoid masking real errors.
+        if entries:
+            residual = schedule.amount - cumulative
+            if residual != Decimal('0') and abs(residual) < Decimal('1'):
+                entries[-1].recognized_amount += residual
+                entries[-1].recognized_amount = entries[-1].recognized_amount.quantize(
+                    Decimal('0.01'), rounding=ROUND_HALF_UP
+                )
+                entries[-1].balance = Decimal('0')
 
         return entries
 
