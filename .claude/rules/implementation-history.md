@@ -7,6 +7,12 @@
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
+| Mar 11 | Hilton combined PDF: Attachment A + Exhibit D with full signature blocks (image+stamp) | `views.py` | pending |
+| Mar 11 | Client Tech Details: default collapsed + preserve scroll/expansion on duplicate/delete/save | `ClientTechDetails.tsx` | `1a84c062` |
+| Mar 11 | Revenue recognition: monthly calc for BMAT (1st-start) + zero-balance guarantee | `revenue_recognition_service.py` | `d41569f6` |
+| Mar 9 | Fix Ascott template Notices clause: {{venue_names}} → {{company_name}} in DB content (data migration) | `0088` | `cc5f5f38` |
+| Mar 9 | Fix QuoteForm: searchable company Autocomplete + load all companies (was Select with page_size:100) | `QuoteForm.tsx`, `Quotes.tsx` | `65f68614` |
+| Mar 7 | Client Tech Details: duplicate/clone + group by company with collapsible headers | `views.py`, `ClientTechDetails.tsx`, `api.ts` | `180d949b` |
 | Mar 7 | Fix HK revenue accrual timeout: N+1 query elimination (4,372→2 queries) + independent frontend fetches + 30s timeout | `revenue_recognition_service.py`, `RevenueAccrual.tsx`, `api.ts` | `4354b30b` |
 | Mar 7 | Auto-generate revenue recognition on invoice create/update | `views.py` | `b3f7024b` |
 | Mar 6 | Fix revenue accrual 0% recognition: parallel list for import quarterly data + cumulative balance fix + frontend hint banner | `revenue_recognition_service.py`, `RevenueAccrual.tsx` | `21333cdc` |
@@ -72,11 +78,14 @@
 - **Contact model fields**: `is_primary` (NOT `is_primary_contact`). No `is_decision_maker` field exists. Use `contact_type` for role-based logic
 - **bulk_create() loses object attrs**: Never store data as `obj._custom_attr` before `bulk_create()` — use parallel list instead
 - **Render cron deploys**: Cron jobs are SEPARATE services — deploying backend does NOT deploy crons. Must trigger each cron's deploy via its own service ID
+- **Contract template content in DB**: `ContractTemplate.content` is stored in the database, not code. Use `{{company_name}}` for hotel/company name, NOT `{{venue_names}}` (which gives zone names like "Lobby and Corridor")
+- **Revenue recognition dual-mode**: BMAT (Thailand) + service starts on 1st → monthly calc. All else → daily calc. Zero-balance guarantee adjusts last entry for rounding
 
 ## Quick Migration Reference (Recent)
 
 | Migration | Purpose |
 |-----------|---------|
+| `0088` | Fix Ascott template Notices: `{{venue_names}}` → `{{company_name}}` (data migration) |
 | `0087` | SequenceEnrollment trigger_entity_id UUID→CharField |
 | `0086` | Revenue Recognition module (Schedule + Entry models, deferred_revenue on BS) |
 | `0085` | Invoice receipt_number + receipt_sent fields |

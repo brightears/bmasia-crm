@@ -20,14 +20,19 @@ Comprehensive financial reporting module for BMAsia CRM. Replaces manual spreads
 Accrual-based revenue recognition matching Pom's spreadsheet format.
 - **Models**: `RevenueRecognitionSchedule`, `RevenueRecognitionEntry`
 - **Service**: `revenue_recognition_service.py` — recognition engine, Excel import, quarterly summaries
-- **Formula**: `daily_rate = amount / total_service_days; quarterly_income = daily_rate × quarter_days`
+- **Dual-mode calculation** (commit `d41569f6`):
+  - **BMAT (Thailand)**: If service starts on 1st of month → monthly (`monthly_rate = amount / total_months; quarterly_income = monthly_rate × months_in_quarter`). If non-1st → daily
+  - **BMAL (Hong Kong)**: Always daily (`daily_rate = amount / total_days; quarterly_income = daily_rate × quarter_days`)
+  - Router: `calculate_quarterly_recognition()` checks `billing_entity == 'bmasia_th' and service_start.day == 1`
+  - Monthly method uses `(year, month)` tuples for clean overlap calculation
+- **Zero-balance guarantee**: Last entry absorbs rounding residual (< 1 unit) so balance = 0 at end of service
 - **Balance Sheet**: `deferred_revenue` field on `BalanceSheetSnapshot`, auto-calculated from entries
 - **API**: `/api/v1/revenue-recognition/` (summary, schedules, import, generate, regenerate, cancel, deferred-revenue, export)
 - **Frontend**: KPI cards, stacked bar chart, Pom-format quarterly table, Excel import dialog, info banner when 0% recognized
 - **Import**: Supports both HK (day-based) and TH (month/day-based) Excel formats. Uses parallel list for quarterly data (NOT object attributes — bulk_create loses them)
 - **Auto-generation**: `generate_schedule_from_invoice()` creates recognition schedules from invoice line items when service period dates are set. Hooked into invoice creation flow.
 - **Migration**: `0086_revenue_recognition_module.py`
-- **Key fix**: Import quarterly data stored in parallel list (not object attrs). Cumulative balance pre-calculates from prior years. Commit `21333cdc`
+- **Key fixes**: Import quarterly data in parallel list (commit `21333cdc`). N+1 query fix (commit `4354b30b`). Dual-mode calc + zero balance (commit `d41569f6`)
 
 ## PDF/Excel Export (Phase 7) - COMPLETE
 

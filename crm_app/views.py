@@ -2891,13 +2891,8 @@ and<br/><br/>
             try:
                 pdf_template = company.parent_company.pdf_template
                 if pdf_template.template_format == 'hilton_hpa':
-                    # Route to appropriate Hilton HPA document based on template settings
-                    if pdf_template.include_exhibit_d:
-                        # Generate Exhibit D (Legal Terms)
-                        return self._generate_hilton_exhibit_d_pdf(contract)
-                    elif pdf_template.include_attachment_a:
-                        # Generate Attachment A (Scope of Work) - default for Hilton
-                        return self._generate_hilton_attachment_a_pdf(contract)
+                    # Hilton HPA always generates combined Attachment A + Exhibit D
+                    return self._generate_hilton_combined_pdf(contract)
             except Exception:
                 # If there's any issue accessing the template, fall back to standard format
                 pass
@@ -3237,6 +3232,570 @@ and<br/><br/>
             'contract_number': contract.contract_number,
             'status': contract.status,
             'master_contract': master_contract.contract_number if master_contract else None
+        })
+
+        return response
+
+    def _generate_hilton_combined_pdf(self, contract):
+        """Generate combined Hilton HPA PDF: Attachment A (Scope of Work) + Exhibit D (Legal Terms) with full signature blocks"""
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
+        from io import BytesIO
+        from django.conf import settings
+
+        company = contract.company
+        master_contract = contract.master_contract
+
+        # Get entity-specific details based on billing_entity
+        billing_entity = company.billing_entity
+        if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+            entity_name = 'BMAsia (Thailand) Co., Ltd.'
+            entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
+            entity_phone = '+66 2153 3520'
+            entity_tax = '0105548025073'
+            entity_contact = 'Norbert Platzer, Managing Director'
+            entity_contact_phone = '+66 2153 3520'
+            entity_contact_email = 'norbert@bmasiamusic.com'
+        else:  # BMAsia Limited (Hong Kong)
+            entity_name = 'BMAsia Limited'
+            entity_address = '22nd Floor, Tai Yau Building, 181 Johnston Road, Wanchai, Hong Kong'
+            entity_phone = '+66 2153 3520'
+            entity_tax = None
+            entity_contact = 'Norbert Platzer, Managing Director'
+            entity_contact_phone = '+66 2153 3520'
+            entity_contact_email = 'norbert@bmasiamusic.com'
+
+        # Get customer primary contact
+        primary_contact = company.contacts.filter(contact_type='Primary').first()
+        customer_contact = f"{primary_contact.name}" if primary_contact else 'Property Contact'
+        customer_phone = primary_contact.phone if primary_contact and primary_contact.phone else 'N/A'
+        customer_email = primary_contact.email if primary_contact and primary_contact.email else 'N/A'
+
+        # Create PDF buffer
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.75*inch, bottomMargin=0.75*inch, leftMargin=0.75*inch, rightMargin=0.75*inch)
+
+        # Container for PDF elements
+        elements = []
+        styles = getSampleStyleSheet()
+
+        # ===== STYLES =====
+        # Attachment A styles (larger font for scope of work)
+        att_title_style = ParagraphStyle(
+            'HiltonTitle',
+            parent=styles['Heading1'],
+            fontSize=14,
+            textColor=colors.black,
+            spaceAfter=6,
+            spaceBefore=6,
+            alignment=TA_CENTER,
+            fontName='DejaVuSans-Bold'
+        )
+
+        att_heading_style = ParagraphStyle(
+            'HiltonHeading',
+            parent=styles['Heading2'],
+            fontSize=11,
+            textColor=colors.black,
+            spaceAfter=6,
+            spaceBefore=12,
+            fontName='DejaVuSans-Bold'
+        )
+
+        att_body_style = ParagraphStyle(
+            'HiltonBody',
+            parent=styles['Normal'],
+            fontSize=10,
+            textColor=colors.black,
+            leading=14,
+            alignment=TA_JUSTIFY
+        )
+
+        att_table_style = ParagraphStyle(
+            'HiltonTable',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.black,
+            leading=12
+        )
+
+        # Exhibit D styles (smaller font for legal terms)
+        exd_title_style = ParagraphStyle(
+            'ExhibitTitle',
+            parent=styles['Heading1'],
+            fontSize=14,
+            textColor=colors.black,
+            spaceAfter=12,
+            spaceBefore=6,
+            alignment=TA_CENTER,
+            fontName='DejaVuSans-Bold'
+        )
+
+        exd_heading_style = ParagraphStyle(
+            'ExhibitHeading',
+            parent=styles['Heading2'],
+            fontSize=10,
+            textColor=colors.black,
+            spaceAfter=4,
+            spaceBefore=10,
+            fontName='DejaVuSans-Bold'
+        )
+
+        exd_body_style = ParagraphStyle(
+            'ExhibitBody',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.black,
+            leading=12,
+            alignment=TA_JUSTIFY
+        )
+
+        # ========================================
+        # PART 1: ATTACHMENT A - SCOPE OF WORK
+        # ========================================
+
+        # Title
+        elements.append(Paragraph("ATTACHMENT A TO HPA", att_title_style))
+        elements.append(Paragraph("HOTEL LEVEL PARTICIPATION AGREEMENT", att_title_style))
+        elements.append(Paragraph("SCOPE OF WORK, PRODUCTS AND PRICE", att_title_style))
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Info Table
+        info_data = [
+            [Paragraph('<b>Field</b>', att_table_style), Paragraph('<b>Details</b>', att_table_style)],
+            ['Supplier', f'{entity_name}\n{entity_address}\n{entity_phone}' + (f'\nTax ID: {entity_tax}' if entity_tax else '')],
+            ['Hotel', f'{company.legal_entity_name or company.name}'],
+            ['Premises', f'{company.full_address if company.full_address else company.country}'],
+            ['Effective Date', contract.start_date.strftime('%B %d, %Y')],
+            ['Term', f'{_format_duration(contract.start_date, contract.end_date)} from {contract.start_date.strftime("%B %d, %Y")} to {contract.end_date.strftime("%B %d, %Y")}'],
+            ['Primary contact at Supplier', f'{entity_contact}\n{entity_contact_phone}\n{entity_contact_email}'],
+            ['Primary contact at Hotel', f'{customer_contact}\n{customer_phone}\n{customer_email}'],
+        ]
+
+        info_table = Table(info_data, colWidths=[2.2*inch, 4.3*inch])
+        info_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d9d9d9')),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
+            ('FONT', (0, 1), (0, -1), 'DejaVuSans-Bold', 9),
+            ('FONT', (1, 1), (1, -1), 'DejaVuSans', 9),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, 0), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        elements.append(info_table)
+        elements.append(Spacer(1, 0.3*inch))
+
+        # 1. Description of Services
+        elements.append(Paragraph("1. DESCRIPTION OF THE SERVICES:", att_heading_style))
+        elements.append(Spacer(1, 0.1*inch))
+
+        # A. Products
+        elements.append(Paragraph("<b>A. Products:</b> Not applicable", att_body_style))
+        elements.append(Spacer(1, 0.1*inch))
+
+        # B. Services
+        services_text = """<b>B. Services:</b> Supplier will provide public space background music services to the Hotel
+        as detailed in this Attachment A. The services include music streaming, playlist curation, and technical support
+        for the following areas:"""
+        elements.append(Paragraph(services_text, att_body_style))
+        elements.append(Spacer(1, 0.1*inch))
+
+        # Get zones and list them — prefer service_locations
+        service_locs = contract.service_locations.all()
+        zones = contract.get_active_zones()
+        if service_locs.exists():
+            zone_items = []
+            for idx, loc in enumerate(service_locs, 1):
+                zone_items.append(f"<b>{self._number_to_roman(idx)}.</b> {loc.location_name}")
+            zone_list = "<br/>".join(zone_items)
+            elements.append(Paragraph(zone_list, att_body_style))
+        elif zones.exists():
+            zone_items = []
+            for idx, zone in enumerate(zones, 1):
+                zone_items.append(f"<b>{self._number_to_roman(idx)}.</b> {zone.name}")
+            zone_list = "<br/>".join(zone_items)
+            elements.append(Paragraph(zone_list, att_body_style))
+        else:
+            elements.append(Paragraph("<b>i.</b> All designated public areas as specified by Hotel", att_body_style))
+
+        elements.append(Spacer(1, 0.2*inch))
+
+        # 2. Equipment and Materials
+        elements.append(Paragraph("2. EQUIPMENT AND MATERIALS REQUIRED:", att_heading_style))
+        equipment_text = """Hotel shall provide all necessary equipment including but not limited to:
+        internet connectivity, sound systems, amplifiers, and speakers in all designated areas.
+        Supplier shall provide access to the music streaming platform and related digital services."""
+        elements.append(Paragraph(equipment_text, att_body_style))
+        elements.append(Spacer(1, 0.2*inch))
+
+        # 3. Deliverables and Timelines
+        elements.append(Paragraph("3. DELIVERABLES AND TIMELINES:", att_heading_style))
+
+        deliverables_data = [
+            [Paragraph('<b>Deliverable</b>', att_table_style), Paragraph('<b>Due Date/Milestone</b>', att_table_style)],
+            ['Music Management', 'For the term of service'],
+            ['Music Curation', 'Completed prior to Installation'],
+            ['Music Change Request', 'Accommodated within 30 days'],
+            ['Music Playlist/Online Support', 'For the term of service'],
+            ['Technical Support', '24/7 availability'],
+            ['Service Reports', 'Quarterly'],
+        ]
+
+        deliverables_table = Table(deliverables_data, colWidths=[3.25*inch, 3.25*inch])
+        deliverables_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d9d9d9')),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
+            ('FONT', (0, 1), (-1, -1), 'DejaVuSans', 9),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        elements.append(deliverables_table)
+        elements.append(Spacer(1, 0.2*inch))
+
+        # 4. Fees and Payments
+        elements.append(Paragraph("4. FEES AND PAYMENTS:", att_heading_style))
+
+        # Currency symbol
+        currency_symbol = {'USD': '$', 'THB': 'THB ', 'EUR': 'EUR ', 'GBP': 'GBP '}.get(contract.currency, contract.currency + ' ')
+
+        # Calculate tax if Thailand entity
+        base_value = float(contract.value)
+        tax_amount = 0
+        total_with_tax = base_value
+        if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+            tax_rate = 0.07
+            tax_amount = base_value * tax_rate
+            total_with_tax = base_value + tax_amount
+            fees_text = f"""Hotel agrees to pay Supplier for the Services as follows:<br/><br/>
+            <b>A. Fees:</b> {currency_symbol}{base_value:,.2f} {contract.currency} plus 7% VAT
+            ({currency_symbol}{tax_amount:,.2f} {contract.currency}), for a total of
+            {currency_symbol}{total_with_tax:,.2f} {contract.currency} per year.<br/><br/>
+            <b>B. Expenses:</b> Supplier will bear the cost of licensing and all related expenses.
+            Hotel shall bear no additional costs beyond the agreed annual fee."""
+        else:
+            fees_text = f"""Hotel agrees to pay Supplier for the Services as follows:<br/><br/>
+            <b>A. Fees:</b> {currency_symbol}{base_value:,.2f} {contract.currency} per year.<br/><br/>
+            <b>B. Expenses:</b> Supplier will bear the cost of licensing and all related expenses.
+            Hotel shall bear no additional costs beyond the agreed annual fee."""
+
+        elements.append(Paragraph(fees_text, att_body_style))
+        elements.append(Spacer(1, 0.2*inch))
+
+        # 5. Ordering and Payment Terms
+        elements.append(Paragraph("5. ORDERING AND PAYMENT TERMS:", att_heading_style))
+        payment_terms = contract.payment_terms if contract.payment_terms else "Payment due within 30 days of invoice date"
+        payment_text = f"""Services shall commence on the Effective Date. {payment_terms}.
+        Invoices will be issued {contract.billing_frequency.lower()} and payment shall be made via bank transfer
+        to Supplier's designated account."""
+        elements.append(Paragraph(payment_text, att_body_style))
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Page break before next sections
+        elements.append(PageBreak())
+
+        # 6. Reports
+        elements.append(Paragraph("6. REPORTS:", att_heading_style))
+        reports_text = """Supplier will provide quarterly service reports detailing music usage, playlist updates,
+        and any technical issues. Reports will include license numbers and compliance documentation as required by applicable law."""
+        elements.append(Paragraph(reports_text, att_body_style))
+        elements.append(Spacer(1, 0.2*inch))
+
+        # 7. Warranties
+        elements.append(Paragraph("7. WARRANTIES:", att_heading_style))
+
+        # Get warranty text from CorporatePdfTemplate if available
+        warranty_text = None
+        if company.parent_company:
+            try:
+                pdf_template = company.parent_company.pdf_template
+                if pdf_template.warranty_text:
+                    warranty_text = pdf_template.warranty_text
+            except:
+                pass
+
+        if not warranty_text:
+            warranty_text = """Supplier warrants that: (a) all music provided is properly licensed for commercial use
+            in hospitality environments; (b) services will be provided in a professional and workmanlike manner;
+            (c) Supplier has all necessary rights and licenses to provide the Services; (d) the Services will not
+            infringe upon any third-party intellectual property rights; (e) Supplier will comply with all applicable
+            laws and regulations in the provision of Services."""
+
+        elements.append(Paragraph(warranty_text, att_body_style))
+        elements.append(Spacer(1, 0.3*inch))
+
+        # 8. Products & Prices (Service Breakdown)
+        elements.append(Paragraph("8. PRODUCTS & PRICES:", att_heading_style))
+        elements.append(Spacer(1, 0.1*inch))
+
+        # Service breakdown table
+        monthly_value = float(contract.monthly_value) if contract.monthly_value else base_value / 12
+
+        price_data = [
+            [Paragraph('<b>Service Description</b>', att_table_style),
+             Paragraph('<b>Quantity</b>', att_table_style),
+             Paragraph('<b>Monthly Fee</b>', att_table_style),
+             Paragraph('<b>Annual Fee</b>', att_table_style)],
+            [f'Music Streaming Services - {zones.count() if zones.exists() else "All"} Zone(s)',
+             '1',
+             f'{currency_symbol}{monthly_value:,.2f}',
+             f'{currency_symbol}{base_value:,.2f}'],
+        ]
+
+        if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+            price_data.append(['VAT (7%)', '', f'{currency_symbol}{(monthly_value * 0.07):,.2f}', f'{currency_symbol}{tax_amount:,.2f}'])
+            price_data.append([Paragraph('<b>Total</b>', att_table_style), '',
+                             Paragraph(f'<b>{currency_symbol}{(monthly_value * 1.07):,.2f}</b>', att_table_style),
+                             Paragraph(f'<b>{currency_symbol}{total_with_tax:,.2f}</b>', att_table_style)])
+
+        price_table = Table(price_data, colWidths=[2.6*inch, 1*inch, 1.5*inch, 1.4*inch])
+        price_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#d9d9d9')),
+            ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
+            ('FONT', (0, 1), (-1, -1), 'DejaVuSans', 9),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        elements.append(price_table)
+
+        # Total Contract Value for multi-year contracts
+        ma_duration_months = 0
+        ma_is_multi_year = False
+        if contract.start_date and contract.end_date:
+            ma_duration_months = ((contract.end_date.year - contract.start_date.year) * 12 +
+                                 (contract.end_date.month - contract.start_date.month))
+            if contract.end_date.day > contract.start_date.day:
+                ma_duration_months += 1
+            ma_is_multi_year = ma_duration_months > 12
+
+        if ma_is_multi_year:
+            years = ma_duration_months / 12
+            ma_tcv_with_tax = total_with_tax * years
+            duration_label = _format_duration(contract.start_date, contract.end_date)
+            elements.append(Spacer(1, 0.1*inch))
+            elements.append(Paragraph(
+                f"<b>Total Contract Value ({duration_label}):</b> {currency_symbol}{ma_tcv_with_tax:,.2f}",
+                att_body_style
+            ))
+
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Account Representation & Customer Service
+        elements.append(Paragraph("ACCOUNT REPRESENTATION & CUSTOMER SERVICE:", att_heading_style))
+
+        support_text = f"""<b>Primary Account Manager:</b> {entity_contact}<br/>
+        <b>Email:</b> {entity_contact_email}<br/>
+        <b>Phone:</b> {entity_contact_phone}<br/><br/>
+
+        <b>Support Escalation Levels:</b><br/>
+        <b>Level 1 - Technical Support:</b> Available 24/7 via email support@bmasiamusic.com<br/>
+        <b>Level 2 - Account Management:</b> Available Monday-Friday 9 AM - 6 PM Bangkok Time<br/>
+        <b>Level 3 - Management:</b> Escalated issues, response within 24 hours<br/><br/>
+
+        For immediate technical assistance, contact our support team at support@bmasiamusic.com or call {entity_contact_phone}."""
+
+        elements.append(Paragraph(support_text, att_body_style))
+
+        # ========================================
+        # PAGE BREAK BETWEEN SECTIONS
+        # ========================================
+        elements.append(PageBreak())
+
+        # ========================================
+        # PART 2: EXHIBIT D - LEGAL TERMS
+        # ========================================
+
+        # Title
+        elements.append(Paragraph("EXHIBIT D", exd_title_style))
+        elements.append(Paragraph("HOTEL PARTICIPATION AGREEMENT", exd_title_style))
+        elements.append(Spacer(1, 0.2*inch))
+
+        # Preamble
+        preamble = f"""THIS HOTEL PARTICIPATION AGREEMENT (this "<b>Agreement</b>") is entered into as of
+        {contract.start_date.strftime('%B %d, %Y')} (the "<b>Effective Date</b>") by and between {entity_name}
+        ("<b>Supplier</b>") and {company.legal_entity_name or company.name} ("<b>Hotel</b>").
+        The Hotel and Supplier may be referred to herein individually as a "<b>Party</b>" and collectively as the "<b>Parties</b>"."""
+
+        elements.append(Paragraph(preamble, exd_body_style))
+        elements.append(Spacer(1, 0.15*inch))
+
+        # Get legal terms from CorporatePdfTemplate if available
+        custom_legal_terms = None
+        if company.parent_company:
+            try:
+                pdf_template = company.parent_company.pdf_template
+                if pdf_template.legal_terms:
+                    custom_legal_terms = pdf_template.legal_terms
+            except:
+                pass
+
+        # Legal sections - use custom if provided, otherwise use defaults
+        if custom_legal_terms:
+            elements.append(Paragraph(custom_legal_terms, exd_body_style))
+        else:
+            # Default Hilton-style legal terms
+            legal_sections = [
+                ("1. DEFINITIONS", """All capitalized terms used in this Agreement shall have the meanings set forth in
+                    Attachment A or as otherwise defined herein."""),
+
+                ("2. SERVICES", """Supplier shall provide the services described in Attachment A (the "<b>Services</b>")
+                    to Hotel in accordance with the terms and conditions of this Agreement. Supplier shall perform the
+                    Services in a professional and workmanlike manner consistent with industry standards."""),
+
+                ("3. TERM", f"""This Agreement shall commence on the Effective Date and continue for a period of twelve (12)
+                    months (the "<b>Initial Term</b>"), unless earlier terminated in accordance with Section 17. Upon expiration
+                    of the Initial Term, this Agreement shall automatically renew for successive twelve (12) month periods
+                    (each a "<b>Renewal Term</b>") unless either Party provides written notice of non-renewal at least sixty (60)
+                    days prior to the end of the then-current term."""),
+
+                ("4. FEES & EXPENSES", """Hotel shall pay Supplier the fees set forth in Attachment A (the "<b>Fees</b>").
+                    All Fees are exclusive of applicable taxes, which shall be Hotel's responsibility. Payment terms are
+                    specified in Attachment A. Late payments shall accrue interest at the rate of 1.5% per month or the
+                    maximum rate permitted by law, whichever is less."""),
+
+                ("5. REPRESENTATIONS & WARRANTIES", """Each Party represents and warrants that: (a) it has full power and
+                    authority to enter into this Agreement; (b) this Agreement constitutes a legal, valid, and binding
+                    obligation; and (c) the execution and performance of this Agreement does not violate any other agreement
+                    to which it is a party. Supplier further warrants that the Services will be performed in accordance
+                    with the specifications set forth in Attachment A."""),
+
+                ("6. YOUR STATUS", """Supplier is an independent contractor and nothing in this Agreement shall be construed
+                    to create a partnership, joint venture, or agency relationship between the Parties. Neither Party has
+                    authority to bind the other Party or to incur obligations on behalf of the other Party without prior
+                    written consent."""),
+
+                ("7. PUBLICITY", """Neither Party shall use the other Party's name, trademarks, or logos in any publicity,
+                    advertising, or promotional materials without the prior written consent of the other Party, except as
+                    required by law or regulation."""),
+
+                ("8. CONFIDENTIALITY", """Each Party agrees to hold in confidence all Confidential Information disclosed by
+                    the other Party and to use such information solely for purposes of performing under this Agreement.
+                    "<b>Confidential Information</b>" means all non-public information disclosed by one Party to the other,
+                    whether orally or in writing, that is designated as confidential or that reasonably should be understood
+                    to be confidential given the nature of the information and circumstances of disclosure."""),
+
+                ("9. PRIVACY", """Each Party shall comply with all applicable privacy and data protection laws and regulations
+                    in the performance of this Agreement. Supplier shall implement appropriate technical and organizational
+                    measures to protect personal data processed in connection with the Services."""),
+
+                ("10. MARKS", """Hotel grants Supplier a limited, non-exclusive license to use Hotel's trademarks solely as
+                    necessary to perform the Services. All goodwill arising from such use shall inure to the benefit of Hotel.
+                    Supplier retains all rights to its trademarks and service marks."""),
+
+                ("11. AUDIT", """Upon reasonable notice, Hotel may audit Supplier's compliance with this Agreement no more
+                    than once per year during normal business hours. Supplier shall cooperate with such audits and provide
+                    reasonable access to relevant records."""),
+
+                ("12. LAWS, LICENSES AND REGULATIONS", """Each Party shall comply with all applicable federal, state, and
+                    local laws, regulations, and ordinances in the performance of this Agreement. Supplier shall obtain and
+                    maintain all licenses, permits, and registrations necessary to perform the Services."""),
+
+                ("13. LIENS", """Supplier shall not permit any liens to be filed against Hotel's property in connection with
+                    the performance of Services. If any lien is filed, Supplier shall cause it to be discharged within ten (10)
+                    days of notice."""),
+
+                ("14. ASSIGNMENT, SUBCONTRACTING", """Neither Party may assign this Agreement without the prior written consent
+                    of the other Party, except that Supplier may assign to an affiliate or successor. Supplier may subcontract
+                    portions of the Services but shall remain responsible for subcontractor performance."""),
+
+                ("15. INDEMNIFICATION", """Each Party ("<b>Indemnifying Party</b>") shall indemnify, defend, and hold harmless
+                    the other Party ("<b>Indemnified Party</b>") from and against any claims, damages, losses, liabilities,
+                    costs, and expenses (including reasonable attorneys' fees) arising out of: (a) the Indemnifying Party's
+                    breach of this Agreement; (b) the Indemnifying Party's negligence or willful misconduct; or (c) the
+                    Indemnifying Party's violation of applicable law."""),
+
+                ("16. INSURANCE", """Supplier shall maintain at its own expense insurance coverage including: (a) commercial
+                    general liability insurance with limits of not less than $1,000,000 per occurrence; (b) workers'
+                    compensation insurance as required by law; and (c) professional liability insurance with limits of not
+                    less than $1,000,000 per claim. Supplier shall provide Hotel with certificates of insurance upon request."""),
+
+                ("17. TERMINATION", """Either Party may terminate this Agreement: (a) for convenience upon sixty (60) days
+                    prior written notice; (b) immediately upon written notice if the other Party materially breaches this
+                    Agreement and fails to cure within thirty (30) days of notice; or (c) immediately if the other Party
+                    becomes insolvent, files for bankruptcy, or makes an assignment for the benefit of creditors."""),
+
+                ("18. POST TERMINATION OBLIGATIONS", """Upon termination or expiration of this Agreement: (a) all outstanding
+                    Fees shall become immediately due and payable; (b) each Party shall return or destroy all Confidential
+                    Information of the other Party; and (c) the provisions of Sections 8, 15, 16, 18, 19, and 24 shall survive."""),
+
+                ("19. REMEDIES", """Except as expressly provided herein, the remedies provided in this Agreement are cumulative
+                    and in addition to any other remedies available at law or in equity. No failure or delay in exercising any
+                    right shall constitute a waiver of that right."""),
+
+                ("20. MISCELLANEOUS", """This Agreement may be executed in counterparts, each of which shall be deemed an
+                    original. Headings are for convenience only and shall not affect interpretation. If any provision is found
+                    invalid or unenforceable, the remaining provisions shall remain in full force and effect."""),
+
+                ("21. NATURE OF AGREEMENT", """This Agreement is a commercial services agreement between independent parties.
+                    Nothing herein shall be construed to create any employment relationship, franchise, or fiduciary duty."""),
+
+                ("22. NOTICES", f"""All notices under this Agreement shall be in writing and delivered by: (a) personal delivery;
+                    (b) certified mail, return receipt requested; or (c) recognized overnight courier service. Notices to Supplier
+                    shall be sent to: {entity_name}, {entity_address}. Notices to Hotel shall be sent to the address set forth in
+                    Attachment A."""),
+
+                ("23. MODIFICATION; ENTIRETY OF AGREEMENT", """This Agreement, including all attachments and exhibits, constitutes
+                    the entire agreement between the Parties and supersedes all prior agreements and understandings, whether oral
+                    or written. This Agreement may not be modified except by a written amendment signed by both Parties."""),
+
+                ("24. GOVERNING LAW AND VENUE", """This Agreement shall be governed by and construed in accordance with the laws
+                    of Thailand, without regard to conflicts of law principles. Any disputes arising under this Agreement shall be
+                    subject to the exclusive jurisdiction of the courts located in Bangkok, Thailand."""),
+
+                ("25. COUNTERPARTS", """This Agreement may be executed in one or more counterparts, each of which shall be deemed
+                    an original and all of which together shall constitute one and the same instrument. Electronic signatures shall
+                    have the same force and effect as original signatures."""),
+            ]
+
+            for section_title, section_text in legal_sections:
+                elements.append(Paragraph(section_title, exd_heading_style))
+                elements.append(Paragraph(section_text, exd_body_style))
+                elements.append(Spacer(1, 0.08*inch))
+
+        # ========================================
+        # SIGNATURE SECTION (Full signature blocks with images/stamps)
+        # ========================================
+        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Paragraph("IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.", exd_body_style))
+        elements.append(Spacer(1, 0.3*inch))
+
+        # Use the full signature blocks with signature image and stamp
+        signature_table = self._build_signature_blocks_table(contract, billing_entity, entity_name)
+        elements.append(signature_table)
+
+        # Build PDF
+        doc.build(elements)
+
+        # Get PDF data
+        pdf_data = buffer.getvalue()
+        buffer.close()
+
+        # Create response
+        response = HttpResponse(pdf_data, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Hilton_HPA_{contract.contract_number}.pdf"'
+
+        # Log activity
+        self.log_action('VIEW', contract, {
+            'action': 'Hilton HPA Combined PDF generated (Attachment A + Exhibit D)',
+            'contract_number': contract.contract_number,
+            'format': 'hilton_hpa',
         })
 
         return response
