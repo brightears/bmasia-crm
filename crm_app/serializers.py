@@ -1046,6 +1046,15 @@ class QuoteSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'is_expired', 'days_until_expiry', 'created_by', 'created_at', 'updated_at']
 
+    def _recalculate_quote_totals(self, quote):
+        """Recalculate quote subtotal and total from line items"""
+        from decimal import Decimal
+        items = quote.line_items.all()
+        subtotal = sum((item.line_total for item in items), Decimal('0'))
+        quote.subtotal = subtotal
+        quote.total_value = subtotal - quote.discount_amount + quote.tax_amount
+        quote.save(update_fields=['subtotal', 'total_value'])
+
     def create(self, validated_data):
         """Create quote with nested line items"""
         line_items_data = validated_data.pop('line_items', [])
@@ -1060,6 +1069,10 @@ class QuoteSerializer(serializers.ModelSerializer):
         # Create line items
         for item_data in line_items_data:
             QuoteLineItem.objects.create(quote=quote, **item_data)
+
+        # Recalculate totals from line items
+        if line_items_data:
+            self._recalculate_quote_totals(quote)
 
         # Create activity log
         QuoteActivity.objects.create(
@@ -1092,6 +1105,9 @@ class QuoteSerializer(serializers.ModelSerializer):
             # Create new line items
             for item_data in line_items_data:
                 QuoteLineItem.objects.create(quote=instance, **item_data)
+
+            # Recalculate totals from line items
+            self._recalculate_quote_totals(instance)
 
         # Create activity log for status changes
         request = self.context.get('request')

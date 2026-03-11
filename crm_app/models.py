@@ -2386,8 +2386,12 @@ class QuoteLineItem(TimestampedModel):
 
     def save(self, *args, **kwargs):
         """Auto-calculate line total"""
-        subtotal = self.quantity * self.unit_price
-        discount_amount = subtotal * (self.discount_percentage / 100)
+        from decimal import Decimal
+        quantity = Decimal(str(self.quantity))
+        unit_price = Decimal(str(self.unit_price))
+        discount_pct = Decimal(str(self.discount_percentage))
+        subtotal = quantity * unit_price
+        discount_amount = subtotal * (discount_pct / Decimal('100'))
         self.line_total = subtotal - discount_amount
         super().save(*args, **kwargs)
 
