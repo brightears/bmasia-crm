@@ -394,7 +394,8 @@ export interface ContractZone {
 export interface ServiceLocation {
   id?: string;
   location_name: string;
-  platform: 'soundtrack' | 'beatbreeze';
+  platform: 'soundtrack' | 'beatbreeze' | 'custom';
+  custom_service_name?: string;
   sort_order?: number;
   created_at?: string;
   updated_at?: string;

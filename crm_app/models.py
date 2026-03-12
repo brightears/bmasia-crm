@@ -1058,6 +1058,7 @@ class ContractServiceLocation(TimestampedModel):
     PLATFORM_CHOICES = [
         ('soundtrack', 'Soundtrack Your Brand'),
         ('beatbreeze', 'Beat Breeze'),
+        ('custom', 'Custom'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -1068,6 +1069,7 @@ class ContractServiceLocation(TimestampedModel):
     )
     location_name = models.CharField(max_length=200)
     platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES, default='soundtrack')
+    custom_service_name = models.CharField(max_length=200, blank=True, default='', help_text="Display name for custom products (e.g., 'MP3')")
     sort_order = models.PositiveIntegerField(default=0)
 
     class Meta:

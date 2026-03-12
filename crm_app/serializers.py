@@ -616,7 +616,7 @@ class ContractLineItemSerializer(serializers.ModelSerializer):
 class ContractServiceLocationSerializer(serializers.ModelSerializer):
     class Meta:
         model = ContractServiceLocation
-        fields = ['id', 'location_name', 'platform', 'sort_order']
+        fields = ['id', 'location_name', 'platform', 'sort_order', 'custom_service_name']
         read_only_fields = ['id']
 
 

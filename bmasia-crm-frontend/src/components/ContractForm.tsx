@@ -56,7 +56,8 @@ interface ContractFormProps {
 
 interface ServiceLocationEntry {
   location_name: string;
-  platform: 'soundtrack' | 'beatbreeze';
+  platform: 'soundtrack' | 'beatbreeze' | 'custom';
+  custom_service_name?: string;
   tempId: string;
 }
 
@@ -368,14 +369,15 @@ const ContractForm: React.FC<ContractFormProps> = ({
     if (contract.service_locations && contract.service_locations.length > 0) {
       dbLocations = contract.service_locations.map(loc => ({
         location_name: loc.location_name,
-        platform: loc.platform,
+        platform: loc.platform as 'soundtrack' | 'beatbreeze' | 'custom',
+        custom_service_name: (loc as any).custom_service_name || '',
         tempId: generateTempId(),
       }));
     } else if (contract.contract_zones && contract.contract_zones.length > 0) {
       const activeZones = contract.contract_zones.filter(cz => cz.is_active);
       dbLocations = activeZones.map(cz => ({
         location_name: cz.zone_name || '',
-        platform: (cz.zone_platform || 'soundtrack') as 'soundtrack' | 'beatbreeze',
+        platform: (cz.zone_platform || 'soundtrack') as 'soundtrack' | 'beatbreeze' | 'custom',
         tempId: generateTempId(),
       }));
     }
@@ -591,18 +593,25 @@ const ContractForm: React.FC<ContractFormProps> = ({
     currentLocations: ServiceLocationEntry[]
   ): { locations: ServiceLocationEntry[]; droppedNamedCount: number } => {
     const requiredCounts: Record<string, number> = { soundtrack: 0, beatbreeze: 0 };
+    // Track custom products separately: { "MP3": 6 }
+    const customProducts: Record<string, number> = {};
 
     currentLineItems.forEach(item => {
       const product = PRODUCT_OPTIONS.find(p => p.name === item.product_service);
       const platform = product?.platform;
       if (platform) {
         requiredCounts[platform] += Math.max(0, Math.round(item.quantity));
+      } else if (item.product_service && item.quantity > 0) {
+        // Custom product — use the typed product name (e.g., "MP3") or fallback to "Custom"
+        const customName = item.product_service === 'Custom' ? 'Custom' : item.product_service;
+        customProducts[customName] = (customProducts[customName] || 0) + Math.max(0, Math.round(item.quantity));
       }
     });
 
     const result: ServiceLocationEntry[] = [];
     let droppedNamedCount = 0;
 
+    // Standard platforms (soundtrack, beatbreeze)
     for (const platform of ['soundtrack', 'beatbreeze'] as const) {
       const existing = currentLocations.filter(loc => loc.platform === platform);
       const required = requiredCounts[platform];
@@ -623,6 +632,31 @@ const ContractForm: React.FC<ContractFormProps> = ({
           result.push(...unnamed.slice(0, required - named.length));
         } else {
           // Even named ones exceed required — keep first N
+          result.push(...named.slice(0, required));
+          droppedNamedCount += named.length - required;
+        }
+      }
+    }
+
+    // Custom products — generate locations with platform='custom'
+    for (const [customName, required] of Object.entries(customProducts)) {
+      const existing = currentLocations.filter(
+        loc => loc.platform === 'custom' && loc.custom_service_name === customName
+      );
+
+      if (existing.length <= required) {
+        result.push(...existing);
+        for (let i = 0; i < required - existing.length; i++) {
+          result.push({ location_name: '', platform: 'custom', custom_service_name: customName, tempId: generateTempId() });
+        }
+      } else {
+        const named = existing.filter(loc => loc.location_name.trim() !== '');
+        const unnamed = existing.filter(loc => loc.location_name.trim() === '');
+
+        if (named.length <= required) {
+          result.push(...named);
+          result.push(...unnamed.slice(0, required - named.length));
+        } else {
           result.push(...named.slice(0, required));
           droppedNamedCount += named.length - required;
         }
@@ -777,6 +811,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
             location_name: loc.location_name.trim(),
             platform: loc.platform,
             sort_order: index,
+            ...(loc.platform === 'custom' && loc.custom_service_name ? { custom_service_name: loc.custom_service_name } : {}),
           })),
       };
 
@@ -1545,7 +1580,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
               {serviceLocations.length === 0 ? (
                 <Typography variant="body2" color="text.disabled" sx={{ py: 2, textAlign: 'center' }}>
-                  Add a music service line item (Soundtrack Your Brand or Beat Breeze) to generate service locations.
+                  Add a music service line item (Soundtrack Your Brand, Beat Breeze, or Custom) to generate service locations.
                 </Typography>
               ) : (
                 <TableContainer component={Paper} variant="outlined">
@@ -1574,7 +1609,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
                           </TableCell>
                           <TableCell>
                             <Typography variant="body2">
-                              {loc.platform === 'soundtrack' ? 'Soundtrack Your Brand' : 'Beat Breeze'}
+                              {loc.platform === 'soundtrack' ? 'Soundtrack Your Brand' : loc.platform === 'beatbreeze' ? 'Beat Breeze' : loc.custom_service_name || 'Custom'}
                             </Typography>
                           </TableCell>
                         </TableRow>

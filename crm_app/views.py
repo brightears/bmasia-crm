@@ -1571,6 +1571,13 @@ class ContractViewSet(BaseModelViewSet):
         loc_list = list(service_locations)
         soundtrack_locs = [l for l in loc_list if l.platform == 'soundtrack']
         beatbreeze_locs = [l for l in loc_list if l.platform == 'beatbreeze']
+        custom_locs = [l for l in loc_list if l.platform == 'custom']
+
+        # Group custom locs by custom_service_name
+        custom_groups = {}
+        for loc in custom_locs:
+            name = loc.custom_service_name or 'Custom'
+            custom_groups.setdefault(name, []).append(loc)
 
         zone_data = [zone_header]
         row_idx = 0
@@ -1591,6 +1598,21 @@ class ContractViewSet(BaseModelViewSet):
                 row_idx += 1
             group_end = row_idx
             if len(platform_locs) > 1:
+                service_spans.append((group_start, group_end))
+
+        # Render custom product groups
+        for custom_name, locs in custom_groups.items():
+            if not locs:
+                continue
+            group_start = row_idx + 1
+            for idx, loc in enumerate(locs, 1):
+                property_name = Paragraph(company.name, prop_style) if row_idx == 0 else ''
+                service_name = custom_name if idx == 1 else ''
+                row = [property_name, service_name, f"Zone {idx}: {loc.location_name}"]
+                zone_data.append(row)
+                row_idx += 1
+            group_end = row_idx
+            if len(locs) > 1:
                 service_spans.append((group_start, group_end))
 
         zone_count = row_idx
