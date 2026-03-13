@@ -5851,7 +5851,23 @@ class QuoteViewSet(BaseModelViewSet):
 
         # Create PDF buffer - compact layout for one-page quotes
         buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.3*inch, bottomMargin=0.3*inch, leftMargin=0.5*inch, rightMargin=0.5*inch)
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.3*inch, bottomMargin=0.75*inch, leftMargin=0.5*inch, rightMargin=0.5*inch)
+
+        # Footer callback — draws at fixed bottom position on every page (same as invoice PDF)
+        def draw_quote_footer(canvas_obj, doc_obj):
+            canvas_obj.saveState()
+            page_width = letter[0]
+            # Gray separator line
+            canvas_obj.setStrokeColor(colors.HexColor('#cccccc'))
+            canvas_obj.setLineWidth(0.5)
+            canvas_obj.line(doc_obj.leftMargin, 0.65*inch, page_width - doc_obj.rightMargin, 0.65*inch)
+            # Footer text
+            canvas_obj.setFont('DejaVuSans-Bold', 7)
+            canvas_obj.setFillColor(colors.HexColor('#888888'))
+            canvas_obj.drawCentredString(page_width / 2, 0.48*inch, entity_name)
+            canvas_obj.setFont('DejaVuSans', 7)
+            canvas_obj.drawCentredString(page_width / 2, 0.33*inch, f"{entity_address} | Phone: {entity_phone}")
+            canvas_obj.restoreState()
 
         # Container for PDF elements
         elements = []
@@ -6188,24 +6204,8 @@ class QuoteViewSet(BaseModelViewSet):
             notes_text = quote.notes.strip().replace('\n', '<br/>')
             elements.append(Paragraph(f"Notes: {notes_text}", terms_style))
 
-        # Footer - entity-specific with separator (generous spacing above)
-        elements.append(Spacer(1, 0.4*inch))
-        elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#cccccc'), spaceBefore=0, spaceAfter=6))
-
-        # Two-line footer for cleaner appearance
-        footer_style = ParagraphStyle(
-            'FooterText',
-            parent=styles['Normal'],
-            fontSize=7,
-            textColor=colors.HexColor('#888888'),
-            leading=10,
-            alignment=TA_CENTER
-        )
-        footer_text = f"""<b>{entity_name}</b><br/>{entity_address} | Phone: {entity_phone}"""
-        elements.append(Paragraph(footer_text, footer_style))
-
-        # Build PDF
-        doc.build(elements)
+        # Build PDF with fixed footer on every page
+        doc.build(elements, onFirstPage=draw_quote_footer, onLaterPages=draw_quote_footer)
 
         # Get PDF data
         pdf_data = buffer.getvalue()
