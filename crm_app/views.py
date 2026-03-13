@@ -6028,7 +6028,7 @@ class QuoteViewSet(BaseModelViewSet):
             ('LINEBELOW', (1, 0), (1, 0), 2, colors.HexColor('#FFA500')),
         ]))
         elements.append(from_bill_table)
-        elements.append(Spacer(1, 0.15*inch))
+        elements.append(Spacer(1, 0.08*inch))
 
         # Prepare line items data
         line_items = quote.line_items.all()
@@ -6089,7 +6089,7 @@ class QuoteViewSet(BaseModelViewSet):
         else:
             elements.append(Paragraph("No line items", body_style))
 
-        elements.append(Spacer(1, 0.08*inch))
+        elements.append(Spacer(1, 0.04*inch))
 
         # Totals section
         totals_data = []
@@ -6139,18 +6139,18 @@ class QuoteViewSet(BaseModelViewSet):
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
             ('FONT', (0, 0), (-1, -1), 'DejaVuSans', 10),
             ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
             # Bold the last row (Total)
-            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 12),
+            ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 11),
             ('LINEABOVE', (0, -1), (-1, -1), 1, colors.HexColor('#FFA500')),
         ]))
 
         elements.append(totals_table)
 
         # Visual separator before payment section
-        elements.append(Spacer(1, 0.15*inch))
-        elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
+        elements.append(Spacer(1, 0.08*inch))
+        elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=4))
 
         # Bank Details Section - Compact, secondary information
         bank_heading_style = ParagraphStyle(
@@ -6186,7 +6186,6 @@ class QuoteViewSet(BaseModelViewSet):
             ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e8e8e8')),
         ]))
         elements.append(bank_table)
-        elements.append(Spacer(1, 0.03*inch))
 
         # Terms and conditions - integrated with bank details (no heading)
         if quote.terms_conditions:
@@ -6200,7 +6199,7 @@ class QuoteViewSet(BaseModelViewSet):
 
         # Notes - only show if there's actual content (not empty/whitespace)
         if quote.notes and quote.notes.strip():
-            elements.append(Spacer(1, 0.05*inch))
+            elements.append(Spacer(1, 0.02*inch))
             notes_text = quote.notes.strip().replace('\n', '<br/>')
             elements.append(Paragraph(f"Notes: {notes_text}", terms_style))
 
