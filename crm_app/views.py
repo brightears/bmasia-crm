@@ -5851,7 +5851,7 @@ class QuoteViewSet(BaseModelViewSet):
 
         # Create PDF buffer - compact layout for one-page quotes
         buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.3*inch, bottomMargin=0.75*inch, leftMargin=0.5*inch, rightMargin=0.5*inch)
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.3*inch, bottomMargin=0.65*inch, leftMargin=0.5*inch, rightMargin=0.5*inch)
 
         # Footer callback — draws at fixed bottom position on every page (same as invoice PDF)
         def draw_quote_footer(canvas_obj, doc_obj):
@@ -5860,13 +5860,13 @@ class QuoteViewSet(BaseModelViewSet):
             # Gray separator line
             canvas_obj.setStrokeColor(colors.HexColor('#cccccc'))
             canvas_obj.setLineWidth(0.5)
-            canvas_obj.line(doc_obj.leftMargin, 0.65*inch, page_width - doc_obj.rightMargin, 0.65*inch)
+            canvas_obj.line(doc_obj.leftMargin, 0.55*inch, page_width - doc_obj.rightMargin, 0.55*inch)
             # Footer text
             canvas_obj.setFont('DejaVuSans-Bold', 7)
             canvas_obj.setFillColor(colors.HexColor('#888888'))
-            canvas_obj.drawCentredString(page_width / 2, 0.48*inch, entity_name)
+            canvas_obj.drawCentredString(page_width / 2, 0.38*inch, entity_name)
             canvas_obj.setFont('DejaVuSans', 7)
-            canvas_obj.drawCentredString(page_width / 2, 0.33*inch, f"{entity_address} | Phone: {entity_phone}")
+            canvas_obj.drawCentredString(page_width / 2, 0.23*inch, f"{entity_address} | Phone: {entity_phone}")
             canvas_obj.restoreState()
 
         # Container for PDF elements
@@ -6148,8 +6148,8 @@ class QuoteViewSet(BaseModelViewSet):
 
         elements.append(totals_table)
 
-        # Visual separator and generous whitespace before payment section
-        elements.append(Spacer(1, 0.35*inch))
+        # Visual separator before payment section
+        elements.append(Spacer(1, 0.15*inch))
         elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=8))
 
         # Bank Details Section - Compact, secondary information
