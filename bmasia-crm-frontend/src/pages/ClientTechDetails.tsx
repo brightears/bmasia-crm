@@ -509,7 +509,6 @@ const ClientTechDetails: React.FC = () => {
               </TableRow>
             ) : (
               groupedDetails.map((group) => {
-                const isMulti = group.items.length > 1;
                 const isExpanded = expandedCompanies.has(group.companyName);
 
                 return (
@@ -518,21 +517,17 @@ const ClientTechDetails: React.FC = () => {
                     <TableRow
                       sx={{
                         backgroundColor: '#f5f5f5',
-                        cursor: isMulti ? 'pointer' : 'default',
-                        '&:hover': isMulti ? { backgroundColor: '#ebebeb' } : {},
+                        cursor: 'pointer',
+                        '&:hover': { backgroundColor: '#ebebeb' },
                       }}
-                      onClick={() => isMulti && toggleCompany(group.companyName)}
+                      onClick={() => toggleCompany(group.companyName)}
                     >
                       <TableCell colSpan={7} sx={{ py: 1 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          {isMulti ? (
-                            isExpanded ? (
-                              <KeyboardArrowDown sx={{ fontSize: 20, color: 'text.secondary' }} />
-                            ) : (
-                              <KeyboardArrowRight sx={{ fontSize: 20, color: 'text.secondary' }} />
-                            )
+                          {isExpanded ? (
+                            <KeyboardArrowDown sx={{ fontSize: 20, color: 'text.secondary' }} />
                           ) : (
-                            <Box sx={{ width: 20 }} />
+                            <KeyboardArrowRight sx={{ fontSize: 20, color: 'text.secondary' }} />
                           )}
                           <Business sx={{ fontSize: 18, color: 'text.secondary' }} />
                           <Typography variant="body2" fontWeight={600}>
@@ -548,8 +543,8 @@ const ClientTechDetails: React.FC = () => {
                       </TableCell>
                     </TableRow>
 
-                    {/* Outlet rows — always show for single-outlet, toggle for multi */}
-                    {(isExpanded || !isMulti) &&
+                    {/* Outlet rows — toggle visibility for all companies */}
+                    {isExpanded &&
                       group.items.map((detail) => (
                         <TableRow
                           key={detail.id}
