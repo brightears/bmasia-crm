@@ -1565,10 +1565,16 @@ class ContractViewSet(BaseModelViewSet):
         company = contract.company
         prop_style = ParagraphStyle('ZoneProp', fontName='DejaVuSans', fontSize=9, textColor=colors.HexColor('#424242'))
 
-        zone_header = ['Property', 'Service', 'Zone']
         platform_labels = {'soundtrack': 'Soundtrack', 'beatbreeze': 'Beat Breeze'}
 
         loc_list = list(service_locations)
+        has_pricing = contract.show_zone_pricing_detail and (
+            any(loc.price for loc in loc_list) or contract.price_per_zone
+        )
+
+        zone_header = ['Property', 'Service', 'Zone']
+        if has_pricing:
+            zone_header.append('Price/Zone')
         soundtrack_locs = [l for l in loc_list if l.platform == 'soundtrack']
         beatbreeze_locs = [l for l in loc_list if l.platform == 'beatbreeze']
         custom_locs = [l for l in loc_list if l.platform == 'custom']
@@ -1594,6 +1600,10 @@ class ContractViewSet(BaseModelViewSet):
                 property_name = Paragraph(company.name, prop_style) if row_idx == 0 else ''
                 service_name = platform_labels[platform_key] if idx == 1 else ''
                 row = [property_name, service_name, f"Zone {idx}: {loc.location_name}"]
+                if has_pricing:
+                    zone_price = loc.price or contract.price_per_zone
+                    price_str = f"{contract.currency} {zone_price:,.2f}" if zone_price else ''
+                    row.append(price_str)
                 zone_data.append(row)
                 row_idx += 1
             group_end = row_idx
@@ -1609,6 +1619,10 @@ class ContractViewSet(BaseModelViewSet):
                 property_name = Paragraph(company.name, prop_style) if row_idx == 0 else ''
                 service_name = custom_name if idx == 1 else ''
                 row = [property_name, service_name, f"Zone {idx}: {loc.location_name}"]
+                if has_pricing:
+                    zone_price = loc.price or contract.price_per_zone
+                    price_str = f"{contract.currency} {zone_price:,.2f}" if zone_price else ''
+                    row.append(price_str)
                 zone_data.append(row)
                 row_idx += 1
             group_end = row_idx
@@ -1616,7 +1630,10 @@ class ContractViewSet(BaseModelViewSet):
                 service_spans.append((group_start, group_end))
 
         zone_count = row_idx
-        zone_col_widths = [2.0*inch, 1.3*inch, 2.2*inch]
+        if has_pricing:
+            zone_col_widths = [1.7*inch, 1.2*inch, 1.8*inch, 1.7*inch]
+        else:
+            zone_col_widths = [2.0*inch, 1.3*inch, 2.2*inch]
         zone_table = Table(zone_data, colWidths=zone_col_widths)
 
         zone_style_list = [

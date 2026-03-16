@@ -1071,6 +1071,10 @@ class ContractServiceLocation(TimestampedModel):
     platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES, default='soundtrack')
     custom_service_name = models.CharField(max_length=200, blank=True, default='', help_text="Display name for custom products (e.g., 'MP3')")
     sort_order = models.PositiveIntegerField(default=0)
+    price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text="Price per zone (overrides contract.price_per_zone if set)"
+    )
 
     class Meta:
         ordering = ['sort_order', 'platform', 'location_name']
