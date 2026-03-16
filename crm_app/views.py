@@ -1599,7 +1599,8 @@ class ContractViewSet(BaseModelViewSet):
             for idx, loc in enumerate(platform_locs, 1):
                 property_name = Paragraph(company.name, prop_style) if row_idx == 0 else ''
                 service_name = platform_labels[platform_key] if idx == 1 else ''
-                row = [property_name, service_name, f"Zone {idx}: {loc.location_name}"]
+                zone_label = Paragraph(f"Zone {idx}: {loc.location_name}", prop_style)
+                row = [property_name, service_name, zone_label]
                 if has_pricing:
                     zone_price = loc.price or contract.price_per_zone
                     price_str = f"{contract.currency} {zone_price:,.2f}" if zone_price else ''
@@ -1618,7 +1619,8 @@ class ContractViewSet(BaseModelViewSet):
             for idx, loc in enumerate(locs, 1):
                 property_name = Paragraph(company.name, prop_style) if row_idx == 0 else ''
                 service_name = custom_name if idx == 1 else ''
-                row = [property_name, service_name, f"Zone {idx}: {loc.location_name}"]
+                zone_label = Paragraph(f"Zone {idx}: {loc.location_name}", prop_style)
+                row = [property_name, service_name, zone_label]
                 if has_pricing:
                     zone_price = loc.price or contract.price_per_zone
                     price_str = f"{contract.currency} {zone_price:,.2f}" if zone_price else ''
