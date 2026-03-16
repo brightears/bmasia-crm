@@ -2132,11 +2132,13 @@ class ContractViewSet(BaseModelViewSet):
                     before = before.rstrip()
                     while before.endswith('<br/>') or before.endswith('<br />'):
                         before = before[:-5].rstrip() if before.endswith('<br/>') else before[:-6].rstrip()
-                    if before.strip():
-                        elements.append(Paragraph(before, body_style))
-                    # Insert signature blocks table (minimal gap)
+                    # Wrap contacts + signature block in KeepTogether to prevent page split
                     sig_table = self._build_signature_blocks_table(contract, billing_entity, entity_name)
-                    elements.append(sig_table)
+                    keep_items = []
+                    if before.strip():
+                        keep_items.append(Paragraph(before, body_style))
+                    keep_items.append(sig_table)
+                    elements.append(KeepTogether(keep_items))
                     elements.append(Spacer(1, 0.2*inch))
                     # Process content after {{signature_blocks}} (may contain other special vars)
                     if len(parts) > 1 and parts[1].strip():
