@@ -5874,18 +5874,18 @@ class QuoteViewSet(BaseModelViewSet):
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.3*inch, bottomMargin=0.65*inch, leftMargin=0.5*inch, rightMargin=0.5*inch)
 
-        # Footer callback — draws at fixed bottom position on every page (same as invoice PDF)
+        # Footer callback — branded with tagline
         def draw_quote_footer(canvas_obj, doc_obj):
             canvas_obj.saveState()
             page_width = letter[0]
-            # Gray separator line
-            canvas_obj.setStrokeColor(colors.HexColor('#cccccc'))
+            # Warm separator line
+            canvas_obj.setStrokeColor(colors.HexColor('#E8E0D8'))
             canvas_obj.setLineWidth(0.5)
             canvas_obj.line(doc_obj.leftMargin, 0.55*inch, page_width - doc_obj.rightMargin, 0.55*inch)
-            # Footer text
+            # Company name + tagline
             canvas_obj.setFont('DejaVuSans-Bold', 7)
             canvas_obj.setFillColor(colors.HexColor('#888888'))
-            canvas_obj.drawCentredString(page_width / 2, 0.38*inch, entity_name)
+            canvas_obj.drawCentredString(page_width / 2, 0.38*inch, f"{entity_name} — Wherever Music Matters")
             canvas_obj.setFont('DejaVuSans', 7)
             canvas_obj.drawCentredString(page_width / 2, 0.23*inch, f"{entity_address} | Phone: {entity_phone}")
             canvas_obj.restoreState()
@@ -5894,12 +5894,21 @@ class QuoteViewSet(BaseModelViewSet):
         elements = []
         styles = getSampleStyleSheet()
 
-        # Custom styles - Modern 2025 design (compact for one-page layout)
+        # Custom styles - Creative music industry design (warm, professional)
+        # Brand colors: deep amber accent, warm cream backgrounds
+        ACCENT = '#E8910C'      # Deep amber (richer than plain orange)
+        ACCENT_LIGHT = '#FFF3E0'  # Warm highlight
+        CARD_BG = '#FFF8F0'     # Warm cream
+        TEXT_DARK = '#3A3A3A'   # Softer than pure black
+        TEXT_MID = '#666666'
+        TEXT_LIGHT = '#888888'
+        GRID_COLOR = '#E8E0D8'  # Warm gray grid
+
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
             fontSize=22,
-            textColor=colors.HexColor('#424242'),
+            textColor=colors.HexColor(TEXT_DARK),
             spaceAfter=8,
             fontName='DejaVuSans-Bold'
         )
@@ -5908,7 +5917,7 @@ class QuoteViewSet(BaseModelViewSet):
             'CustomHeading',
             parent=styles['Heading2'],
             fontSize=11,
-            textColor=colors.HexColor('#424242'),
+            textColor=colors.HexColor(TEXT_DARK),
             spaceAfter=4,
             spaceBefore=4,
             fontName='DejaVuSans-Bold'
@@ -5918,7 +5927,7 @@ class QuoteViewSet(BaseModelViewSet):
             'CustomBody',
             parent=styles['Normal'],
             fontSize=9,
-            textColor=colors.HexColor('#424242'),
+            textColor=colors.HexColor(TEXT_DARK),
             leading=12
         )
 
@@ -5926,7 +5935,7 @@ class QuoteViewSet(BaseModelViewSet):
             'SmallText',
             parent=styles['Normal'],
             fontSize=7,
-            textColor=colors.HexColor('#757575'),
+            textColor=colors.HexColor(TEXT_MID),
             leading=9
         )
 
@@ -5952,22 +5961,32 @@ class QuoteViewSet(BaseModelViewSet):
             # Fallback to text if image loading fails
             elements.append(Paragraph("BM ASIA", title_style))
 
-        # Orange accent line
+        # Accent line
         elements.append(Spacer(1, 0.03*inch))
-        elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#FFA500'), spaceBefore=0, spaceAfter=0))
+        elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor(ACCENT), spaceBefore=0, spaceAfter=0))
         elements.append(Spacer(1, 0.08*inch))
 
-        # Quote title with orange color
+        # Quote title — branded
         quote_title_style = ParagraphStyle(
             'QuoteTitle',
             parent=styles['Heading1'],
             fontSize=20,
-            textColor=colors.HexColor('#FFA500'),
-            spaceAfter=10,
+            textColor=colors.HexColor(ACCENT),
+            spaceAfter=2,
             alignment=TA_CENTER,
             fontName='DejaVuSans-Bold'
         )
+        tagline_style = ParagraphStyle(
+            'Tagline',
+            parent=styles['Normal'],
+            fontSize=7,
+            textColor=colors.HexColor(TEXT_LIGHT),
+            alignment=TA_CENTER,
+            spaceAfter=8,
+            fontName='DejaVuSans'
+        )
         elements.append(Paragraph("QUOTATION", quote_title_style))
+        elements.append(Paragraph("Wherever Music Matters", tagline_style))
 
         # Document metadata table (modern grid layout) - Status removed per customer feedback
         metadata_data = [
@@ -5980,23 +5999,18 @@ class QuoteViewSet(BaseModelViewSet):
 
         metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.7*inch, 1.7*inch, 1.8*inch])
         metadata_table.setStyle(TableStyle([
-            # Header row - orange background
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(ACCENT)),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
-            ('TOPPADDING', (0, 0), (-1, 0), 4),
-
-            # Data row
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+            ('TOPPADDING', (0, 0), (-1, 0), 5),
             ('FONT', (0, 1), (-1, 1), 'DejaVuSans', 10),
-            ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#424242')),
+            ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor(TEXT_DARK)),
             ('ALIGN', (0, 1), (-1, 1), 'CENTER'),
-            ('TOPPADDING', (0, 1), (-1, 1), 4),
-            ('BOTTOMPADDING', (0, 1), (-1, 1), 4),
-
-            # Grid
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+            ('TOPPADDING', (0, 1), (-1, 1), 5),
+            ('BOTTOMPADDING', (0, 1), (-1, 1), 5),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor(GRID_COLOR)),
         ]))
         elements.append(metadata_table)
         elements.append(Spacer(1, 0.08*inch))
@@ -6041,12 +6055,12 @@ class QuoteViewSet(BaseModelViewSet):
             # Content row
             ('TOPPADDING', (0, 1), (-1, 1), 4),
             ('BOTTOMPADDING', (0, 1), (-1, 1), 10),
-            # Subtle background for card effect
-            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#fafafa')),
-            ('BACKGROUND', (1, 0), (1, -1), colors.HexColor('#fafafa')),
-            # Subtle left border accent
-            ('LINEBELOW', (0, 0), (0, 0), 2, colors.HexColor('#FFA500')),
-            ('LINEBELOW', (1, 0), (1, 0), 2, colors.HexColor('#FFA500')),
+            # Warm cream card background
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor(CARD_BG)),
+            ('BACKGROUND', (1, 0), (1, -1), colors.HexColor(CARD_BG)),
+            # Accent border
+            ('LINEBELOW', (0, 0), (0, 0), 2, colors.HexColor(ACCENT)),
+            ('LINEBELOW', (1, 0), (1, 0), 2, colors.HexColor(ACCENT)),
         ]))
         elements.append(from_bill_table)
         elements.append(Spacer(1, 0.08*inch))
@@ -6072,9 +6086,12 @@ class QuoteViewSet(BaseModelViewSet):
                 else:
                     cell_content = f"<b>{product_name}</b>"
 
+                # Smart quantity formatting: whole numbers as integers
+                qty_str = f"{item.quantity:,.0f}" if item.quantity == int(item.quantity) else f"{item.quantity:,.2f}"
+
                 table_data.append([
                     Paragraph(cell_content, body_style),
-                    str(item.quantity),
+                    qty_str,
                     f"{currency_symbol}{item.unit_price:,.2f}",
                     f"{currency_symbol}{item.line_total:,.2f}"
                 ])
@@ -6082,28 +6099,28 @@ class QuoteViewSet(BaseModelViewSet):
             # Create line items table
             line_items_table = Table(table_data, colWidths=[3.5*inch, 1*inch, 1.2*inch, 1.2*inch])
             line_items_table.setStyle(TableStyle([
-                # Header row
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
+                # Header row — deep amber
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(ACCENT)),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
                 ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
                 ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
                 ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
                 ('TOPPADDING', (0, 0), (-1, 0), 6),
 
-                # Data rows
+                # Data rows — more generous padding
                 ('FONT', (0, 1), (-1, -1), 'DejaVuSans', 8),
-                ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#212121')),
+                ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor(TEXT_DARK)),
                 ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),
                 ('ALIGN', (0, 1), (0, -1), 'LEFT'),
                 ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                ('TOPPADDING', (0, 1), (-1, -1), 4),
-                ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
+                ('TOPPADDING', (0, 1), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
 
-                # Grid
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+                # Warm grid
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor(GRID_COLOR)),
 
-                # Alternating row colors
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f5f5')]),
+                # Alternating warm cream rows
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor(CARD_BG)]),
             ]))
 
             elements.append(line_items_table)
@@ -6159,28 +6176,29 @@ class QuoteViewSet(BaseModelViewSet):
             ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
             ('FONT', (0, 0), (-1, -1), 'DejaVuSans', 10),
-            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#424242')),
-            ('TOPPADDING', (0, 0), (-1, -1), 3),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-            # Bold the last row (Total)
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor(TEXT_DARK)),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            # Bold total row with warm accent
             ('FONT', (0, -1), (-1, -1), 'DejaVuSans-Bold', 11),
-            ('LINEABOVE', (0, -1), (-1, -1), 1, colors.HexColor('#FFA500')),
+            ('LINEABOVE', (0, -1), (-1, -1), 1, colors.HexColor(ACCENT)),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor(ACCENT_LIGHT)),
         ]))
 
         elements.append(totals_table)
 
         # Visual separator before payment section
-        elements.append(Spacer(1, 0.08*inch))
-        elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#e0e0e0'), spaceBefore=0, spaceAfter=4))
+        elements.append(Spacer(1, 0.12*inch))
+        elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor(GRID_COLOR), spaceBefore=0, spaceAfter=6))
 
-        # Bank Details Section - Compact, secondary information
+        # Bank Details Section
         bank_heading_style = ParagraphStyle(
             'BankHeading',
             parent=styles['Normal'],
             fontSize=9,
-            textColor=colors.HexColor('#888888'),
+            textColor=colors.HexColor(TEXT_LIGHT),
             spaceAfter=4,
-            spaceBefore=0,
+            spaceBefore=4,
             fontName='DejaVuSans-Bold'
         )
         elements.append(Paragraph("Payment Information", bank_heading_style))
@@ -6194,35 +6212,43 @@ class QuoteViewSet(BaseModelViewSet):
 
         bank_table = Table(bank_data, colWidths=[1.5*inch, 5.4*inch])
         bank_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fafafa')),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor(CARD_BG)),
             ('FONT', (0, 0), (0, -1), 'DejaVuSans-Bold', 8),
             ('FONT', (1, 0), (1, -1), 'DejaVuSans', 8),
-            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#555555')),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor(TEXT_MID)),
             ('ALIGN', (0, 0), (0, -1), 'LEFT'),
             ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-            ('TOPPADDING', (0, 0), (-1, -1), 3),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
             ('LEFTPADDING', (0, 0), (-1, -1), 8),
             ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-            ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#e8e8e8')),
+            ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.HexColor('#E8E0D8')),
         ]))
         elements.append(bank_table)
 
-        # Terms and conditions - integrated with bank details (no heading)
+        # Terms and conditions — with breathing room
+        elements.append(Spacer(1, 0.06*inch))
         if quote.terms_conditions:
-            # Handle multi-line terms and conditions
             terms_text = quote.terms_conditions.replace('\n', '<br/>')
             elements.append(Paragraph(terms_text, terms_style))
         else:
-            # Use default payment terms if no custom terms
             payment_terms_formatted = payment_terms_default.replace('\n', '<br/>')
             elements.append(Paragraph(payment_terms_formatted, terms_style))
 
-        # Notes - only show if there's actual content (not empty/whitespace)
+        # Notes — visually separated with warm styling
         if quote.notes and quote.notes.strip():
-            elements.append(Spacer(1, 0.02*inch))
+            elements.append(Spacer(1, 0.08*inch))
+            notes_style = ParagraphStyle(
+                'NotesStyled',
+                parent=styles['Normal'],
+                fontSize=7,
+                textColor=colors.HexColor(TEXT_MID),
+                leading=9,
+                leftIndent=8,
+                borderPadding=4,
+            )
             notes_text = quote.notes.strip().replace('\n', '<br/>')
-            elements.append(Paragraph(f"Notes: {notes_text}", terms_style))
+            elements.append(Paragraph(f"<b>Notes:</b> {notes_text}", notes_style))
 
         # Build PDF with fixed footer on every page
         doc.build(elements, onFirstPage=draw_quote_footer, onLaterPages=draw_quote_footer)
