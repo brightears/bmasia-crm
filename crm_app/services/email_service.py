@@ -4,6 +4,7 @@ Handles all email sending functionality including templates, campaigns, and trac
 """
 
 import logging
+import os
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timedelta
 import pytz
@@ -485,6 +486,9 @@ class EmailService:
     
     def send_quote_followups(self) -> Dict[str, int]:
         """Send follow-up reminders for sent quotes that haven't been responded to"""
+        if os.environ.get('DISABLE_AUTO_FOLLOWUPS', '').lower() in ('true', '1', 'yes'):
+            logger.info("Quote follow-ups disabled via DISABLE_AUTO_FOLLOWUPS")
+            return {'skipped': 0}
         if not self.is_business_hours():
             logger.info("Skipping quote follow-ups - outside business hours")
             return {'skipped': 0}
@@ -590,6 +594,9 @@ class EmailService:
 
     def send_contract_followups(self) -> Dict[str, int]:
         """Send follow-up reminders for sent contracts that haven't been signed"""
+        if os.environ.get('DISABLE_AUTO_FOLLOWUPS', '').lower() in ('true', '1', 'yes'):
+            logger.info("Contract follow-ups disabled via DISABLE_AUTO_FOLLOWUPS")
+            return {'skipped': 0}
         if not self.is_business_hours():
             logger.info("Skipping contract follow-ups - outside business hours")
             return {'skipped': 0}
