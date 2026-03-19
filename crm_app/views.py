@@ -2114,6 +2114,24 @@ class ContractViewSet(BaseModelViewSet):
             zones = contract.get_active_zones()
             has_locations = contract.service_locations.exists() or zones.exists()
 
+            # Helper to render paragraph content, splitting on '---' for page breaks
+            def render_paragraph(content):
+                """Render content as paragraph(s), inserting PageBreak on '---' separators."""
+                import re as _re_pb
+                from reportlab.platypus import PageBreak as PB
+                separator_pattern = r'(?:<br/>)*\s*(?:<b>)?---(?:</b>)?\s*(?:<br/>)*'
+                if _re_pb.search(separator_pattern, content):
+                    section_parts = _re_pb.split(separator_pattern, content)
+                    for i, section in enumerate(section_parts):
+                        if section.strip():
+                            elements.append(Paragraph(section.strip(), body_style))
+                            elements.append(Spacer(1, 0.2*inch))
+                        if i < len(section_parts) - 1:
+                            elements.append(PB())
+                else:
+                    elements.append(Paragraph(content, body_style))
+                    elements.append(Spacer(1, 0.2*inch))
+
             # Helper function to render template segments with special variable handling
             def render_segment(segment):
                 """Recursively render template segment, handling special variables.
@@ -2171,9 +2189,9 @@ class ContractViewSet(BaseModelViewSet):
                         else:
                             bulk_content = before[:last_break]
 
-                        # Render bulk content normally (allows page breaks)
+                        # Render bulk content (with page break support for '---' separators)
                         if bulk_content.strip():
-                            elements.append(Paragraph(bulk_content, body_style))
+                            render_paragraph(bulk_content)
 
                         # Add heading + zones table
                         if heading_content.strip():
@@ -2234,25 +2252,10 @@ class ContractViewSet(BaseModelViewSet):
                         render_segment(after_sig)
                     return
 
-                # No special variables — render as paragraph(s)
-                # Handle '---' as page break separator (e.g., before ATTACHMENT A)
+                # No special variables — render as paragraph(s) with page break support
                 content = self._substitute_template_variables(segment, contract)
                 if content.strip():
-                    # Split on '---' separator to insert page breaks (handles <b>---</b> variant)
-                    import re as _re2
-                    separator_pattern = r'(?:<br/>)*\s*(?:<b>)?---(?:</b>)?\s*(?:<br/>)*'
-                    if _re2.search(separator_pattern, content):
-                        from reportlab.platypus import PageBreak
-                        section_parts = _re2.split(separator_pattern, content)
-                        for i, section in enumerate(section_parts):
-                            if section.strip():
-                                elements.append(Paragraph(section.strip(), body_style))
-                                elements.append(Spacer(1, 0.2*inch))
-                            if i < len(section_parts) - 1:
-                                elements.append(PageBreak())
-                    else:
-                        elements.append(Paragraph(content, body_style))
-                        elements.append(Spacer(1, 0.2*inch))
+                    render_paragraph(content)
 
             # Render the template content (handles all special variables)
             render_segment(template_content)
