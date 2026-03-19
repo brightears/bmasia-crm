@@ -1556,14 +1556,21 @@ class ContractViewSet(BaseModelViewSet):
         return zone_table
 
     def _build_service_locations_table(self, contract, service_locations):
-        """Build zones table from ContractServiceLocation records (new simple model)."""
+        """Build zones table from ContractServiceLocation records (new simple model).
+        Uses warm BMAsia design palette. Supports pagination for large zone counts."""
         from reportlab.lib import colors
         from reportlab.lib.units import inch
         from reportlab.platypus import Table, TableStyle, Paragraph
         from reportlab.lib.styles import ParagraphStyle
 
+        # Warm design palette (matching quotation PDF)
+        ACCENT = '#E8910C'
+        CARD_BG = '#FFF8F0'
+        TEXT_DARK = '#3A3A3A'
+        GRID_COLOR = '#E8E0D8'
+
         company = contract.company
-        prop_style = ParagraphStyle('ZoneProp', fontName='DejaVuSans', fontSize=9, textColor=colors.HexColor('#424242'))
+        prop_style = ParagraphStyle('ZoneProp', fontName='DejaVuSans', fontSize=9, textColor=colors.HexColor(TEXT_DARK))
 
         platform_labels = {'soundtrack': 'Soundtrack', 'beatbreeze': 'Beat Breeze'}
 
@@ -1636,30 +1643,43 @@ class ContractViewSet(BaseModelViewSet):
             zone_col_widths = [1.7*inch, 1.2*inch, 1.8*inch, 1.7*inch]
         else:
             zone_col_widths = [2.0*inch, 1.3*inch, 2.2*inch]
-        zone_table = Table(zone_data, colWidths=zone_col_widths)
+
+        # For large tables (>15 zones), enable page splitting with repeated header
+        repeat_rows = 1 if zone_count > 15 else 0
+        zone_table = Table(zone_data, colWidths=zone_col_widths, repeatRows=repeat_rows)
 
         zone_style_list = [
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(ACCENT)),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
             ('FONT', (0, 1), (-1, -1), 'DejaVuSans', 9),
-            ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor('#424242')),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#fafafa')),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor(TEXT_DARK)),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('TOPPADDING', (0, 0), (-1, -1), 6),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor(GRID_COLOR)),
         ]
 
-        if zone_count > 1:
-            zone_style_list.append(('SPAN', (0, 1), (0, zone_count)))
-            zone_style_list.append(('VALIGN', (0, 1), (0, zone_count), 'MIDDLE'))
+        # Alternating warm row backgrounds
+        for i in range(1, zone_count + 1):
+            bg = colors.white if i % 2 == 1 else colors.HexColor(CARD_BG)
+            zone_style_list.append(('BACKGROUND', (0, i), (-1, i), bg))
 
-        for start, end in service_spans:
-            zone_style_list.append(('SPAN', (1, start), (1, end)))
-            zone_style_list.append(('VALIGN', (1, start), (1, end), 'MIDDLE'))
+        # Only merge Property/Service cells for small tables (≤15 zones)
+        # Large tables need to split across pages — spans prevent splitting
+        if zone_count <= 15:
+            if zone_count > 1:
+                zone_style_list.append(('SPAN', (0, 1), (0, zone_count)))
+                zone_style_list.append(('VALIGN', (0, 1), (0, zone_count), 'MIDDLE'))
+            for start, end in service_spans:
+                zone_style_list.append(('SPAN', (1, start), (1, end)))
+                zone_style_list.append(('VALIGN', (1, start), (1, end), 'MIDDLE'))
+        else:
+            # For large tables: show property name only on first row, service on first of each group
+            # No spans — allows natural page breaking
+            pass
 
         zone_table.setStyle(TableStyle(zone_style_list))
         return zone_table
@@ -1831,16 +1851,16 @@ class ContractViewSet(BaseModelViewSet):
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.4*inch, bottomMargin=0.75*inch)
 
-        # Footer callback — draws at fixed bottom position on every page (same pattern as invoice PDF)
+        # Footer callback — draws at fixed bottom position on every page (warm design)
         def draw_contract_footer(canvas_obj, doc_obj):
             canvas_obj.saveState()
             page_width = letter[0]
-            canvas_obj.setStrokeColor(colors.HexColor('#e0e0e0'))
-            canvas_obj.setLineWidth(1)
+            canvas_obj.setStrokeColor(colors.HexColor('#E8E0D8'))
+            canvas_obj.setLineWidth(0.5)
             canvas_obj.line(doc_obj.leftMargin, 0.65*inch, page_width - doc_obj.rightMargin, 0.65*inch)
             canvas_obj.setFont('DejaVuSans-Bold', 7)
             canvas_obj.setFillColor(colors.HexColor('#888888'))
-            canvas_obj.drawCentredString(page_width / 2, 0.48*inch, entity_name)
+            canvas_obj.drawCentredString(page_width / 2, 0.48*inch, f"{entity_name}  ·  Wherever Music Matters")
             canvas_obj.setFont('DejaVuSans', 7)
             canvas_obj.drawCentredString(page_width / 2, 0.35*inch, f"{entity_address} | Phone: {entity_phone}")
             canvas_obj.restoreState()
@@ -1849,12 +1869,12 @@ class ContractViewSet(BaseModelViewSet):
         elements = []
         styles = getSampleStyleSheet()
 
-        # Custom styles - Modern 2025 design
+        # Custom styles — warm BMAsia design (matching quotation PDF)
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
             fontSize=24,
-            textColor=colors.HexColor('#424242'),
+            textColor=colors.HexColor('#3A3A3A'),
             spaceAfter=12,
             fontName='DejaVuSans-Bold'
         )
@@ -1863,7 +1883,7 @@ class ContractViewSet(BaseModelViewSet):
             'CustomHeading',
             parent=styles['Heading2'],
             fontSize=12,
-            textColor=colors.HexColor('#424242'),
+            textColor=colors.HexColor('#3A3A3A'),
             spaceAfter=8,
             spaceBefore=8,
             fontName='DejaVuSans-Bold'
@@ -1873,7 +1893,7 @@ class ContractViewSet(BaseModelViewSet):
             'CustomBody',
             parent=styles['Normal'],
             fontSize=10,
-            textColor=colors.HexColor('#424242'),
+            textColor=colors.HexColor('#3A3A3A'),
             leading=14
         )
 
@@ -1881,7 +1901,7 @@ class ContractViewSet(BaseModelViewSet):
             'SmallText',
             parent=styles['Normal'],
             fontSize=8,
-            textColor=colors.HexColor('#757575'),
+            textColor=colors.HexColor('#888888'),
             leading=11
         )
 
@@ -1890,7 +1910,7 @@ class ContractViewSet(BaseModelViewSet):
             'ClauseStyle',
             parent=styles['Normal'],
             fontSize=10,
-            textColor=colors.HexColor('#424242'),
+            textColor=colors.HexColor('#3A3A3A'),
             leading=14,
             leftIndent=0,
             spaceBefore=8,
@@ -1921,22 +1941,32 @@ class ContractViewSet(BaseModelViewSet):
             # Fallback to text if image loading fails
             elements.append(Paragraph("BM ASIA", title_style))
 
-        # Orange accent line
+        # Deep amber accent line
         elements.append(Spacer(1, 0.1*inch))
-        elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#FFA500'), spaceBefore=0, spaceAfter=0))
-        elements.append(Spacer(1, 0.2*inch))
+        elements.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor('#E8910C'), spaceBefore=0, spaceAfter=0))
+        elements.append(Spacer(1, 0.15*inch))
 
-        # Contract title with orange color
+        # Contract title with deep amber color + tagline
         contract_title_style = ParagraphStyle(
             'ContractTitle',
             parent=styles['Heading1'],
-            fontSize=24,
-            textColor=colors.HexColor('#FFA500'),
-            spaceAfter=20,
+            fontSize=22,
+            textColor=colors.HexColor('#E8910C'),
+            spaceAfter=4,
             alignment=TA_CENTER,
             fontName='DejaVuSans-Bold'
         )
+        tagline_style = ParagraphStyle(
+            'Tagline',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#888888'),
+            alignment=TA_CENTER,
+            spaceAfter=16,
+            fontName='DejaVuSans'
+        )
         elements.append(Paragraph("PRINCIPAL TERMS", contract_title_style))
+        elements.append(Paragraph("Wherever Music Matters", tagline_style))
 
         # Document metadata table (modern grid layout)
         # Use Paragraph for Validity to allow text wrapping within the cell
@@ -1945,7 +1975,7 @@ class ContractViewSet(BaseModelViewSet):
             parent=styles['Normal'],
             fontSize=10,
             fontName='DejaVuSans',
-            textColor=colors.HexColor('#424242'),
+            textColor=colors.HexColor('#3A3A3A'),
             alignment=TA_CENTER,
             leading=13,
         )
@@ -1963,8 +1993,8 @@ class ContractViewSet(BaseModelViewSet):
 
         metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.5*inch, 1.3*inch, 2.4*inch])
         metadata_table.setStyle(TableStyle([
-            # Header row - orange background
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
+            # Header row — deep amber
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E8910C')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 10),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
@@ -1973,18 +2003,18 @@ class ContractViewSet(BaseModelViewSet):
 
             # Data row
             ('FONT', (0, 1), (-1, 1), 'DejaVuSans', 10),
-            ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#424242')),
+            ('TEXTCOLOR', (0, 1), (-1, 1), colors.HexColor('#3A3A3A')),
             ('ALIGN', (0, 1), (-1, 1), 'CENTER'),
             ('TOPPADDING', (0, 1), (-1, 1), 10),
             ('BOTTOMPADDING', (0, 1), (-1, 1), 10),
 
-            # Grid
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
+            # Grid — warm gray
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E8E0D8')),
         ]))
         elements.append(metadata_table)
         elements.append(Spacer(1, 0.25*inch))
 
-        # Two-column From/Bill To section with card styling (like Quote)
+        # Two-column From/Bill To section with warm card styling
         from_header_style = ParagraphStyle(
             'FromHeader',
             parent=styles['Normal'],
@@ -1999,7 +2029,7 @@ class ContractViewSet(BaseModelViewSet):
             parent=styles['Normal'],
             fontSize=10,
             leading=14,
-            textColor=colors.HexColor('#333333'),
+            textColor=colors.HexColor('#3A3A3A'),
         )
 
         # Create card-style FROM section
@@ -2016,15 +2046,15 @@ class ContractViewSet(BaseModelViewSet):
         ]
         from_card = Table(from_card_data, colWidths=[3.3*inch])
         from_card.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fafafa')),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FFF8F0')),
             ('TOPPADDING', (0, 0), (-1, 0), 8),
             ('LEFTPADDING', (0, 0), (-1, -1), 12),
             ('RIGHTPADDING', (0, 0), (-1, -1), 12),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 0),
             ('TOPPADDING', (0, 1), (-1, 1), 4),
             ('BOTTOMPADDING', (0, 1), (-1, 1), 12),
-            # Orange accent line under header
-            ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#FFA500')),
+            # Deep amber accent line under header
+            ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#E8910C')),
         ]))
 
         # Create card-style BILL TO section
@@ -2039,15 +2069,15 @@ class ContractViewSet(BaseModelViewSet):
         ]
         bill_card = Table(bill_card_data, colWidths=[3.3*inch])
         bill_card.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fafafa')),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FFF8F0')),
             ('TOPPADDING', (0, 0), (-1, 0), 8),
             ('LEFTPADDING', (0, 0), (-1, -1), 12),
             ('RIGHTPADDING', (0, 0), (-1, -1), 12),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 0),
             ('TOPPADDING', (0, 1), (-1, 1), 4),
             ('BOTTOMPADDING', (0, 1), (-1, 1), 12),
-            # Orange accent line under header
-            ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#FFA500')),
+            # Deep amber accent line under header
+            ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#E8910C')),
         ]))
 
         # Combine into two-column layout
@@ -2098,17 +2128,27 @@ class ContractViewSet(BaseModelViewSet):
                         if bulk_content.strip():
                             elements.append(Paragraph(bulk_content, body_style))
 
-                        # Wrap heading + zones table together in KeepTogether
-                        keep_together_items = []
+                        # Add heading + zones table
                         if heading_content.strip():
-                            keep_together_items.append(Paragraph(heading_content, body_style))
+                            elements.append(Paragraph(heading_content, body_style))
                         if has_locations:
                             zone_table = self._build_zones_table(contract, zones)
                             if zone_table:
-                                keep_together_items.append(zone_table)
-                                keep_together_items.append(Spacer(1, 0.15*inch))
-                        if keep_together_items:
-                            elements.append(KeepTogether(keep_together_items))
+                                # For large tables (>15 zones), allow natural page flow
+                                # For small tables, keep heading + table together
+                                loc_count = contract.service_locations.count() or zones.count()
+                                if loc_count <= 15:
+                                    keep_items = []
+                                    if heading_content.strip():
+                                        # Re-add heading inside KeepTogether (remove the one above)
+                                        elements.pop()  # remove the heading we just added
+                                        keep_items.append(Paragraph(heading_content, body_style))
+                                    keep_items.append(zone_table)
+                                    keep_items.append(Spacer(1, 0.15*inch))
+                                    elements.append(KeepTogether(keep_items))
+                                else:
+                                    elements.append(zone_table)
+                                    elements.append(Spacer(1, 0.15*inch))
                     else:
                         # No <br/><br/> found - just wrap zones table in KeepTogether
                         if before.strip():
@@ -5302,15 +5342,15 @@ class InvoiceViewSet(BaseModelViewSet):
         ]
         from_card = Table(from_card_data, colWidths=[3.3*inch])
         from_card.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fafafa')),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FFF8F0')),
             ('TOPPADDING', (0, 0), (-1, 0), 8),
             ('LEFTPADDING', (0, 0), (-1, -1), 12),
             ('RIGHTPADDING', (0, 0), (-1, -1), 12),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 0),
             ('TOPPADDING', (0, 1), (-1, 1), 4),
             ('BOTTOMPADDING', (0, 1), (-1, 1), 12),
-            # Orange accent line under header
-            ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#FFA500')),
+            # Deep amber accent line under header
+            ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#E8910C')),
         ]))
 
         # Create card-style BILL TO section
@@ -5332,15 +5372,15 @@ class InvoiceViewSet(BaseModelViewSet):
         ]
         bill_card = Table(bill_card_data, colWidths=[3.3*inch])
         bill_card.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fafafa')),
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#FFF8F0')),
             ('TOPPADDING', (0, 0), (-1, 0), 8),
             ('LEFTPADDING', (0, 0), (-1, -1), 12),
             ('RIGHTPADDING', (0, 0), (-1, -1), 12),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 0),
             ('TOPPADDING', (0, 1), (-1, 1), 4),
             ('BOTTOMPADDING', (0, 1), (-1, 1), 12),
-            # Orange accent line under header
-            ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#FFA500')),
+            # Deep amber accent line under header
+            ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#E8910C')),
         ]))
 
         # Combine into two-column layout
