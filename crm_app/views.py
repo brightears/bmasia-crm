@@ -1448,14 +1448,17 @@ class ContractViewSet(BaseModelViewSet):
         # If contract has custom payment_terms, substitute the default payment text
         # This allows per-contract payment terms (e.g., bi-annual) to override the template default
         if contract.payment_terms:
-            hk_default = 'by bank transfer on a net received paid in full to BMA\u2019s HSBC Bank, Hong Kong due immediately as invoiced'
-            hk_default_alt = "by bank transfer on a net received paid in full to BMA's HSBC Bank, Hong Kong due immediately as invoiced"
-            th_default = 'by bank transfer on a net received, paid in full basis, with no offset to BMA\u2019s TMB-Thanachart Bank, Bangkok'
-            th_default_alt = "by bank transfer on a net received, paid in full basis, with no offset to BMA's TMB-Thanachart Bank, Bangkok"
+            import re
+            # Match the default payment clause regardless of case, apostrophe style, or minor wording
+            # HK pattern: "bank transfer...HSBC Bank, Hong Kong due immediately as invoiced...taxes...invoiced."
+            hk_pattern = r'[Bb]y bank transfer[^.]*HSBC Bank[^.]*invoiced\.'
+            # TH pattern: "bank transfer...TMB-Thanachart Bank...invoiced...Withholding Tax..."
+            th_pattern = r'[Bb]y bank transfer[^.]*TMB-Thanachart Bank[^.]*\.'
             custom_pt = contract.payment_terms
-            for default_text in [hk_default, hk_default_alt, th_default, th_default_alt]:
-                if default_text in content:
-                    content = content.replace(default_text, custom_pt)
+            for pattern in [hk_pattern, th_pattern]:
+                match = re.search(pattern, content, re.DOTALL)
+                if match:
+                    content = content[:match.start()] + custom_pt + content[match.end():]
                     break
 
         return content
