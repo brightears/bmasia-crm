@@ -2181,16 +2181,18 @@ class ContractViewSet(BaseModelViewSet):
                         render_segment(parts[1])
                     return
 
-                # Check for {{signature_blocks}}
-                if '{{signature_blocks}}' in segment:
-                    parts = segment.split('{{signature_blocks}}', 1)
-                    # Render content before {{signature_blocks}} - strip trailing breaks to reduce gap
-                    before = self._substitute_template_variables(parts[0], contract)
-                    # Remove trailing <br/> tags to tighten spacing before signature
+                # Check for {{signature_blocks}} — also handle variations with spaces
+                import re as _re
+                sig_match = _re.search(r'\{\{\s*signature_blocks\s*\}\}', segment)
+                if sig_match:
+                    before_sig = segment[:sig_match.start()]
+                    after_sig = segment[sig_match.end():]
+                    # Render content before signature blocks
+                    before = self._substitute_template_variables(before_sig, contract)
                     before = before.rstrip()
                     while before.endswith('<br/>') or before.endswith('<br />'):
                         before = before[:-5].rstrip() if before.endswith('<br/>') else before[:-6].rstrip()
-                    # Wrap contacts + signature block in KeepTogether to prevent page split
+                    # Build signature table
                     sig_table = self._build_signature_blocks_table(contract, billing_entity, entity_name)
                     keep_items = []
                     if before.strip():
@@ -2198,16 +2200,30 @@ class ContractViewSet(BaseModelViewSet):
                     keep_items.append(sig_table)
                     elements.append(KeepTogether(keep_items))
                     elements.append(Spacer(1, 0.2*inch))
-                    # Process content after {{signature_blocks}} (may contain other special vars)
-                    if len(parts) > 1 and parts[1].strip():
-                        render_segment(parts[1])
+                    # Process content after {{signature_blocks}}
+                    if after_sig.strip():
+                        render_segment(after_sig)
                     return
 
-                # No special variables - render as paragraph
+                # No special variables — render as paragraph(s)
+                # Handle '---' as page break separator (e.g., before ATTACHMENT A)
                 content = self._substitute_template_variables(segment, contract)
                 if content.strip():
-                    elements.append(Paragraph(content, body_style))
-                    elements.append(Spacer(1, 0.2*inch))
+                    # Split on '---' to insert page breaks between sections
+                    if '<br/>---<br/>' in content or '\n---\n' in content:
+                        from reportlab.platypus import PageBreak
+                        # Normalize separator
+                        content = content.replace('\n---\n', '<br/>---<br/>')
+                        section_parts = content.split('<br/>---<br/>')
+                        for i, section in enumerate(section_parts):
+                            if section.strip():
+                                elements.append(Paragraph(section.strip(), body_style))
+                                elements.append(Spacer(1, 0.2*inch))
+                            if i < len(section_parts) - 1:
+                                elements.append(PageBreak())
+                    else:
+                        elements.append(Paragraph(content, body_style))
+                        elements.append(Spacer(1, 0.2*inch))
 
             # Render the template content (handles all special variables)
             render_segment(template_content)
