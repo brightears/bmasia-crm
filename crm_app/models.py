@@ -893,9 +893,35 @@ class Contract(TimestampedModel):
         ]
     
     def save(self, *args, **kwargs):
-        """Auto-set sent_date when status changes to Sent"""
+        """Auto-set sent_date when status changes to Sent.
+        Auto-generate contract_number if blank or starts with 'C-' (old format)."""
         if self.status == 'Sent' and not self.sent_date:
             self.sent_date = timezone.now().date()
+
+        # Auto-generate contract number: HK-CT26XXX or TH-CT26XXX
+        if not self.contract_number or self.contract_number.startswith('C-'):
+            year_suffix = timezone.now().strftime('%y')
+            if self.company and self.company.billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+                prefix = f'TH-CT{year_suffix}'
+            else:
+                prefix = f'HK-CT{year_suffix}'
+
+            # Find highest existing number with this prefix
+            existing = Contract.objects.filter(
+                contract_number__startswith=prefix
+            ).order_by('-contract_number').values_list('contract_number', flat=True).first()
+
+            if existing:
+                try:
+                    last_num = int(existing[len(prefix):])
+                    next_num = last_num + 1
+                except (ValueError, IndexError):
+                    next_num = 1
+            else:
+                next_num = 1
+
+            self.contract_number = f"{prefix}{next_num:03d}"
+
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -2359,7 +2385,7 @@ class Quote(TimestampedModel):
         return 0
 
     def save(self, *args, **kwargs):
-        """Auto-update status dates"""
+        """Auto-update status dates. Auto-generate quote_number if blank or old format."""
         if self.status == 'Sent' and not self.sent_date:
             self.sent_date = timezone.now().date()
         elif self.status == 'Accepted' and not self.accepted_date:
@@ -2368,6 +2394,29 @@ class Quote(TimestampedModel):
             self.rejected_date = timezone.now().date()
         elif self.status == 'Expired' and not self.expired_date:
             self.expired_date = timezone.now().date()
+
+        # Auto-generate quote number: HK-QT26XXX or TH-QT26XXX
+        if not self.quote_number or self.quote_number.startswith('Q-'):
+            year_suffix = timezone.now().strftime('%y')
+            if self.company and self.company.billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+                prefix = f'TH-QT{year_suffix}'
+            else:
+                prefix = f'HK-QT{year_suffix}'
+
+            existing = Quote.objects.filter(
+                quote_number__startswith=prefix
+            ).order_by('-quote_number').values_list('quote_number', flat=True).first()
+
+            if existing:
+                try:
+                    last_num = int(existing[len(prefix):])
+                    next_num = last_num + 1
+                except (ValueError, IndexError):
+                    next_num = 1
+            else:
+                next_num = 1
+
+            self.quote_number = f"{prefix}{next_num:03d}"
 
         super().save(*args, **kwargs)
 
