@@ -1449,11 +1449,11 @@ class ContractViewSet(BaseModelViewSet):
         # This allows per-contract payment terms (e.g., bi-annual) to override the template default
         if contract.payment_terms:
             import re
-            # Match the default payment clause regardless of case, apostrophe style, or minor wording
-            # HK pattern: "bank transfer...HSBC Bank, Hong Kong due immediately as invoiced...taxes...invoiced."
-            hk_pattern = r'[Bb]y bank transfer[^.]*HSBC Bank[^.]*invoiced\.'
-            # TH pattern: "bank transfer...TMB-Thanachart Bank...invoiced...Withholding Tax..."
-            th_pattern = r'[Bb]y bank transfer[^.]*TMB-Thanachart Bank[^.]*\.'
+            # Match the default payment clause — uses .*? (non-greedy, DOTALL) to cross sentence boundaries
+            # HK: "By bank transfer...HSBC Bank...invoiced." (spans 2 sentences)
+            hk_pattern = r'[Bb]y bank transfer.*?HSBC Bank.*?as invoiced\.'
+            # TH: "by bank transfer...TMB-Thanachart Bank...Withholding Tax..." (spans 2+ sentences)
+            th_pattern = r'[Bb]y bank transfer.*?TMB.Thanachart Bank.*?(?:as invoiced|Thai Law)\.'
             custom_pt = contract.payment_terms
             for pattern in [hk_pattern, th_pattern]:
                 match = re.search(pattern, content, re.DOTALL)
