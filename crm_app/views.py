@@ -2116,7 +2116,36 @@ class ContractViewSet(BaseModelViewSet):
 
             # Helper function to render template segments with special variable handling
             def render_segment(segment):
-                """Recursively render template segment, handling special variables"""
+                """Recursively render template segment, handling special variables.
+                Finds whichever special variable appears FIRST and processes up to that point."""
+                import re as _re
+
+                # Find positions of all special variables
+                zones_pos = segment.find('{{zones_table}}')
+                sig_match = _re.search(r'\{\{\s*signature_blocks\s*\}\}', segment)
+                sig_pos = sig_match.start() if sig_match else -1
+
+                # If both exist, process whichever comes FIRST
+                # If signature_blocks comes before zones_table, handle it first
+                if sig_pos >= 0 and (zones_pos < 0 or sig_pos < zones_pos):
+                    # Process {{signature_blocks}} first
+                    before_sig = segment[:sig_pos]
+                    after_sig = segment[sig_match.end():]
+                    before = self._substitute_template_variables(before_sig, contract)
+                    before = before.rstrip()
+                    while before.endswith('<br/>') or before.endswith('<br />'):
+                        before = before[:-5].rstrip() if before.endswith('<br/>') else before[:-6].rstrip()
+                    sig_table = self._build_signature_blocks_table(contract, billing_entity, entity_name)
+                    keep_items = []
+                    if before.strip():
+                        keep_items.append(Paragraph(before, body_style))
+                    keep_items.append(sig_table)
+                    elements.append(KeepTogether(keep_items))
+                    elements.append(Spacer(1, 0.2*inch))
+                    if after_sig.strip():
+                        render_segment(after_sig)
+                    return
+
                 # Check for {{zones_table}}
                 if '{{zones_table}}' in segment:
                     parts = segment.split('{{zones_table}}', 1)
