@@ -2238,12 +2238,12 @@ class ContractViewSet(BaseModelViewSet):
                 # Handle '---' as page break separator (e.g., before ATTACHMENT A)
                 content = self._substitute_template_variables(segment, contract)
                 if content.strip():
-                    # Split on '---' to insert page breaks between sections
-                    if '<br/>---<br/>' in content or '\n---\n' in content:
+                    # Split on '---' separator to insert page breaks (handles <b>---</b> variant)
+                    import re as _re2
+                    separator_pattern = r'(?:<br/>)*\s*(?:<b>)?---(?:</b>)?\s*(?:<br/>)*'
+                    if _re2.search(separator_pattern, content):
                         from reportlab.platypus import PageBreak
-                        # Normalize separator
-                        content = content.replace('\n---\n', '<br/>---<br/>')
-                        section_parts = content.split('<br/>---<br/>')
+                        section_parts = _re2.split(separator_pattern, content)
                         for i, section in enumerate(section_parts):
                             if section.strip():
                                 elements.append(Paragraph(section.strip(), body_style))
