@@ -1444,6 +1444,20 @@ class ContractViewSet(BaseModelViewSet):
 
         for var, value in replacements.items():
             content = content.replace(var, str(value))
+
+        # If contract has custom payment_terms, substitute the default payment text
+        # This allows per-contract payment terms (e.g., bi-annual) to override the template default
+        if contract.payment_terms:
+            hk_default = 'by bank transfer on a net received paid in full to BMA\u2019s HSBC Bank, Hong Kong due immediately as invoiced'
+            hk_default_alt = "by bank transfer on a net received paid in full to BMA's HSBC Bank, Hong Kong due immediately as invoiced"
+            th_default = 'by bank transfer on a net received, paid in full basis, with no offset to BMA\u2019s TMB-Thanachart Bank, Bangkok'
+            th_default_alt = "by bank transfer on a net received, paid in full basis, with no offset to BMA's TMB-Thanachart Bank, Bangkok"
+            custom_pt = contract.payment_terms
+            for default_text in [hk_default, hk_default_alt, th_default, th_default_alt]:
+                if default_text in content:
+                    content = content.replace(default_text, custom_pt)
+                    break
+
         return content
 
     def _generate_zones_text(self, contract, zones):
