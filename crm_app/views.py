@@ -1458,7 +1458,8 @@ class ContractViewSet(BaseModelViewSet):
             for pattern in [hk_pattern, th_pattern]:
                 match = re.search(pattern, content, re.DOTALL)
                 if match:
-                    content = content[:match.start()] + custom_pt + content[match.end():]
+                    # Append custom terms after the default text (don't replace)
+                    content = content[:match.end()] + ' ' + custom_pt + content[match.end():]
                     break
 
         return content
