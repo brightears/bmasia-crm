@@ -13,9 +13,44 @@ class TimestampedModel(models.Model):
     """Abstract base model with created_at and updated_at timestamps"""
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         abstract = True
+
+
+class DocumentSequence(models.Model):
+    """Track sequential document numbers per region/type/year.
+    Uses select_for_update() for atomic get-and-increment — no race conditions."""
+    region = models.CharField(max_length=2, choices=[('HK', 'Hong Kong'), ('TH', 'Thailand')])
+    doc_type = models.CharField(max_length=2, choices=[('CT', 'Contract'), ('QT', 'Quote'), ('IV', 'Invoice')])
+    year = models.CharField(max_length=2)
+    next_sequence = models.IntegerField(default=1)
+
+    class Meta:
+        unique_together = ('region', 'doc_type', 'year')
+
+    def __str__(self):
+        return f"{self.region}-{self.doc_type}{self.year}: next={self.next_sequence}"
+
+    @classmethod
+    def get_next_number(cls, region, doc_type, year=None):
+        """Atomically get the next document number and increment the counter.
+        Uses select_for_update() to prevent race conditions."""
+        from django.db import transaction
+        if year is None:
+            year = timezone.now().strftime('%y')
+        prefix = f"{region}-{doc_type}{year}"
+        with transaction.atomic():
+            seq, created = cls.objects.select_for_update().get_or_create(
+                region=region,
+                doc_type=doc_type,
+                year=year,
+                defaults={'next_sequence': 1}
+            )
+            number = seq.next_sequence
+            seq.next_sequence += 1
+            seq.save()
+        return f"{prefix}{number:03d}"
 
 
 class User(AbstractUser):
@@ -894,33 +929,14 @@ class Contract(TimestampedModel):
     
     def save(self, *args, **kwargs):
         """Auto-set sent_date when status changes to Sent.
-        Auto-generate contract_number if blank or starts with 'C-' (old format)."""
+        Auto-generate contract_number using atomic DocumentSequence."""
         if self.status == 'Sent' and not self.sent_date:
             self.sent_date = timezone.now().date()
 
-        # Auto-generate contract number: HK-CT26XXX or TH-CT26XXX
+        # Auto-generate contract number using atomic sequence
         if not self.contract_number or self.contract_number.startswith('C-'):
-            year_suffix = timezone.now().strftime('%y')
-            if self.company and self.company.billing_entity == 'BMAsia (Thailand) Co., Ltd.':
-                prefix = f'TH-CT{year_suffix}'
-            else:
-                prefix = f'HK-CT{year_suffix}'
-
-            # Find highest existing number with this prefix
-            existing = Contract.objects.filter(
-                contract_number__startswith=prefix
-            ).order_by('-contract_number').values_list('contract_number', flat=True).first()
-
-            if existing:
-                try:
-                    last_num = int(existing[len(prefix):])
-                    next_num = last_num + 1
-                except (ValueError, IndexError):
-                    next_num = 1
-            else:
-                next_num = 1
-
-            self.contract_number = f"{prefix}{next_num:03d}"
+            region = 'TH' if self.company and self.company.billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 'HK'
+            self.contract_number = DocumentSequence.get_next_number(region, 'CT')
 
         super().save(*args, **kwargs)
 
@@ -2395,28 +2411,10 @@ class Quote(TimestampedModel):
         elif self.status == 'Expired' and not self.expired_date:
             self.expired_date = timezone.now().date()
 
-        # Auto-generate quote number: HK-QT26XXX or TH-QT26XXX
+        # Auto-generate quote number using atomic sequence
         if not self.quote_number or self.quote_number.startswith('Q-'):
-            year_suffix = timezone.now().strftime('%y')
-            if self.company and self.company.billing_entity == 'BMAsia (Thailand) Co., Ltd.':
-                prefix = f'TH-QT{year_suffix}'
-            else:
-                prefix = f'HK-QT{year_suffix}'
-
-            existing = Quote.objects.filter(
-                quote_number__startswith=prefix
-            ).order_by('-quote_number').values_list('quote_number', flat=True).first()
-
-            if existing:
-                try:
-                    last_num = int(existing[len(prefix):])
-                    next_num = last_num + 1
-                except (ValueError, IndexError):
-                    next_num = 1
-            else:
-                next_num = 1
-
-            self.quote_number = f"{prefix}{next_num:03d}"
+            region = 'TH' if self.company and self.company.billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 'HK'
+            self.quote_number = DocumentSequence.get_next_number(region, 'QT')
 
         super().save(*args, **kwargs)
 

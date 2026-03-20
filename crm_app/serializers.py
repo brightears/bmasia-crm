@@ -694,7 +694,7 @@ class ContractSerializer(serializers.ModelSerializer):
             'contract_documents', 'line_items', 'service_locations',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'effective_soundtrack_account_id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'contract_number', 'effective_soundtrack_account_id', 'created_at', 'updated_at']
         extra_kwargs = {
             'contract_number': {'required': False}
         }

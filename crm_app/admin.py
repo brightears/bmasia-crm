@@ -25,7 +25,8 @@ from .models import (
     Device, ClientTechDetail, StaticDocument,
     CorporatePdfTemplate, ContractTemplate, ServicePackageItem, ContractDocument,
     SeasonalTriggerDate, ZoneOfflineAlert,
-    ProspectSequence, ProspectSequenceStep, ProspectEnrollment, ProspectStepExecution, AIEmailDraft
+    ProspectSequence, ProspectSequenceStep, ProspectEnrollment, ProspectStepExecution, AIEmailDraft,
+    DocumentSequence
 )
 
 
@@ -3818,3 +3819,11 @@ class AIEmailDraftAdmin(admin.ModelAdmin):
     list_filter = ['status', 'auto_approved']
     search_fields = ['subject']
     readonly_fields = ['id', 'created_at', 'updated_at']
+
+
+@admin.register(DocumentSequence)
+class DocumentSequenceAdmin(admin.ModelAdmin):
+    list_display = ['region', 'doc_type', 'year', 'next_sequence']
+    list_filter = ['region', 'doc_type']
+    ordering = ['region', 'doc_type', 'year']
+
