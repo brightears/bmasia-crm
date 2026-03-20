@@ -319,7 +319,11 @@ class EmailService:
         return ""
     
     def send_renewal_reminders(self) -> Dict[str, int]:
-        """Send renewal reminders for contracts expiring soon"""
+        """Send renewal reminders for contracts expiring soon.
+        DISABLED — all renewals handled by Claude Code /renewal-followup skill (since 19.03.2026)."""
+        logger.info("Renewal reminders DISABLED — handled by Claude Code desk sessions")
+        return {'sent': 0, 'failed': 0, 'skipped': 0}
+        # --- DISABLED CODE BELOW ---
         if not self.is_business_hours():
             logger.info("Skipping renewal reminders - outside business hours")
             return {'skipped': 0}
@@ -412,7 +416,11 @@ class EmailService:
         return results
     
     def send_payment_reminders(self) -> Dict[str, int]:
-        """Send payment reminders for overdue invoices"""
+        """Send payment reminders for overdue invoices.
+        DISABLED — payment follow-ups will be handled by Claude Code Phase 2 (not yet active)."""
+        logger.info("Payment reminders DISABLED — pending Phase 2 implementation")
+        return {'sent': 0, 'failed': 0, 'skipped': 0}
+        # --- DISABLED CODE BELOW ---
         if not self.is_business_hours():
             logger.info("Skipping payment reminders - outside business hours")
             return {'skipped': 0}
@@ -485,7 +493,11 @@ class EmailService:
         return results
     
     def send_quote_followups(self) -> Dict[str, int]:
-        """Send follow-up reminders for sent quotes that haven't been responded to"""
+        """Send follow-up reminders for sent quotes that haven't been responded to.
+        DISABLED — all follow-ups handled by Claude Code desk sessions (since 18.03.2026)."""
+        logger.info("Quote follow-ups DISABLED — handled by Claude Code desk sessions")
+        return {'sent': 0, 'failed': 0, 'skipped': 0}
+        # --- DISABLED CODE BELOW ---
         if os.environ.get('DISABLE_AUTO_FOLLOWUPS', '').lower() in ('true', '1', 'yes'):
             logger.info("Quote follow-ups disabled via DISABLE_AUTO_FOLLOWUPS")
             return {'skipped': 0}
@@ -593,7 +605,11 @@ class EmailService:
         return results
 
     def send_contract_followups(self) -> Dict[str, int]:
-        """Send follow-up reminders for sent contracts that haven't been signed"""
+        """Send follow-up reminders for sent contracts that haven't been signed.
+        DISABLED — all follow-ups handled by Claude Code desk sessions (since 18.03.2026)."""
+        logger.info("Contract follow-ups DISABLED — handled by Claude Code desk sessions")
+        return {'sent': 0, 'failed': 0, 'skipped': 0}
+        # --- DISABLED CODE BELOW ---
         if os.environ.get('DISABLE_AUTO_FOLLOWUPS', '').lower() in ('true', '1', 'yes'):
             logger.info("Contract follow-ups disabled via DISABLE_AUTO_FOLLOWUPS")
             return {'skipped': 0}
