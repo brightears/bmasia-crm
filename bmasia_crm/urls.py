@@ -71,6 +71,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('crm_app.urls')),  # API endpoints under /api/
     path('api-auth/', include('rest_framework.urls')),
+    path('', include('mcp_server.urls')),  # MCP server at /mcp/
     # Setup endpoint to create admin user
     path('setup-admin/', create_admin_view, name='setup_admin'),
     path('reset-admin/', reset_admin_view, name='reset_admin'),

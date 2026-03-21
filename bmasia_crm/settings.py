@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     # 'rest_framework_simplejwt.token_blacklist',  # Temporarily disabled due to missing migrations
     'corsheaders',
     'django_filters',
+    'mcp_server',
 
     # Local apps
     'crm_app',
@@ -276,6 +277,19 @@ ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 PROSPECT_REPLY_EMAIL = config('PROSPECT_REPLY_EMAIL', default='norbert@bmasiamusic.com')
 PROSPECT_REPLY_IMAP_PASSWORD = config('PROSPECT_REPLY_IMAP_PASSWORD', default='')
 PROSPECT_IMAP_HOST = config('PROSPECT_IMAP_HOST', default='imap.gmail.com')
+
+# ============================================================
+# MCP Server Configuration (django-mcp-server)
+# ============================================================
+DJANGO_MCP_ENDPOINT = "mcp/"
+DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
+    "name": "bmasia-crm",
+    "instructions": "BMAsia CRM MCP Server — manage companies, contacts, contracts, invoices, quotes, opportunities, tasks, and zones.",
+    "stateless": True,
+}
+DJANGO_MCP_AUTHENTICATION_CLASSES = [
+    'rest_framework.authentication.TokenAuthentication',
+]
 
 # Soundtrack API Configuration
 SOUNDTRACK_API_TOKEN = config('SOUNDTRACK_API_TOKEN', default='')

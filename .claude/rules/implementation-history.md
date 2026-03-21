@@ -7,7 +7,10 @@
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
-| Mar 11 | Hilton combined PDF: Attachment A + Exhibit D with full signature blocks (image+stamp) | `views.py` | pending |
+| Mar 15 | Client Tech Details: consistent collapsible headers for all companies (including single-outlet) | `ClientTechDetails.tsx` | `b4091cd9` |
+| Mar 12 | Custom products in contract service locations (sync + PDF + model) | `models.py`, `views.py`, `ContractForm.tsx`, `0089` | `cf775176` |
+| Mar 11 | Hilton combined PDF: Attachment A + Exhibit D with full signature blocks (image+stamp) | `views.py` | `69356d7e` |
+| Mar 11 | Fix QuoteLineItem Decimal precision + recalculate quote totals after create/update | `models.py`, `serializers.py` | `eb63fd55` |
 | Mar 11 | Client Tech Details: default collapsed + preserve scroll/expansion on duplicate/delete/save | `ClientTechDetails.tsx` | `1a84c062` |
 | Mar 11 | Revenue recognition: monthly calc for BMAT (1st-start) + zero-balance guarantee | `revenue_recognition_service.py` | `d41569f6` |
 | Mar 9 | Fix Ascott template Notices clause: {{venue_names}} → {{company_name}} in DB content (data migration) | `0088` | `cc5f5f38` |
@@ -71,7 +74,7 @@
 - **Partial updates**: Always use PATCH, not PUT (DRF requires all fields with PUT)
 - **Write-only serializer fields**: Frontend sends `field_id`, not `field` (e.g., `category_id`)
 - **Contract status lifecycle**: Draft → Sent → Active → Renewed/Expired/Cancelled
-- **Service locations**: Auto-derived from line items via `syncLocationsFromLineItems()`
+- **Service locations**: Auto-derived from line items via `syncLocationsFromLineItems()`. Supports 'soundtrack', 'beatbreeze', AND 'custom' platforms. Custom products use `custom_service_name` for PDF display
 - **QuickBooks IIF**: DD/MM/YYYY dates, negative QNTY for SPL rows, VAT as separate row
 - **Email PDF generation**: All send methods (quote/contract/invoice/receipt) must use `RequestFactory` → viewset `pdf()` to generate full PDF. Never use inline fallback generators. `BaseModelViewSet.log_action()` skips audit log for AnonymousUser
 - **Invoice PDF shared builder**: `_build_invoice_pdf(invoice, is_receipt=False)` — parameterizes title, metadata, filename for both invoice and receipt PDFs
@@ -85,6 +88,7 @@
 
 | Migration | Purpose |
 |-----------|---------|
+| `0089` | ContractServiceLocation custom platform + custom_service_name field |
 | `0088` | Fix Ascott template Notices: `{{venue_names}}` → `{{company_name}}` (data migration) |
 | `0087` | SequenceEnrollment trigger_entity_id UUID→CharField |
 | `0086` | Revenue Recognition module (Schedule + Entry models, deferred_revenue on BS) |
