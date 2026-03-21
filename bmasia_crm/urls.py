@@ -17,6 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include, re_path
 from django.views.generic import RedirectView
+from rest_framework.authtoken.views import obtain_auth_token
 from django.conf import settings
 from crm_app.admin_setup import create_admin_view
 from crm_app.views import debug_soundtrack_api, apply_migration_0025_view, email_tracking_pixel
@@ -72,6 +73,7 @@ urlpatterns = [
     path('api/', include('crm_app.urls')),  # API endpoints under /api/
     path('api-auth/', include('rest_framework.urls')),
     path('', include('mcp_server.urls')),  # MCP server at /mcp/
+    path('api-token-auth/', obtain_auth_token, name='api_token_auth'),  # DRF token auth
     # Setup endpoint to create admin user
     path('setup-admin/', create_admin_view, name='setup_admin'),
     path('reset-admin/', reset_admin_view, name='reset_admin'),
