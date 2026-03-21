@@ -153,7 +153,7 @@ class AutoEnrollmentService:
                     receives_notifications=True,
                     receives_renewal_emails=True,
                     unsubscribed=False
-                ).order_by('-is_primary_contact').first()
+                ).order_by('-is_primary').first()
 
                 if not contact:
                     logger.warning(f"No active contact for contract {contract.contract_number} (company: {contract.company.name})")
@@ -241,7 +241,7 @@ class AutoEnrollmentService:
                     receives_payment_emails=True,
                     unsubscribed=False
                 ).filter(
-                    Q(is_billing_contact=True) | Q(is_primary_contact=True)
+                    Q(contact_type='Billing') | Q(is_primary=True)
                 ).first()
 
                 if not contact:
