@@ -12,11 +12,12 @@ from mcp_server.query_tool import ModelQueryToolset
 from crm_app.models import (
     Company, Contact, Contract, Invoice, Quote, Opportunity,
     Task, Zone, ContractLineItem, InvoiceLineItem, QuoteLineItem,
-    ContractServiceLocation,
+    ContractServiceLocation, ClientTechDetail, Device, Ticket, KBArticle,
 )
 from crm_app.views import (
     CompanyViewSet, ContactViewSet, ContractViewSet, InvoiceViewSet,
     QuoteViewSet, OpportunityViewSet, TaskViewSet, ZoneViewSet,
+    ClientTechDetailViewSet, DeviceViewSet, TicketViewSet, KBArticleViewSet,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,9 +37,10 @@ across Thailand and Hong Kong.
 ### Query Tools (read)
 Use `query_data_collections` to search and filter any collection using MongoDB-style
 aggregation pipelines. Available collections: company, contact, contract, invoice,
-quote, opportunity, task, zone.
+quote, opportunity, task, zone, clienttechdetail, device, ticket, kbarticle.
 
 ### CRUD Tools (write)
+**Sales:**
 - Companies: list, create, update, delete
 - Contacts: list, create, update, delete
 - Contracts: list, create, update, delete
@@ -47,6 +49,12 @@ quote, opportunity, task, zone.
 - Opportunities: list, create, update, delete
 - Tasks: list, create, update, delete
 - Zones: list
+
+**Tech Support:**
+- Client Tech Details: list, create, update, delete (hardware configs per outlet)
+- Devices: list, create, update, delete (PCs, tablets, players)
+- Tickets: list, create, update
+- Knowledge Base: list, create, update
 
 ### PDF Tools
 - `generate_contract_pdf(id)` — generate contract PDF
@@ -155,6 +163,54 @@ class ZoneQuery(ModelQueryToolset):
     ]
     search_fields = ['name', 'soundtrack_zone_id']
     extra_instructions = "Zones represent physical music playback areas in hotel properties."
+
+
+class ClientTechDetailQuery(ModelQueryToolset):
+    model = ClientTechDetail
+    fields = [
+        'id', 'company', 'zone', 'outlet_name', 'platform_type', 'syb_account_type',
+        'anydesk_id', 'teamviewer_id', 'ultraviewer_id', 'other_remote_id',
+        'system_type', 'soundcard_channel', 'bms_license', 'additional_hardware',
+        'install_date', 'commencement_date', 'activation_date', 'expiry_date',
+        'pc_name', 'pc_make', 'pc_model', 'operating_system', 'os_type',
+        'ram', 'cpu_type', 'cpu_speed', 'created_at',
+    ]
+    search_fields = ['outlet_name', 'anydesk_id', 'teamviewer_id', 'ultraviewer_id', 'pc_name', 'bms_license']
+    extra_instructions = (
+        "Hardware/software configuration per client outlet. One record per outlet. "
+        "Search by AnyDesk ID, outlet name, or PC name to find a client's setup. "
+        "platform_type: soundtrack, beatbreeze, bms, dm. system_type: single, multi."
+    )
+
+
+class DeviceQuery(ModelQueryToolset):
+    model = Device
+    fields = ['id', 'company', 'name', 'device_type', 'model_info', 'notes', 'created_at']
+    search_fields = ['name', 'model_info', 'notes']
+    extra_instructions = "Devices (PCs, tablets, players) that run music zones. One device can serve multiple zones."
+
+
+class TicketQuery(ModelQueryToolset):
+    model = Ticket
+    fields = [
+        'id', 'ticket_number', 'subject', 'description', 'status', 'priority',
+        'category', 'company', 'contact', 'assigned_to', 'created_at', 'updated_at',
+    ]
+    search_fields = ['ticket_number', 'subject', 'description']
+    extra_instructions = (
+        "Support tickets. Status: new, assigned, in_progress, pending, resolved, closed. "
+        "Priority: low, medium, high, urgent. Category: technical, billing, zone_config, account, feature_request, general."
+    )
+
+
+class KBArticleQuery(ModelQueryToolset):
+    model = KBArticle
+    fields = [
+        'id', 'article_number', 'title', 'content', 'excerpt', 'status',
+        'visibility', 'category', 'created_at', 'updated_at',
+    ]
+    search_fields = ['title', 'content', 'excerpt', 'article_number']
+    extra_instructions = "Knowledge base articles for tech support. Search by keyword to find solutions."
 
 
 # ============================================================
@@ -353,6 +409,101 @@ mcp_server.register_drf_list_tool(
     name="list_zones",
     instructions="List zones (music playback areas) with pagination.",
     actions={'get': 'list'},
+)
+
+# --- Client Tech Details ---
+mcp_server.register_drf_list_tool(
+    ClientTechDetailViewSet,
+    name="list_client_tech_details",
+    instructions="List client tech details (hardware configs per outlet). Filter by company, platform_type, outlet_name.",
+    actions={'get': 'list'},
+)
+mcp_server.register_drf_create_tool(
+    ClientTechDetailViewSet,
+    name="create_client_tech_detail",
+    instructions=(
+        "Create a client tech detail record. Required: company (ID), outlet_name. "
+        "Optional: platform_type, anydesk_id, ultraviewer_id, system_type, pc_name, operating_system, ram, etc."
+    ),
+    actions={'post': 'create'},
+)
+mcp_server.register_drf_update_tool(
+    ClientTechDetailViewSet,
+    name="update_client_tech_detail",
+    instructions="Update a client tech detail by ID. Use to update AnyDesk IDs, hardware specs, etc.",
+    actions={'patch': 'partial_update'},
+)
+mcp_server.register_drf_destroy_tool(
+    ClientTechDetailViewSet,
+    name="delete_client_tech_detail",
+    instructions="Delete a client tech detail by ID.",
+    actions={'delete': 'destroy'},
+)
+
+# --- Devices ---
+mcp_server.register_drf_list_tool(
+    DeviceViewSet,
+    name="list_devices",
+    instructions="List devices (PCs, tablets, players) with pagination.",
+    actions={'get': 'list'},
+)
+mcp_server.register_drf_create_tool(
+    DeviceViewSet,
+    name="create_device",
+    instructions="Create a device. Required: company (ID), name. Optional: device_type (pc/tablet/music_player/other), model_info, notes.",
+    actions={'post': 'create'},
+)
+mcp_server.register_drf_update_tool(
+    DeviceViewSet,
+    name="update_device",
+    instructions="Update a device by ID.",
+    actions={'patch': 'partial_update'},
+)
+mcp_server.register_drf_destroy_tool(
+    DeviceViewSet,
+    name="delete_device",
+    instructions="Delete a device by ID.",
+    actions={'delete': 'destroy'},
+)
+
+# --- Tickets ---
+mcp_server.register_drf_list_tool(
+    TicketViewSet,
+    name="list_tickets",
+    instructions="List support tickets with pagination. Filter by status, priority, category.",
+    actions={'get': 'list'},
+)
+mcp_server.register_drf_create_tool(
+    TicketViewSet,
+    name="create_ticket",
+    instructions="Create a support ticket. Required: subject, description. Optional: priority, category, company (ID), contact (ID).",
+    actions={'post': 'create'},
+)
+mcp_server.register_drf_update_tool(
+    TicketViewSet,
+    name="update_ticket",
+    instructions="Update a ticket by ID. Use to change status, priority, assign to user, etc.",
+    actions={'patch': 'partial_update'},
+)
+
+# --- Knowledge Base ---
+mcp_server.register_drf_list_tool(
+    KBArticleViewSet,
+    name="list_kb_articles",
+    instructions="List knowledge base articles. Filter by status, category, visibility.",
+    actions={'get': 'list'},
+)
+mcp_server.register_drf_create_tool(
+    KBArticleViewSet,
+    name="create_kb_article",
+    instructions="Create a knowledge base article. Required: title, content, category_id. Optional: visibility (public/internal), status (draft/published).",
+    actions={'post': 'create'},
+)
+mcp_server.register_drf_update_tool(
+    KBArticleViewSet,
+    name="update_kb_article",
+    instructions="Update a KB article by ID.",
+    actions={'patch': 'partial_update'},
 )
 
 # ============================================================
