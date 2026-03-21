@@ -498,12 +498,14 @@ mcp_server.register_drf_create_tool(
     name="create_kb_article",
     instructions="Create a knowledge base article. Required: title, content, category_id. Optional: visibility (public/internal), status (draft/published).",
     actions={'post': 'create'},
+    body_schema={"type": "object", "description": "KB article data: title (str), content (str), category_id (uuid), visibility (public/internal), status (draft/published)"},
 )
 mcp_server.register_drf_update_tool(
     KBArticleViewSet,
     name="update_kb_article",
     instructions="Update a KB article by ID.",
     actions={'patch': 'partial_update'},
+    body_schema={"type": "object", "description": "Fields to update: title, content, category_id, visibility, status"},
 )
 
 # ============================================================
