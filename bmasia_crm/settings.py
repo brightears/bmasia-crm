@@ -288,7 +288,7 @@ DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
     "stateless": True,
 }
 DJANGO_MCP_AUTHENTICATION_CLASSES = [
-    'rest_framework.authentication.TokenAuthentication',
+    'crm_app.mcp_auth.QueryParamTokenAuthentication',
 ]
 
 # Soundtrack API Configuration
