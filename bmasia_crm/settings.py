@@ -55,7 +55,7 @@ INSTALLED_APPS = [
     # 'rest_framework_simplejwt.token_blacklist',  # Temporarily disabled due to missing migrations
     'corsheaders',
     'django_filters',
-    # 'mcp_server',  # TEMPORARILY DISABLED — _patched_initialize_request crashes all API requests (v0.5.7 bug)
+    'mcp_server',  # Bug in v0.5.7 patched via crm_app.apps.CrmAppConfig.ready()
 
     # Local apps
     'crm_app',
