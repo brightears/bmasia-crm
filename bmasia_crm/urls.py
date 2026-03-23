@@ -72,7 +72,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('crm_app.urls')),  # API endpoints under /api/
     path('api-auth/', include('rest_framework.urls')),
-    path('', include('mcp_server.urls')),  # MCP server at /mcp/
+    # path('', include('mcp_server.urls')),  # MCP server at /mcp/ — TEMPORARILY DISABLED (v0.5.7 bug)
     path('api-token-auth/', obtain_auth_token, name='api_token_auth'),  # DRF token auth
     # Setup endpoint to create admin user
     path('setup-admin/', create_admin_view, name='setup_admin'),
