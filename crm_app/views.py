@@ -2690,6 +2690,7 @@ and<br/><br/>
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), -35),  # Signature sits on the line below
+                ('LEFTPADDING', (0, 0), (0, 0), 30),  # Shift signature right to center on line
                 ('RIGHTPADDING', (0, 0), (0, 0), -40),  # Pull stamp left to overlap signature
             ]))
             bmasia_sig_content.append(sig_stamp_table)
