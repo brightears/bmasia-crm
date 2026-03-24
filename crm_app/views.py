@@ -1700,6 +1700,11 @@ class ContractViewSet(BaseModelViewSet):
             pass
 
         zone_table.setStyle(TableStyle(zone_style_list))
+
+        # Wrap small tables in KeepTogether to prevent page-break splits
+        if zone_count <= 15:
+            from reportlab.platypus import KeepTogether
+            return KeepTogether([zone_table])
         return zone_table
 
     def _build_signature_blocks_table(self, contract, billing_entity, entity_name):
@@ -1818,7 +1823,9 @@ class ContractViewSet(BaseModelViewSet):
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ]))
 
-        return signature_table
+        # Wrap in KeepTogether to prevent page-break splits in signature block
+        from reportlab.platypus import KeepTogether
+        return KeepTogether([signature_table])
 
     def _format_company_address(self, company):
         """Format company address as single line (for contract preambles etc.)"""
