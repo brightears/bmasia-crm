@@ -2681,22 +2681,16 @@ and<br/><br/>
         # BMAsia signature block - signature and stamp side by side, overlapping line/text
         bmasia_sig_content = []
 
-        # Row 1: Signature and stamp side by side, signature on the line
+        # Row 1: Signature and stamp side by side, overlapping, signature on the line
         if signature_img or stamp_img:
-            # Size to fit within 3.4" column: sig 2.0" + stamp 1.3" = 3.3"
-            if signature_img:
-                signature_img = Image(sig_path, width=2.0*inch, height=0.8*inch)
-            if stamp_img:
-                # Re-create stamp at smaller size
-                stamp_path_used = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures',
-                    'BMAsia Thai Stamp.png' if billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 'BMAsia Stamp.png')
-                stamp_img = Image(stamp_path_used, width=1.3*inch, height=1.3*inch)
+            # Original sizes — stamp overlaps signature (intentional)
             sig_stamp_data = [[signature_img or '', stamp_img or '']]
-            sig_stamp_table = Table(sig_stamp_data, colWidths=[2.0*inch, 1.3*inch])
+            sig_stamp_table = Table(sig_stamp_data, colWidths=[2.8*inch, 1.6*inch])
             sig_stamp_table.setStyle(TableStyle([
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), -30),  # Overlap the line below
+                ('BOTTOMPADDING', (0, 0), (-1, -1), -35),  # Signature sits on the line below
+                ('RIGHTPADDING', (0, 0), (0, 0), -40),  # Pull stamp left to overlap signature
             ]))
             bmasia_sig_content.append(sig_stamp_table)
 
