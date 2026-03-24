@@ -2704,11 +2704,13 @@ and<br/><br/>
         # Customer signature block (empty for them to sign)
         customer_sig_content = []
 
-        # Primary customer signatory
-        customer_sig_content.append(Spacer(1, 0.85*inch))  # Space for signature, reduced to fit on page
+        # Primary customer signatory — space for their signature to match BMAsia side height
+        customer_sig_content.append(Spacer(1, 0.15*inch))  # Small top padding
         customer_sig_content.append(Paragraph('_' * 35, sig_line_style))
+        # Avoid showing same text twice when signatory name equals title
         customer_sig_content.append(Paragraph(f"<b>{customer_signatory}</b>", sig_name_style))
-        customer_sig_content.append(Paragraph(customer_title, sig_title_style))
+        if customer_title and customer_title != customer_signatory:
+            customer_sig_content.append(Paragraph(customer_title, sig_title_style))
         customer_sig_content.append(Paragraph(f"<b>{company.legal_entity_name or company.name}</b>", sig_company_style))
         customer_sig_content.append(Spacer(1, 0.1*inch))
         customer_sig_content.append(Paragraph('Date: _________________', sig_date_style))
@@ -2734,7 +2736,7 @@ and<br/><br/>
 
         signature_table = Table([[bmasia_cell, customer_cell]], colWidths=[3.45*inch, 3.45*inch])
         signature_table.setStyle(TableStyle([
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),  # Align from bottom so text elements match
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ]))
         signature_elements.append(signature_table)
