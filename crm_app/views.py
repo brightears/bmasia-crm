@@ -2632,8 +2632,7 @@ and<br/><br/>
         # Signatures Section - Keep together with footer to prevent page break
         signature_elements = []
 
-        signature_elements.append(Paragraph("SIGNATURES", heading_style))
-        signature_elements.append(Spacer(1, 0.15*inch))
+        signature_elements.append(Spacer(1, 0.3*inch))
 
         # Create signature table with signatory names and titles
         bmasia_signatory = contract.bmasia_signatory_name or 'Chris Andrews'
@@ -2690,7 +2689,7 @@ and<br/><br/>
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
                 ('BOTTOMPADDING', (0, 0), (-1, -1), -35),  # Signature sits on the line below
-                ('LEFTPADDING', (0, 0), (0, 0), 80),  # Shift signature right to center on line
+                ('LEFTPADDING', (0, 0), (0, 0), 100),  # Shift signature right to center on line
                 ('RIGHTPADDING', (0, 0), (0, 0), -40),  # Pull stamp left to overlap signature
             ]))
             bmasia_sig_content.append(sig_stamp_table)
