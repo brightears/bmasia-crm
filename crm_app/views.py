@@ -1700,6 +1700,11 @@ class ContractViewSet(BaseModelViewSet):
             pass
 
         zone_table.setStyle(TableStyle(zone_style_list))
+
+        # Prevent internal table splits for small zone counts
+        if zone_count <= 15:
+            from reportlab.platypus import KeepTogether
+            return KeepTogether([zone_table])
         return zone_table
 
     def _build_signature_blocks_table(self, contract, billing_entity, entity_name):
