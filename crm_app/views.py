@@ -2681,16 +2681,18 @@ and<br/><br/>
         # BMAsia signature block - signature and stamp side by side, overlapping line/text
         bmasia_sig_content = []
 
-        # Row 1: Signature and stamp side by side, shifted right to center over line
+        # Row 1: Signature and stamp side by side, centered over the line
         if signature_img or stamp_img:
+            # Scale signature to fit within column width alongside stamp
+            if signature_img:
+                signature_img = Image(sig_path, width=1.8*inch, height=0.7*inch)
             sig_stamp_data = [[signature_img or '', stamp_img or '']]
-            # Signature + stamp table - shifted right with left padding
-            sig_stamp_table = Table(sig_stamp_data, colWidths=[2.8*inch, 1.6*inch])
+            sig_stamp_table = Table(sig_stamp_data, colWidths=[1.8*inch, 1.6*inch])
             sig_stamp_table.setStyle(TableStyle([
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('ALIGN', (0, 0), (0, 0), 'RIGHT'),   # Signature aligned right (toward center)
+                ('ALIGN', (1, 0), (1, 0), 'LEFT'),     # Stamp aligned left (toward center)
                 ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), -20),  # Overlap the line below
-                ('LEFTPADDING', (0, 0), (0, 0), 25),  # Shift signature right to center over line
+                ('BOTTOMPADDING', (0, 0), (-1, -1), -15),  # Overlap the line below
             ]))
             bmasia_sig_content.append(sig_stamp_table)
 
