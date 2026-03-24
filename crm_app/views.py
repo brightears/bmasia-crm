@@ -1700,11 +1700,6 @@ class ContractViewSet(BaseModelViewSet):
             pass
 
         zone_table.setStyle(TableStyle(zone_style_list))
-
-        # Wrap small tables in KeepTogether to prevent page-break splits
-        if zone_count <= 15:
-            from reportlab.platypus import KeepTogether
-            return KeepTogether([zone_table])
         return zone_table
 
     def _build_signature_blocks_table(self, contract, billing_entity, entity_name):
@@ -1823,9 +1818,7 @@ class ContractViewSet(BaseModelViewSet):
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ]))
 
-        # Wrap in KeepTogether to prevent page-break splits in signature block
-        from reportlab.platypus import KeepTogether
-        return KeepTogether([signature_table])
+        return signature_table
 
     def _format_company_address(self, company):
         """Format company address as single line (for contract preambles etc.)"""
@@ -2201,26 +2194,27 @@ class ContractViewSet(BaseModelViewSet):
                             render_paragraph(bulk_content)
 
                         # Add heading + zones table
-                        if heading_content.strip():
-                            elements.append(Paragraph(heading_content, body_style))
                         if has_locations:
                             zone_table = self._build_zones_table(contract, zones)
                             if zone_table:
-                                # For large tables (>15 zones), allow natural page flow
-                                # For small tables, keep heading + table together
                                 loc_count = contract.service_locations.count() or zones.count()
                                 if loc_count <= 15:
-                                    keep_items = []
+                                    # Use keepWithNext on heading to prevent orphaning
                                     if heading_content.strip():
-                                        # Re-add heading inside KeepTogether (remove the one above)
-                                        elements.pop()  # remove the heading we just added
-                                        keep_items.append(Paragraph(heading_content, body_style))
-                                    keep_items.append(zone_table)
-                                    keep_items.append(Spacer(1, 0.15*inch))
-                                    elements.append(KeepTogether(keep_items))
+                                        keep_style = body_style.clone('keep_heading', keepWithNext=True, spaceAfter=6)
+                                        elements.append(Paragraph(heading_content, keep_style))
+                                    elements.append(KeepTogether([zone_table, Spacer(1, 0.15*inch)]))
                                 else:
+                                    if heading_content.strip():
+                                        elements.append(Paragraph(heading_content, body_style))
                                     elements.append(zone_table)
                                     elements.append(Spacer(1, 0.15*inch))
+                            else:
+                                if heading_content.strip():
+                                    elements.append(Paragraph(heading_content, body_style))
+                        else:
+                            if heading_content.strip():
+                                elements.append(Paragraph(heading_content, body_style))
                     else:
                         # No <br/><br/> found - just wrap zones table in KeepTogether
                         if before.strip():
@@ -2246,13 +2240,12 @@ class ContractViewSet(BaseModelViewSet):
                     before = before.rstrip()
                     while before.endswith('<br/>') or before.endswith('<br />'):
                         before = before[:-5].rstrip() if before.endswith('<br/>') else before[:-6].rstrip()
-                    # Build signature table
+                    # Build signature table — keep heading with signature block
                     sig_table = self._build_signature_blocks_table(contract, billing_entity, entity_name)
-                    keep_items = []
                     if before.strip():
-                        keep_items.append(Paragraph(before, body_style))
-                    keep_items.append(sig_table)
-                    elements.append(KeepTogether(keep_items))
+                        keep_style = body_style.clone('keep_sig_heading', keepWithNext=True, spaceAfter=6)
+                        elements.append(Paragraph(before, keep_style))
+                    elements.append(KeepTogether([sig_table]))
                     elements.append(Spacer(1, 0.2*inch))
                     # Process content after {{signature_blocks}}
                     if after_sig.strip():
