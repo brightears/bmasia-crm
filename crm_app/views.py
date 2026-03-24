@@ -2327,11 +2327,17 @@ and<br/><br/>
             zones = contract.get_active_zones()
             zone_table = self._build_zones_table(contract, zones)
             if zone_table:
-                elements.append(Paragraph(
+                heading_para = Paragraph(
                     f"<b>{clause_num}.</b> Locations for provision of services:",
                     clause_style
-                ))
-                elements.append(zone_table)
+                )
+                # Keep heading + table together to prevent page-break orphaning
+                loc_count = contract.service_locations.count() or (zones.count() if zones else 0)
+                if loc_count <= 15:
+                    elements.append(KeepTogether([heading_para, zone_table, Spacer(1, 0.15*inch)]))
+                else:
+                    elements.append(heading_para)
+                    elements.append(zone_table)
                 clause_num += 1
             else:
                 elements.append(Paragraph(
