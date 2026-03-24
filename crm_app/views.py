@@ -2681,26 +2681,24 @@ and<br/><br/>
         # BMAsia signature block - signature and stamp side by side, overlapping line/text
         bmasia_sig_content = []
 
-        # Row 1: Signature and stamp — signature centered on the line below
+        # Row 1: Signature and stamp side by side, signature on the line
         if signature_img or stamp_img:
-            # Signature image at original size
+            # Size to fit within 3.4" column: sig 2.0" + stamp 1.3" = 3.3"
             if signature_img:
-                signature_img = Image(sig_path, width=2.8*inch, height=1.1*inch)
-            # Stack: stamp on top (centered), signature below (overlapping line)
-            sig_stamp_data = []
+                signature_img = Image(sig_path, width=2.0*inch, height=0.8*inch)
             if stamp_img:
-                sig_stamp_data.append([stamp_img])
-            if signature_img:
-                sig_stamp_data.append([signature_img])
-            if sig_stamp_data:
-                sig_stamp_table = Table(sig_stamp_data, colWidths=[3.2*inch])
-                sig_stamp_table.setStyle(TableStyle([
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
-                    ('BOTTOMPADDING', (0, -1), (0, -1), -35),  # Signature overlaps the line below
-                    ('TOPPADDING', (0, 0), (-1, -1), 0),
-                ]))
-                bmasia_sig_content.append(sig_stamp_table)
+                # Re-create stamp at smaller size
+                stamp_path_used = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures',
+                    'BMAsia Thai Stamp.png' if billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 'BMAsia Stamp.png')
+                stamp_img = Image(stamp_path_used, width=1.3*inch, height=1.3*inch)
+            sig_stamp_data = [[signature_img or '', stamp_img or '']]
+            sig_stamp_table = Table(sig_stamp_data, colWidths=[2.0*inch, 1.3*inch])
+            sig_stamp_table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), -30),  # Overlap the line below
+            ]))
+            bmasia_sig_content.append(sig_stamp_table)
 
         bmasia_sig_content.append(Paragraph('_' * 35, sig_line_style))
         bmasia_sig_content.append(Paragraph(f"<b>{bmasia_signatory}</b>", sig_name_style))
