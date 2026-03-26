@@ -909,10 +909,11 @@ class RevenueRecognitionService:
     @staticmethod
     def _parse_date(value) -> Optional[date]:
         """Parse date from various formats."""
+        # Check datetime FIRST — datetime is a subclass of date, so isinstance(datetime, date) is True
+        if hasattr(value, 'date') and callable(value.date):
+            return value.date()
         if isinstance(value, date):
             return value
-        if hasattr(value, 'date'):
-            return value.date()
         if not value:
             return None
         try:
