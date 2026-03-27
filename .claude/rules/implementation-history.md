@@ -3,10 +3,13 @@
 > **Full history**: See `docs/IMPLEMENTATION_ARCHIVE.md` for detailed implementation records.
 > **Lessons learned**: Key gotchas are documented in MEMORY.md.
 
-## This Week (Feb 28 - Mar 6, 2026)
+## This Week (Mar 21-27, 2026)
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
+| Mar 27 | Revenue import: Clear & Reimport checkbox to delete existing schedules before import | `views.py`, `RevenueAccrual.tsx`, `api.ts` | `f0ff7d6f` |
+| Mar 26 | Fix revenue import 500: datetime vs date type mismatch in _parse_date() | `revenue_recognition_service.py` | `92cae18d` |
+| Mar 21 | MCP server: django-mcp-server with sales + tech support tools, PDF generation, query collections | `crm_app/mcp.py`, `mcp_auth.py`, `settings.py`, `urls.py` | `574f676f` |
 | Mar 15 | Client Tech Details: consistent collapsible headers for all companies (including single-outlet) | `ClientTechDetails.tsx` | `b4091cd9` |
 | Mar 12 | Custom products in contract service locations (sync + PDF + model) | `models.py`, `views.py`, `ContractForm.tsx`, `0089` | `cf775176` |
 | Mar 11 | Hilton combined PDF: Attachment A + Exhibit D with full signature blocks (image+stamp) | `views.py` | `69356d7e` |
