@@ -1753,11 +1753,12 @@ class ApiService {
     return response.data;
   }
 
-  async importRevenueRecognition(file: File, billingEntity: string, currency: string): Promise<any> {
+  async importRevenueRecognition(file: File, billingEntity: string, currency: string, clearExisting: boolean = false): Promise<any> {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('billing_entity', billingEntity);
     formData.append('currency', currency);
+    formData.append('clear_existing', clearExisting ? 'true' : 'false');
     const response = await authApi.post('/revenue-recognition/import/', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });

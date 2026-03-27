@@ -28,6 +28,8 @@ import {
   Chip,
   Tooltip,
   IconButton,
+  Checkbox,
+  FormControlLabel,
 } from '@mui/material';
 import {
   AccountBalance as AccountBalanceIcon,
@@ -564,6 +566,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ open, onClose, onImported }
   const [file, setFile] = useState<File | null>(null);
   const [importEntity, setImportEntity] = useState<string>('bmasia_th');
   const [importCurrency, setImportCurrency] = useState<string>('THB');
+  const [clearExisting, setClearExisting] = useState<boolean>(true);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -587,7 +590,7 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ open, onClose, onImported }
     setImportError(null);
     setResult(null);
     try {
-      const data = await apiService.importRevenueRecognition(file, importEntity, importCurrency);
+      const data = await apiService.importRevenueRecognition(file, importEntity, importCurrency, clearExisting);
       setResult(data);
     } catch (err: any) {
       const msg =
@@ -638,6 +641,21 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ open, onClose, onImported }
             </Select>
           </FormControl>
 
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={clearExisting}
+                onChange={(e) => setClearExisting(e.target.checked)}
+                size="small"
+              />
+            }
+            label={
+              <Typography variant="body2">
+                Clear existing schedules for this entity before importing
+              </Typography>
+            }
+          />
+
           <Box>
             <input
               ref={fileInputRef}
@@ -673,6 +691,11 @@ const ImportDialog: React.FC<ImportDialogProps> = ({ open, onClose, onImported }
               <Typography variant="body2" fontWeight="bold">
                 Import complete
               </Typography>
+              {result.cleared !== undefined && result.cleared > 0 && (
+                <Typography variant="body2">
+                  Cleared: {result.cleared} existing schedules
+                </Typography>
+              )}
               <Typography variant="body2">
                 Created: {result.created} | Skipped: {result.skipped} | Errors: {result.errors}
               </Typography>

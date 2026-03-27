@@ -12659,6 +12659,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
         file_obj = request.FILES.get('file')
         billing_entity = request.data.get('billing_entity')
         currency = request.data.get('currency')
+        clear_existing = request.data.get('clear_existing', '').lower() in ('true', '1', 'yes')
 
         if not file_obj:
             return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -12669,7 +12670,18 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
 
         try:
             service = RevenueRecognitionService()
+
+            # Clear existing schedules if requested
+            deleted_count = 0
+            if clear_existing:
+                deleted_qs = RevenueRecognitionSchedule.objects.filter(billing_entity=billing_entity)
+                deleted_count = deleted_qs.count()
+                deleted_qs.delete()
+                logger.info(f"Cleared {deleted_count} existing schedules for {billing_entity}")
+
             result = service.import_from_excel(file_obj, billing_entity, currency)
+            if deleted_count > 0:
+                result['cleared'] = deleted_count
             if 'error' in result:
                 return Response(result, status=status.HTTP_400_BAD_REQUEST)
             return Response(result, status=status.HTTP_201_CREATED)
