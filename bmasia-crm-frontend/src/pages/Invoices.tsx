@@ -163,8 +163,8 @@ const Invoices: React.FC = () => {
 
   const loadCompanies = async () => {
     try {
-      const response = await ApiService.getCompanies({ page_size: 1000, ordering: 'name' });
-      setCompanies(response.results);
+      const companies = await ApiService.getCompaniesSimple();
+      setCompanies(companies as any[]);
     } catch (err) {
       console.error('Failed to load companies:', err);
     }

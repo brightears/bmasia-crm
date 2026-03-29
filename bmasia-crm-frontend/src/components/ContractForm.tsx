@@ -262,10 +262,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
   const loadCompanies = async () => {
     try {
-      const response: ApiResponse<Company> = await ApiService.getCompanies({
-        page_size: 1000,
-      });
-      setCompanies(response.results);
+      const companies = await ApiService.getCompaniesSimple();
+      setCompanies(companies as any[]);
     } catch (err) {
       console.error('Failed to load companies:', err);
     }

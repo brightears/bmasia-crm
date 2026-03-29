@@ -119,13 +119,13 @@ const TicketForm: React.FC = () => {
 
   const loadCompanies = async () => {
     try {
-      const response = await ApiService.getCompanies({ page_size: 1000, ordering: 'name' });
-      setCompanies(response.results);
+      const companiesData = await ApiService.getCompaniesSimple();
+      setCompanies(companiesData as any[]);
 
       // Auto-select company from query param (e.g., /tickets/new?company=uuid)
       const preselectedCompanyId = searchParams.get('company');
       if (preselectedCompanyId && !isEditMode) {
-        const found = response.results.find((c: Company) => c.id === preselectedCompanyId);
+        const found = companiesData.find((c: any) => c.id === preselectedCompanyId);
         if (found) {
           setSelectedCompany(found);
           setCompany(found.id);

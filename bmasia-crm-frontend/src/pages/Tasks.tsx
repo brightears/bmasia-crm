@@ -109,16 +109,16 @@ const Tasks: React.FC = () => {
 
   const fetchSupportingData = useCallback(async () => {
     try {
-      const [usersRes, companiesRes, opportunitiesRes, contractsRes, contactsRes] = await Promise.all([
+      const [usersRes, companiesData, opportunitiesRes, contractsRes, contactsRes] = await Promise.all([
         ApiService.getUsers(),
-        ApiService.getCompanies({ page_size: 1000 }),
+        ApiService.getCompaniesSimple(),
         ApiService.getOpportunities({ page_size: 1000 }),
         ApiService.getContracts({ page_size: 1000 }),
         ApiService.getContacts({ page_size: 1000 }),
       ]);
 
       setUsers(usersRes.results);
-      setCompanies(companiesRes.results);
+      setCompanies(companiesData as any[]);
       setOpportunities(opportunitiesRes.results);
       setContracts(contractsRes.results);
       setContacts(contactsRes.results);

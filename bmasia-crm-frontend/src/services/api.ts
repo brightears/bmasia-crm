@@ -79,6 +79,11 @@ class ApiService {
     }
   }
 
+  async getCompaniesSimple(params?: any): Promise<{id: string; name: string; billing_entity: string}[]> {
+    const response = await authApi.get('/companies/simple/', { params });
+    return response.data;
+  }
+
   async getCompany(id: string): Promise<Company> {
     if (this.useMockData) {
       console.log('ApiService: Using mock data for company detail');

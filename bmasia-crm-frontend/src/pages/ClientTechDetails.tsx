@@ -128,8 +128,8 @@ const ClientTechDetails: React.FC = () => {
   useEffect(() => {
     const loadCompanies = async () => {
       try {
-        const response = await ApiService.getCompanies({ page_size: 1000, ordering: 'name' });
-        setCompanies(response.results || []);
+        const companiesData = await ApiService.getCompaniesSimple();
+        setCompanies(companiesData as any[]);
       } catch (err) {
         console.error('Failed to load companies:', err);
       }

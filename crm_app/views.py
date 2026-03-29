@@ -563,6 +563,22 @@ class CompanyViewSet(BaseModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
     
+    @action(detail=False, methods=['get'], url_path='simple')
+    def simple_list(self, request):
+        """Lightweight company list for dropdowns — returns only id, name, billing_entity."""
+        companies = Company.objects.values('id', 'name', 'billing_entity').order_by('name')
+
+        # Optional filter
+        billing_entity = request.query_params.get('billing_entity')
+        if billing_entity:
+            companies = companies.filter(billing_entity=billing_entity)
+
+        search = request.query_params.get('search')
+        if search:
+            companies = companies.filter(name__icontains=search)
+
+        return Response(list(companies))
+
     @action(detail=True, methods=['get'])
     def dashboard(self, request, pk=None):
         """Get company dashboard data"""
