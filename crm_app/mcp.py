@@ -36,21 +36,13 @@ aggregation pipelines. Available collections: company, contact, contract, invoic
 quote, opportunity, task, zone, clienttechdetail, device, ticket, kbarticle.
 
 ### CRUD Tools (write)
-**Sales:**
-- Companies: list, create, update, delete
-- Contacts: list, create, update, delete
-- Contracts: list, create, update, delete
-- Invoices: list, create, update, delete
-- Quotes: list, create, update, delete
-- Opportunities: list, create, update, delete
-- Tasks: list, create, update, delete
-- Zones: list
+Use these 3 generic tools for all write operations:
+- `create_record(collection, data)` — create a new record (data is a JSON string)
+- `update_record(collection, id, data)` — partial update (only include changed fields)
+- `delete_record(collection, id)` — delete a record
 
-**Tech Support:**
-- Client Tech Details: list, create, update, delete (hardware configs per outlet)
-- Devices: list, create, update, delete (PCs, tablets, players)
-- Tickets: list, create, update
-- Knowledge Base: list, create, update
+Supported collections: company, contact, contract, invoice, quote, opportunity,
+task, zone, clienttechdetail, device, ticket, kbarticle.
 
 ### PDF Tools
 - `generate_contract_pdf(id)` — generate contract PDF
@@ -210,19 +202,134 @@ class KBArticleQuery(ModelQueryToolset):
 
 
 # ============================================================
-# DRF ViewSet tools — DISABLED
+# Generic CRUD tools — bypasses ViewSet patching bug
 # ============================================================
-# django-mcp-server v0.5.7 patches ViewSet.initialize_request at class level,
-# which breaks self.action for ALL requests (not just MCP ones).
-# Bug: BaseAPIViewCallerTool.__init__ does view_class.initialize_request = patched
-# This corrupts CompanyViewSet, ContractViewSet, etc. for normal API calls.
-#
-# CRUD operations still work via:
-# 1. Query toolsets above (read — MongoDB-style aggregation)
-# 2. Direct REST API calls (POST/PATCH/DELETE to /api/v1/...)
-# 3. Claude Code on VPS uses the REST API directly
-#
-# Re-enable when django-mcp-server fixes the class-level patching bug.
+# django-mcp-server v0.5.7 ViewSet integration is broken (patches
+# initialize_request at class level, corrupting all API requests).
+# These tools use serializers directly — no ViewSet involvement.
+
+import json as _json
+
+_COLLECTION_MAP = {
+    'company': (Company, 'crm_app.serializers.CompanySerializer'),
+    'contact': (Contact, 'crm_app.serializers.ContactSerializer'),
+    'contract': (Contract, 'crm_app.serializers.ContractSerializer'),
+    'invoice': (Invoice, 'crm_app.serializers.InvoiceSerializer'),
+    'quote': (Quote, 'crm_app.serializers.QuoteSerializer'),
+    'opportunity': (Opportunity, 'crm_app.serializers.OpportunitySerializer'),
+    'task': (Task, 'crm_app.serializers.TaskSerializer'),
+    'zone': (Zone, 'crm_app.serializers.ZoneSerializer'),
+    'clienttechdetail': (ClientTechDetail, 'crm_app.serializers.ClientTechDetailSerializer'),
+    'device': (Device, 'crm_app.serializers.DeviceSerializer'),
+    'ticket': (Ticket, 'crm_app.serializers.TicketSerializer'),
+    'kbarticle': (KBArticle, 'crm_app.serializers.KBArticleSerializer'),
+}
+
+
+def _get_serializer_class(dotted_path):
+    """Import and return a serializer class from its dotted path."""
+    from importlib import import_module
+    module_path, class_name = dotted_path.rsplit('.', 1)
+    module = import_module(module_path)
+    return getattr(module, class_name)
+
+
+@mcp_server.tool()
+def create_record(collection: str, data: str) -> str:
+    """Create a new record in a CRM collection.
+
+    Args:
+        collection: Collection name (company, contact, contract, invoice, quote,
+                    opportunity, task, zone, clienttechdetail, device, ticket, kbarticle)
+        data: JSON string with field values. Use query_data_collections to check
+              field names and valid choices first.
+
+    Returns: JSON with the created record's id and key fields, or validation errors.
+    """
+    if collection not in _COLLECTION_MAP:
+        return f"Error: Unknown collection '{collection}'. Valid: {', '.join(sorted(_COLLECTION_MAP))}"
+
+    try:
+        fields = _json.loads(data)
+    except _json.JSONDecodeError as e:
+        return f"Error: Invalid JSON — {e}"
+
+    model, serializer_path = _COLLECTION_MAP[collection]
+    SerializerClass = _get_serializer_class(serializer_path)
+
+    serializer = SerializerClass(data=fields)
+    if not serializer.is_valid():
+        return f"Validation errors: {_json.dumps(serializer.errors)}"
+
+    instance = serializer.save()
+    # Return a concise summary
+    result = {'id': str(instance.id)}
+    for attr in ['name', 'contract_number', 'invoice_number', 'quote_number',
+                 'ticket_number', 'article_number', 'title', 'email', 'subject']:
+        if hasattr(instance, attr) and getattr(instance, attr):
+            result[attr] = str(getattr(instance, attr))
+    return _json.dumps(result)
+
+
+@mcp_server.tool()
+def update_record(collection: str, id: str, data: str) -> str:
+    """Update an existing record in a CRM collection.
+
+    Args:
+        collection: Collection name (same options as create_record)
+        id: UUID of the record to update
+        data: JSON string with fields to update (partial update — only include
+              fields you want to change)
+
+    Returns: JSON with updated fields, or validation errors.
+    """
+    if collection not in _COLLECTION_MAP:
+        return f"Error: Unknown collection '{collection}'. Valid: {', '.join(sorted(_COLLECTION_MAP))}"
+
+    try:
+        fields = _json.loads(data)
+    except _json.JSONDecodeError as e:
+        return f"Error: Invalid JSON — {e}"
+
+    model, serializer_path = _COLLECTION_MAP[collection]
+
+    try:
+        instance = model.objects.get(id=id)
+    except model.DoesNotExist:
+        return f"Error: {collection} with ID '{id}' not found."
+
+    SerializerClass = _get_serializer_class(serializer_path)
+    serializer = SerializerClass(instance, data=fields, partial=True)
+    if not serializer.is_valid():
+        return f"Validation errors: {_json.dumps(serializer.errors)}"
+
+    instance = serializer.save()
+    return f"Updated {collection} {id} successfully."
+
+
+@mcp_server.tool()
+def delete_record(collection: str, id: str) -> str:
+    """Delete a record from a CRM collection.
+
+    Args:
+        collection: Collection name (same options as create_record)
+        id: UUID of the record to delete
+
+    Returns: Confirmation message or error.
+    """
+    if collection not in _COLLECTION_MAP:
+        return f"Error: Unknown collection '{collection}'. Valid: {', '.join(sorted(_COLLECTION_MAP))}"
+
+    model, _ = _COLLECTION_MAP[collection]
+
+    try:
+        instance = model.objects.get(id=id)
+    except model.DoesNotExist:
+        return f"Error: {collection} with ID '{id}' not found."
+
+    name = getattr(instance, 'name', None) or getattr(instance, 'contract_number', None) or str(id)
+    instance.delete()
+    return f"Deleted {collection} '{name}' ({id})."
 
 # ============================================================
 # Custom tools — PDF generation
