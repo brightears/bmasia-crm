@@ -127,7 +127,7 @@ const TicketForm: React.FC = () => {
       if (preselectedCompanyId && !isEditMode) {
         const found = companiesData.find((c: any) => c.id === preselectedCompanyId);
         if (found) {
-          setSelectedCompany(found);
+          setSelectedCompany(found as any);
           setCompany(found.id);
         }
       }
