@@ -48,11 +48,11 @@ const ZonesPage: React.FC = () => {
       setError('');
       const [zonesResponse, companiesResponse] = await Promise.all([
         ApiService.getZones(),
-        ApiService.getCompanies({ is_active: true }),
+        ApiService.getCompaniesSimple({ ordering: 'name' }),
       ]);
       const zonesData = zonesResponse.results || [];
       setZones(zonesData);
-      setCompanies(companiesResponse.results || companiesResponse);
+      setCompanies(companiesResponse as any[]);
 
       // Load contract information for all zones
       const contractsData: Record<string, ContractZone[]> = {};

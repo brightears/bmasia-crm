@@ -129,10 +129,10 @@ const ZonesUnified: React.FC = () => {
       setError(null);
       const [zonesResponse, companiesResponse] = await Promise.all([
         apiService.getZones({ page_size: 1000 }),
-        apiService.getCompanies({ is_active: true }),
+        apiService.getCompaniesSimple({ ordering: 'name' }),
       ]);
       setZones(zonesResponse.results || []);
-      setCompanies(companiesResponse.results || companiesResponse);
+      setCompanies(companiesResponse as any[]);
     } catch (err: any) {
       console.error('Error loading data:', err);
       setError(err.message || 'Failed to load zones and companies');

@@ -119,11 +119,8 @@ const Contacts: React.FC = () => {
 
   const loadCompanies = async () => {
     try {
-      const response: ApiResponse<Company> = await ApiService.getCompanies({
-        page_size: 1000,
-        ordering: 'name',
-      });
-      setCompanies(response.results);
+      const companiesData = await ApiService.getCompaniesSimple({ ordering: 'name' });
+      setCompanies(companiesData as any[]);
     } catch (err: any) {
       console.error('Failed to load companies:', err);
     }
