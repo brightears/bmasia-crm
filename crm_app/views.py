@@ -19,9 +19,12 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 import csv
 import json
+import logging
 import os
 import re
 import uuid
+
+logger = logging.getLogger(__name__)
 
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
