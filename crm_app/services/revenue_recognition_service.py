@@ -137,9 +137,6 @@ class RevenueRecognitionService:
         effective_start = max(q_start, service_start)
         effective_end = min(q_end, service_end)
 
-        # No recognition before invoice date
-        effective_start = max(effective_start, invoice_date)
-
         # No overlap = no recognition
         if effective_start > effective_end:
             return Decimal('0')
@@ -189,10 +186,8 @@ class RevenueRecognitionService:
         svc_end_ym = (service_end.year, service_end.month)
         q_start_ym = (year, q_start_month)
         q_end_ym = (year, q_end_month)
-        inv_ym = (invoice_date.year, invoice_date.month)
-
-        # Effective overlap: max of (quarter start, service start, invoice month)
-        eff_start_ym = max(q_start_ym, svc_start_ym, inv_ym)
+        # Effective overlap: max of (quarter start, service start)
+        eff_start_ym = max(q_start_ym, svc_start_ym)
         # min of (quarter end, service end)
         eff_end_ym = min(q_end_ym, svc_end_ym)
 
