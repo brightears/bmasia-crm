@@ -2023,14 +2023,13 @@ class ContractViewSet(BaseModelViewSet):
             validity_style
         )
         metadata_data = [
-            ['Contract Number', 'Date', 'Status', 'Validity'],
+            ['Contract Number', 'Date', 'Validity'],
             [contract.contract_number,
              contract.start_date.strftime('%b %d, %Y'),
-             contract.status,
              validity_text]
         ]
 
-        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.5*inch, 1.3*inch, 2.4*inch])
+        metadata_table = Table(metadata_data, colWidths=[2.2*inch, 1.8*inch, 2.9*inch])
         metadata_table.setStyle(TableStyle([
             # Header row — deep amber
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E8910C')),
@@ -2905,14 +2904,13 @@ and<br/><br/>
             master_validity_style
         )
         metadata_data = [
-            ['Agreement Number', 'Date', 'Status', 'Validity'],
+            ['Agreement Number', 'Date', 'Validity'],
             [contract.contract_number,
              contract.start_date.strftime('%b %d, %Y'),
-             contract.status,
              master_validity_text]
         ]
 
-        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.5*inch, 1.3*inch, 2.4*inch])
+        metadata_table = Table(metadata_data, colWidths=[2.2*inch, 1.8*inch, 2.9*inch])
         metadata_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -3199,14 +3197,13 @@ and<br/><br/>
             participation_validity_style
         )
         metadata_data = [
-            ['Agreement Number', 'Date', 'Status', 'Validity'],
+            ['Agreement Number', 'Date', 'Validity'],
             [contract.contract_number,
              contract.start_date.strftime('%b %d, %Y'),
-             contract.status,
              participation_validity_text]
         ]
 
-        metadata_table = Table(metadata_data, colWidths=[1.7*inch, 1.5*inch, 1.3*inch, 2.4*inch])
+        metadata_table = Table(metadata_data, colWidths=[2.2*inch, 1.8*inch, 2.9*inch])
         metadata_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FFA500')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
