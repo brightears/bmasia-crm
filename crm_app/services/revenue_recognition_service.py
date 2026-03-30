@@ -754,8 +754,21 @@ class RevenueRecognitionService:
                 stats['skipped'] += 1
 
         # Bulk create schedules
-        created_schedules = self.Schedule.objects.bulk_create(schedules_to_create)
-        stats['created'] = len(created_schedules)
+        try:
+            created_schedules = self.Schedule.objects.bulk_create(schedules_to_create)
+            stats['created'] = len(created_schedules)
+        except Exception as e:
+            logger.exception(f"Bulk create failed for {len(schedules_to_create)} schedules: {e}")
+            # Try one-by-one to identify the bad record
+            created_schedules = []
+            for idx, sched in enumerate(schedules_to_create):
+                try:
+                    sched.save()
+                    created_schedules.append(sched)
+                except Exception as row_err:
+                    stats['errors'].append(f"Schedule {idx} ({sched.client_name}): {str(row_err)}")
+                    stats['skipped'] += 1
+            stats['created'] = len(created_schedules)
 
         # Create entries — use imported quarterly data if available, else calculate
         entries_to_create = []
