@@ -2408,10 +2408,14 @@ and<br/><br/>
                         if item.get('description'):
                             service_items_list.append(f"  {item.get('description', '')}")
 
-            # If no service items, add default
+            # If no service items, add default — use correct platform name
             if not service_items_list:
+                # Detect platform from service_locations
+                svc_locs = contract.service_locations.all()
+                is_beatbreeze = any(loc.platform == 'beatbreeze' for loc in svc_locs) if svc_locs.exists() else False
+                platform_name = "Beat Breeze" if is_beatbreeze else "SYB"
                 service_items_list = [
-                    "• Assistance to design playlists and schedules on the SYB platform",
+                    f"• Assistance to design playlists and schedules on the {platform_name} platform",
                     "• Remote on-line activation assistance",
                     "• Monthly refresh of music content",
                     "• Special event playlists as needed",
@@ -2467,8 +2471,8 @@ and<br/><br/>
                     clause_style
                 ))
             else:
-                # Legacy: flat value with zone count
-                zone_count = contract.get_zone_count()
+                # Legacy: flat value with zone count (prefer service_locations over ContractZones)
+                zone_count = contract.service_locations.count() or contract.get_zone_count()
                 elements.append(Paragraph(
                     f"<b>{clause_num}.</b> Total cost{per_year_label}: {contract.currency} {total_before_tax:,.2f} for {zone_count} zone{'s' if zone_count != 1 else ''} + {tax_rate:.0f}% VAT ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}{per_year_label}</b>",
                     clause_style
