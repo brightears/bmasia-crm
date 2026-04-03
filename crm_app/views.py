@@ -6207,9 +6207,10 @@ class QuoteViewSet(BaseModelViewSet):
         # Prepare line items data
         line_items = quote.line_items.all()
 
+        # Currency symbol (must be defined before line items check — used in totals section regardless)
+        currency_symbol = {'USD': '$', 'THB': 'THB ', 'EUR': 'EUR ', 'GBP': 'GBP '}.get(quote.currency, quote.currency + ' ')
+
         if line_items.exists():
-            # Currency symbol
-            currency_symbol = {'USD': '$', 'THB': 'THB ', 'EUR': 'EUR ', 'GBP': 'GBP '}.get(quote.currency, quote.currency + ' ')
 
             table_data = [
                 ['Product / Service', 'Quantity', 'Unit Price', 'Total']
