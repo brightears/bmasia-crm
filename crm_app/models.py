@@ -940,8 +940,8 @@ class Contract(TimestampedModel):
         if self.status == 'Sent' and not self.sent_date:
             self.sent_date = timezone.now().date()
 
-        # Deferred numbering: assign real contract number only when Sent
-        if self.status == 'Sent' and (not self.contract_number or self.contract_number.startswith('DRAFT-') or self.contract_number.startswith('C-')):
+        # Deferred numbering: assign real contract number when Sent, Active, or Renewed
+        if self.status in ('Sent', 'Active', 'Renewed') and (not self.contract_number or self.contract_number.startswith('DRAFT-') or self.contract_number.startswith('C-')):
             region = 'TH' if self.company and self.company.billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 'HK'
             self.contract_number = DocumentSequence.get_next_number(region, 'CT')
         elif not self.contract_number or self.contract_number.startswith('C-'):
