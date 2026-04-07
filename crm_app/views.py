@@ -42,7 +42,7 @@ from .models import (
     Ticket, TicketComment, TicketAttachment,
     KBCategory, KBTag, KBArticle, KBArticleView, KBArticleRating,
     KBArticleRelation, KBArticleAttachment, TicketKBArticle,
-    Zone, Device, ClientTechDetail, StaticDocument,
+    Zone, Device, ClientTechDetail, StaticDocument, DocumentSequence,
     ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
     SeasonalTriggerDate,
     MonthlyRevenueSnapshot, MonthlyRevenueTarget, ContractRevenueEvent,
@@ -1220,11 +1220,9 @@ class ContractViewSet(BaseModelViewSet):
 
         original = self.get_object()
 
-        # Generate new contract number
-        today = timezone.now()
-        base_number = f"C-{today.strftime('%Y%m%d')}"
-        random_suffix = str(uuid.uuid4())[:4].upper()
-        new_contract_number = f"{base_number}-{random_suffix}"
+        # Generate new contract number using entity prefix format
+        region = 'TH' if original.company and original.company.billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 'HK'
+        new_contract_number = DocumentSequence.get_next_number(region, 'CT')
 
         # Calculate new dates
         new_start_date = original.end_date

@@ -764,15 +764,13 @@ class ContractSerializer(serializers.ModelSerializer):
         line_items_data = validated_data.pop('line_items', [])
         service_locations_data = validated_data.pop('service_locations', [])
 
-        # Auto-generate contract number if not provided
+        # Auto-generate temporary DRAFT number if not provided
+        # Real contract number is assigned by model.save() when status → Sent
         if not validated_data.get('contract_number'):
-            today = timezone.now().date()
-            date_str = today.strftime('%Y-%m%d')
-            # Count existing contracts for today
-            count = Contract.objects.filter(
-                contract_number__startswith=f'C-{date_str}'
+            draft_count = Contract.objects.filter(
+                contract_number__startswith='DRAFT-'
             ).count() + 1
-            validated_data['contract_number'] = f'C-{date_str}-{count:03d}'
+            validated_data['contract_number'] = f'DRAFT-{draft_count:04d}'
 
         # Auto-calculate tax fields
         validated_data = self._calculate_tax_fields(validated_data)

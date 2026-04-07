@@ -35,11 +35,12 @@ class DocumentSequence(models.Model):
     @classmethod
     def get_next_number(cls, region, doc_type, year=None):
         """Atomically get the next document number and increment the counter.
-        Uses select_for_update() to prevent race conditions."""
+        Uses select_for_update() to prevent race conditions.
+        Contract format: BMAT-26-C-0001 (Thailand) / BMAL-26-C-0001 (Hong Kong)
+        Quote/Invoice format unchanged: TH-QT26001 / HK-IV26001"""
         from django.db import transaction
         if year is None:
             year = timezone.now().strftime('%y')
-        prefix = f"{region}-{doc_type}{year}"
         with transaction.atomic():
             seq, created = cls.objects.select_for_update().get_or_create(
                 region=region,
@@ -50,7 +51,12 @@ class DocumentSequence(models.Model):
             number = seq.next_sequence
             seq.next_sequence += 1
             seq.save()
-        return f"{prefix}{number:03d}"
+        if doc_type == 'CT':
+            entity = 'BMAT' if region == 'TH' else 'BMAL'
+            return f"{entity}-{year}-C-{number:04d}"
+        else:
+            prefix = f"{region}-{doc_type}{year}"
+            return f"{prefix}{number:03d}"
 
 
 class User(AbstractUser):
@@ -929,14 +935,19 @@ class Contract(TimestampedModel):
     
     def save(self, *args, **kwargs):
         """Auto-set sent_date when status changes to Sent.
-        Auto-generate contract_number using atomic DocumentSequence."""
+        Deferred contract numbering: drafts get DRAFT-xxxx, real number
+        (BMAT-26-C-0001 / BMAL-26-C-0001) assigned only when status → Sent."""
         if self.status == 'Sent' and not self.sent_date:
             self.sent_date = timezone.now().date()
 
-        # Auto-generate contract number using atomic sequence
-        if not self.contract_number or self.contract_number.startswith('C-'):
+        # Deferred numbering: assign real contract number only when Sent
+        if self.status == 'Sent' and (not self.contract_number or self.contract_number.startswith('DRAFT-') or self.contract_number.startswith('C-')):
             region = 'TH' if self.company and self.company.billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 'HK'
             self.contract_number = DocumentSequence.get_next_number(region, 'CT')
+        elif not self.contract_number or self.contract_number.startswith('C-'):
+            # Draft/new contracts get a temporary DRAFT number
+            draft_count = Contract.objects.filter(contract_number__startswith='DRAFT-').count() + 1
+            self.contract_number = f'DRAFT-{draft_count:04d}'
 
         super().save(*args, **kwargs)
 
