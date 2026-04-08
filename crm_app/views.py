@@ -1449,7 +1449,8 @@ class ContractViewSet(BaseModelViewSet):
                 tcv = float(contract.value) * years
                 replacements['{{total_contract_value}}'] = f"{contract.currency} {tcv:,.2f}"
                 replacements['{{total_contract_value_amount}}'] = f"{tcv:,.2f}"
-                vat_suffix = " + 7% VAT" if company and company.billing_entity == 'BMAsia (Thailand) Co., Ltd.' else ""
+                effective_tax = float(contract.tax_rate) if contract.tax_rate else (7.0 if company and company.billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 0.0)
+                vat_suffix = f" + {effective_tax:.0f}% VAT" if effective_tax > 0 else ""
                 replacements['{{billing_note}}'] = f"Invoiced annually at {contract.currency} {contract.value:,.2f}{vat_suffix} per year."
 
         # Compute rate per zone
@@ -2422,7 +2423,8 @@ and<br/><br/>
 
             # Add pricing if available
             if contract.show_zone_pricing_detail and contract.price_per_zone:
-                service_items_list.append(f"• <b>Price:</b> {contract.currency} {contract.price_per_zone:,.2f} per zone per year + 7% VAT")
+                vat_text = f" + {float(contract.tax_rate):.0f}% VAT" if contract.tax_rate and float(contract.tax_rate) > 0 else ""
+                service_items_list.append(f"• <b>Price:</b> {contract.currency} {contract.price_per_zone:,.2f} per zone per year{vat_text}")
 
             for item_text in service_items_list:
                 elements.append(Paragraph(item_text, bullet_style))
@@ -2430,7 +2432,7 @@ and<br/><br/>
             clause_num += 1
 
             # Clause 6: Total Cost
-            tax_rate = 7.0 if billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 0.0
+            tax_rate = float(contract.tax_rate) if contract.tax_rate else (7.0 if billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 0.0)
             total_before_tax = float(contract.value) if contract.value else 0.0
             tax_amount = total_before_tax * (tax_rate / 100)
             total_with_tax = total_before_tax + tax_amount
