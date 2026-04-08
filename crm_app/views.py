@@ -1463,22 +1463,9 @@ class ContractViewSet(BaseModelViewSet):
         for var, value in replacements.items():
             content = content.replace(var, str(value))
 
-        # If contract has custom payment_terms, substitute the default payment text
-        # This allows per-contract payment terms (e.g., bi-annual) to override the template default
-        if contract.payment_terms:
-            import re
-            # Match the default payment clause — uses .*? (non-greedy, DOTALL) to cross sentence boundaries
-            # HK: "By bank transfer...HSBC Bank...invoiced." (spans 2 sentences)
-            hk_pattern = r'[Bb]y bank transfer.*?HSBC Bank.*?as invoiced\.'
-            # TH: "by bank transfer...TMB-Thanachart Bank...Withholding Tax..." (spans 2+ sentences)
-            th_pattern = r'[Bb]y bank transfer.*?TMB.Thanachart Bank.*?(?:as invoiced|Thai Law)\.'
-            custom_pt = contract.payment_terms
-            for pattern in [hk_pattern, th_pattern]:
-                match = re.search(pattern, content, re.DOTALL)
-                if match:
-                    # Append custom terms after the default text (don't replace)
-                    content = content[:match.end()] + ' ' + custom_pt + content[match.end():]
-                    break
+        # Note: contract.payment_terms is an internal CRM field (e.g., "Net 30", "Due on Receipt")
+        # used for tracking/invoicing — it should NOT be appended to contract PDF text.
+        # The payment clause text already contains the full terms.
 
         return content
 
