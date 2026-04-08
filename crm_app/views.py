@@ -2473,10 +2473,11 @@ and<br/><br/>
             else:
                 # Legacy: flat value with zone count (prefer service_locations over ContractZones)
                 zone_count = contract.service_locations.count() or contract.get_zone_count()
-                elements.append(Paragraph(
-                    f"<b>{clause_num}.</b> Total cost{per_year_label}: {contract.currency} {total_before_tax:,.2f} for {zone_count} zone{'s' if zone_count != 1 else ''} + {tax_rate:.0f}% VAT ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}{per_year_label}</b>",
-                    clause_style
-                ))
+                if tax_rate > 0:
+                    cost_text = f"<b>{clause_num}.</b> Total cost{per_year_label}: {contract.currency} {total_before_tax:,.2f} for {zone_count} zone{'s' if zone_count != 1 else ''} + {tax_rate:.0f}% VAT ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}{per_year_label}</b>"
+                else:
+                    cost_text = f"<b>{clause_num}.</b> Total cost{per_year_label}: <b>{contract.currency} {total_before_tax:,.2f}</b> for {zone_count} zone{'s' if zone_count != 1 else ''}"
+                elements.append(Paragraph(cost_text, clause_style))
 
             # Total Contract Value for multi-year deals
             if is_multi_year:
