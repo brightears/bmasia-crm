@@ -2208,11 +2208,15 @@ class ContractViewSet(BaseModelViewSet):
                             if zone_table:
                                 loc_count = contract.service_locations.count() or zones.count()
                                 if loc_count <= 15:
-                                    # Use keepWithNext on heading to prevent orphaning
+                                    # Bundle heading + table + spacer in a single KeepTogether
+                                    # so the heading never orphans onto a page without the table.
+                                    kt_list = []
                                     if heading_content.strip():
-                                        keep_style = body_style.clone('keep_heading', keepWithNext=True, spaceAfter=6)
-                                        elements.append(Paragraph(heading_content, keep_style))
-                                    elements.append(KeepTogether([zone_table, Spacer(1, 0.15*inch)]))
+                                        heading_style = body_style.clone('section_heading', spaceAfter=6)
+                                        kt_list.append(Paragraph(heading_content, heading_style))
+                                    kt_list.append(zone_table)
+                                    kt_list.append(Spacer(1, 0.15*inch))
+                                    elements.append(KeepTogether(kt_list))
                                 else:
                                     if heading_content.strip():
                                         elements.append(Paragraph(heading_content, body_style))
