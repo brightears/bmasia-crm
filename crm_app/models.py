@@ -254,9 +254,13 @@ class Company(TimestampedModel):
             models.Index(fields=['industry']),
         ]
     
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._original_soundtrack_account_id = self.soundtrack_account_id
+
     def __str__(self):
         return self.name
-    
+
     @property
     def full_address(self):
         """Return formatted address"""

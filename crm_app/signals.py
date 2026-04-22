@@ -12,8 +12,9 @@ logger = logging.getLogger(__name__)
 def sync_soundtrack_zones_on_save(sender, instance, created, **kwargs):
     """Automatically sync zones when Soundtrack account ID is added or changed"""
     if instance.soundtrack_account_id:
-        # Check if this is a new account ID or if it changed
-        if created or (not created and instance.tracker.has_changed('soundtrack_account_id')):
+        original = getattr(instance, '_original_soundtrack_account_id', None)
+        changed = instance.soundtrack_account_id != original
+        if created or changed:
             from .services.soundtrack_api import soundtrack_api
             try:
                 synced, errors = soundtrack_api.sync_company_zones(instance)
@@ -21,6 +22,7 @@ def sync_soundtrack_zones_on_save(sender, instance, created, **kwargs):
                     logger.info(f"Auto-synced {synced} zones for {instance.name}")
             except Exception as e:
                 logger.error(f"Error auto-syncing zones for {instance.name}: {str(e)}")
+    instance._original_soundtrack_account_id = instance.soundtrack_account_id
 
 
 @receiver(post_save, sender=Contract)
