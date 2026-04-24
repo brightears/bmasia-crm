@@ -4,6 +4,8 @@ MCP Server tools for BMAsia CRM.
 Exposes core CRM ViewSets as MCP tools via django-mcp-server.
 Endpoint: /mcp/ with Token authentication.
 """
+import base64
+import json
 import logging
 
 from mcp_server import mcp_server
@@ -45,6 +47,9 @@ Supported collections: company, contact, contract, invoice, quote, opportunity,
 task, zone, clienttechdetail, device, ticket, kbarticle.
 
 ### PDF Tools
+Each returns a JSON string with `filename`, `size`, and `content_b64` (base64-
+encoded PDF bytes). Parse with `json.loads`, then `base64.b64decode(content_b64)`
+to recover the raw PDF. On failure returns `{"error": "..."}`.
 - `generate_contract_pdf(id)` — generate contract PDF
 - `generate_quote_pdf(id)` — generate quote PDF
 - `generate_invoice_pdf(id)` — generate invoice PDF
@@ -336,16 +341,43 @@ def delete_record(collection: str, id: str) -> str:
 # ============================================================
 
 
+def _pdf_response_payload(response, default_filename: str) -> str:
+    """Shape a ViewSet PDF response into a JSON string with base64 content.
+
+    Returns JSON with keys: filename, size, content_b64. Callers parse with
+    json.loads and base64.b64decode(content_b64) to recover raw PDF bytes.
+    """
+    if response.status_code != 200:
+        return json.dumps({"error": f"HTTP {response.status_code}"})
+
+    content_disp = response.get('Content-Disposition', '')
+    filename = (
+        content_disp.split('filename=')[-1].strip('"')
+        if 'filename=' in content_disp
+        else default_filename
+    )
+    return json.dumps({
+        "filename": filename,
+        "size": len(response.content),
+        "content_b64": base64.b64encode(response.content).decode('ascii'),
+    })
+
+
 @mcp_server.tool()
 def generate_contract_pdf(id: str) -> str:
-    """Generate a contract PDF by contract ID. Returns the PDF filename and size."""
+    """Generate a contract PDF by contract ID.
+
+    Returns JSON string: {"filename": str, "size": int, "content_b64": str}.
+    Parse with json.loads, then base64.b64decode(content_b64) for raw bytes.
+    On failure returns {"error": "..."}.
+    """
     from django.test import RequestFactory
     from crm_app.models import Contract
 
     try:
-        contract = Contract.objects.get(id=id)
+        Contract.objects.get(id=id)
     except Contract.DoesNotExist:
-        return f"Error: Contract with ID '{id}' not found."
+        return json.dumps({"error": f"Contract with ID '{id}' not found."})
 
     factory = RequestFactory()
     request = factory.get(f'/api/v1/contracts/{id}/pdf/')
@@ -353,25 +385,24 @@ def generate_contract_pdf(id: str) -> str:
 
     viewset = ContractViewSet.as_view({'get': 'pdf'})
     response = viewset(request, pk=id)
-
-    if response.status_code == 200:
-        content_disp = response.get('Content-Disposition', '')
-        filename = content_disp.split('filename=')[-1].strip('"') if 'filename=' in content_disp else f'contract_{id}.pdf'
-        return f"PDF generated: {filename} ({len(response.content):,} bytes)"
-    else:
-        return f"Error generating PDF: HTTP {response.status_code}"
+    return _pdf_response_payload(response, f'contract_{id}.pdf')
 
 
 @mcp_server.tool()
 def generate_quote_pdf(id: str) -> str:
-    """Generate a quote PDF by quote ID. Returns the PDF filename and size."""
+    """Generate a quote PDF by quote ID.
+
+    Returns JSON string: {"filename": str, "size": int, "content_b64": str}.
+    Parse with json.loads, then base64.b64decode(content_b64) for raw bytes.
+    On failure returns {"error": "..."}.
+    """
     from django.test import RequestFactory
     from crm_app.models import Quote
 
     try:
-        quote = Quote.objects.get(id=id)
+        Quote.objects.get(id=id)
     except Quote.DoesNotExist:
-        return f"Error: Quote with ID '{id}' not found."
+        return json.dumps({"error": f"Quote with ID '{id}' not found."})
 
     factory = RequestFactory()
     request = factory.get(f'/api/v1/quotes/{id}/pdf/')
@@ -379,25 +410,24 @@ def generate_quote_pdf(id: str) -> str:
 
     viewset = QuoteViewSet.as_view({'get': 'pdf'})
     response = viewset(request, pk=id)
-
-    if response.status_code == 200:
-        content_disp = response.get('Content-Disposition', '')
-        filename = content_disp.split('filename=')[-1].strip('"') if 'filename=' in content_disp else f'quote_{id}.pdf'
-        return f"PDF generated: {filename} ({len(response.content):,} bytes)"
-    else:
-        return f"Error generating PDF: HTTP {response.status_code}"
+    return _pdf_response_payload(response, f'quote_{id}.pdf')
 
 
 @mcp_server.tool()
 def generate_invoice_pdf(id: str) -> str:
-    """Generate an invoice PDF by invoice ID. Returns the PDF filename and size."""
+    """Generate an invoice PDF by invoice ID.
+
+    Returns JSON string: {"filename": str, "size": int, "content_b64": str}.
+    Parse with json.loads, then base64.b64decode(content_b64) for raw bytes.
+    On failure returns {"error": "..."}.
+    """
     from django.test import RequestFactory
     from crm_app.models import Invoice
 
     try:
-        invoice = Invoice.objects.get(id=id)
+        Invoice.objects.get(id=id)
     except Invoice.DoesNotExist:
-        return f"Error: Invoice with ID '{id}' not found."
+        return json.dumps({"error": f"Invoice with ID '{id}' not found."})
 
     factory = RequestFactory()
     request = factory.get(f'/api/v1/invoices/{id}/pdf/')
@@ -405,13 +435,7 @@ def generate_invoice_pdf(id: str) -> str:
 
     viewset = InvoiceViewSet.as_view({'get': 'pdf'})
     response = viewset(request, pk=id)
-
-    if response.status_code == 200:
-        content_disp = response.get('Content-Disposition', '')
-        filename = content_disp.split('filename=')[-1].strip('"') if 'filename=' in content_disp else f'invoice_{id}.pdf'
-        return f"PDF generated: {filename} ({len(response.content):,} bytes)"
-    else:
-        return f"Error generating PDF: HTTP {response.status_code}"
+    return _pdf_response_payload(response, f'invoice_{id}.pdf')
 
 
 def _get_system_user():
