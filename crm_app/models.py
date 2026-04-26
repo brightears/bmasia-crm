@@ -36,8 +36,23 @@ class DocumentSequence(models.Model):
     def get_next_number(cls, region, doc_type, year=None):
         """Atomically get the next document number and increment the counter.
         Uses select_for_update() to prevent race conditions.
-        Contract format: BMAT-26-C-0001 (Thailand) / BMAL-26-C-0001 (Hong Kong)
-        Quote/Invoice format unchanged: TH-QT26001 / HK-IV26001"""
+
+        Format (Pom-agreed convention, restored 26.04.2026 per Norbert
+        directive): {region}-{doc_type}{year}{seq:03d}.
+
+            HK-CT26XXX (International contract) / TH-CT26XXX (Thailand)
+            HK-QT26XXX / TH-QT26XXX (quotes)
+            HK-IV26XXX / TH-IV26XXX (invoices)
+
+        Earlier this year a per-doc-type override produced contracts as
+        BMAT-26-C-NNNN / BMAL-26-C-NNNN (with hyphens and billing-entity
+        prefix) — that drift was unilateral, not Pom-agreed. Reverted
+        here. Existing drifted-format contracts (e.g. BMAL-26-C-0867)
+        remain in the database; only newly generated contracts come out
+        in the standard format. The CT sequence counter itself is
+        preserved — counting continues from where it left off, just
+        formatted as HK-CT26XXX going forward.
+        """
         from django.db import transaction
         if year is None:
             year = timezone.now().strftime('%y')
@@ -51,12 +66,8 @@ class DocumentSequence(models.Model):
             number = seq.next_sequence
             seq.next_sequence += 1
             seq.save()
-        if doc_type == 'CT':
-            entity = 'BMAT' if region == 'TH' else 'BMAL'
-            return f"{entity}-{year}-C-{number:04d}"
-        else:
-            prefix = f"{region}-{doc_type}{year}"
-            return f"{prefix}{number:03d}"
+        prefix = f"{region}-{doc_type}{year}"
+        return f"{prefix}{number:03d}"
 
 
 class User(AbstractUser):
@@ -940,7 +951,7 @@ class Contract(TimestampedModel):
     def save(self, *args, **kwargs):
         """Auto-set sent_date when status changes to Sent.
         Deferred contract numbering: drafts get DRAFT-xxxx, real number
-        (BMAT-26-C-0001 / BMAL-26-C-0001) assigned only when status → Sent."""
+        (HK-CT26XXX / TH-CT26XXX) assigned only when status → Sent."""
         if self.status == 'Sent' and not self.sent_date:
             self.sent_date = timezone.now().date()
 
