@@ -348,6 +348,9 @@ const KnowledgeBaseArticle: React.FC = () => {
                   color: 'text.secondary',
                 },
                 '& a': { color: '#FFA500', textDecoration: 'none', '&:hover': { textDecoration: 'underline' } },
+                '& .ql-align-center': { textAlign: 'center' },
+                '& .ql-align-right': { textAlign: 'right' },
+                '& .ql-align-justify': { textAlign: 'justify' },
               }}
               dangerouslySetInnerHTML={{ __html: sanitizedContent }}
             />
