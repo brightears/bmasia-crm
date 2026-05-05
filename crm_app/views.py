@@ -2398,19 +2398,39 @@ and<br/><br/>
                         if item.get('description'):
                             service_items_list.append(f"  {item.get('description', '')}")
 
-            # If no service items, add default — use correct platform name
+            # If no service items, add default — product-aware (SYB vs Beat Breeze vs Custom/LIM/MP3)
+            # FIX 2026-05-05 (Lyra): platform-detection now handles 'custom' explicitly. Custom-product locations
+            # (LIM, MP3, etc — see ContractServiceLocation.custom_service_name) get the LIM-style bullet set
+            # which emphasizes content-lease + management instead of SYB cloud-platform features.
             if not service_items_list:
-                # Detect platform from service_locations
                 svc_locs = contract.service_locations.all()
-                is_beatbreeze = any(loc.platform == 'beatbreeze' for loc in svc_locs) if svc_locs.exists() else False
-                platform_name = "Beat Breeze" if is_beatbreeze else "SYB"
-                service_items_list = [
-                    f"• Assistance to design playlists and schedules on the {platform_name} platform",
-                    "• Remote on-line activation assistance",
-                    "• Monthly refresh of music content",
-                    "• Special event playlists as needed",
-                    "• First Line Technical Support"
-                ]
+                platforms = {loc.platform for loc in svc_locs} if svc_locs.exists() else {'soundtrack'}
+
+                # If ALL locations are custom products (LIM/MP3/etc), use the LIM-style bullets
+                if platforms == {'custom'}:
+                    # Get a representative custom product name for the first bullet
+                    first_custom = next((loc.custom_service_name for loc in svc_locs if loc.platform == 'custom' and loc.custom_service_name), 'License Inclusive Music')
+                    # Use only the part before any em-dash for cleaner display
+                    custom_label = first_custom.split('—')[0].split('-')[0].strip() or 'License Inclusive Music'
+                    service_items_list = [
+                        f"• Curation and content lease for the {custom_label} package",
+                        "• Player provided and managed by BMAsia",
+                        "• Monthly refresh of music content",
+                        "• Music design tailored to property brief",
+                        "• Special event playlists as needed",
+                        "• First Line Technical Support",
+                    ]
+                else:
+                    # SYB or Beat Breeze (or mixed) — keep cloud-platform-style bullets
+                    is_beatbreeze = 'beatbreeze' in platforms and 'soundtrack' not in platforms
+                    platform_name = "Beat Breeze" if is_beatbreeze else "SYB"
+                    service_items_list = [
+                        f"• Assistance to design playlists and schedules on the {platform_name} platform",
+                        "• Remote on-line activation assistance",
+                        "• Monthly refresh of music content",
+                        "• Special event playlists as needed",
+                        "• First Line Technical Support",
+                    ]
 
             # Add pricing if available
             if contract.show_zone_pricing_detail and contract.price_per_zone:
@@ -2580,30 +2600,46 @@ and<br/><br/>
             bmasia_email = contract.bmasia_contact_email or "norbert@bmasiamusic.com"
             bmasia_title = contract.bmasia_contact_title or "Managing Director"
 
-            # Customer contact
-            customer_contact = contract.customer_contact_name or "[Customer Contact Name]"
-            customer_email = contract.customer_contact_email or "[Customer Email]"
-            customer_title = contract.customer_contact_title or "[Title]"
+            # Customer contact — fall back to company primary contact, then omit the line if still blank
+            # FIX 2026-05-05 (Lyra): never print literal "[Customer Contact Name]" / "[Customer Email]" placeholders
+            # to customer-facing PDF. Try contract fields → company primary contact → omit if all blank.
+            customer_contact = contract.customer_contact_name
+            customer_email = contract.customer_contact_email
+            customer_title = contract.customer_contact_title
 
-            contacts_text = f"""
-            <b>BMA:</b> {bmasia_contact}, {bmasia_title}<br/>
-            E: {bmasia_email}<br/>
-            <br/>
-            <b>Client:</b> {customer_contact}, {customer_title}<br/>
-            E: {customer_email}
-            """
+            if not (customer_contact and customer_email):
+                # Fall back to company's primary contact
+                primary = contract.company.contacts.filter(is_primary=True).first() if contract.company else None
+                if primary:
+                    customer_contact = customer_contact or primary.name
+                    customer_email = customer_email or primary.email
+                    customer_title = customer_title or primary.title
+
+            contacts_text = f"<b>BMA:</b> {bmasia_contact}"
+            if bmasia_title:
+                contacts_text += f", {bmasia_title}"
+            contacts_text += f"<br/>E: {bmasia_email}<br/><br/>"
+
+            # Only print client block if we have a real contact — never leak literal placeholders
+            if customer_contact and customer_email:
+                contacts_text += f"<b>Client:</b> {customer_contact}"
+                if customer_title:
+                    contacts_text += f", {customer_title}"
+                contacts_text += f"<br/>E: {customer_email}"
+
             elements.append(Paragraph(contacts_text, body_style))
             elements.append(Spacer(1, 0.3*inch))
 
         # END OF ELSE BLOCK - Hardcoded clauses only run when no template
 
-        # Additional Terms and Conditions
-        if contract.notes:
+        # Additional Terms and Conditions — customer-facing only
+        # FIX 2026-05-05 (Lyra): contract.notes is INTERNAL ONLY (CRM tracking, sent_date pointers, internal context).
+        # NEVER print contract.notes on customer-facing PDF — it leaks internal info (e.g., "Word-doc-rendered, file ID...").
+        # If additional terms need to appear on the customer PDF, use contract.custom_terms (matches master-agreement codepath).
+        if contract.custom_terms:
             elements.append(Paragraph("ADDITIONAL TERMS AND CONDITIONS", heading_style))
-
-            # Handle multi-line notes
-            notes_text = contract.notes.replace('\n', '<br/>')
-            elements.append(Paragraph(notes_text, body_style))
+            additional_terms_text = contract.custom_terms.replace('\n', '<br/>')
+            elements.append(Paragraph(additional_terms_text, body_style))
             elements.append(Spacer(1, 0.3*inch))
 
         # Contract Status Indicator
