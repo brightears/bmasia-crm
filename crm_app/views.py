@@ -2314,6 +2314,20 @@ class ContractViewSet(BaseModelViewSet):
             if contract.preamble_custom:
                 preamble_text = contract.preamble_custom
             else:
+                # FIX 2026-05-05 (Lyra): product-aware Whereas clause.
+                # SYB contracts → "BMA is a certified legal reseller of Soundtrack Your Brand (SYB)..."
+                # BB/LIM contracts → "BMA provides License Inclusive Music (LIM)..." (BB is BMAsia's own product, no SYB-licensing reference).
+                # Detection mirrors the Section 5 product-aware logic (commit 7509b06).
+                _svc_locs = contract.service_locations.all()
+                _platforms = {loc.platform for loc in _svc_locs} if _svc_locs.exists() else {'soundtrack'}
+
+                if _platforms == {'custom'} or _platforms == {'beatbreeze'} or _platforms == {'custom', 'beatbreeze'}:
+                    # BB / LIM only — BMAsia's own product, not SYB-licensing
+                    whereas_clause = "<b>Whereas</b> BMA provides License Inclusive Music (LIM) services and music design and management for hospitality and commercial clients."
+                else:
+                    # SYB or mixed — keep the original SYB-reseller framing
+                    whereas_clause = "<b>Whereas</b> BMA is a certified legal reseller of Soundtrack Your Brand (SYB) and provides music design and management services to hospitality and commercial clients."
+
                 # Default preamble
                 preamble_text = f"""
 This agreement is made on {contract.start_date.strftime('%d %B %Y') if contract.start_date else '[date]'} between:<br/><br/>
@@ -2321,7 +2335,7 @@ This agreement is made on {contract.start_date.strftime('%d %B %Y') if contract.
 and<br/><br/>
 <b>{company.legal_entity_name or company.name}</b>, with registered address at {self._format_company_address(company)} (Client).<br/><br/>
 (Together "The Parties")<br/><br/>
-<b>Whereas</b> BMA is a certified legal reseller of Soundtrack Your Brand (SYB) and provides music design and management services to hospitality and commercial clients.
+{whereas_clause}
                 """
 
             # Substitute template variables
