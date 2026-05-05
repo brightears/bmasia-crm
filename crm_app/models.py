@@ -961,8 +961,21 @@ class Contract(TimestampedModel):
             self.contract_number = DocumentSequence.get_next_number(region, 'CT')
         elif not self.contract_number or self.contract_number.startswith('C-'):
             # Draft/new contracts get a temporary DRAFT number
-            draft_count = Contract.objects.filter(contract_number__startswith='DRAFT-').count() + 1
-            self.contract_number = f'DRAFT-{draft_count:04d}'
+            # FIX 2026-05-05 (Lyra): use MAX(existing DRAFT-NNNN) + 1 instead of COUNT() + 1.
+            # Old logic broke when a Draft was deleted (count drops, but old numbers remain in DB
+            # → collision on next create). MAX-based logic is safe regardless of deletions.
+            from django.db.models import Max
+            from django.db.models.functions import Substr, Cast
+            existing_drafts = Contract.objects.filter(
+                contract_number__regex=r'^DRAFT-\d{4}$'
+            ).values_list('contract_number', flat=True)
+            max_draft = 0
+            for cn in existing_drafts:
+                try:
+                    max_draft = max(max_draft, int(cn.replace('DRAFT-', '')))
+                except ValueError:
+                    continue
+            self.contract_number = f'DRAFT-{max_draft + 1:04d}'
 
         super().save(*args, **kwargs)
 

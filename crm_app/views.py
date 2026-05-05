@@ -2011,9 +2011,17 @@ class ContractViewSet(BaseModelViewSet):
             f"{contract.start_date.strftime('%b %d, %Y')}<br/>to {contract.end_date.strftime('%b %d, %Y')}",
             validity_style
         )
+        # FIX 2026-05-05 (Lyra): suppress DRAFT-NNNN placeholder on customer-facing PDFs.
+        # Render "(Pending finalization)" instead of e.g. "DRAFT-0005" so customers never see
+        # internal placeholder numbers when a render+send happens before Draft→Sent flip.
+        # Real contract number is assigned at status transition; if customer sees DRAFT-, it's a fire-sequence bug
+        # caught here as a safety net rather than leaking.
+        contract_number_display = contract.contract_number
+        if contract_number_display and contract_number_display.startswith('DRAFT-'):
+            contract_number_display = '(Pending finalization)'
         metadata_data = [
             ['Contract Number', 'Date', 'Validity'],
-            [contract.contract_number,
+            [contract_number_display,
              contract.start_date.strftime('%b %d, %Y'),
              validity_text]
         ]
@@ -2538,13 +2546,29 @@ and<br/><br/>
             )
 
             # Create styled bank details card (adjusted widths to fit page)
+            # FIX 2026-05-05 (Lyra): wrap cell content in Paragraph so long bank names
+            # (e.g. "TMBThanachart Bank, Thonglor Soi 17 Branch") wrap to multiple lines
+            # instead of overflowing into adjacent SWIFT/Account columns. Plain strings
+            # in ReportLab Table cells DON'T wrap; Paragraph objects DO.
+            bank_cell_style = ParagraphStyle(
+                'BankCell',
+                fontName='DejaVuSans',
+                fontSize=8,
+                textColor=colors.HexColor('#333333'),
+                leading=10,
+            )
             bank_data = [
                 ['Beneficiary', 'Bank', 'SWIFT', 'Account No.'],
-                [entity_name, entity_bank, entity_swift, entity_account]
+                [
+                    Paragraph(entity_name, bank_cell_style),
+                    Paragraph(entity_bank, bank_cell_style),
+                    Paragraph(entity_swift, bank_cell_style),
+                    Paragraph(entity_account, bank_cell_style),
+                ]
             ]
 
-            # Total width ~6.5 inches (page width minus margins)
-            bank_table = Table(bank_data, colWidths=[1.6*inch, 2.3*inch, 1.0*inch, 1.5*inch])
+            # Total width ~6.5 inches (page width minus margins) — Bank widened slightly to fit common BMA bank names on one line, SWIFT trimmed to balance
+            bank_table = Table(bank_data, colWidths=[1.5*inch, 2.5*inch, 1.0*inch, 1.4*inch])
             bank_table.setStyle(TableStyle([
                 # Header row - subtle gray
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f0f0f0')),
