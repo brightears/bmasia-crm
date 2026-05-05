@@ -2011,22 +2011,31 @@ class ContractViewSet(BaseModelViewSet):
             f"{contract.start_date.strftime('%b %d, %Y')}<br/>to {contract.end_date.strftime('%b %d, %Y')}",
             validity_style
         )
-        # FIX 2026-05-05 (Lyra): suppress DRAFT-NNNN placeholder on customer-facing PDFs.
-        # Render "(Pending finalization)" instead of e.g. "DRAFT-0005" so customers never see
-        # internal placeholder numbers when a render+send happens before Draft→Sent flip.
-        # Real contract number is assigned at status transition; if customer sees DRAFT-, it's a fire-sequence bug
-        # caught here as a safety net rather than leaking.
-        contract_number_display = contract.contract_number
-        if contract_number_display and contract_number_display.startswith('DRAFT-'):
-            contract_number_display = '(Pending finalization)'
-        metadata_data = [
-            ['Contract Number', 'Date', 'Validity'],
-            [contract_number_display,
-             contract.start_date.strftime('%b %d, %Y'),
-             validity_text]
-        ]
-
-        metadata_table = Table(metadata_data, colWidths=[2.2*inch, 1.8*inch, 2.9*inch])
+        # FIX 2026-05-05 (Lyra, refined): suppress entire Contract Number column on Draft renders.
+        # Original safety-net showed "(Pending finalization)" which Nikki flagged as looking
+        # unfinished/unprofessional even on internal preview (HGI Darwin 20:55 BKK feedback).
+        # New behavior:
+        #   - Draft (pre-flip): hide Contract Number column entirely → 2-column table (Date / Validity)
+        #   - Sent/Active/Renewed/Expired: show full 3-column table with real contract_number
+        # Real contract number gets assigned on Draft→Sent flip via models.Contract.save() — the
+        # canonical fire sequence renders AFTER the flip, so customer-facing PDFs always show the
+        # real number. This is the internal-preview polish for pre-flip renders.
+        is_draft_number = contract.contract_number and contract.contract_number.startswith('DRAFT-')
+        if is_draft_number:
+            metadata_data = [
+                ['Date', 'Validity'],
+                [contract.start_date.strftime('%b %d, %Y'),
+                 validity_text]
+            ]
+            metadata_table = Table(metadata_data, colWidths=[2.5*inch, 4.4*inch])
+        else:
+            metadata_data = [
+                ['Contract Number', 'Date', 'Validity'],
+                [contract.contract_number,
+                 contract.start_date.strftime('%b %d, %Y'),
+                 validity_text]
+            ]
+            metadata_table = Table(metadata_data, colWidths=[2.2*inch, 1.8*inch, 2.9*inch])
         metadata_table.setStyle(TableStyle([
             # Header row — deep amber
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#E8910C')),
