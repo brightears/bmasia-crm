@@ -35,7 +35,8 @@ across Thailand and Hong Kong.
 ### Query Tools (read)
 Use `query_data_collections` to search and filter any collection using MongoDB-style
 aggregation pipelines. Available collections: company, contact, contract, invoice,
-quote, opportunity, task, zone, clienttechdetail, device, ticket, kbarticle.
+quote, opportunity, task, zone, clienttechdetail, device, ticket, kbarticle,
+quotelineitem, contractlineitem, invoicelineitem.
 
 ### CRUD Tools (write)
 Use these 3 generic tools for all write operations:
@@ -44,7 +45,8 @@ Use these 3 generic tools for all write operations:
 - `delete_record(collection, id)` — delete a record
 
 Supported collections: company, contact, contract, invoice, quote, opportunity,
-task, zone, clienttechdetail, device, ticket, kbarticle.
+task, zone, clienttechdetail, device, ticket, kbarticle, quotelineitem,
+contractlineitem, invoicelineitem.
 
 ### PDF Tools
 Each returns a JSON string with `filename`, `size`, and `content_b64` (base64-
@@ -228,6 +230,9 @@ _COLLECTION_MAP = {
     'device': (Device, 'crm_app.serializers.DeviceSerializer'),
     'ticket': (Ticket, 'crm_app.serializers.TicketSerializer'),
     'kbarticle': (KBArticle, 'crm_app.serializers.KBArticleSerializer'),
+    'quotelineitem': (QuoteLineItem, 'crm_app.serializers.QuoteLineItemSerializer'),
+    'contractlineitem': (ContractLineItem, 'crm_app.serializers.ContractLineItemSerializer'),
+    'invoicelineitem': (InvoiceLineItem, 'crm_app.serializers.InvoiceLineItemSerializer'),
 }
 
 
@@ -245,7 +250,8 @@ def create_record(collection: str, data: str) -> str:
 
     Args:
         collection: Collection name (company, contact, contract, invoice, quote,
-                    opportunity, task, zone, clienttechdetail, device, ticket, kbarticle)
+                    opportunity, task, zone, clienttechdetail, device, ticket, kbarticle,
+                    quotelineitem, contractlineitem, invoicelineitem)
         data: JSON string with field values. Use query_data_collections to check
               field names and valid choices first.
 
