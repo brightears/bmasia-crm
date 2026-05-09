@@ -161,7 +161,7 @@ def format_address_multiline(company):
 
 class BaseModelViewSet(viewsets.ModelViewSet):
     """Base viewset with common functionality"""
-    permission_classes = [AllowAny]  # Disabled auth for development
+    permission_classes = [IsAuthenticated]  # Hardened 09.05.2026 — Cira gatekeeper era
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     
     def get_queryset(self):
