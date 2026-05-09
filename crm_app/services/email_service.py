@@ -729,6 +729,24 @@ class EmailService:
         ).distinct()
 
         for company in companies:
+            # Skip companies with no zones linked — the quarterly template
+            # otherwise renders "Active Zones: 0 of 0 zones" which is an
+            # embarrassing data-incomplete signal to the customer. Caught
+            # 08.05.2026 on RIU Plaza NYC during Nina's Track A audit; see
+            # data/drafts/crm-bug-zone-count-zero-of-zero-2026-05-08.md in
+            # the BMAsia-Emails repo.
+            zone_total = company.zones.count()
+            if zone_total == 0:
+                logger.warning(
+                    "quarterly_checkin: skipping company %s (id=%s) — no zones "
+                    "linked (soundtrack_account_id=%r). Fix: link the SYB "
+                    "account or sync zones, then it will re-enter the next "
+                    "quarterly cycle.",
+                    company.name, company.id, company.soundtrack_account_id,
+                )
+                results['skipped'] = results.get('skipped', 0) + 1
+                continue
+
             # Get contacts for quarterly updates
             contacts = company.contacts.filter(
                 is_active=True,
