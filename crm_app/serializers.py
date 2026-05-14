@@ -669,6 +669,7 @@ class ContractSerializer(serializers.ModelSerializer):
             'id', 'company', 'company_name', 'opportunity', 'opportunity_name',
             'quote', 'quote_number',
             'contract_number', 'contract_type', 'status', 'start_date', 'end_date',
+            'sent_date',
             'value', 'tax_rate', 'tax_amount', 'total_value',
             'currency', 'auto_renew', 'renewal_period_months', 'is_active',
             'payment_terms', 'billing_frequency', 'discount_percentage', 'notes',
