@@ -208,6 +208,40 @@ class KBArticleQuery(ModelQueryToolset):
     extra_instructions = "Knowledge base articles for tech support. Search by keyword to find solutions."
 
 
+class QuoteLineItemQuery(ModelQueryToolset):
+    model = QuoteLineItem
+    fields = [
+        'id', 'quote', 'product_service', 'description', 'quantity',
+        'unit_price', 'discount_percentage', 'tax_rate', 'line_total',
+        'created_at', 'updated_at',
+    ]
+    search_fields = ['description', 'product_service']
+    extra_instructions = "Line items attached to quotes. Use to verify what's on a quote PDF or audit nested-write results."
+
+
+class ContractLineItemQuery(ModelQueryToolset):
+    model = ContractLineItem
+    fields = [
+        'id', 'contract', 'product_service', 'description', 'quantity',
+        'unit_price', 'discount_percentage', 'tax_rate', 'line_total',
+        'created_at', 'updated_at',
+    ]
+    search_fields = ['description', 'product_service']
+    extra_instructions = "Line items attached to contracts. Use to verify what's on a contract PDF or audit nested-write results."
+
+
+class InvoiceLineItemQuery(ModelQueryToolset):
+    model = InvoiceLineItem
+    fields = [
+        'id', 'invoice', 'product_service', 'description', 'quantity',
+        'unit_price', 'tax_rate', 'line_total',
+        'service_period_start', 'service_period_end',
+        'created_at', 'updated_at',
+    ]
+    search_fields = ['description', 'product_service']
+    extra_instructions = "Line items attached to invoices. Use to verify what's on an invoice PDF or audit nested-write results."
+
+
 # ============================================================
 # Generic CRUD tools — bypasses ViewSet patching bug
 # ============================================================
