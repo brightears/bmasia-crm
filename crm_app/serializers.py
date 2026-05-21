@@ -693,6 +693,16 @@ class ContractSerializer(serializers.ModelSerializer):
             'bmasia_contact_name', 'bmasia_contact_email', 'bmasia_contact_title',
             'customer_contact_name', 'customer_contact_email', 'customer_contact_title',
             'contract_documents', 'line_items', 'service_locations',
+            # Finance tracking — Revenue lifecycle.
+            # Fix 2026-05-21 (Lyra, per Cira build-request): these were absent from
+            # the whitelist, causing DRF to silent-drop the fields on update. Four
+            # confirmed cases (Phoenix Mills, Arnoma, Mercure UAE, ibis Silom)
+            # set lifecycle_effective_date + lifecycle_type via update and read
+            # them back as null/'' with no validation error. Adding here exposes
+            # them for read + write. lifecycle_type_manually_set flag is also
+            # surfaced so callers can explicitly mark manual sets and prevent
+            # the revenue-tracking auto-management from overwriting them.
+            'lifecycle_type', 'lifecycle_type_manually_set', 'lifecycle_effective_date',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'contract_number', 'effective_soundtrack_account_id', 'created_at', 'updated_at']
