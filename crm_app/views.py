@@ -6142,7 +6142,8 @@ class QuoteViewSet(BaseModelViewSet):
             parent=styles['Normal'],
             fontSize=9,
             textColor=colors.HexColor(TEXT_DARK),
-            leading=12
+            leading=12,
+            fontName='DejaVuSans'
         )
 
         small_style = ParagraphStyle(
@@ -6150,7 +6151,8 @@ class QuoteViewSet(BaseModelViewSet):
             parent=styles['Normal'],
             fontSize=7,
             textColor=colors.HexColor(TEXT_MID),
-            leading=9
+            leading=9,
+            fontName='DejaVuSans'
         )
 
         terms_style = ParagraphStyle(
@@ -6158,7 +6160,8 @@ class QuoteViewSet(BaseModelViewSet):
             parent=styles['Normal'],
             fontSize=7,
             textColor=colors.HexColor('#757575'),
-            leading=8
+            leading=8,
+            fontName='DejaVuSans'
         )
 
         # Header - BMAsia Logo (properly sized with aspect ratio preserved)
@@ -6461,6 +6464,7 @@ class QuoteViewSet(BaseModelViewSet):
                 leading=9,
                 leftIndent=8,
                 borderPadding=4,
+                fontName='DejaVuSans',
             )
             notes_text = quote.notes.strip().replace('\n', '<br/>')
             elements.append(Paragraph(f"<b>Notes:</b> {notes_text}", notes_style))
