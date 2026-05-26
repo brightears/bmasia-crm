@@ -22,6 +22,7 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { useNavigate } from 'react-router-dom';
 import { Company, Zone, ClientTechDetail } from '../types';
 import ApiService from '../services/api';
 
@@ -116,6 +117,7 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
   companies,
   initialCompanyId,
 }) => {
+  const navigate = useNavigate();
   const [form, setForm] = useState<FormState>(emptyForm);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [zones, setZones] = useState<Zone[]>([]);
@@ -456,14 +458,17 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
                   <Button
                     variant="outlined"
                     size="small"
-                    onClick={() => window.open('/zones/new', '_blank')}
+                    onClick={() => {
+                      onClose();
+                      navigate('/zones/new');
+                    }}
                   >
                     + Add Zone
                   </Button>
                 )}
               </Box>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-                Same Zone management as on the Company page. Cards open in a new tab so you don't lose this form.
+                Same Zone management as on the Company page. Add or Edit will navigate away — save this form first if you have unsaved changes.
               </Typography>
               {!form.company ? (
                 <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
@@ -489,7 +494,10 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
                           transition: 'all 0.2s',
                           '&:hover': { boxShadow: 2, borderColor: 'primary.main' },
                         }}
-                        onClick={() => window.open(`/zones/${zone.id}`, '_blank')}
+                        onClick={() => {
+                          onClose();
+                          navigate(`/zones/${zone.id}`);
+                        }}
                       >
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1, mb: 0.5 }}>
                           <Typography variant="body2" fontWeight={600} noWrap title={zone.name}>
