@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.admin import SimpleListFilter
-from django.utils.html import format_html
+from django.utils.html import format_html, format_html_join
 from django.utils.formats import number_format
 from django import forms
 from django.http import HttpResponse, HttpResponseRedirect
@@ -1463,12 +1463,16 @@ class ClientTechDetailAdmin(admin.ModelAdmin):
     list_display = ['company', 'outlet_name', 'platform_type', 'system_type', 'anydesk_id', 'pc_make', 'pc_model', 'created_at']
     list_filter = ['platform_type', 'system_type', 'company']
     search_fields = ['outlet_name', 'company__name', 'anydesk_id', 'teamviewer_id', 'comments']
-    readonly_fields = ['id', 'created_at', 'updated_at']
+    readonly_fields = ['id', 'created_at', 'updated_at', 'zones_management']
     autocomplete_fields = ['company', 'zone']
 
     fieldsets = (
         ('Client & Location', {
             'fields': ('company', 'zone', 'outlet_name', 'platform_type', 'syb_account_type')
+        }),
+        ('Music Zones (this Company)', {
+            'fields': ('zones_management',),
+            'description': 'Same Zone add / edit / delete as on the Company page — duplicated here for Tech Support convenience.'
         }),
         ('Remote Access', {
             'fields': ('anydesk_id', 'teamviewer_id', 'ultraviewer_id', 'other_remote_id')
@@ -1497,6 +1501,72 @@ class ClientTechDetailAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+    def zones_management(self, obj):
+        """Mirror of CompanyAdmin's Zone inline — list company zones + Add/Edit/Delete links.
+        Renders nothing useful until a Company is saved on this Tech Detail (FK is the anchor)."""
+        if not obj or not obj.company_id:
+            return format_html(
+                '<em style="color:#999;">Save this Tech Detail with a Company selected first. '
+                'Music Zones for that Company will then appear here.</em>'
+            )
+
+        zones = obj.company.zones.all().order_by('name')
+        status_colors = {
+            'online': 'green',
+            'offline': 'red',
+            'no_device': '#DAA520',
+            'expired': 'gray',
+            'pending': 'gray',
+            'cancelled': 'gray',
+        }
+
+        if zones:
+            rows = format_html_join(
+                '',
+                '<tr>'
+                '<td style="padding:4px 8px;"><a href="{}">{}</a></td>'
+                '<td style="padding:4px 8px;">{}</td>'
+                '<td style="padding:4px 8px;"><span style="padding:3px 8px; border-radius:3px; '
+                'color:white; background-color:{}; font-size:11px;">{}</span></td>'
+                '<td style="padding:4px 8px;"><a href="{}">Edit</a> &nbsp;|&nbsp; '
+                '<a href="{}" style="color:#b00;">Open to Delete</a></td>'
+                '</tr>',
+                (
+                    (
+                        reverse('admin:crm_app_zone_change', args=[z.pk]),
+                        z.name,
+                        z.get_platform_display(),
+                        status_colors.get(z.status, 'gray'),
+                        z.get_status_display(),
+                        reverse('admin:crm_app_zone_change', args=[z.pk]),
+                        reverse('admin:crm_app_zone_change', args=[z.pk]),
+                    )
+                    for z in zones
+                ),
+            )
+        else:
+            rows = format_html(
+                '<tr><td colspan="4" style="text-align:center; color:#999; padding:8px;">'
+                'No Music Zones yet for this Company.</td></tr>'
+            )
+
+        add_url = '{}?company={}'.format(reverse('admin:crm_app_zone_add'), obj.company_id)
+
+        return format_html(
+            '<table style="width:100%; margin-bottom:10px; border-collapse:collapse;">'
+            '<thead style="background:#f4f4f4;"><tr>'
+            '<th style="text-align:left; padding:6px 8px;">Name</th>'
+            '<th style="text-align:left; padding:6px 8px;">Platform</th>'
+            '<th style="text-align:left; padding:6px 8px;">Status</th>'
+            '<th style="text-align:left; padding:6px 8px;">Actions</th>'
+            '</tr></thead>'
+            '<tbody>{}</tbody>'
+            '</table>'
+            '<p><a class="button" href="{}">+ Add Zone</a></p>',
+            rows, add_url,
+        )
+    zones_management.short_description = 'Music Zones (this Company)'
 
 
 @admin.register(Zone)
