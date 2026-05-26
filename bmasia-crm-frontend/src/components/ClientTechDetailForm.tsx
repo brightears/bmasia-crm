@@ -446,6 +446,85 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
               </Grid>
             </Paper>
 
+            {/* Section 1.5: Music Zones (this Company) — duplicate of the Company-page Zones tab for Tech Support convenience */}
+            <Paper sx={{ p: 2, mb: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography variant="subtitle1" fontWeight={600}>
+                  Music Zones (this Company)
+                </Typography>
+                {form.company && (
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => window.open('/zones/new', '_blank')}
+                  >
+                    + Add Zone
+                  </Button>
+                )}
+              </Box>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+                Same Zone management as on the Company page. Cards open in a new tab so you don't lose this form.
+              </Typography>
+              {!form.company ? (
+                <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                  Select a Company above to see its Music Zones.
+                </Typography>
+              ) : zonesLoading ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
+                  <CircularProgress size={24} />
+                </Box>
+              ) : zones.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                  No Music Zones yet for this Company. Use "+ Add Zone" above.
+                </Typography>
+              ) : (
+                <Grid container spacing={1.5}>
+                  {zones.map((zone) => (
+                    <Grid item xs={12} sm={6} md={4} key={zone.id}>
+                      <Paper
+                        variant="outlined"
+                        sx={{
+                          p: 1.5,
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          '&:hover': { boxShadow: 2, borderColor: 'primary.main' },
+                        }}
+                        onClick={() => window.open(`/zones/${zone.id}`, '_blank')}
+                      >
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                          <Typography variant="body2" fontWeight={600} noWrap title={zone.name}>
+                            {zone.name}
+                          </Typography>
+                          <Box
+                            sx={{
+                              px: 1,
+                              py: 0.25,
+                              borderRadius: 1,
+                              fontSize: '0.7rem',
+                              color: 'white',
+                              bgcolor:
+                                zone.status === 'online' ? 'success.main' :
+                                zone.status === 'offline' ? 'error.main' :
+                                zone.status === 'no_device' ? 'warning.main' :
+                                'grey.500',
+                              textTransform: 'capitalize',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {zone.status?.replace('_', ' ')}
+                          </Box>
+                        </Box>
+                        <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'capitalize' }}>
+                          {zone.platform}
+                          {zone.device_name ? ` • ${zone.device_name}` : ''}
+                        </Typography>
+                      </Paper>
+                    </Grid>
+                  ))}
+                </Grid>
+              )}
+            </Paper>
+
             {/* Section 2: Remote Access */}
             <Paper sx={{ p: 2, mb: 2 }}>
               <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>
