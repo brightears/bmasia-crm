@@ -671,7 +671,7 @@ const CompanyDetail: React.FC = () => {
                   variant="contained"
                   size="small"
                   startIcon={<Add />}
-                  onClick={() => navigate('/zones/new')}
+                  onClick={() => navigate(`/zones/new?company=${id}&return_to=${encodeURIComponent(`/companies/${id}`)}`)}
                   sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
                 >
                   Add Zone
@@ -823,7 +823,7 @@ const CompanyDetail: React.FC = () => {
               <Button
                 variant="contained"
                 startIcon={<Add />}
-                onClick={() => navigate('/zones/new')}
+                onClick={() => navigate(`/zones/new?company=${id}&return_to=${encodeURIComponent(`/companies/${id}`)}`)}
                 sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
               >
                 Add First Zone

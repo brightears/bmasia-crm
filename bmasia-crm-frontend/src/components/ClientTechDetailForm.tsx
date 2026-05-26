@@ -460,7 +460,7 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
                     size="small"
                     onClick={() => {
                       onClose();
-                      navigate('/zones/new');
+                      navigate(`/zones/new?company=${form.company}&return_to=${encodeURIComponent('/client-tech-details')}`);
                     }}
                   >
                     + Add Zone

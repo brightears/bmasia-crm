@@ -21,7 +21,7 @@ import {
   Stack,
 } from '@mui/material';
 import { Save, Cancel, ArrowBack, Add } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Zone, Company, Device, DEVICE_TYPE_LABELS } from '../types';
 import ApiService from '../services/api';
 
@@ -43,8 +43,11 @@ interface FormData {
 
 const ZoneForm: React.FC<ZoneFormProps> = ({ zone, mode }) => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const prefilledCompanyId = mode === 'create' ? (searchParams.get('company') || '') : '';
+  const returnTo = searchParams.get('return_to') || '/zones';
   const [formData, setFormData] = useState<FormData>({
-    company: '',
+    company: prefilledCompanyId,
     name: '',
     platform: 'soundtrack',
     status: 'pending',
@@ -175,12 +178,18 @@ const ZoneForm: React.FC<ZoneFormProps> = ({ zone, mode }) => {
       };
 
       if (mode === 'edit' && zone?.id) {
-        await ApiService.updateZone(zone.id, submitData);
+        const updated = await ApiService.updateZone(zone.id, submitData);
+        if (!updated?.id) {
+          throw new Error('Zone update returned no record');
+        }
       } else {
-        await ApiService.createZone(submitData);
+        const created = await ApiService.createZone(submitData);
+        if (!created?.id) {
+          throw new Error('Zone create returned no record');
+        }
       }
 
-      navigate('/zones');
+      navigate(returnTo);
     } catch (err: any) {
       console.error('Submit error:', err);
       if (err.response?.data) {
@@ -222,8 +231,8 @@ const ZoneForm: React.FC<ZoneFormProps> = ({ zone, mode }) => {
 
   return (
     <Box>
-      <Button startIcon={<ArrowBack />} onClick={() => navigate('/zones')} sx={{ mb: 2 }}>
-        Back to Zones
+      <Button startIcon={<ArrowBack />} onClick={() => navigate(returnTo)} sx={{ mb: 2 }}>
+        Back
       </Button>
 
       <Typography variant="h4" component="h1" gutterBottom>
@@ -416,7 +425,7 @@ const ZoneForm: React.FC<ZoneFormProps> = ({ zone, mode }) => {
           <Button
             variant="outlined"
             startIcon={<Cancel />}
-            onClick={() => navigate('/zones')}
+            onClick={() => navigate(returnTo)}
             disabled={submitting}
           >
             Cancel
