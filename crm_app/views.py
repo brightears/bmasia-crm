@@ -2591,7 +2591,8 @@ and<br/><br/>
             ]
 
             # Total width ~6.5 inches (page width minus margins) — Bank widened slightly to fit common BMA bank names on one line, SWIFT trimmed to balance
-            bank_table = Table(bank_data, colWidths=[1.5*inch, 2.5*inch, 1.0*inch, 1.4*inch])
+            # FIX 2026-05-29 (Lyra): SWIFT col 1.0->1.2in (Bank 2.5->2.3 to compensate) so 11-char BICs like HSBCHKHHHKH render on one line, not wrapping a lone trailing "H".
+            bank_table = Table(bank_data, colWidths=[1.5*inch, 2.3*inch, 1.2*inch, 1.4*inch])
             bank_table.setStyle(TableStyle([
                 # Header row - subtle gray
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f0f0f0')),
