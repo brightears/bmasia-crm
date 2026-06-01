@@ -6295,9 +6295,22 @@ class QuoteViewSet(BaseModelViewSet):
                 ['Product / Service', 'Quantity', 'Unit Price', 'Total']
             ]
 
+            # Map product_service slug -> customer-facing display name.
+            # The data field stays a lowercase slug (validation contract); only the
+            # rendered PDF label is humanized. Unknown values render unchanged.
+            product_display_names = {
+                'beatbreeze': 'Beat Breeze',
+                'soundtrack': 'Soundtrack Your Brand',
+                'soundtrackyourbrand': 'Soundtrack Your Brand',
+                'syb': 'Soundtrack Your Brand',
+            }
+
             for item in line_items:
                 # Combine product name (bold) with description
-                product_name = item.product_service or 'Service'
+                raw_product = item.product_service or 'Service'
+                product_name = product_display_names.get(
+                    raw_product.strip().lower().replace(' ', ''), raw_product
+                )
                 description_text = item.description or ''
                 # Format: Product name in bold, description below
                 if description_text:
