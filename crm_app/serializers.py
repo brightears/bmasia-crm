@@ -775,13 +775,15 @@ class ContractSerializer(serializers.ModelSerializer):
         line_items_data = validated_data.pop('line_items', [])
         service_locations_data = validated_data.pop('service_locations', [])
 
-        # Auto-generate temporary DRAFT number if not provided
-        # Real contract number is assigned by model.save() when status → Sent
-        if not validated_data.get('contract_number'):
-            draft_count = Contract.objects.filter(
-                contract_number__startswith='DRAFT-'
-            ).count() + 1
-            validated_data['contract_number'] = f'DRAFT-{draft_count:04d}'
+        # DRAFT placeholder numbering is handled centrally by Contract.save()
+        # (MAX-based — see models.py). Do NOT generate it here.
+        # FIX 2026-06-02 (Lyra): removed the old COUNT-based generation that
+        # bypassed the model's MAX-based logic and collided on gaps. With drafts
+        # 0001-0007 present but gaps at 0004 (freed when minted real number),
+        # count(6)+1 = 7 tried DRAFT-0007, which already existed (Pullman Hanoi)
+        # → fleet-wide contract-create failure. Deferring to the model (which
+        # uses MAX(existing)+1) is gap-safe. Real HK-CT/TH-CT number is still
+        # assigned by the model when status → Sent.
 
         # Auto-calculate tax fields
         validated_data = self._calculate_tax_fields(validated_data)
