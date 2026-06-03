@@ -86,6 +86,8 @@ def derive_payment_schedule(quote, format_duration):
     freq = getattr(quote, 'billing_frequency', 'annual') or 'annual'
     months = getattr(quote, 'contract_duration_months', 12) or 12
     term = format_duration(months)
+    if freq in ('one-time', 'one_time', 'once'):
+        return "Billed once, in full, on invoice."
     if freq == 'upfront':
         return f"Billed once, in full, upfront for the {term} term."
     if freq == 'biannual':
@@ -194,7 +196,8 @@ def build_quote_pdf(quote, entity, logo_path, format_address_multiline, format_d
         [quote.quote_number,
          quote.valid_from.strftime('%b %d, %Y'),
          quote.valid_until.strftime('%b %d, %Y'),
-         format_duration(quote.contract_duration_months)],
+         ('One-time' if (getattr(quote, 'billing_frequency', '') or '') in ('one-time', 'one_time', 'once')
+          else format_duration(quote.contract_duration_months))],
     ]
     metadata_table = Table(metadata_data, colWidths=[1.7 * inch, 1.7 * inch, 1.7 * inch, 1.8 * inch])
     metadata_table.setStyle(TableStyle([
@@ -262,8 +265,12 @@ def build_quote_pdf(quote, entity, logo_path, format_address_multiline, format_d
     billing_label = BILLING_FREQUENCY_DISPLAY.get(billing_freq, billing_freq.title())
     band_style = ParagraphStyle('TermBand', parent=styles['Normal'], fontSize=10,
                                 textColor=colors.HexColor(TEXT_DARK), fontName='DejaVuSans-Bold', leading=13)
+    if billing_freq in ('one-time', 'one_time', 'once'):
+        band_text = "One-time purchase &nbsp;&nbsp;|&nbsp;&nbsp; No recurring subscription"
+    else:
+        band_text = f"Term: {term_label} &nbsp;&nbsp;|&nbsp;&nbsp; Billing: {billing_label}"
     term_band = Table(
-        [[Paragraph(f"Term: {term_label} &nbsp;&nbsp;|&nbsp;&nbsp; Billing: {billing_label}", band_style)]],
+        [[Paragraph(band_text, band_style)]],
         colWidths=[6.9 * inch])
     term_band.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor(ACCENT_LIGHT)),
@@ -393,7 +400,9 @@ def build_quote_pdf(quote, entity, logo_path, format_address_multiline, format_d
         tax_pct = (quote.tax_amount / after_discount * 100) if after_discount > 0 else 0
         totals_data.append([f'{tax_label} ({tax_pct:.0f}%):', f"{currency_symbol}{quote.tax_amount:,.2f}"])
 
-    if duration_months > 12:
+    if billing_freq in ('one-time', 'one_time', 'once'):
+        totals_data.append(['<b>Total (one-time):</b>', f"<b>{currency_symbol}{quote.total_value:,.2f}</b>"])
+    elif duration_months > 12:
         duration_label = format_duration(duration_months)
         totals_data.append(['<b>Annual subscription:</b>', f"<b>{currency_symbol}{quote.total_value:,.2f} / year</b>"])
         years = duration_months / 12
