@@ -288,7 +288,14 @@ def build_quote_pdf(quote, entity, logo_path, format_address_multiline, format_d
         if code in SUBSCRIPTION_CODES:
             used_codes.add(code)
         description_text = item.description or ''
-        cell_content = f"<b>{code}</b><br/>{description_text}" if description_text else f"<b>{code}</b>"
+        # Avoid repeating the product name: if the description already begins with
+        # the product label, show the description alone (Norbert note 03.06.2026).
+        if description_text and description_text.strip().lower().startswith(code.lower()):
+            cell_content = f"<b>{description_text}</b>"
+        elif description_text:
+            cell_content = f"<b>{code}</b><br/>{description_text}"
+        else:
+            cell_content = f"<b>{code}</b>"
         qty_str = _qty_str(item.quantity)
         is_complimentary = float(item.unit_price) == 0
 
@@ -347,7 +354,7 @@ def build_quote_pdf(quote, entity, logo_path, format_address_multiline, format_d
         comp_data = [['Included at no charge', 'Quantity', 'Value']] + comp_items
         comp_table = Table(comp_data, colWidths=[3.5 * inch, 1 * inch, 2.4 * inch])
         comp_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#5B8A3C')),  # green = saving
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#B07C2A')),  # bronze = included (brand-warm)
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('FONT', (0, 0), (-1, 0), 'DejaVuSans-Bold', 9),
             ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
@@ -361,12 +368,12 @@ def build_quote_pdf(quote, entity, logo_path, format_address_multiline, format_d
             ('TOPPADDING', (0, 1), (-1, -1), 3),
             ('BOTTOMPADDING', (0, 1), (-1, -1), 3),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor(GRID_COLOR)),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F1F7EC')),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#FBF1DD')),
         ]))
         elements.append(comp_table)
         if total_comp_value > 0:
             saving_style = ParagraphStyle('Saving', parent=small_style, alignment=TA_RIGHT,
-                                          textColor=colors.HexColor('#5B8A3C'), fontName='DejaVuSans-Bold')
+                                          textColor=colors.HexColor('#8A5E15'), fontName='DejaVuSans-Bold')
             elements.append(Paragraph(
                 f"Total value included at no charge: {currency_symbol}{total_comp_value:,.2f}", saving_style))
 
