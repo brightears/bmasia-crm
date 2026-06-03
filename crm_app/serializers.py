@@ -977,7 +977,7 @@ class QuoteLineItemSerializer(serializers.ModelSerializer):
         model = QuoteLineItem
         fields = [
             'id', 'quote', 'product_service', 'description', 'quantity',
-            'unit_price', 'discount_percentage', 'tax_rate', 'line_total',
+            'unit_price', 'unit_value', 'discount_percentage', 'tax_rate', 'line_total',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'quote', 'line_total', 'created_at', 'updated_at']
@@ -1050,6 +1050,7 @@ class QuoteSerializer(serializers.ModelSerializer):
             'id', 'quote_number', 'company', 'company_name', 'contact', 'contact_name',
             'opportunity', 'opportunity_name', 'status', 'quote_type', 'contract_duration_months', 'valid_from', 'valid_until',
             'subtotal', 'tax_amount', 'discount_amount', 'total_value', 'currency',
+            'billing_frequency', 'payment_schedule',
             'terms_conditions', 'notes', 'is_expired', 'days_until_expiry',
             'sent_date', 'accepted_date', 'rejected_date', 'expired_date',
             'created_by', 'created_by_name', 'line_items', 'attachments', 'activities',
