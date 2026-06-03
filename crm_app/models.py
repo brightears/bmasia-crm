@@ -2399,6 +2399,23 @@ class Quote(TimestampedModel):
     total_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
 
+    # Billing presentation (drives the quote PDF term/billing band + payment-schedule line)
+    BILLING_FREQUENCY_CHOICES = [
+        ('annual', 'Annual'),
+        ('upfront', 'Upfront (full term)'),
+        ('biannual', 'Bi-annual'),
+        ('quarterly', 'Quarterly'),
+        ('monthly', 'Monthly'),
+    ]
+    billing_frequency = models.CharField(
+        max_length=20, choices=BILLING_FREQUENCY_CHOICES, default='annual',
+        help_text="How the subscription is billed across the contract term (shown on the quote PDF)."
+    )
+    payment_schedule = models.CharField(
+        max_length=255, blank=True,
+        help_text="Explicit payment-schedule line for the quote PDF. If blank, it is derived from billing frequency + contract term."
+    )
+
     # Additional information
     terms_conditions = models.TextField(blank=True, help_text="Terms and conditions for this quote")
     notes = models.TextField(blank=True, help_text="Internal notes about this quote")
@@ -2466,6 +2483,10 @@ class QuoteLineItem(TimestampedModel):
     description = models.TextField()
     quantity = models.DecimalField(max_digits=10, decimal_places=2, default=1)
     unit_price = models.DecimalField(max_digits=12, decimal_places=2)
+    unit_value = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        help_text="List/retail value per unit. Shown for complimentary (zero-price) items to anchor the saving. Leave blank for normally priced items."
+    )
     discount_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     line_total = models.DecimalField(max_digits=12, decimal_places=2)
