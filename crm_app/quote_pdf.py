@@ -377,12 +377,6 @@ def build_quote_pdf(quote, entity, logo_path, format_address_multiline, format_d
             elements.append(Paragraph(
                 f"Total value included at no charge: {currency_symbol}{total_comp_value:,.2f}", saving_style))
 
-    # Pt1 — legend footnote for any short codes used
-    if used_codes:
-        legend = "  ·  ".join(f"{c} = {LEGEND_FULL_NAMES[c]}" for c in sorted(used_codes))
-        elements.append(Spacer(1, 0.03 * inch))
-        elements.append(Paragraph(legend, small_style))
-
     elements.append(Spacer(1, 0.02 * inch))
 
     # Totals (Pt2c ladder — annual then total contract value for multi-year)
@@ -481,6 +475,13 @@ def build_quote_pdf(quote, entity, logo_path, format_address_multiline, format_d
                                      borderPadding=4, fontName='DejaVuSans')
         notes_text = quote.notes.strip().replace('\n', '<br/>')
         elements.append(Paragraph(f"<b>Notes:</b> {notes_text}", notes_style))
+
+    # Pt1 — product-code legend at the very bottom (cleaner placement, Norbert 03.06.2026)
+    if used_codes:
+        legend = "  ·  ".join(f"{c} = {LEGEND_FULL_NAMES[c]}" for c in sorted(used_codes))
+        elements.append(Spacer(1, 0.06 * inch))
+        legend_style = ParagraphStyle('Legend', parent=small_style, textColor=colors.HexColor(TEXT_LIGHT))
+        elements.append(Paragraph(legend, legend_style))
 
     doc.build(elements, onFirstPage=draw_quote_footer, onLaterPages=draw_quote_footer)
     pdf_data = buffer.getvalue()
