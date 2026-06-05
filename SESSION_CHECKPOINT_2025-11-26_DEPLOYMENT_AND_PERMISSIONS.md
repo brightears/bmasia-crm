@@ -150,19 +150,19 @@ Users with "Sales" role (and other non-Admin roles) saw "Access Denied" when acc
 
 ### How to Check Render Logs
 ```bash
-curl -s -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -s -H "Authorization: Bearer rnd_REDACTED_revoked" \
   "https://api.render.com/v1/logs?ownerId=tea-d13uhr3uibrs73btc1p0&resource=srv-d3clctt6ubrc73etb580&direction=backward&limit=50"
 ```
 
 ### How to Trigger Frontend Deployment
 ```bash
-curl -X POST -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -X POST -H "Authorization: Bearer rnd_REDACTED_revoked" \
   -H "Content-Type: application/json" -d '{}' \
   "https://api.render.com/v1/services/srv-d3clctt6ubrc73etb580/deploys"
 ```
 
 ### How to Check Deployment Status
 ```bash
-curl -s -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -s -H "Authorization: Bearer rnd_REDACTED_revoked" \
   "https://api.render.com/v1/services/srv-d3clctt6ubrc73etb580/deploys/{deploy_id}"
 ```

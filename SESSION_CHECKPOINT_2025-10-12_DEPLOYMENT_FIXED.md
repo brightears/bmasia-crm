@@ -276,7 +276,7 @@ curl -X POST -H "Content-Type: application/json" \
   "https://bmasia-crm.onrender.com/api/v1/auth/login/"
 
 # Check environment variables
-curl -s -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -s -H "Authorization: Bearer rnd_REDACTED_revoked" \
   "https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g/env-vars" | \
   python3 -c "import sys, json; data = json.load(sys.stdin); \
   print('Environment Variables:'); \
@@ -287,13 +287,13 @@ curl -s -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
 ### 2. If Variables Are Missing
 ```bash
 # Set ALL 4 together (copy from "Final Production Configuration" section above)
-curl -X PUT -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -X PUT -H "Authorization: Bearer rnd_REDACTED_revoked" \
   -H "Content-Type: application/json" \
   -d '[{...ALL 4 VARIABLES...}]' \
   "https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g/env-vars"
 
 # Then trigger deployment
-curl -X POST -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -X POST -H "Authorization: Bearer rnd_REDACTED_revoked" \
   -H "Content-Type: application/json" -d '{}' \
   "https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g/deploys"
 ```
@@ -331,7 +331,7 @@ git pull origin main
 - **Backend Service**: srv-d13ukt8gjchc73fjat0g
 - **Frontend Service**: srv-d3clctt6ubrc73etb580
 - **PostgreSQL Database**: dpg-d3cbikd6ubrc73el0ke0-a
-- **API Key**: rnd_QAJKR0jggzsxSLOCx3HfovreCzOd
+- **API Key**: rnd_REDACTED_revoked
 
 ### SMTP Configuration
 - **Email**: norbert@bmasiamusic.com

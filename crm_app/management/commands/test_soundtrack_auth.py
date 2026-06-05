@@ -10,7 +10,7 @@ class Command(BaseCommand):
     
     def handle(self, *args, **options):
         # The token from environment
-        token = "YVhId2UyTWJVWEhMRWlycUFPaUl3Y2NtOXNGeUoxR0Q6SVRHazZSWDVYV2FTenhiS1ZwNE1sSmhHUUJEVVRDdDZGU0FwVjZqMXNEQU1EMjRBT2pub2hmZ3NQODRRNndQWg=="
+        token = "REDACTED_set_in_render_dashboard"
         
         # Try to decode it
         try:

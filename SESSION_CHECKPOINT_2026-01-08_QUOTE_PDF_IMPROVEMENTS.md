@@ -99,11 +99,11 @@ Contains full 5-phase plan for:
 
 ```bash
 # Deploy backend
-curl -X POST -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -X POST -H "Authorization: Bearer rnd_REDACTED_revoked" \
   "https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g/deploys"
 
 # Check status
-curl -s -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -s -H "Authorization: Bearer rnd_REDACTED_revoked" \
   "https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g/deploys?limit=1"
 ```
 

@@ -10,7 +10,7 @@ Use the Django management command to create the table directly, bypassing migrat
 
 ### 1. Deploy Latest Code
 ```bash
-curl -X POST -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -X POST -H "Authorization: Bearer rnd_REDACTED_revoked" \
   https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g/deploys
 ```
 

@@ -74,14 +74,14 @@ python manage.py showmigrations crm_app
 Now that migrations are synced, trigger a new deployment via local terminal:
 
 ```bash
-curl -X POST -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -X POST -H "Authorization: Bearer rnd_REDACTED_revoked" \
   https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g/deploys
 ```
 
 ### 6. Monitor Deployment
 Check status every 15-30 seconds:
 ```bash
-curl -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -H "Authorization: Bearer rnd_REDACTED_revoked" \
   "https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g/deploys?limit=1"
 ```
 

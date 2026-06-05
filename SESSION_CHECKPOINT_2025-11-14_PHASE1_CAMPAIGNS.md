@@ -900,7 +900,7 @@ DEFAULT_FROM_EMAIL=BMAsia Music <norbert@bmasiamusic.com>
 - **Email**: admin@bmasiamusic.com
 
 ### Render API
-- **API Key**: rnd_QAJKR0jggzsxSLOCx3HfovreCzOd
+- **API Key**: rnd_REDACTED_revoked
 - **Owner ID**: tea-d13uhr3uibrs73btc1p0
 
 ### SMTP Configuration

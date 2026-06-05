@@ -374,7 +374,7 @@ f0b02f9 - Add Settings page with email automation controls
 - **Email**: admin@bmasiamusic.com
 
 ### Render API
-- **API Key**: rnd_QAJKR0jggzsxSLOCx3HfovreCzOd
+- **API Key**: rnd_REDACTED_revoked
 - **Owner ID**: tea-d13uhr3uibrs73btc1p0
 
 ### SMTP Configuration
@@ -405,17 +405,17 @@ python manage.py send_emails --type all --dry-run
 ### Check Deployment Status
 ```bash
 # Frontend
-curl -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -H "Authorization: Bearer rnd_REDACTED_revoked" \
   "https://api.render.com/v1/services/srv-d3clctt6ubrc73etb580/deploys?limit=1"
 
 # Backend
-curl -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -H "Authorization: Bearer rnd_REDACTED_revoked" \
   "https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g/deploys?limit=1"
 ```
 
 ### Verify Routes Configuration
 ```bash
-curl -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -H "Authorization: Bearer rnd_REDACTED_revoked" \
   "https://api.render.com/v1/services/srv-d3clctt6ubrc73etb580/routes"
 ```
 

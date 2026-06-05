@@ -292,7 +292,7 @@ MARKETING_SENDER_EMAIL=marketing@bmasiamusic.com
 **Step 3**: Add to Render:
 ```bash
 curl -X PUT \
-  -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+  -H "Authorization: Bearer rnd_REDACTED_revoked" \
   -H "Content-Type: application/json" \
   -d '[{"key":"MARKETING_SENDER_EMAIL","value":"marketing@bmasiamusic.com"}]' \
   "https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g/env-vars"

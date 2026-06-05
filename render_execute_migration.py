@@ -8,7 +8,7 @@ import json
 import time
 import sys
 
-RENDER_API_KEY = "rnd_QAJKR0jggzsxSLOCx3HfovreCzOd"
+RENDER_API_KEY = "rnd_REDACTED_revoked"
 API_BASE = "https://api.render.com/v1"
 
 def get_services():

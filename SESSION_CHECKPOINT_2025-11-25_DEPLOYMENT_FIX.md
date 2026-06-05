@@ -313,7 +313,7 @@ Date:   Mon Nov 25 04:51:00 2025
 ### Trigger Frontend Deployment
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+  -H "Authorization: Bearer rnd_REDACTED_revoked" \
   -H "Content-Type: application/json" \
   -d '{}' \
   "https://api.render.com/v1/services/srv-d3clctt6ubrc73etb580/deploys"
@@ -322,7 +322,7 @@ curl -X POST \
 ### Check Deployment Status
 ```bash
 curl -s \
-  -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+  -H "Authorization: Bearer rnd_REDACTED_revoked" \
   "https://api.render.com/v1/services/srv-d3clctt6ubrc73etb580/deploys/dep-d4ijc7p5pdvs73816910"
 ```
 

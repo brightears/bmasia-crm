@@ -258,21 +258,21 @@ Typical deployment takes 4-6 minutes:
 
 **Check Environment Variables**:
 ```bash
-curl -s -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -s -H "Authorization: Bearer rnd_REDACTED_revoked" \
   "https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g/env-vars" | \
   python3 -c "import sys, json; [print(item['envVar']['key']) for item in json.load(sys.stdin)]"
 ```
 
 **Check Service Status**:
 ```bash
-curl -s -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -s -H "Authorization: Bearer rnd_REDACTED_revoked" \
   "https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g" | \
   python3 -c "import sys, json; d=json.load(sys.stdin); print(f\"Status: {d['serviceDetails']['state']}\")"
 ```
 
 **View Latest Deployment**:
 ```bash
-curl -s -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -s -H "Authorization: Bearer rnd_REDACTED_revoked" \
   "https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g/deploys?limit=1" | \
   python3 -c "import sys, json; d=json.load(sys.stdin)[0]['deploy']; print(f\"Status: {d['status']}\\nCommit: {d['commit']['message'][:50]}\")"
 ```

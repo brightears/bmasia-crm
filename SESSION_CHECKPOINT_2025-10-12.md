@@ -231,7 +231,7 @@ If conversation is restarted:
 - Backend: srv-d13ukt8gjchc73fjat0g
 - Frontend: srv-d3clctt6ubrc73etb580 (needs verification)
 
-**Render API Key**: rnd_QAJKR0jggzsxSLOCx3HfovreCzOd (in .env)
+**Render API Key**: rnd_REDACTED_revoked (in .env)
 
 ---
 **Session Date**: October 12, 2025

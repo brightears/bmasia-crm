@@ -649,7 +649,7 @@ ALTER TABLE equipment DROP COLUMN zone_id;
 ### Quick Start Commands
 ```bash
 # Check deployment status
-curl -s -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -s -H "Authorization: Bearer rnd_REDACTED_revoked" \
   "https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g" | jq '.service.updatedAt'
 
 # Test Zone API
