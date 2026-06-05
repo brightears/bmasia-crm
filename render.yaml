@@ -6,17 +6,17 @@ services:
     startCommand: "./start.sh"
     envVars:
       - key: SECRET_KEY
-        value: django-insecure-demo-key-replace-in-production
+        sync: false
       - key: DEBUG
-        value: "True"
+        value: "False"
       - key: ALLOWED_HOSTS
         value: "*"
       - key: SOUNDTRACK_API_TOKEN
-        value: YVhId2UyTWJVWEhMRWlycUFPaUl3Y2NtOXNGeUoxR0Q6SVRHazZSWDVYV2FTenhiS1ZwNE1sSmhHUUJEVVRDdDZGU0FwVjZqMXNEQU1EMjRBT2pub2hmZ3NQODRRNndQWg==
+        sync: false
       - key: SOUNDTRACK_CLIENT_ID
-        value: VCZz6nGt0pkQ1fBsHuO8cqgR6Ctefv7f
+        sync: false
       - key: SOUNDTRACK_CLIENT_SECRET
-        value: Ht4g6isxxrNXeYgxNkDyfM0TJe508kqJHPdFVihi9KYbOnmfO8v2PipFUCf69zmc
+        sync: false
 
   # ALL email cron jobs DISABLED (30.03.2026)
   # Lyra handles all client communication: renewals, payments, quarterly check-ins, prospect outreach

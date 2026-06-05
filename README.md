@@ -131,9 +131,9 @@ The frontend will be available at `http://localhost:3000`
 ### API Configuration
 Environment variables (already configured on Render):
 ```
-SOUNDTRACK_API_TOKEN=YVhId2UyTWJVWEhMRWlycUFPaUl3Y2NtOXNGeUoxR0Q6SVRHazZSWDVYV2FTenhiS1ZwNE1sSmhHUUJEVVRDdDZGU0FwVjZqMXNEQU1EMjRBT2pub2hmZ3NQODRRNndQWg==
-SOUNDTRACK_CLIENT_ID=VCZz6nGt0pkQ1fBsHuO8cqgR6Ctefv7f
-SOUNDTRACK_CLIENT_SECRET=Ht4g6isxxrNXeYgxNkDyfM0TJe508kqJHPdFVihi9KYbOnmfO8v2PipFUCf69zmc
+SOUNDTRACK_API_TOKEN=REDACTED_set_in_render_dashboard
+SOUNDTRACK_CLIENT_ID=REDACTED_set_in_render_dashboard
+SOUNDTRACK_CLIENT_SECRET=REDACTED_set_in_render_dashboard
 ```
 
 ## User Roles & Permissions
@@ -232,9 +232,9 @@ DEBUG=True
 ALLOWED_HOSTS=*
 DATABASE_URL=sqlite:///db.sqlite3
 CORS_ALLOWED_ORIGINS=http://localhost:3000
-SOUNDTRACK_API_TOKEN=your-token
-SOUNDTRACK_CLIENT_ID=your-client-id
-SOUNDTRACK_CLIENT_SECRET=your-secret
+SOUNDTRACK_API_TOKEN=REDACTED_set_in_render_dashboard
+SOUNDTRACK_CLIENT_ID=REDACTED_set_in_render_dashboard
+SOUNDTRACK_CLIENT_SECRET=REDACTED_set_in_render_dashboard
 ```
 
 ### Frontend (.env)

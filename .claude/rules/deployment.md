@@ -40,5 +40,5 @@
 7. Test on production URLs
 
 ### Render API Key
-- Value: `rnd_QAJKR0jggzsxSLOCx3HfovreCzOd`
+- Value: `rnd_REDACTED_revoked_set_in_render_dashboard`
 - Available via MCP access for deployment automation
