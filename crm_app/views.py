@@ -1578,6 +1578,12 @@ class ContractViewSet(BaseModelViewSet):
         zone_table.setStyle(TableStyle(zone_style_list))
         return zone_table
 
+    def _canonical_product_label(self, name):
+        """Royalty-free tier is canonically 'Beat Breeze' (retire 'License Inclusive Music'/'LIM')."""
+        if name and name.strip().lower() in ('license inclusive music', 'license inclusive music (lim)', 'lim', 'beatbreeze', 'beat breeze'):
+            return 'Beat Breeze'
+        return name
+
     def _build_service_locations_table(self, contract, service_locations):
         """Build zones table from ContractServiceLocation records (new simple model).
         Uses warm BMAsia design palette. Supports pagination for large zone counts."""
@@ -1612,7 +1618,7 @@ class ContractViewSet(BaseModelViewSet):
         # Group custom locs by custom_service_name
         custom_groups = {}
         for loc in custom_locs:
-            name = loc.custom_service_name or 'Custom'
+            name = self._canonical_product_label(loc.custom_service_name) or 'Custom'
             custom_groups.setdefault(name, []).append(loc)
 
         zone_data = [zone_header]
@@ -2332,7 +2338,7 @@ class ContractViewSet(BaseModelViewSet):
 
                 if _platforms == {'custom'} or _platforms == {'beatbreeze'} or _platforms == {'custom', 'beatbreeze'}:
                     # BB / LIM only — BMAsia's own product, not SYB-licensing
-                    whereas_clause = "<b>Whereas</b> BMA provides License Inclusive Music (LIM) services and music design and management for hospitality and commercial clients."
+                    whereas_clause = "<b>Whereas</b> BMA provides Beat Breeze, its own background-music service, together with music design and management services to hospitality and commercial clients."
                 else:
                     # SYB or mixed — keep the original SYB-reseller framing
                     whereas_clause = "<b>Whereas</b> BMA is a certified legal reseller of Soundtrack Your Brand (SYB) and provides music design and management services to hospitality and commercial clients."
@@ -2440,9 +2446,9 @@ and<br/><br/>
                 # If ALL locations are custom products (LIM/MP3/etc), use the LIM-style bullets
                 if platforms == {'custom'}:
                     # Get a representative custom product name for the first bullet
-                    first_custom = next((loc.custom_service_name for loc in svc_locs if loc.platform == 'custom' and loc.custom_service_name), 'License Inclusive Music')
+                    first_custom = next((loc.custom_service_name for loc in svc_locs if loc.platform == 'custom' and loc.custom_service_name), 'Beat Breeze')
                     # Use only the part before any em-dash for cleaner display
-                    custom_label = first_custom.split('—')[0].split('-')[0].strip() or 'License Inclusive Music'
+                    custom_label = self._canonical_product_label(first_custom.split('—')[0].split('-')[0].strip()) or 'Beat Breeze'
                     service_items_list = [
                         f"• Curation and content lease for the {custom_label} package",
                         "• Player provided and managed by BMAsia",
