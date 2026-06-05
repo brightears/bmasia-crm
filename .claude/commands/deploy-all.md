@@ -12,12 +12,12 @@ Deploy both backend and frontend to Render in parallel.
 
 Backend:
 ```bash
-curl -X POST -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" -H "Content-Type: application/json" -d '{}' "https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g/deploys"
+curl -X POST -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" -d '{}' "https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g/deploys"
 ```
 
 Frontend:
 ```bash
-curl -X POST -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" -H "Content-Type: application/json" -d '{}' "https://api.render.com/v1/services/srv-d3clctt6ubrc73etb580/deploys"
+curl -X POST -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" -d '{}' "https://api.render.com/v1/services/srv-d3clctt6ubrc73etb580/deploys"
 ```
 
 2. Poll both deployment statuses until both are "live" or one fails

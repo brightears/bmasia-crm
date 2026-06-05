@@ -17,7 +17,7 @@
     ]
   },
   "env": {
-    "RENDER_API_KEY": "rnd_QAJKR0jggzsxSLOCx3HfovreCzOd",
+    "RENDER_API_KEY": "set-in-settings.local.json-or-env",
     "RENDER_BACKEND_ID": "srv-d13ukt8gjchc73fjat0g",
     "RENDER_FRONTEND_ID": "srv-d3clctt6ubrc73etb580",
     "RENDER_CRON_ID": "crn-d4b9g875r7bs7391al2g",

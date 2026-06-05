@@ -16,19 +16,19 @@ Services:
 
 ### Backend Logs
 ```bash
-curl -s -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
   "https://api.render.com/v1/services/srv-d13ukt8gjchc73fjat0g/logs?limit=50"
 ```
 
 ### Frontend Logs
 ```bash
-curl -s -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
   "https://api.render.com/v1/services/srv-d3clctt6ubrc73etb580/logs?limit=50"
 ```
 
 ### Cron Job Logs
 ```bash
-curl -s -H "Authorization: Bearer rnd_QAJKR0jggzsxSLOCx3HfovreCzOd" \
+curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
   "https://api.render.com/v1/services/crn-d4b9g875r7bs7391al2g/logs?limit=50"
 ```
 
