@@ -28,9 +28,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-fallback-key-for-demo-only')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = config('DEBUG', default=True, cast=bool)
+DEBUG = config('DEBUG', default=False, cast=bool)
+# Fail-secure: never run with DEBUG in production. Render sets RENDER=true automatically;
+# debug prod issues via logs, not Django DEBUG pages (which leak settings + tracebacks).
+if os.environ.get('RENDER'):
+    DEBUG = False
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*', cast=Csv())
+# Defensive: with DEBUG=False Django enforces ALLOWED_HOSTS; ensure Render hosts resolve.
+if os.environ.get('RENDER') and '*' not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS += ['.onrender.com']
 
 # CSRF trusted origins for deployment
 CSRF_TRUSTED_ORIGINS = [
@@ -268,7 +275,11 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_SECONDS = 31536000
     SECURE_REDIRECT_EXEMPT = []
-    SECURE_SSL_REDIRECT = True
+    # Behind Render's TLS-terminating proxy: detect HTTPS correctly (secure cookies/HSTS).
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    # Render already redirects HTTP->HTTPS at the edge; app-level redirect behind a proxy
+    # is the classic infinite-loop cause. Keep OFF (redundant + risky).
+    SECURE_SSL_REDIRECT = False
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
 
