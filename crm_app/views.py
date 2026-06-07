@@ -3438,11 +3438,14 @@ and<br/><br/>
         elements.append(details_table)
         elements.append(Spacer(1, 0.3*inch))
 
-        # Additional Notes (if any)
-        if contract.notes:
+        # Additional Terms — customer-facing only.
+        # FIX 2026-06-07 (Vera): was rendering contract.notes (INTERNAL-ONLY — leaks import/CRM-tracking
+        # context onto the customer PDF). The participation path missed the 2026-05-05 principal-terms fix;
+        # use contract.custom_terms, matching _generate_principal_terms_pdf and _generate_master_agreement_pdf.
+        if contract.custom_terms:
             elements.append(Paragraph("ADDITIONAL TERMS", heading_style))
-            notes_text = contract.notes.replace('\n', '<br/>')
-            elements.append(Paragraph(notes_text, body_style))
+            terms_text = contract.custom_terms.replace('\n', '<br/>')
+            elements.append(Paragraph(terms_text, body_style))
             elements.append(Spacer(1, 0.3*inch))
 
         # Signatures Section
