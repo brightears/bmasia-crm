@@ -103,7 +103,9 @@ class ContractQuery(ModelQueryToolset):
     ]
     search_fields = ['contract_number', 'notes', 'payment_terms']
     extra_instructions = (
-        "Status lifecycle: Draft → Sent → Active → Renewed/Expired/Cancelled. "
+        "Status lifecycle: Draft → Sent → Active → Renewed/Expired. Cancelled is terminal, "
+        "reachable from Sent (renewal declined/abandoned before activation — never went live) "
+        "or from Active (terminated after going live). "
         "Use $lookup with 'company' to join company details."
     )
 
