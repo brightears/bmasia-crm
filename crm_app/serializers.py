@@ -674,6 +674,11 @@ class ContractSerializer(serializers.ModelSerializer):
             'currency', 'auto_renew', 'renewal_period_months', 'is_active',
             'payment_terms', 'billing_frequency', 'discount_percentage', 'notes',
             'renewal_notice_sent', 'renewal_notice_date', 'send_renewal_reminders',
+            # Follow-up tracking (unsigned-contract Day-5/Day-10 reminders) — Fix 2026-06-09
+            # (Vera, per Cira/Theo build-request via to-vera): absent from this whitelist, so
+            # DRF silent-dropped them on update_record (verified on HK-CT26842) — same class as
+            # the lifecycle_type fix below. Theo needs them settable for renewal followup-hygiene backfills.
+            'first_followup_sent', 'second_followup_sent',
             'renewed_from', 'renewed_from_contract_number', 'renewal_count', 'days_until_expiry',
             'is_expiring_soon', 'monthly_value', 'invoices', 'paid_invoices_count',
             'outstanding_amount', 'contract_zones', 'active_zone_count', 'total_zone_count',
