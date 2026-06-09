@@ -7,6 +7,8 @@
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
+| Jun 9 | Fix: expose contract.first/second_followup_sent to API serializer — were absent from ContractSerializer.Meta.fields whitelist so DRF silently dropped them on update_record/PATCH (same class as the lifecycle_type fix); Theo needs them for renewal follow-up-hygiene backfills | `serializers.py` | `63fea98` |
+| Jun 9 | Doc: legitimize Sent→Cancelled in MCP contract lifecycle hint (declined-at-Sent renewals); no code state-machine exists — status is a plain choices field, Cira's charter is the real gate | `mcp.py` | `88d518f` |
 | Mar 27 | Revenue import: Clear & Reimport checkbox to delete existing schedules before import | `views.py`, `RevenueAccrual.tsx`, `api.ts` | `f0ff7d6f` |
 | Mar 26 | Fix revenue import 500: datetime vs date type mismatch in _parse_date() | `revenue_recognition_service.py` | `92cae18d` |
 | Mar 21 | MCP server: django-mcp-server with sales + tech support tools, PDF generation, query collections | `crm_app/mcp.py`, `mcp_auth.py`, `settings.py`, `urls.py` | `574f676f` |
@@ -77,6 +79,7 @@
 - **Partial updates**: Always use PATCH, not PUT (DRF requires all fields with PUT)
 - **Write-only serializer fields**: Frontend sends `field_id`, not `field` (e.g., `category_id`)
 - **Contract status lifecycle**: Draft → Sent → Active → Renewed/Expired/Cancelled
+- **DRF serializer whitelist = silent write-drop**: a field absent from a ModelSerializer's explicit Meta.fields is silently dropped on update/PATCH (success, no error, value unchanged). Add model fields to the serializer whitelist when they must be API/MCP-writable. update_record (mcp.py) writes via the serializer in `_COLLECTION_MAP`, NOT the MCP ModelQueryToolset.fields list.
 - **Service locations**: Auto-derived from line items via `syncLocationsFromLineItems()`. Supports 'soundtrack', 'beatbreeze', AND 'custom' platforms. Custom products use `custom_service_name` for PDF display
 - **QuickBooks IIF**: DD/MM/YYYY dates, negative QNTY for SPL rows, VAT as separate row
 - **Email PDF generation**: All send methods (quote/contract/invoice/receipt) must use `RequestFactory` → viewset `pdf()` to generate full PDF. Never use inline fallback generators. `BaseModelViewSet.log_action()` skips audit log for AnonymousUser
