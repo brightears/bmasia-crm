@@ -7,6 +7,8 @@
 
 | Date | Feature | Key Files | Commit |
 |------|---------|-----------|--------|
+| Jun 10 | Proforma Invoice: standalone contract-generated advance-payment PDF (Pom's design — separate from the invoice pipeline; no Invoice/AR/rev-rec/receipt record; 'not a tax invoice' notice; PF-<contract_number>; due = contract start). Endpoint `/contracts/{id}/proforma-pdf/` + MCP `generate_proforma_pdf(id)` + 'Download Proforma Invoice' menu item | `proforma_pdf.py`, `views.py`, `mcp.py`, `api.ts`, `Contracts.tsx` | `cbc38d6` |
+| Jun 10 | Proforma totals ladder: Subtotal → Less discount (X%) → Total payable whenever value+tax ≠ total (prevents AP double-deducting an already-applied discount) | `proforma_pdf.py` | `aa1fb65` |
 | Jun 9 | Fix: expose contract.first/second_followup_sent to API serializer — were absent from ContractSerializer.Meta.fields whitelist so DRF silently dropped them on update_record/PATCH (same class as the lifecycle_type fix); Theo needs them for renewal follow-up-hygiene backfills | `serializers.py` | `63fea98` |
 | Jun 9 | Doc: legitimize Sent→Cancelled in MCP contract lifecycle hint (declined-at-Sent renewals); no code state-machine exists — status is a plain choices field, Cira's charter is the real gate | `mcp.py` | `88d518f` |
 | Mar 27 | Revenue import: Clear & Reimport checkbox to delete existing schedules before import | `views.py`, `RevenueAccrual.tsx`, `api.ts` | `f0ff7d6f` |
