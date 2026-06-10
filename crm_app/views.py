@@ -1319,6 +1319,60 @@ class ContractViewSet(BaseModelViewSet):
         else:  # standard
             return self._generate_principal_terms_pdf(contract)
 
+    @action(detail=True, methods=['get'], url_path='proforma-pdf')
+    def proforma_pdf(self, request, pk=None):
+        """Generate the PROFORMA INVOICE PDF for this contract.
+
+        Standalone advance-payment document (Pom's design, 09.06.2026): sent
+        with the renewal pack so the customer can raise a PO / pay before the
+        service period starts. Creates NO Invoice row and touches no
+        AR/revenue-recognition/receipt logic — the official tax invoice still
+        issues on payment via the Invoice flow. See crm_app/proforma_pdf.py.
+        """
+        from django.conf import settings
+        import os
+
+        contract = self.get_object()
+
+        # Entity block — same resolution as the quote/contract PDFs
+        billing_entity = contract.company.billing_entity
+        if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+            entity = {
+                'name': 'BMAsia (Thailand) Co., Ltd.',
+                'address': '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand',
+                'phone': '+66 2153 3520',
+                'tax': '0105548025073',
+                'bank': 'TMBThanachart Bank, Thonglor Soi 17 Branch',
+                'swift': 'TMBKTHBK',
+                'account': '916-1-00579-9',
+                'payment_terms_default': 'by bank transfer on a net received, paid in full basis, with no offset to BMA\'s TMB-Thanachart Bank, Bangkok, Thailand due immediately on invoicing to activate the music subscription. All outbound and inbound bank transfer fees are borne by the Client in remitting payments as invoiced less Withholding Tax required by Thai Law.',
+                'billing_entity': billing_entity,
+            }
+        else:  # BMAsia Limited (Hong Kong)
+            entity = {
+                'name': 'BMAsia Limited',
+                'address': '22nd Floor, Tai Yau Building, 181 Johnston Road, Wanchai, Hong Kong',
+                'phone': '+66 2153 3520',
+                'tax': None,
+                'bank': 'HSBC, HK',
+                'swift': 'HSBCHKHHHKH',
+                'account': '808-021570-838',
+                'payment_terms_default': 'by bank transfer on a net received, paid in full basis, with no offset to BMA\'s HSBC Bank, Hong Kong due immediately as invoiced to activate the music subscription. All Bank transfer fees, and all taxes are borne by the Client in remitting payments as invoiced.',
+                'billing_entity': billing_entity,
+            }
+
+        from crm_app.proforma_pdf import build_proforma_pdf
+        logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
+        pdf_data = build_proforma_pdf(
+            contract, entity, logo_path,
+            format_address_multiline=format_address_multiline,
+        )
+
+        ref = contract.contract_number or str(contract.id)[:8]
+        response = HttpResponse(pdf_data, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Proforma_PF-{ref}.pdf"'
+        return response
+
     @action(detail=True, methods=['get'])
     def standard_terms(self, request, pk=None):
         """

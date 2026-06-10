@@ -320,6 +320,26 @@ const Contracts: React.FC = () => {
     setActionMenuAnchor(null);
   };
 
+  // Proforma invoice: standalone advance-payment request generated from the
+  // contract (sent with the renewal pack so the customer can raise a PO and
+  // pay before the period starts). Not a tax invoice; creates no Invoice/AR.
+  const handleDownloadProforma = async (contract: Contract) => {
+    try {
+      const blob = await ApiService.downloadProformaPDF(contract.id);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Proforma_PF-${contract.contract_number}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError('Failed to download proforma invoice');
+    }
+    setActionMenuAnchor(null);
+  };
+
   const handleDuplicateForRenewal = async (contract: Contract) => {
     if (window.confirm(`Create renewal contract for "${contract.contract_number}"?\n\nThis will:\n• Create a new Active contract starting ${contract.end_date}\n• Mark the current contract as Renewed`)) {
       try {
@@ -636,6 +656,12 @@ const Contracts: React.FC = () => {
             <GetApp fontSize="small" />
           </ListItemIcon>
           <ListItemText>Download PDF</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handleDownloadProforma(actionMenuContract!)}>
+          <ListItemIcon>
+            <GetApp fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Download Proforma Invoice</ListItemText>
         </MenuItem>
         <MenuItem
           onClick={() => handleDuplicateForRenewal(actionMenuContract!)}

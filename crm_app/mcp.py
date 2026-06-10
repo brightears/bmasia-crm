@@ -53,6 +53,8 @@ Each returns a JSON string with `filename`, `size`, and `content_b64` (base64-
 encoded PDF bytes). Parse with `json.loads`, then `base64.b64decode(content_b64)`
 to recover the raw PDF. On failure returns `{"error": "..."}`.
 - `generate_contract_pdf(id)` — generate contract PDF
+- `generate_proforma_pdf(id)` — generate PROFORMA INVOICE PDF from a contract (advance-payment
+  request for the renewal pack; marked "not a tax invoice"; creates no Invoice/AR/tax record)
 - `generate_quote_pdf(id)` — generate quote PDF
 - `generate_invoice_pdf(id)` — generate invoice PDF
 
@@ -428,6 +430,35 @@ def generate_contract_pdf(id: str) -> str:
     viewset = ContractViewSet.as_view({'get': 'pdf'})
     response = viewset(request, pk=id)
     return _pdf_response_payload(response, f'contract_{id}.pdf')
+
+
+@mcp_server.tool()
+def generate_proforma_pdf(id: str) -> str:
+    """Generate a PROFORMA INVOICE PDF for a contract by contract ID.
+
+    Standalone advance-payment document for the renewal pack — clearly marked
+    "not a tax invoice", creates NO Invoice record and touches no AR/tax data.
+    The official tax invoice still issues on payment via the Invoice flow.
+
+    Returns JSON string: {"filename": str, "size": int, "content_b64": str}.
+    Parse with json.loads, then base64.b64decode(content_b64) for raw bytes.
+    On failure returns {"error": "..."}.
+    """
+    from django.test import RequestFactory
+    from crm_app.models import Contract
+
+    try:
+        Contract.objects.get(id=id)
+    except Contract.DoesNotExist:
+        return json.dumps({"error": f"Contract with ID '{id}' not found."})
+
+    factory = RequestFactory()
+    request = factory.get(f'/api/v1/contracts/{id}/proforma-pdf/')
+    request.user = _get_system_user()
+
+    viewset = ContractViewSet.as_view({'get': 'proforma_pdf'})
+    response = viewset(request, pk=id)
+    return _pdf_response_payload(response, f'proforma_{id}.pdf')
 
 
 @mcp_server.tool()

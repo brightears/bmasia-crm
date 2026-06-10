@@ -657,6 +657,15 @@ class ApiService {
     return response.data;
   }
 
+  // Download Proforma Invoice PDF (advance-payment request generated from the
+  // contract; standalone — not a tax invoice, creates no Invoice/AR record)
+  async downloadProformaPDF(id: string): Promise<Blob> {
+    const response = await authApi.get(`/contracts/${id}/proforma-pdf/`, {
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+
   // Corporate Contracts
   async getMasterAgreements(): Promise<Contract[]> {
     const response = await authApi.get<Contract[]>('/contracts/master-agreements/');
