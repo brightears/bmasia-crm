@@ -281,16 +281,24 @@ def build_proforma_pdf(contract, entity, logo_path, format_address_multiline, is
 
     # Totals — rendered exactly as stored on the contract. VAT shown only when
     # the contract carries tax (informational; the claimable document is the
-    # tax invoice issued on payment).
+    # tax invoice issued on payment). A discount is shown EXPLICITLY whenever
+    # value+tax != total, so the customer's AP sees the reduction is already
+    # applied and doesn't deduct it a second time.
     value = float(getattr(contract, 'value', 0) or 0)
     tax_amount = float(getattr(contract, 'tax_amount', 0) or 0)
     total_value = float(getattr(contract, 'total_value', 0) or 0) or (value + tax_amount)
+    discount = round(value + tax_amount - total_value, 2)
     totals_data = []
+    if tax_amount > 0 or discount > 0.005:
+        totals_data.append(['Subtotal:', f"{currency_symbol}{value:,.2f}"])
+    if discount > 0.005:
+        discount_pct = float(getattr(contract, 'discount_percentage', 0) or 0) or (
+            (discount / value * 100) if value else 0)
+        totals_data.append([f'Less discount ({discount_pct:.0f}%):', f"-{currency_symbol}{discount:,.2f}"])
     if tax_amount > 0:
         tax_label = "VAT" if billing_entity == 'BMAsia (Thailand) Co., Ltd.' else "Tax"
         tax_rate = float(getattr(contract, 'tax_rate', 0) or 0)
         rate_str = f" ({tax_rate:.0f}%)" if tax_rate else ""
-        totals_data.append(['Subtotal:', f"{currency_symbol}{value:,.2f}"])
         totals_data.append([f'{tax_label}{rate_str}:', f"{currency_symbol}{tax_amount:,.2f}"])
     totals_data.append(['<b>Total payable:</b>', f"<b>{currency_symbol}{total_value:,.2f}</b>"])
     totals_data_parsed = [[Paragraph(label, body_style), Paragraph(v, body_style)] for label, v in totals_data]
