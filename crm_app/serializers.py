@@ -234,6 +234,7 @@ class CompanySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'legal_entity_name', 'country', 'website', 'industry',
             'location_count', 'music_zone_count', 'avg_zones_per_location',
+            'contracted_product', 'contracted_zone_count', 'contracted_synced_at',
             'soundtrack_account_id', 'is_active', 'seasonal_emails_enabled',
             'soundtrack_offline_alerts_enabled', 'notes', 'it_notes',
             'address_line1', 'address_line2', 'city', 'state', 'postal_code',

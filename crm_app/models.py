@@ -187,6 +187,25 @@ class Company(TimestampedModel):
     # BMAsia specific fields
     location_count = models.IntegerField(default=1, help_text="Number of physical locations")
     music_zone_count = models.IntegerField(default=1, help_text="Total number of music zones across all locations")
+
+    # Contracted product & zones — sourced from the renewal funnel (the source of truth), for
+    # data-quality/reporting and agent queries (e.g. "who is on Beat Breeze for the renewal run").
+    # Deliberately DISTINCT from music_zone_count and the Soundtrack-synced Zone/ContractServiceLocation
+    # tables (which reflect live devices / per-contract PDF rows, not what's contracted at the customer
+    # level). Funnel mapping: LIM*->beatbreeze, SYB*->soundtrack. Never drives the rendered contract PDF.
+    contracted_product = models.CharField(
+        max_length=20, blank=True,
+        choices=[('beatbreeze', 'Beat Breeze'), ('soundtrack', 'Soundtrack'), ('mixed', 'Mixed')],
+        help_text="Contracted music product per the renewal funnel (source of truth)."
+    )
+    contracted_zone_count = models.IntegerField(
+        null=True, blank=True,
+        help_text="Contracted zone count per the renewal funnel (source of truth)."
+    )
+    contracted_synced_at = models.DateField(
+        null=True, blank=True,
+        help_text="Date contracted_product/contracted_zone_count were last reconciled from the funnel."
+    )
     
     # Soundtrack integration
     soundtrack_account_id = models.CharField(max_length=100, blank=True, help_text="Soundtrack Your Brand account ID for API integration")
