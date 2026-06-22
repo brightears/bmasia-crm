@@ -404,7 +404,15 @@ def build_quote_pdf(quote, entity, logo_path, format_address_multiline, format_d
         duration_label = format_duration(duration_months)
         totals_data.append([f'<b>Total ({duration_label}):</b>', f"<b>{currency_symbol}{quote.total_value:,.2f}</b>"])
     else:
-        totals_data.append(['<b>Total (per year):</b>', f"<b>{currency_symbol}{quote.total_value:,.2f}</b>"])
+        # A prorated/annex quote can keep contract_duration_months=12 while billing only a
+        # partial-period amount; labelling that "Total (per year)" contradicts the annual rate
+        # (e.g. "Total (per year): 170.02" against a 580/yr rate — the Hyatt Danang annex).
+        # When the quote is prorated, drop the annual claim — the rate + period stay in the
+        # line items, the Term/Billing header and the notes. Normal annual quotes keep Pom's label.
+        prorated = ('prorat' in (getattr(quote, 'notes', '') or '').lower()
+                    or any('prorat' in (getattr(li, 'description', '') or '').lower() for li in line_items))
+        total_label = 'Total:' if prorated else 'Total (per year):'
+        totals_data.append([f'<b>{total_label}</b>', f"<b>{currency_symbol}{quote.total_value:,.2f}</b>"])
 
     totals_data_parsed = [[Paragraph(label, body_style), Paragraph(value, body_style)] for label, value in totals_data]
     totals_table = Table(totals_data_parsed, colWidths=[5 * inch, 1.9 * inch])
