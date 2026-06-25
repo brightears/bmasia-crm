@@ -856,6 +856,10 @@ class Contract(TimestampedModel):
     bmasia_signatory_name = models.CharField(max_length=255, blank=True)
     bmasia_signatory_title = models.CharField(max_length=255, blank=True)
     custom_terms = models.TextField(blank=True, help_text="Custom terms for master agreements")
+    property_name = models.CharField(
+        max_length=200, blank=True,
+        help_text="Trading/venue name to print in the Section-2 schedule (e.g. 'Soneva Jani'). "
+                  "Bill-To, preamble and signature blocks always stay the legal company. Falls back to company name when blank.")
 
     # Zone relationship
     zones = models.ManyToManyField(

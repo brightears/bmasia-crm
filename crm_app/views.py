@@ -1580,7 +1580,7 @@ class ContractViewSet(BaseModelViewSet):
                 continue
             group_start = row_idx + 1  # +1 for header row
             for idx, zone in enumerate(platform_zones, 1):
-                property_name = Paragraph(company.name, prop_style) if row_idx == 0 else ''
+                property_name = Paragraph(contract.property_name or company.name, prop_style) if row_idx == 0 else ''
                 service_name = platform_labels[platform_key] if idx == 1 else ''
                 row = [property_name, service_name, f"Zone {idx}: {str(zone)}"]
                 if has_pricing:
@@ -1687,7 +1687,7 @@ class ContractViewSet(BaseModelViewSet):
                 continue
             group_start = row_idx + 1
             for idx, loc in enumerate(platform_locs, 1):
-                property_name = Paragraph(company.name, prop_style) if row_idx == 0 else ''
+                property_name = Paragraph(contract.property_name or company.name, prop_style) if row_idx == 0 else ''
                 service_name = Paragraph(platform_labels[platform_key], prop_style) if idx == 1 else ''
                 zone_label = Paragraph(f"Zone {idx}: {loc.location_name}", prop_style)
                 row = [property_name, service_name, zone_label]
@@ -1707,7 +1707,7 @@ class ContractViewSet(BaseModelViewSet):
                 continue
             group_start = row_idx + 1
             for idx, loc in enumerate(locs, 1):
-                property_name = Paragraph(company.name, prop_style) if row_idx == 0 else ''
+                property_name = Paragraph(contract.property_name or company.name, prop_style) if row_idx == 0 else ''
                 service_name = Paragraph(custom_name, prop_style) if idx == 1 else ''
                 zone_label = Paragraph(f"Zone {idx}: {loc.location_name}", prop_style)
                 row = [property_name, service_name, zone_label]
