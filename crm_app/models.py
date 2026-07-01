@@ -2429,6 +2429,7 @@ class Quote(TimestampedModel):
         ('biannual', 'Bi-annual'),
         ('quarterly', 'Quarterly'),
         ('monthly', 'Monthly'),
+        ('one-time', 'One-time'),
     ]
     billing_frequency = models.CharField(
         max_length=20, choices=BILLING_FREQUENCY_CHOICES, default='annual',

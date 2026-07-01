@@ -61,6 +61,7 @@ BILLING_FREQUENCY_DISPLAY = {
     'biannual': 'Bi-annual',
     'quarterly': 'Quarterly',
     'monthly': 'Monthly',
+    'one-time': 'One-time',
 }
 
 
@@ -94,6 +95,8 @@ def derive_payment_schedule(quote, format_duration):
         return "Billed quarterly."
     if freq == 'monthly':
         return "Billed monthly."
+    if freq == 'one-time':
+        return "Billed once — a single one-time charge (no recurring subscription)."
     # annual (default)
     if months > 12:
         return f"Billed annually — one invoice per year for the full {term}."
@@ -393,7 +396,11 @@ def build_quote_pdf(quote, entity, logo_path, format_address_multiline, format_d
         tax_pct = (quote.tax_amount / after_discount * 100) if after_discount > 0 else 0
         totals_data.append([f'{tax_label} ({tax_pct:.0f}%):', f"{currency_symbol}{quote.tax_amount:,.2f}"])
 
-    if duration_months > 12:
+    if billing_freq == 'one-time':
+        # One-off charge (hardware / setup): never annualise — no "per year" and no multi-year
+        # contract-value multiply. The single figure IS the total. (INC-20260622-af80a5)
+        totals_data.append(['<b>Total (one-time):</b>', f"<b>{currency_symbol}{quote.total_value:,.2f}</b>"])
+    elif duration_months > 12:
         duration_label = format_duration(duration_months)
         totals_data.append(['<b>Annual subscription:</b>', f"<b>{currency_symbol}{quote.total_value:,.2f} / year</b>"])
         years = duration_months / 12
