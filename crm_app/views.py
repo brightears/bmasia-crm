@@ -1214,15 +1214,14 @@ class ContractViewSet(BaseModelViewSet):
         - Sets end_date = start_date + renewal_period_months
         - Marks original contract as 'Renewed'
         - Links new contract to original via renewed_from
+        The renewal is created as a DRAFT (INC-20260622-e4cd8f): it must flow through
+        Draft → Sent → Active like any contract, not be born 'Active' (signed/live) unsent.
+        Its real CT number is deferred until it reaches Sent (it carries a DRAFT-xxxx until then).
         """
         from dateutil.relativedelta import relativedelta
         import uuid
 
         original = self.get_object()
-
-        # Generate new contract number using entity prefix format
-        region = 'TH' if original.company and original.company.billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 'HK'
-        new_contract_number = DocumentSequence.get_next_number(region, 'CT')
 
         # Calculate new dates
         new_start_date = original.end_date
@@ -1233,17 +1232,18 @@ class ContractViewSet(BaseModelViewSet):
         new_contract = Contract.objects.create(
             company=original.company,
             opportunity=None,  # New contract, no opportunity link
-            contract_number=new_contract_number,
+            # contract_number omitted on purpose → save() assigns a deferred DRAFT-xxxx; the real
+            # CT number is minted only when the draft is advanced to Sent (INC-20260622-e4cd8f).
             contract_type=original.contract_type,
             service_type=original.service_type,
-            status='Active',
+            status='Draft',
             start_date=new_start_date,
             end_date=new_end_date,
             value=original.value,
             currency=original.currency,
             auto_renew=original.auto_renew,
             renewal_period_months=original.renewal_period_months,
-            is_active=True,
+            is_active=False,  # Draft renewal is not live until it is signed/activated
             payment_terms=original.payment_terms,
             billing_frequency=original.billing_frequency,
             discount_percentage=original.discount_percentage,
@@ -1294,7 +1294,7 @@ class ContractViewSet(BaseModelViewSet):
 
         serializer = self.get_serializer(new_contract)
         return Response({
-            'message': f'Renewal contract {new_contract_number} created',
+            'message': f'Renewal draft {new_contract.contract_number} created (Draft → send → sign to activate)',
             'new_contract': serializer.data,
             'original_status': 'Renewed'
         }, status=status.HTTP_201_CREATED)
