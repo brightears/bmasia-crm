@@ -2526,7 +2526,16 @@ and<br/><br/>
             # Add pricing if available
             if contract.show_zone_pricing_detail and contract.price_per_zone:
                 vat_text = f" + {float(contract.tax_rate):.0f}% VAT" if contract.tax_rate and float(contract.tax_rate) > 0 else ""
-                service_items_list.append(f"• <b>Price:</b> {contract.currency} {contract.price_per_zone:,.2f} per zone per year{vat_text}")
+                # "per year" only for annual/multi-year terms. A sub-annual bridge (e.g. a 6-month
+                # contract priced per zone FOR THE TERM) must NOT say "per year" — a client could read
+                # the term price as an annual rate. Annual / multi-year / date-less: unchanged.
+                _dur_m = 0
+                if contract.start_date and contract.end_date:
+                    _dur_m = ((contract.end_date.year - contract.start_date.year) * 12 +
+                              (contract.end_date.month - contract.start_date.month) +
+                              (1 if contract.end_date.day > contract.start_date.day else 0))
+                _per = "" if (contract.start_date and contract.end_date and _dur_m < 12) else " per year"
+                service_items_list.append(f"• <b>Price:</b> {contract.currency} {contract.price_per_zone:,.2f} per zone{_per}{vat_text}")
 
             for item_text in service_items_list:
                 elements.append(Paragraph(item_text, bullet_style))
