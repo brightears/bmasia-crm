@@ -1,8 +1,8 @@
 """Signals for CRM app"""
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.utils import timezone
-from .models import Company, Contract
+from .models import Company, Contract, QuoteLineItem
 import logging
 
 logger = logging.getLogger(__name__)
@@ -60,3 +60,12 @@ def handle_contract_termination(sender, instance, created, **kwargs):
         if link.zone.status != 'cancelled':
             link.zone.mark_as_cancelled()
             logger.info(f"Marked zone {link.zone.name} as cancelled due to contract {instance.contract_number} termination")
+
+
+@receiver(post_delete, sender=QuoteLineItem)
+def resync_quote_total_on_delete(sender, instance, **kwargs):
+    """Re-sync the parent quote's totals when a line item is deleted, so a quote's stated total
+    always matches its remaining lines on every write path (self-audit 2026-07-02)."""
+    from .models import Quote
+    if instance.quote_id and Quote.objects.filter(pk=instance.quote_id).exists():
+        instance.resync_quote_total()

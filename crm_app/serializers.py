@@ -484,7 +484,9 @@ class OpportunitySerializer(serializers.ModelSerializer):
 class InvoiceLineItemSerializer(serializers.ModelSerializer):
     """Serializer for InvoiceLineItem model"""
     id = serializers.UUIDField(read_only=True)
-    invoice = serializers.PrimaryKeyRelatedField(read_only=True)
+    # Writable so an agent can create a line item standalone via MCP (was read_only). Optional
+    # because nested creation sets the parent explicitly (self-audit 2026-07-02).
+    invoice = serializers.PrimaryKeyRelatedField(queryset=Invoice.objects.all(), required=False, allow_null=True)
 
     class Meta:
         model = InvoiceLineItem
@@ -493,7 +495,7 @@ class InvoiceLineItemSerializer(serializers.ModelSerializer):
             'tax_rate', 'line_total', 'service_period_start', 'service_period_end',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'invoice', 'line_total', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'line_total', 'created_at', 'updated_at']
         extra_kwargs = {
             'invoice': {'required': False}
         }
@@ -599,7 +601,9 @@ class ContractDocumentSerializer(serializers.ModelSerializer):
 class ContractLineItemSerializer(serializers.ModelSerializer):
     """Serializer for ContractLineItem model"""
     id = serializers.UUIDField(read_only=True)
-    contract = serializers.PrimaryKeyRelatedField(read_only=True)
+    # Writable so an agent can create a line item standalone via MCP (was read_only). Optional
+    # because nested creation sets the parent explicitly (self-audit 2026-07-02).
+    contract = serializers.PrimaryKeyRelatedField(queryset=Contract.objects.all(), required=False, allow_null=True)
 
     class Meta:
         model = ContractLineItem
@@ -608,7 +612,7 @@ class ContractLineItemSerializer(serializers.ModelSerializer):
             'unit_price', 'discount_percentage', 'tax_rate', 'line_total',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'contract', 'line_total', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'line_total', 'created_at', 'updated_at']
         extra_kwargs = {
             'contract': {'required': False}
         }
@@ -977,7 +981,10 @@ class QuoteLineItemSerializer(serializers.ModelSerializer):
     """Serializer for QuoteLineItem model"""
     # Explicitly define UUID fields to ensure proper serialization
     id = serializers.UUIDField(read_only=True)
-    quote = serializers.PrimaryKeyRelatedField(read_only=True)
+    # Writable so an agent can create a line item standalone (MCP create_record) — was read_only,
+    # which made standalone line-item creation impossible (self-audit 2026-07-02). Optional because
+    # nested creation sets the parent explicitly.
+    quote = serializers.PrimaryKeyRelatedField(queryset=Quote.objects.all(), required=False, allow_null=True)
 
     class Meta:
         model = QuoteLineItem
@@ -986,7 +993,7 @@ class QuoteLineItemSerializer(serializers.ModelSerializer):
             'unit_price', 'unit_value', 'discount_percentage', 'tax_rate', 'line_total',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'quote', 'line_total', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'line_total', 'created_at', 'updated_at']
         extra_kwargs = {
             'quote': {'required': False}  # Not required during nested creation
         }
@@ -1084,8 +1091,9 @@ class QuoteSerializer(serializers.ModelSerializer):
 
         quote = Quote.objects.create(**validated_data)
 
-        # Create line items
+        # Create line items (pop any parent key so it can't clash with the explicit quote=quote)
         for item_data in line_items_data:
+            item_data.pop('quote', None)
             QuoteLineItem.objects.create(quote=quote, **item_data)
 
         # Recalculate totals from line items
@@ -1120,8 +1128,9 @@ class QuoteSerializer(serializers.ModelSerializer):
             # Delete existing line items
             instance.line_items.all().delete()
 
-            # Create new line items
+            # Create new line items (pop any parent key so it can't clash with quote=instance)
             for item_data in line_items_data:
+                item_data.pop('quote', None)
                 QuoteLineItem.objects.create(quote=instance, **item_data)
 
             # Recalculate totals from line items

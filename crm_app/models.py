@@ -2522,7 +2522,7 @@ class QuoteLineItem(TimestampedModel):
         return f"{self.product_service} - {self.quote.quote_number}"
 
     def save(self, *args, **kwargs):
-        """Auto-calculate line total"""
+        """Auto-calculate line total, then re-sync the parent quote's totals."""
         from decimal import Decimal
         quantity = Decimal(str(self.quantity))
         unit_price = Decimal(str(self.unit_price))
@@ -2531,6 +2531,18 @@ class QuoteLineItem(TimestampedModel):
         discount_amount = subtotal * (discount_pct / Decimal('100'))
         self.line_total = subtotal - discount_amount
         super().save(*args, **kwargs)
+        self.resync_quote_total()
+
+    def resync_quote_total(self):
+        """Keep Quote.subtotal/total_value consistent with its line items on EVERY write path
+        (nested, REST, MCP, admin). Without this a standalone line-item write left the quote's
+        stated total out of sync with its lines — the PDF would not add up (self-audit 2026-07-02)."""
+        from decimal import Decimal
+        q = self.quote
+        subtotal = sum((li.line_total for li in q.line_items.all()), Decimal('0'))
+        q.subtotal = subtotal
+        q.total_value = subtotal - (q.discount_amount or Decimal('0')) + (q.tax_amount or Decimal('0'))
+        q.save(update_fields=['subtotal', 'total_value', 'updated_at'])
 
 
 class QuoteAttachment(TimestampedModel):
