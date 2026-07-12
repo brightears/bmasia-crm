@@ -282,6 +282,27 @@ def _get_serializer_class(dotted_path):
     return getattr(module, class_name)
 
 
+def _dropped_keys(serializer, requested_fields):
+    """DRF silently ignores request keys that aren't writable serializer fields — the caller
+    gets 'success' while the write never happened (e.g. patching `preamble_template_id` when the
+    writable field is `preamble_template`). Surface exactly which keys were dropped and why, so
+    agent callers can trust a success response.
+    Returns (applied, dropped) where dropped maps key -> reason."""
+    applied, dropped = [], {}
+    for key in requested_fields:
+        f = serializer.fields.get(key)
+        if f is None:
+            hint = ''
+            if key.endswith('_id') and key[:-3] in serializer.fields and not serializer.fields[key[:-3]].read_only:
+                hint = f" (did you mean '{key[:-3]}'?)"
+            dropped[key] = f"not a field on this collection{hint}"
+        elif f.read_only:
+            dropped[key] = 'read-only field'
+        else:
+            applied.append(key)
+    return applied, dropped
+
+
 @mcp_server.tool()
 def create_record(collection: str, data: str) -> str:
     """Create a new record in a CRM collection.
@@ -317,6 +338,11 @@ def create_record(collection: str, data: str) -> str:
                  'ticket_number', 'article_number', 'title', 'email', 'subject']:
         if hasattr(instance, attr) and getattr(instance, attr):
             result[attr] = str(getattr(instance, attr))
+    _, dropped = _dropped_keys(serializer, fields)
+    if dropped:
+        result['warning_ignored_keys'] = dropped
+        result['warning'] = ('These keys were NOT saved (DRF drops non-writable keys silently). '
+                             'Fix the key names and re-send if you intended to set them.')
     return _json.dumps(result)
 
 
@@ -352,8 +378,28 @@ def update_record(collection: str, id: str, data: str) -> str:
     if not serializer.is_valid():
         return f"Validation errors: {_json.dumps(serializer.errors)}"
 
+    applied, dropped = _dropped_keys(serializer, fields)
+    if not applied:
+        # Nothing in the patch is writable -> refuse rather than fake success.
+        return _json.dumps({
+            'updated': False, 'id': str(id),
+            'error': 'No writable fields in patch — nothing was saved.',
+            'ignored_keys': dropped,
+        })
+
     instance = serializer.save()
-    return f"Updated {collection} {id} successfully."
+    # Read-back so the caller can verify what was actually persisted.
+    persisted = {}
+    for key in applied:
+        src = serializer.fields[key].source or key
+        val = getattr(instance, src, None)
+        persisted[key] = str(val) if val is not None else None
+    result = {'updated': True, 'id': str(id), 'applied': persisted}
+    if dropped:
+        result['warning_ignored_keys'] = dropped
+        result['warning'] = ('These keys were NOT saved (DRF drops non-writable keys silently). '
+                             'Fix the key names and re-send if you intended to set them.')
+    return _json.dumps(result)
 
 
 @mcp_server.tool()
