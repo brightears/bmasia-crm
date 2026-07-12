@@ -26,7 +26,10 @@ import subprocess
 import os
 
 def reset_admin_view(request):
-    """Reset admin user - for troubleshooting"""
+    """DISABLED 2026-07-02 (security): unauthenticated superuser reset with a fixed password was a
+    full account-takeover hole. Route removed; use the `reset_admin` / `createadmin` management commands."""
+    from django.http import HttpResponseForbidden
+    return HttpResponseForbidden('Disabled for security. Use the reset_admin management command.')
     try:
         from crm_app.models import User
         
@@ -74,9 +77,8 @@ urlpatterns = [
     path('api-auth/', include('rest_framework.urls')),
     path('', include('mcp_server.urls')),  # MCP server at /mcp/
     path('api-token-auth/', obtain_auth_token, name='api_token_auth'),  # DRF token auth
-    # Setup endpoint to create admin user
-    path('setup-admin/', create_admin_view, name='setup_admin'),
-    path('reset-admin/', reset_admin_view, name='reset_admin'),
+    # SECURITY 2026-07-02: removed unauthenticated setup-admin/reset-admin routes — they granted full
+    # superuser takeover with a fixed password. Use the `createadmin` / `reset_admin` management commands.
     path('debug-soundtrack/', debug_soundtrack_api, name='debug_soundtrack'),
     # Emergency migration endpoint
     path('api/apply-migration-0025/', apply_migration_0025_view, name='apply_migration_0025'),

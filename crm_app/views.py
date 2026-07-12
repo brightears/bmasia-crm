@@ -7364,7 +7364,7 @@ class AutomationViewSet(viewsets.ViewSet):
     """
     ViewSet for email automation status and manual triggering
     """
-    permission_classes = [AllowAny]  # TODO: Restrict to admin in production
+    permission_classes = [IsAuthenticated]  # hardened 2026-07-02: was AllowAny — anon could trigger real customer emails via test-run
 
     @action(detail=False, methods=['get'], url_path='status')
     def get_status(self, request):
@@ -10188,7 +10188,7 @@ class StaticDocumentViewSet(viewsets.ModelViewSet):
     """
     queryset = StaticDocument.objects.all()
     serializer_class = StaticDocumentSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]  # hardened 2026-07-02: was AllowAny — anon could POST forged legal T&Cs served on every contract pack
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['document_type', 'is_active']
     search_fields = ['name', 'description']
