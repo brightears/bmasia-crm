@@ -1252,17 +1252,21 @@ class ContractViewSet(BaseModelViewSet):
             renewed_from=original,
             send_renewal_reminders=original.send_renewal_reminders,
             contract_category=original.contract_category,
-            corporate_parent=original.corporate_parent,
-            # Content fields
-            preamble_text=original.preamble_text,
-            custom_preamble=original.custom_preamble,
-            payment_terms_text=original.payment_terms_text,
-            custom_payment_terms=original.custom_payment_terms,
-            activation_terms_text=original.activation_terms_text,
-            custom_activation_terms=original.custom_activation_terms,
+            master_contract=original.master_contract,
+            lifecycle_type='renewal',
+            property_name=original.property_name,
+            # Content fields — REAL field names. The previous kwargs (corporate_parent, preamble_text,
+            # payment_terms_text, activation_terms_text, custom_*, service_package_items) are NOT Contract
+            # fields and raised AttributeError → HTTP 500 on EVERY call (self-audit 2026-07-02).
+            preamble_template=original.preamble_template,
+            preamble_custom=original.preamble_custom,
+            payment_template=original.payment_template,
+            payment_custom=original.payment_custom,
+            activation_template=original.activation_template,
+            activation_custom=original.activation_custom,
+            custom_terms=original.custom_terms,
             show_zone_pricing_detail=original.show_zone_pricing_detail,
             price_per_zone=original.price_per_zone,
-            service_package_items=original.service_package_items,
             custom_service_items=original.custom_service_items,
             bmasia_contact_name=original.bmasia_contact_name,
             bmasia_contact_title=original.bmasia_contact_title,
@@ -1274,6 +1278,21 @@ class ContractViewSet(BaseModelViewSet):
         # Copy zones to new contract
         for zone in original.zones.all():
             new_contract.zones.add(zone)
+
+        # Copy service_items (M2M — cannot be passed to create())
+        if original.service_items.exists():
+            new_contract.service_items.set(original.service_items.all())
+        # Copy service locations — the canonical rows that drive the contract PDF product/zone table
+        for loc in original.service_locations.all():
+            new_contract.service_locations.create(
+                location_name=loc.location_name, platform=loc.platform,
+                custom_service_name=loc.custom_service_name, sort_order=loc.sort_order, price=loc.price)
+        # Copy line items
+        for li in original.line_items.all():
+            new_contract.line_items.create(
+                product_service=li.product_service, description=li.description, quantity=li.quantity,
+                unit_price=li.unit_price, discount_percentage=li.discount_percentage,
+                tax_rate=li.tax_rate, line_total=li.line_total)
 
         # Mark original as renewed
         original.status = 'Renewed'
