@@ -28,18 +28,21 @@ def sync_soundtrack_zones_on_save(sender, instance, created, **kwargs):
 @receiver(post_save, sender=Contract)
 def handle_contract_termination(sender, instance, created, **kwargs):
     """
-    When contract status changes to 'Terminated', automatically:
+    When a contract is 'Cancelled', automatically:
     1. Close all active ContractZone relationships (set end_date, is_active=False)
     2. Mark all zones as 'cancelled'
 
-    This ensures data integrity and automatic sync between contracts and zones.
+    Fix 2026-07-02: gate was 'Terminated', which is NOT a valid Contract status
+    (valid: Draft/Sent/Active/Renewed/Expired/Cancelled) — so this never fired and zones
+    were never released on cancellation. Idempotent: the active-links filter + the status
+    guard below make repeat saves a no-op.
     """
     # Only run for existing contracts (not new ones)
     if created:
         return
 
-    # Only run if status is Terminated
-    if instance.status != 'Terminated':
+    # Only run when the contract is Cancelled
+    if instance.status != 'Cancelled':
         return
 
     today = timezone.now().date()

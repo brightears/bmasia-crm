@@ -8,11 +8,9 @@ echo "Python version: $(python --version)"
 echo "Date: $(date)"
 echo "======================================================"
 
-# Try to run reset_db.py if RESET_DB is set
-if [ "$RESET_DB" = "true" ]; then
-    echo "RESET_DB is set, resetting database..."
-    python reset_db.py <<< "yes"
-fi
+# SECURITY 2026-07-02: removed the boot-time RESET_DB branch — a single env var could wipe the
+# production database on deploy, with the confirmation auto-piped. DB resets, if ever needed, run
+# manually via the reset_db management command with explicit interactive confirmation.
 
 # Create campaign tables directly via SQL (bypasses migration issues)
 echo "Creating campaign tables via direct SQL..."

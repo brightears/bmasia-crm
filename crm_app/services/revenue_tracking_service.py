@@ -34,6 +34,13 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
+# MonthlyRevenueSnapshot keys on entity SLUGS ('bmasia_th'/'bmasia_hk'); Company.billing_entity
+# stores the DISPLAY value. Translate slug → display before filtering Company (self-audit 2026-07-02).
+SLUG_TO_COMPANY_ENTITY = {
+    'bmasia_th': 'BMAsia (Thailand) Co., Ltd.',
+    'bmasia_hk': 'BMAsia Limited',
+}
+
 
 class RevenueTrackingService:
     """
@@ -94,8 +101,11 @@ class RevenueTrackingService:
         4. If zones were added mid-term → addon (handled separately)
         5. Default → new
         """
-        # Check for churn first
-        if contract.status in ['Terminated']:
+        # Check for churn first — only a genuinely-live contract that was cancelled counts as churn.
+        # A renewal declined while still at 'Sent' (never went live) is a lost opportunity, not churn
+        # (Norbert 2026-07-02). "Went live" is approximated by the term having started.
+        if (contract.status == 'Cancelled' and contract.start_date
+                and contract.start_date <= timezone.now().date()):
             return 'churn'
 
         # Get prior contracts for this company (excluding current)
@@ -439,10 +449,11 @@ class RevenueTrackingService:
             logger.debug(f"Skipping {category}/{billing_entity}/{currency}: manually overridden")
             return existing
 
-        # Build base query for contracts
+        # Build base query for contracts. Snapshots key on entity slugs but Company.billing_entity
+        # stores the display value — translate first, else this matched zero contracts (self-audit).
         contracts = self.Contract.objects.filter(
             currency=currency,
-            company__billing_entity=billing_entity,
+            company__billing_entity=SLUG_TO_COMPANY_ENTITY.get(billing_entity, billing_entity),
             lifecycle_type=category
         )
 
