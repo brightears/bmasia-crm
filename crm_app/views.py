@@ -1145,7 +1145,33 @@ class ContractViewSet(BaseModelViewSet):
         expiring = [contract for contract in self.get_queryset() if contract.is_expiring_soon]
         serializer = self.get_serializer(expiring, many=True)
         return Response(serializer.data)
-    
+
+    @action(detail=False, methods=['get'], url_path='renewal-book')
+    def renewal_book(self, request):
+        """Renewal Book — the CRM equivalent of a renewal-funnel month tab, agent-first.
+
+        GET /api/v1/contracts/renewal-book/?year=2026&month=9[&currency=USD]
+        Returns every contract whose term ends in that month (up for renewal) with the
+        renewal-relevant fields — corporate group, product (Soundtrack/Beat Breeze), zones,
+        value, status, successor + its status, paid state, quarterly-billing flag — plus footer
+        totals by product and by status. Built to retire the Google-Sheets funnel tabs.
+        Tip: the funnel keeps USD (International) and THB (Thailand) on separate sheets — pass
+        ?currency=USD or ?currency=THB to match one tab; omit it to see both (mixed-currency totals).
+        """
+        from crm_app.services.renewal_book_service import build_renewal_book
+        try:
+            data = build_renewal_book(
+                request.query_params.get('year'),
+                request.query_params.get('month'),
+                request.query_params.get('currency') or None,
+            )
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'Required query params: year and month (1-12).',
+                 'example': '/api/v1/contracts/renewal-book/?year=2026&month=9&currency=USD'},
+                status=status.HTTP_400_BAD_REQUEST)
+        return Response(data)
+
     @action(detail=True, methods=['post'])
     def send(self, request, pk=None):
         """Send contract via email with PDF attachment"""

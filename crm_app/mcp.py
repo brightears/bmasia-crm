@@ -426,6 +426,32 @@ def delete_record(collection: str, id: str) -> str:
     instance.delete()
     return f"Deleted {collection} '{name}' ({id})."
 
+
+@mcp_server.tool()
+def renewal_book(year: int, month: int, currency: str = "") -> str:
+    """The Renewal Book — every contract whose term ends in a given month (the CRM equivalent of a
+    renewal-funnel month tab). Use this to see what is up for renewal, its status, and whether it
+    has been renewed/paid — instead of the Google Sheets.
+
+    Each row: corporate_group, company, country, end_date, zones, value, currency, product
+    (Soundtrack/Beat Breeze), lifecycle_type, status, cancelled flag, auto_renew, billing_frequency,
+    successor_contract + successor_status (via the renewed-from link), invoices_paid, outstanding_amount.
+    Plus footer totals_by_product (contracts/zones/value) and totals_by_status.
+
+    Args:
+        year: e.g. 2026
+        month: 1-12
+        currency: optional 'USD' or 'THB' to match one funnel sheet; omit to see both.
+
+    Returns: JSON {year, month, month_label, currency, count, totals_by_product, totals_by_status, rows}.
+    """
+    from crm_app.services.renewal_book_service import build_renewal_book
+    try:
+        data = build_renewal_book(year, month, currency or None)
+    except (TypeError, ValueError) as e:
+        return f"Error: {e}. Provide year and month (1-12), e.g. year=2026, month=9."
+    return _json.dumps(data)
+
 # ============================================================
 # Custom tools — PDF generation
 # ============================================================
