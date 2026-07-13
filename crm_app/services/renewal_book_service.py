@@ -42,7 +42,15 @@ def build_renewal_book(year, month, currency=None):
     rows, totals, status_totals = [], {}, {}
     for c in qs:
         group = c.company.parent_company.name if c.company.parent_company else c.company.name
+        # Prefer the real service_location rows; when a contract has none yet, fall back to the
+        # funnel-sourced company.contracted_zone_count so the book/parity aren't blind to the zone
+        # count. zones_source flags which, so an empty-service_locations contract is still visible.
         zones = c.service_locations.count()
+        zones_source = 'service_locations'
+        if zones == 0:
+            fallback = getattr(c.company, 'contracted_zone_count', None) or 0
+            if fallback:
+                zones, zones_source = fallback, 'contracted_zone_count'
         product = _product_of(c)
         renewals = list(c.renewals.all())
         successor = renewals[0] if renewals else None
@@ -57,6 +65,7 @@ def build_renewal_book(year, month, currency=None):
             'country': c.company.country or '',
             'end_date': c.end_date.isoformat() if c.end_date else None,
             'zones': zones,
+            'zones_source': zones_source,
             'value': val,
             'currency': c.currency,
             'product': product,
