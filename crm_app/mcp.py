@@ -78,11 +78,14 @@ class CompanyQuery(ModelQueryToolset):
     fields = [
         'id', 'name', 'legal_entity_name', 'billing_entity', 'industry',
         'phone', 'email', 'website', 'country', 'city', 'address',
-        'full_address', 'status', 'notes', 'parent_company',
-        'created_at', 'updated_at',
+        'full_address', 'is_active', 'is_corporate_parent', 'parent_company',
+        'contracted_product', 'contracted_zone_count', 'contracted_synced_at',
+        'notes', 'created_at', 'updated_at',
     ]
     search_fields = ['name', 'legal_entity_name', 'email', 'city', 'country', 'notes']
-    extra_instructions = "Use this to look up hotels, resorts, and corporate clients."
+    extra_instructions = ("Hotels, resorts, corporate clients. contracted_product (soundtrack/beatbreeze) + "
+                          "contracted_zone_count are funnel-sourced; is_corporate_parent + parent_company give "
+                          "the corporate group. NOTE: is_active is unreliable — judge active status by contracts.")
 
 
 class ContactQuery(ModelQueryToolset):
@@ -98,17 +101,21 @@ class ContactQuery(ModelQueryToolset):
 class ContractQuery(ModelQueryToolset):
     model = Contract
     fields = [
-        'id', 'contract_number', 'company', 'contract_type', 'status',
-        'start_date', 'end_date', 'value', 'currency', 'monthly_value',
-        'total_value', 'billing_frequency', 'payment_terms', 'notes',
-        'master_contract', 'created_at', 'updated_at',
+        'id', 'contract_number', 'company', 'contract_type', 'service_type', 'status',
+        'lifecycle_type', 'start_date', 'end_date', 'value', 'currency',
+        'total_value', 'billing_frequency', 'payment_terms', 'auto_renew',
+        'renewal_period_months', 'renewed_from', 'renewal_notice_sent', 'sent_date',
+        'contract_category', 'is_active', 'master_contract', 'notes',
+        'created_at', 'updated_at',
     ]
     search_fields = ['contract_number', 'notes', 'payment_terms']
     extra_instructions = (
         "Status lifecycle: Draft → Sent → Active → Renewed/Expired. Cancelled is terminal, "
         "reachable from Sent (renewal declined/abandoned before activation — never went live) "
         "or from Active (terminated after going live). "
-        "Use $lookup with 'company' to join company details."
+        "service_type = product (Soundtrack / Beat Breeze). lifecycle_type: new/renewal/addon/churn. "
+        "renewed_from links a renewal to the contract it replaced (renewal lineage). "
+        "For a month's renewals use the renewal_book tool. $lookup with 'company' to join company details."
     )
 
 
@@ -116,7 +123,7 @@ class InvoiceQuery(ModelQueryToolset):
     model = Invoice
     fields = [
         'id', 'invoice_number', 'company', 'contract', 'status',
-        'invoice_date', 'due_date', 'paid_date', 'subtotal', 'total_tax',
+        'invoice_date', 'due_date', 'paid_date', 'amount', 'tax_amount',
         'total_amount', 'currency', 'notes', 'created_at',
     ]
     search_fields = ['invoice_number', 'notes']
@@ -126,11 +133,13 @@ class InvoiceQuery(ModelQueryToolset):
 class QuoteQuery(ModelQueryToolset):
     model = Quote
     fields = [
-        'id', 'quote_number', 'company', 'status', 'quote_date',
-        'valid_until', 'subtotal', 'total_value', 'currency',
-        'notes', 'created_at',
+        'id', 'quote_number', 'company', 'opportunity', 'status', 'quote_type',
+        'valid_from', 'valid_until', 'subtotal', 'total_value', 'currency',
+        'billing_frequency', 'contract_duration_months', 'notes', 'created_at',
     ]
     search_fields = ['quote_number', 'notes']
+    extra_instructions = ("Use convert_quote_to_contract to turn an accepted quote into a Draft contract "
+                          "(copies terms + line items, derives service locations).")
 
 
 class OpportunityQuery(ModelQueryToolset):
