@@ -452,6 +452,38 @@ def renewal_book(year: int, month: int, currency: str = "") -> str:
         return f"Error: {e}. Provide year and month (1-12), e.g. year=2026, month=9."
     return _json.dumps(data)
 
+
+@mcp_server.tool()
+def convert_quote_to_contract(quote_id: str, overrides_json: str = "") -> str:
+    """Turn an accepted quote into a Draft contract: copies the terms + line items, derives the
+    service locations, and links the quote. Idempotent — if the quote already has a (non-cancelled)
+    contract, that one is returned and nothing new is created.
+
+    Args:
+        quote_id: the quote's UUID.
+        overrides_json: optional JSON object with any of start_date, end_date,
+            contract_duration_months, billing_frequency, property_name, notes, price_per_zone,
+            customer_contact_name, customer_contact_title, customer_contact_email.
+
+    Returns: JSON with contract_id, contract_number, status, and a message. NOTE: the derived
+    service-location product/zone mapping is best-effort — read them back and correct if needed.
+    """
+    from crm_app.models import Quote
+    from crm_app.services.quote_conversion import convert_quote_to_contract as _convert
+    try:
+        quote = Quote.objects.get(id=quote_id)
+    except Quote.DoesNotExist:
+        return f"Error: quote '{quote_id}' not found."
+    overrides = {}
+    if overrides_json:
+        try:
+            overrides = _json.loads(overrides_json)
+        except _json.JSONDecodeError as e:
+            return f"Error: invalid overrides_json — {e}"
+    contract, info = _convert(quote, overrides)
+    return _json.dumps({'contract_id': str(contract.id), 'contract_number': contract.contract_number,
+                        'status': contract.status, **info})
+
 # ============================================================
 # Custom tools — PDF generation
 # ============================================================

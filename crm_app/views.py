@@ -6028,6 +6028,27 @@ class QuoteViewSet(BaseModelViewSet):
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
+    def convert_to_contract(self, request, pk=None):
+        """Create a Draft contract from this quote: copies terms + line items, derives service
+        locations, links the quote. Idempotent — returns the existing contract if one already links
+        this quote (no duplicate). Optional JSON body overrides: start_date, end_date,
+        contract_duration_months, billing_frequency, property_name, notes, price_per_zone,
+        customer_contact_name/title/email."""
+        from crm_app.services.quote_conversion import convert_quote_to_contract
+        quote = self.get_object()
+        body = request.data if isinstance(request.data, dict) else {}
+        contract, info = convert_quote_to_contract(quote, body)
+        if not info.get('already_existed'):
+            self.log_action('CREATE', contract, {
+                'action': 'Converted from quote', 'quote_number': quote.quote_number,
+                'service_locations_derived': info.get('service_locations_derived')})
+        code = status.HTTP_200_OK if info.get('already_existed') else status.HTTP_201_CREATED
+        payload = {'message': info['message'], 'contract': ContractSerializer(contract).data}
+        if info.get('already_existed'):
+            payload['already_existed'] = True
+        return Response(payload, status=code)
+
+    @action(detail=True, methods=['post'])
     def send(self, request, pk=None):
         """Send quote via email with PDF attachment"""
         from crm_app.services.email_service import EmailService
