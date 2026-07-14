@@ -33,6 +33,20 @@ from reportlab.pdfbase.ttfonts import TTFont
 pdfmetrics.registerFont(TTFont('DejaVuSans', 'DejaVuSans.ttf'))
 pdfmetrics.registerFont(TTFont('DejaVuSans-Bold', 'DejaVuSans-Bold.ttf'))
 
+
+def _unicode_base_fonts(styles):
+    """Point ReportLab's built-in base styles at the registered DejaVu fonts, so any Paragraph that
+    inherits 'Normal'/'BodyText'/heading styles (preamble, party names, clauses, notes — including
+    Vietnamese diacritics like Ệ Ư Ớ) renders real glyphs instead of Helvetica tofu. Only the
+    Helvetica family is remapped; Courier/Times are left alone. Returns the same stylesheet."""
+    _map = {'Helvetica': 'DejaVuSans', 'Helvetica-Bold': 'DejaVuSans-Bold',
+            'Helvetica-Oblique': 'DejaVuSans', 'Helvetica-BoldOblique': 'DejaVuSans-Bold'}
+    for _name in list(styles.byName):
+        s = styles[_name]
+        if getattr(s, 'fontName', None) in _map:
+            s.fontName = _map[s.fontName]
+    return styles
+
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
     Opportunity, OpportunityActivity, Contract, Invoice, InvoiceLineItem, ContractZone,
@@ -2001,6 +2015,7 @@ class ContractViewSet(BaseModelViewSet):
         # Container for PDF elements
         elements = []
         styles = getSampleStyleSheet()
+        _unicode_base_fonts(styles)
 
         # Custom styles — warm BMAsia design (matching quotation PDF)
         title_style = ParagraphStyle(
@@ -3024,6 +3039,7 @@ and<br/><br/>
         # Container for PDF elements
         elements = []
         styles = getSampleStyleSheet()
+        _unicode_base_fonts(styles)
 
         # Custom styles
         title_style = ParagraphStyle(
@@ -3317,6 +3333,7 @@ and<br/><br/>
         # Container for PDF elements
         elements = []
         styles = getSampleStyleSheet()
+        _unicode_base_fonts(styles)
 
         # Custom styles
         title_style = ParagraphStyle(
@@ -3657,6 +3674,7 @@ and<br/><br/>
         # Container for PDF elements
         elements = []
         styles = getSampleStyleSheet()
+        _unicode_base_fonts(styles)
 
         # ===== STYLES =====
         # Attachment A styles (larger font for scope of work)
@@ -4221,6 +4239,7 @@ and<br/><br/>
         # Container for PDF elements
         elements = []
         styles = getSampleStyleSheet()
+        _unicode_base_fonts(styles)
 
         # Custom styles
         title_style = ParagraphStyle(
@@ -4607,6 +4626,7 @@ and<br/><br/>
         # Container for PDF elements
         elements = []
         styles = getSampleStyleSheet()
+        _unicode_base_fonts(styles)
 
         # Custom styles
         title_style = ParagraphStyle(
@@ -5490,6 +5510,7 @@ class InvoiceViewSet(BaseModelViewSet):
         # Container for PDF elements
         elements = []
         styles = getSampleStyleSheet()
+        _unicode_base_fonts(styles)
 
         # Custom styles - Modern 2025 design
         title_style = ParagraphStyle(
@@ -9108,6 +9129,7 @@ class KBArticleViewSet(viewsets.ModelViewSet):
 
         # Styles
         styles_base = getSampleStyleSheet()
+        _unicode_base_fonts(styles_base)
         pdf_styles = {
             'title': ParagraphStyle('KBTitle', parent=styles_base['Heading1'], fontSize=20, textColor=colors.HexColor('#424242'), fontName='DejaVuSans-Bold', spaceAfter=6),
             'h1': ParagraphStyle('KBH1', parent=styles_base['Heading1'], fontSize=16, textColor=colors.HexColor('#424242'), fontName='DejaVuSans-Bold', spaceBefore=12, spaceAfter=6),
@@ -9800,6 +9822,7 @@ class ClientTechDetailViewSet(viewsets.ModelViewSet):
 
         # Styles
         styles = getSampleStyleSheet()
+        _unicode_base_fonts(styles)
         title_style = ParagraphStyle('TechTitle', parent=styles['Heading1'], fontSize=20, textColor=colors.HexColor('#424242'), fontName='DejaVuSans-Bold', spaceAfter=4, alignment=TA_CENTER)
         section_style = ParagraphStyle('TechSection', parent=styles['Heading2'], fontSize=12, textColor=colors.HexColor('#FFA500'), fontName='DejaVuSans-Bold', spaceBefore=14, spaceAfter=6)
         label_style = ParagraphStyle('TechLabel', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#757575'), fontName='DejaVuSans-Bold', leading=12)

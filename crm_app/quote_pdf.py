@@ -65,6 +65,18 @@ BILLING_FREQUENCY_DISPLAY = {
 }
 
 
+def _unicode_base_fonts(styles):
+    """Remap ReportLab's Helvetica base styles to the registered DejaVu fonts so text inheriting
+    'Normal'/'BodyText' (notes, terms, bank details — incl. Vietnamese diacritics) isn't Helvetica tofu."""
+    _map = {'Helvetica': 'DejaVuSans', 'Helvetica-Bold': 'DejaVuSans-Bold',
+            'Helvetica-Oblique': 'DejaVuSans', 'Helvetica-BoldOblique': 'DejaVuSans-Bold'}
+    for _name in list(styles.byName):
+        s = styles[_name]
+        if getattr(s, 'fontName', None) in _map:
+            s.fontName = _map[s.fontName]
+    return styles
+
+
 def _short_code(raw_product):
     return PRODUCT_SHORT_CODES.get(
         (raw_product or '').strip().lower().replace(' ', ''), raw_product or 'Service'
@@ -154,6 +166,7 @@ def build_quote_pdf(quote, entity, logo_path, format_address_multiline, format_d
 
     elements = []
     styles = getSampleStyleSheet()
+    _unicode_base_fonts(styles)
 
     title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=22,
                                  textColor=colors.HexColor(TEXT_DARK), spaceAfter=8, fontName='DejaVuSans-Bold')
