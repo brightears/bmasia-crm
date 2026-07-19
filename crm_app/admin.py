@@ -1024,7 +1024,7 @@ class ContractAdmin(admin.ModelAdmin):
             'fields': ('payment_terms', 'billing_frequency', 'auto_renew', 'renewal_period_months')
         }),
         ('Signatories', {
-            'fields': ('customer_signatory_name', 'customer_signatory_title', 'bmasia_signatory_name', 'bmasia_signatory_title'),
+            'fields': ('customer_signatory_name', 'customer_signatory_title', 'additional_customer_signatories', 'bmasia_signatory_name', 'bmasia_signatory_title'),
             'classes': ('collapse',),
             'description': 'Authorized signatories for this contract'
         }),
@@ -3896,4 +3896,3 @@ class DocumentSequenceAdmin(admin.ModelAdmin):
     list_display = ['region', 'doc_type', 'year', 'next_sequence']
     list_filter = ['region', 'doc_type']
     ordering = ['region', 'doc_type', 'year']
-

@@ -1966,6 +1966,7 @@ class ContractViewSet(BaseModelViewSet):
         from django.conf import settings
         from datetime import datetime
         import os
+        from xml.sax.saxutils import escape
 
         company = contract.company
 
@@ -1979,9 +1980,48 @@ class ContractViewSet(BaseModelViewSet):
         # Get signatory info
         bmasia_signatory = contract.bmasia_signatory_name or 'Chris Andrews'
         bmasia_title = contract.bmasia_signatory_title or 'Director'
-        customer_signatory = contract.customer_signatory_name or 'Authorized Representative'
-        customer_title = contract.customer_signatory_title or 'Authorized Representative'
         bmasia_date = datetime.now().strftime('%d %B %Y')
+        default_customer_entity = getattr(company, 'legal_entity_name', '') or getattr(company, 'name', '')
+
+        def clean_text(value, fallback=''):
+            value = fallback if value in (None, '') else value
+            return escape(str(value))
+
+        def normalize_customer_signatory(signatory):
+            signatory = signatory or {}
+            entity = (
+                signatory.get('legal_entity_name') or
+                signatory.get('entity_name') or
+                signatory.get('entity') or
+                signatory.get('company_name') or
+                default_customer_entity
+            )
+            poa = (
+                signatory.get('poa') or
+                signatory.get('poa_reference') or
+                signatory.get('power_of_attorney') or
+                signatory.get('authority')
+            )
+            return {
+                'name': signatory.get('name') or 'Authorized Representative',
+                'title': signatory.get('title') or 'Authorized Representative',
+                'entity': entity,
+                'poa': poa,
+            }
+
+        customer_signatories = [
+            normalize_customer_signatory({
+                'name': contract.customer_signatory_name,
+                'title': contract.customer_signatory_title,
+            })
+        ]
+        additional_signatories = contract.additional_customer_signatories or []
+        for signatory in additional_signatories:
+            if isinstance(signatory, dict) and any(signatory.get(key) for key in (
+                'name', 'title', 'legal_entity_name', 'entity_name', 'entity', 'company_name',
+                'poa', 'poa_reference', 'power_of_attorney', 'authority',
+            )):
+                customer_signatories.append(normalize_customer_signatory(signatory))
 
         # Load signature and stamp images
         signature_img = None
@@ -2023,36 +2063,29 @@ class ContractViewSet(BaseModelViewSet):
             bmasia_sig_content.append(sig_stamp_table)
 
         bmasia_sig_content.append(Paragraph('_' * 35, sig_line_style))
-        bmasia_sig_content.append(Paragraph(f"<b>{bmasia_signatory}</b>", sig_name_style))
-        bmasia_sig_content.append(Paragraph(bmasia_title, sig_title_style))
-        bmasia_sig_content.append(Paragraph(f"<b>{entity_name}</b>", sig_company_style))
+        bmasia_sig_content.append(Paragraph(f"<b>{clean_text(bmasia_signatory)}</b>", sig_name_style))
+        bmasia_sig_content.append(Paragraph(clean_text(bmasia_title), sig_title_style))
+        bmasia_sig_content.append(Paragraph(f"<b>{clean_text(entity_name)}</b>", sig_company_style))
         bmasia_sig_content.append(Spacer(1, 0.1*inch))
         bmasia_sig_content.append(Paragraph(f'Date: <u>{bmasia_date}</u>', sig_date_style))
 
         # === Customer signature block (right column) ===
         customer_sig_content = []
 
-        # Primary customer signatory
-        customer_sig_content.append(Spacer(1, 1.15*inch))  # Space for signature (tuned to align with BMAsia sig line)
-        customer_sig_content.append(Paragraph('_' * 35, sig_line_style))
-        customer_sig_content.append(Paragraph(f"<b>{customer_signatory}</b>", sig_name_style))
-        customer_sig_content.append(Paragraph(customer_title, sig_title_style))
-        customer_sig_content.append(Paragraph(f"<b>{company.legal_entity_name or company.name}</b>", sig_company_style))
-        customer_sig_content.append(Spacer(1, 0.1*inch))
-        customer_sig_content.append(Paragraph('Date: _________________', sig_date_style))
-
-        # Additional customer signatories
-        additional_signatories = contract.additional_customer_signatories or []
-        for signatory in additional_signatories:
-            if signatory.get('name') or signatory.get('title'):
+        for index, signatory in enumerate(customer_signatories):
+            if index == 0:
+                customer_sig_content.append(Spacer(1, 1.15*inch))  # Space for signature (tuned to align with BMAsia sig line)
+            else:
                 customer_sig_content.append(Spacer(1, 0.3*inch))
                 customer_sig_content.append(Spacer(1, 0.6*inch))  # Space for signature
-                customer_sig_content.append(Paragraph('_' * 35, sig_line_style))
-                customer_sig_content.append(Paragraph(f"<b>{signatory.get('name', 'Authorized Representative')}</b>", sig_name_style))
-                customer_sig_content.append(Paragraph(signatory.get('title', ''), sig_title_style))
-                customer_sig_content.append(Paragraph(f"<b>{company.legal_entity_name or company.name}</b>", sig_company_style))
-                customer_sig_content.append(Spacer(1, 0.1*inch))
-                customer_sig_content.append(Paragraph('Date: _________________', sig_date_style))
+            customer_sig_content.append(Paragraph('_' * 35, sig_line_style))
+            customer_sig_content.append(Paragraph(f"<b>{clean_text(signatory['name'])}</b>", sig_name_style))
+            customer_sig_content.append(Paragraph(clean_text(signatory['title']), sig_title_style))
+            customer_sig_content.append(Paragraph(f"<b>{clean_text(signatory['entity'])}</b>", sig_company_style))
+            if signatory.get('poa'):
+                customer_sig_content.append(Paragraph(f"POA: {clean_text(signatory['poa'])}", sig_date_style))
+            customer_sig_content.append(Spacer(1, 0.1*inch))
+            customer_sig_content.append(Paragraph('Date: _________________', sig_date_style))
 
         # Build two-column table
         bmasia_cell = Table([[item] for item in bmasia_sig_content], colWidths=[3.4*inch])

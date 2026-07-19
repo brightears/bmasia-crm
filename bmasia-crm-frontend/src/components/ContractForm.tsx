@@ -61,6 +61,18 @@ interface ServiceLocationEntry {
   tempId: string;
 }
 
+interface CustomerSignatoryEntry {
+  name: string;
+  title: string;
+  legal_entity_name?: string;
+  entity_name?: string;
+  entity?: string;
+  company_name?: string;
+  poa?: string;
+  poa_reference?: string;
+  power_of_attorney?: string;
+}
+
 const contractStatuses = [
   'Draft',
   'Sent',
@@ -203,7 +215,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
   const isFormInitialized = useRef(false);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [masterContracts, setMasterContracts] = useState<Contract[]>([]);
-  const [additionalSignatories, setAdditionalSignatories] = useState<Array<{ name: string; title: string }>>([]);
+  const [additionalSignatories, setAdditionalSignatories] = useState<CustomerSignatoryEntry[]>([]);
   const [contractTemplates, setContractTemplates] = useState<ContractTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
 
@@ -1103,29 +1115,53 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
                 {/* Additional Customer Signatories */}
                 {additionalSignatories.map((signatory, index) => (
-                  <Box key={index} sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                    <TextField
-                      fullWidth
-                      label={`Additional Signatory ${index + 1} Name`}
-                      value={signatory.name}
-                      onChange={(e) => {
-                        const updated = [...additionalSignatories];
-                        updated[index] = { ...updated[index], name: e.target.value };
-                        setAdditionalSignatories(updated);
-                      }}
-                      placeholder="e.g., Jane Doe"
-                    />
-                    <TextField
-                      fullWidth
-                      label={`Additional Signatory ${index + 1} Title`}
-                      value={signatory.title}
-                      onChange={(e) => {
-                        const updated = [...additionalSignatories];
-                        updated[index] = { ...updated[index], title: e.target.value };
-                        setAdditionalSignatories(updated);
-                      }}
-                      placeholder="e.g., Director"
-                    />
+                  <Box key={index} sx={{ display: 'flex', gap: 2, alignItems: 'flex-start' }}>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2, flexGrow: 1 }}>
+                      <TextField
+                        fullWidth
+                        label={`Additional Signatory ${index + 1} Name`}
+                        value={signatory.name}
+                        onChange={(e) => {
+                          const updated = [...additionalSignatories];
+                          updated[index] = { ...updated[index], name: e.target.value };
+                          setAdditionalSignatories(updated);
+                        }}
+                        placeholder="e.g., Jane Doe"
+                      />
+                      <TextField
+                        fullWidth
+                        label={`Additional Signatory ${index + 1} Title`}
+                        value={signatory.title}
+                        onChange={(e) => {
+                          const updated = [...additionalSignatories];
+                          updated[index] = { ...updated[index], title: e.target.value };
+                          setAdditionalSignatories(updated);
+                        }}
+                        placeholder="e.g., Director"
+                      />
+                      <TextField
+                        fullWidth
+                        label={`Additional Signatory ${index + 1} Legal Entity`}
+                        value={signatory.legal_entity_name || signatory.entity_name || signatory.entity || signatory.company_name || ''}
+                        onChange={(e) => {
+                          const updated = [...additionalSignatories];
+                          updated[index] = { ...updated[index], legal_entity_name: e.target.value };
+                          setAdditionalSignatories(updated);
+                        }}
+                        placeholder="Defaults to contract company"
+                      />
+                      <TextField
+                        fullWidth
+                        label={`Additional Signatory ${index + 1} POA`}
+                        value={signatory.poa || signatory.poa_reference || signatory.power_of_attorney || ''}
+                        onChange={(e) => {
+                          const updated = [...additionalSignatories];
+                          updated[index] = { ...updated[index], poa: e.target.value };
+                          setAdditionalSignatories(updated);
+                        }}
+                        placeholder="e.g., Power of Attorney dated 01 Jan 2026"
+                      />
+                    </Box>
                     <IconButton
                       onClick={() => {
                         setAdditionalSignatories(additionalSignatories.filter((_, i) => i !== index));
@@ -1143,7 +1179,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
                   variant="outlined"
                   size="small"
                   startIcon={<AddIcon />}
-                  onClick={() => setAdditionalSignatories([...additionalSignatories, { name: '', title: '' }])}
+                  onClick={() => setAdditionalSignatories([...additionalSignatories, { name: '', title: '', legal_entity_name: '', poa: '' }])}
                   sx={{ alignSelf: 'flex-start' }}
                 >
                   Add Customer Signatory
