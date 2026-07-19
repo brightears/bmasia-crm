@@ -2,7 +2,12 @@ from datetime import date
 from types import SimpleNamespace
 
 from crm_app.views import ContractViewSet
-from crm_app.views import _contract_total_contract_value, _duration_months
+from crm_app.views import (
+    _contract_fee_period_suffix,
+    _contract_invoice_frequency_text,
+    _contract_total_contract_value,
+    _duration_months,
+)
 
 
 class FakeQuerySet(list):
@@ -90,3 +95,16 @@ def test_multi_year_contract_value_still_multiplies_annual_line_items():
     duration_months = _duration_months(date(2026, 8, 1), date(2028, 7, 31))
 
     assert _contract_total_contract_value(360.0, duration_months, contract, line_items) == 720.0
+
+
+def test_one_time_contract_value_is_not_multiplied_for_title_case_billing_frequency():
+    contract = SimpleNamespace(
+        billing_frequency='One-time',
+        service_locations=FakeServiceLocations([FakeServiceLocation('Lobby', 'soundtrack')]),
+    )
+    line_items = [SimpleNamespace(quantity=1)]
+    duration_months = _duration_months(date(2026, 8, 1), date(2028, 7, 31))
+
+    assert _contract_total_contract_value(360.0, duration_months, contract, line_items) == 360.0
+    assert _contract_fee_period_suffix(contract) == ''
+    assert _contract_invoice_frequency_text(contract) == 'once'

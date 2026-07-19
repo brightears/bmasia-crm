@@ -166,8 +166,7 @@ def _contract_line_items_cover_full_term(contract, duration_months, line_items=N
     if duration_months <= 12:
         return False
 
-    billing_frequency = (getattr(contract, 'billing_frequency', '') or '').strip().lower()
-    if billing_frequency in {'one-time', 'onetime', 'upfront', 'full term', 'full-term'}:
+    if _is_one_time_billing(contract):
         return True
 
     if line_items is None:
@@ -197,6 +196,23 @@ def _contract_total_contract_value(total_with_tax, duration_months, contract, li
     if _contract_line_items_cover_full_term(contract, duration_months, line_items):
         return total_with_tax
     return total_with_tax * (duration_months / 12)
+
+
+def _is_one_time_billing(contract):
+    billing_frequency = (getattr(contract, 'billing_frequency', '') or '').strip().lower()
+    return billing_frequency in {'one-time', 'one time', 'onetime', 'upfront', 'full term', 'full-term'}
+
+
+def _contract_invoice_frequency_text(contract):
+    return 'once' if _is_one_time_billing(contract) else (getattr(contract, 'billing_frequency', '') or 'annually').lower()
+
+
+def _contract_fee_period_suffix(contract):
+    return '' if _is_one_time_billing(contract) else ' per year'
+
+
+def _contract_fee_kind_text(contract):
+    return 'one-time fee' if _is_one_time_billing(contract) else 'annual fee'
 
 
 def _format_duration_from_months(months):
@@ -2752,7 +2768,7 @@ and<br/><br/>
                     _dur_m = ((contract.end_date.year - contract.start_date.year) * 12 +
                               (contract.end_date.month - contract.start_date.month) +
                               (1 if contract.end_date.day > contract.start_date.day else 0))
-                _per = "" if (contract.start_date and contract.end_date and _dur_m < 12) else " per year"
+                _per = "" if (_is_one_time_billing(contract) or (contract.start_date and contract.end_date and _dur_m < 12)) else " per year"
                 service_items_list.append(f"• <b>Price:</b> {contract.currency} {contract.price_per_zone:,.2f} per zone{_per}{vat_text}")
 
             for item_text in service_items_list:
@@ -4024,6 +4040,9 @@ and<br/><br/>
         base_value = float(contract.value)
         tax_amount = 0
         total_with_tax = base_value
+        fee_period = _contract_fee_period_suffix(contract)
+        fee_kind = _contract_fee_kind_text(contract)
+        invoice_frequency = _contract_invoice_frequency_text(contract)
         if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
             tax_rate = 0.07
             tax_amount = base_value * tax_rate
@@ -4031,14 +4050,14 @@ and<br/><br/>
             fees_text = f"""Hotel agrees to pay Supplier for the Services as follows:<br/><br/>
             <b>A. Fees:</b> {currency_symbol}{base_value:,.2f} {contract.currency} plus 7% VAT
             ({currency_symbol}{tax_amount:,.2f} {contract.currency}), for a total of
-            {currency_symbol}{total_with_tax:,.2f} {contract.currency} per year.<br/><br/>
+            {currency_symbol}{total_with_tax:,.2f} {contract.currency}{fee_period}.<br/><br/>
             <b>B. Expenses:</b> Supplier will bear the cost of licensing and all related expenses.
-            Hotel shall bear no additional costs beyond the agreed annual fee."""
+            Hotel shall bear no additional costs beyond the agreed {fee_kind}."""
         else:
             fees_text = f"""Hotel agrees to pay Supplier for the Services as follows:<br/><br/>
-            <b>A. Fees:</b> {currency_symbol}{base_value:,.2f} {contract.currency} per year.<br/><br/>
+            <b>A. Fees:</b> {currency_symbol}{base_value:,.2f} {contract.currency}{fee_period}.<br/><br/>
             <b>B. Expenses:</b> Supplier will bear the cost of licensing and all related expenses.
-            Hotel shall bear no additional costs beyond the agreed annual fee."""
+            Hotel shall bear no additional costs beyond the agreed {fee_kind}."""
 
         elements.append(Paragraph(fees_text, att_body_style))
         elements.append(Spacer(1, 0.2*inch))
@@ -4047,8 +4066,8 @@ and<br/><br/>
         elements.append(Paragraph("5. ORDERING AND PAYMENT TERMS:", att_heading_style))
         payment_terms = contract.payment_terms if contract.payment_terms else "Payment due within 30 days of invoice date"
         payment_text = f"""Services shall commence on the Effective Date. {payment_terms}.
-        Invoices will be issued {contract.billing_frequency.lower()} and payment shall be made via bank transfer
-        to Supplier's designated account."""
+            Invoices will be issued {invoice_frequency} and payment shall be made via bank transfer
+            to Supplier's designated account."""
         elements.append(Paragraph(payment_text, att_body_style))
         elements.append(Spacer(1, 0.2*inch))
 
@@ -4551,6 +4570,9 @@ and<br/><br/>
 
         # Calculate tax if Thailand entity
         base_value = float(contract.value)
+        fee_period = _contract_fee_period_suffix(contract)
+        fee_kind = _contract_fee_kind_text(contract)
+        invoice_frequency = _contract_invoice_frequency_text(contract)
         if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
             tax_rate = 0.07
             tax_amount = base_value * tax_rate
@@ -4558,14 +4580,14 @@ and<br/><br/>
             fees_text = f"""Hotel agrees to pay Supplier for the Services as follows:<br/><br/>
             <b>A. Fees:</b> {currency_symbol}{base_value:,.2f} {contract.currency} plus 7% VAT
             ({currency_symbol}{tax_amount:,.2f} {contract.currency}), for a total of
-            {currency_symbol}{total_with_tax:,.2f} {contract.currency} per year.<br/><br/>
+            {currency_symbol}{total_with_tax:,.2f} {contract.currency}{fee_period}.<br/><br/>
             <b>B. Expenses:</b> Supplier will bear the cost of licensing and all related expenses.
-            Hotel shall bear no additional costs beyond the agreed annual fee."""
+            Hotel shall bear no additional costs beyond the agreed {fee_kind}."""
         else:
             fees_text = f"""Hotel agrees to pay Supplier for the Services as follows:<br/><br/>
-            <b>A. Fees:</b> {currency_symbol}{base_value:,.2f} {contract.currency} per year.<br/><br/>
+            <b>A. Fees:</b> {currency_symbol}{base_value:,.2f} {contract.currency}{fee_period}.<br/><br/>
             <b>B. Expenses:</b> Supplier will bear the cost of licensing and all related expenses.
-            Hotel shall bear no additional costs beyond the agreed annual fee."""
+            Hotel shall bear no additional costs beyond the agreed {fee_kind}."""
 
         elements.append(Paragraph(fees_text, body_style))
         elements.append(Spacer(1, 0.2*inch))
@@ -4574,7 +4596,7 @@ and<br/><br/>
         elements.append(Paragraph("5. ORDERING AND PAYMENT TERMS:", heading_style))
         payment_terms = contract.payment_terms if contract.payment_terms else "Payment due within 30 days of invoice date"
         payment_text = f"""Services shall commence on the Effective Date. {payment_terms}.
-        Invoices will be issued {contract.billing_frequency.lower()} and payment shall be made via bank transfer
+        Invoices will be issued {invoice_frequency} and payment shall be made via bank transfer
         to Supplier's designated account."""
         elements.append(Paragraph(payment_text, body_style))
         elements.append(Spacer(1, 0.2*inch))

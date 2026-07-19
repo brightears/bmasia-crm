@@ -41,6 +41,29 @@ def _platform_for(product):
     return 'custom', (product or '').strip()[:200]
 
 
+def _contract_billing_frequency_from_quote(quote, overrides):
+    """Normalize quote billing codes to the title-case values used by contracts."""
+    raw = overrides.get('billing_frequency') or getattr(quote, 'billing_frequency', None) or 'Annual'
+    value = str(raw).strip()
+    normalized = value.lower()
+    display_values = {
+        'annual': 'Annually',
+        'annually': 'Annually',
+        'monthly': 'Monthly',
+        'quarterly': 'Quarterly',
+        'biannual': 'Semi-annually',
+        'bi-annually': 'Semi-annually',
+        'semi-annually': 'Semi-annually',
+        'one-time': 'One-time',
+        'one time': 'One-time',
+        'onetime': 'One-time',
+        'upfront': 'One-time',
+        'full term': 'One-time',
+        'full-term': 'One-time',
+    }
+    return display_values.get(normalized, value or 'Annual')
+
+
 def convert_quote_to_contract(quote, overrides=None):
     """Returns (contract, info). info includes {already_existed, service_locations_derived, message}."""
     overrides = overrides or {}
@@ -73,7 +96,7 @@ def convert_quote_to_contract(quote, overrides=None):
         total_value=quote.total_value,
         tax_amount=quote.tax_amount,
         currency=quote.currency,
-        billing_frequency=overrides.get('billing_frequency') or quote.billing_frequency or 'Annual',
+        billing_frequency=_contract_billing_frequency_from_quote(quote, overrides),
         property_name=overrides.get('property_name', ''),
         price_per_zone=price_per_zone,
         show_zone_pricing_detail=bool(price_per_zone),
