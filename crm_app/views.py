@@ -1769,19 +1769,44 @@ class ContractViewSet(BaseModelViewSet):
         service_locs = contract.service_locations.all()
         if service_locs.exists():
             loc_list = list(service_locs)
-            platforms = {loc.platform for loc in loc_list}
-            zone_count = len(loc_list)
+            grouped_counts = {}
+            custom_labels = {}
+            for loc in loc_list:
+                platform = loc.platform
+                zone_names = [name.strip() for name in str(loc.location_name).splitlines() if name.strip()]
+                grouped_counts[platform] = grouped_counts.get(platform, 0) + (len(zone_names) or 1)
+                if platform == 'custom' and loc.custom_service_name:
+                    custom_labels[platform] = self._canonical_product_label(loc.custom_service_name)
         else:
             zone_list = list(zones) if zones.exists() else []
             platforms = {zone.platform for zone in zone_list}
-            zone_count = len(zone_list)
+            grouped_counts = {platform: len([zone for zone in zone_list if zone.platform == platform]) for platform in platforms}
+            custom_labels = {}
+
+        platforms = {platform for platform, count in grouped_counts.items() if count}
+        zone_count = sum(grouped_counts.values())
 
         if platforms == {'beatbreeze'}:
             service_name = 'Beat Breeze Services'
         elif platforms == {'custom'} and service_locs.exists():
-            custom_name = next((loc.custom_service_name for loc in loc_list if loc.custom_service_name), '')
+            custom_name = custom_labels.get('custom', '')
             label = self._canonical_product_label(custom_name) or 'Custom Music Services'
             service_name = label if label.lower().endswith('services') else f'{label} Services'
+        elif len(platforms) > 1:
+            labels = {
+                'soundtrack': 'Soundtrack Your Brand Services',
+                'beatbreeze': 'Beat Breeze Services',
+            }
+            parts = []
+            for platform in ('soundtrack', 'beatbreeze'):
+                count = grouped_counts.get(platform, 0)
+                if count:
+                    parts.append(f'{labels[platform]} - {count} Zone(s)')
+            for platform in sorted(platforms - {'soundtrack', 'beatbreeze'}):
+                label = custom_labels.get(platform) or 'Custom Music Services'
+                service_name = label if label.lower().endswith('services') else f'{label} Services'
+                parts.append(f'{service_name} - {grouped_counts[platform]} Zone(s)')
+            return '; '.join(parts)
         else:
             service_name = 'Music Streaming Services'
 
