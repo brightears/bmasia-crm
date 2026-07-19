@@ -23,6 +23,7 @@ import logging
 import os
 import re
 import uuid
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,73 @@ def _format_duration(start_date, end_date):
     years = months // 12
     remaining = months % 12
     return f'{years} year{"s" if years > 1 else ""} and {remaining} month{"s" if remaining > 1 else ""}'
+
+
+def _duration_months(start_date, end_date):
+    if not start_date or not end_date:
+        return 0
+    months = ((end_date.year - start_date.year) * 12 +
+              (end_date.month - start_date.month))
+    if end_date.day > start_date.day:
+        months += 1
+    return months
+
+
+def _manager_count(manager):
+    try:
+        return manager.count()
+    except TypeError:
+        return len(manager)
+    except AttributeError:
+        return 0
+
+
+def _contract_zone_count(contract):
+    service_locations = getattr(contract, 'service_locations', None)
+    service_location_count = _manager_count(service_locations)
+    if service_location_count:
+        return service_location_count
+    if hasattr(contract, 'get_zone_count'):
+        return contract.get_zone_count()
+    return 0
+
+
+def _contract_line_items_cover_full_term(contract, duration_months, line_items=None):
+    """Detect line-item contracts whose quantity already includes the multi-year term."""
+    if duration_months <= 12:
+        return False
+
+    billing_frequency = (getattr(contract, 'billing_frequency', '') or '').strip().lower()
+    if billing_frequency in {'one-time', 'onetime', 'upfront', 'full term', 'full-term'}:
+        return True
+
+    if line_items is None:
+        line_item_manager = getattr(contract, 'line_items', None)
+        if not line_item_manager:
+            return False
+        line_items = list(line_item_manager.all())
+    if not line_items:
+        return False
+
+    zone_count = _contract_zone_count(contract)
+    if zone_count <= 0:
+        return False
+
+    years = Decimal(str(duration_months)) / Decimal('12')
+    expected_quantity = Decimal(str(zone_count)) * years
+    actual_quantity = sum(
+        Decimal(str(getattr(item, 'quantity', 0) or 0))
+        for item in line_items
+    )
+    return abs(actual_quantity - expected_quantity) <= Decimal('0.01')
+
+
+def _contract_total_contract_value(total_with_tax, duration_months, contract, line_items=None):
+    if duration_months <= 12:
+        return total_with_tax
+    if _contract_line_items_cover_full_term(contract, duration_months, line_items):
+        return total_with_tax
+    return total_with_tax * (duration_months / 12)
 
 
 def _format_duration_from_months(months):
@@ -1553,18 +1621,17 @@ class ContractViewSet(BaseModelViewSet):
 
         # Compute Total Contract Value and billing note for multi-year deals
         if contract.start_date and contract.end_date and contract.value:
-            dur_months = ((contract.end_date.year - contract.start_date.year) * 12 +
-                         (contract.end_date.month - contract.start_date.month))
-            if contract.end_date.day > contract.start_date.day:
-                dur_months += 1
+            dur_months = _duration_months(contract.start_date, contract.end_date)
             if dur_months > 12:
-                years = dur_months / 12
-                tcv = float(contract.value) * years
+                tcv = _contract_total_contract_value(float(contract.value), dur_months, contract)
                 replacements['{{total_contract_value}}'] = f"{contract.currency} {tcv:,.2f}"
                 replacements['{{total_contract_value_amount}}'] = f"{tcv:,.2f}"
                 effective_tax = float(contract.tax_rate) if contract.tax_rate else (7.0 if company and company.billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 0.0)
                 vat_suffix = f" + {effective_tax:.0f}% VAT" if effective_tax > 0 else ""
-                replacements['{{billing_note}}'] = f"Invoiced annually at {contract.currency} {contract.value:,.2f}{vat_suffix} per year."
+                if _contract_line_items_cover_full_term(contract, dur_months):
+                    replacements['{{billing_note}}'] = f"Total for the full term: {contract.currency} {contract.value:,.2f}{vat_suffix}."
+                else:
+                    replacements['{{billing_note}}'] = f"Invoiced annually at {contract.currency} {contract.value:,.2f}{vat_suffix} per year."
 
         # Compute rate per zone
         if contract.value:
@@ -2645,16 +2712,14 @@ and<br/><br/>
             is_multi_year = False
             contract_duration_months = 0
             if contract.start_date and contract.end_date:
-                contract_duration_months = ((contract.end_date.year - contract.start_date.year) * 12 +
-                                           (contract.end_date.month - contract.start_date.month))
-                if contract.end_date.day > contract.start_date.day:
-                    contract_duration_months += 1
+                contract_duration_months = _duration_months(contract.start_date, contract.end_date)
                 is_multi_year = contract_duration_months > 12
-
-            per_year_label = " per year" if is_multi_year else ""
 
             # Check if contract has line items for detailed breakdown
             contract_line_items = list(contract.line_items.all()) if hasattr(contract, 'line_items') else []
+            line_items_cover_full_term = _contract_line_items_cover_full_term(
+                contract, contract_duration_months, contract_line_items)
+            per_year_label = " per year" if is_multi_year and not line_items_cover_full_term else ""
 
             if contract_line_items:
                 # Line items breakdown
@@ -2685,8 +2750,8 @@ and<br/><br/>
 
             # Total Contract Value for multi-year deals
             if is_multi_year:
-                years = contract_duration_months / 12
-                tcv = total_with_tax * years
+                tcv = _contract_total_contract_value(
+                    total_with_tax, contract_duration_months, contract, contract_line_items)
                 duration_label = _format_duration(contract.start_date, contract.end_date)
                 elements.append(Paragraph(
                     f"&nbsp;&nbsp;&nbsp;&nbsp;<b>Total Contract Value ({duration_label}):</b> {contract.currency} {tcv:,.2f}",

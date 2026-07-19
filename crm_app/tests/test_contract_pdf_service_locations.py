@@ -1,4 +1,8 @@
+from datetime import date
+from types import SimpleNamespace
+
 from crm_app.views import ContractViewSet
+from crm_app.views import _contract_total_contract_value, _duration_months
 
 
 class FakeQuerySet(list):
@@ -27,6 +31,11 @@ class FakeServiceLocation:
         self.platform = platform
         self.custom_service_name = custom_service_name
         self.price = None
+
+
+class FakeServiceLocations(list):
+    def all(self):
+        return self
 
 
 def _plain_text(value):
@@ -58,3 +67,26 @@ def test_service_locations_table_splits_multiline_zone_names_and_keeps_running_n
     assert _plain_text(rows[1][1]) == 'Soundtrack Your Brand'
     assert _plain_text(rows[3][1]) == 'Beat Breeze'
     assert _plain_text(rows[4][1]) == 'MP3'
+
+
+def test_multi_year_contract_value_not_multiplied_when_line_item_quantity_includes_term():
+    contract = SimpleNamespace(
+        billing_frequency='Annually',
+        service_locations=FakeServiceLocations([FakeServiceLocation('Lobby', 'soundtrack')]),
+    )
+    line_items = [SimpleNamespace(quantity=2)]
+    duration_months = _duration_months(date(2026, 8, 1), date(2028, 7, 31))
+
+    assert duration_months == 24
+    assert _contract_total_contract_value(720.0, duration_months, contract, line_items) == 720.0
+
+
+def test_multi_year_contract_value_still_multiplies_annual_line_items():
+    contract = SimpleNamespace(
+        billing_frequency='Annually',
+        service_locations=FakeServiceLocations([FakeServiceLocation('Lobby', 'soundtrack')]),
+    )
+    line_items = [SimpleNamespace(quantity=1)]
+    duration_months = _duration_months(date(2026, 8, 1), date(2028, 7, 31))
+
+    assert _contract_total_contract_value(360.0, duration_months, contract, line_items) == 720.0
