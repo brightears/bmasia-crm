@@ -1697,6 +1697,30 @@ class ContractViewSet(BaseModelViewSet):
             return 'Beat Breeze'
         return name
 
+    def _participation_products_price_description(self, contract, zones):
+        """Return the Section 8 service label for Hilton participation PDFs."""
+        service_locs = contract.service_locations.all()
+        if service_locs.exists():
+            loc_list = list(service_locs)
+            platforms = {loc.platform for loc in loc_list}
+            zone_count = len(loc_list)
+        else:
+            zone_list = list(zones) if zones.exists() else []
+            platforms = {zone.platform for zone in zone_list}
+            zone_count = len(zone_list)
+
+        if platforms == {'beatbreeze'}:
+            service_name = 'Beat Breeze Services'
+        elif platforms == {'custom'} and service_locs.exists():
+            custom_name = next((loc.custom_service_name for loc in loc_list if loc.custom_service_name), '')
+            label = self._canonical_product_label(custom_name) or 'Custom Music Services'
+            service_name = label if label.lower().endswith('services') else f'{label} Services'
+        else:
+            service_name = 'Music Streaming Services'
+
+        zone_label = zone_count if zone_count else 'All'
+        return f'{service_name} - {zone_label} Zone(s)'
+
     def _build_service_locations_table(self, contract, service_locations):
         """Build zones table from ContractServiceLocation records (new simple model).
         Uses warm BMAsia design palette. Supports pagination for large zone counts."""
@@ -3941,7 +3965,7 @@ and<br/><br/>
              Paragraph('<b>Quantity</b>', att_table_style),
              Paragraph('<b>Monthly Fee</b>', att_table_style),
              Paragraph('<b>Annual Fee</b>', att_table_style)],
-            [f'Music Streaming Services - {zones.count() if zones.exists() else "All"} Zone(s)',
+            [self._participation_products_price_description(contract, zones),
              '1',
              f'{currency_symbol}{monthly_value:,.2f}',
              f'{currency_symbol}{base_value:,.2f}'],
@@ -4468,7 +4492,7 @@ and<br/><br/>
              Paragraph('<b>Quantity</b>', table_style),
              Paragraph('<b>Monthly Fee</b>', table_style),
              Paragraph('<b>Annual Fee</b>', table_style)],
-            [f'Music Streaming Services - {zones.count() if zones.exists() else "All"} Zone(s)',
+            [self._participation_products_price_description(contract, zones),
              '1',
              f'{currency_symbol}{monthly_value:,.2f}',
              f'{currency_symbol}{base_value:,.2f}'],
