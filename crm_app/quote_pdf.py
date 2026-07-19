@@ -23,6 +23,7 @@ billing entity + helper callables and delegates here.
 
 from io import BytesIO
 import os
+from decimal import Decimal, InvalidOperation
 
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
@@ -88,6 +89,31 @@ def _qty_str(quantity):
         return f"{quantity:,.0f}" if quantity == int(quantity) else f"{quantity:,.2f}"
     except (TypeError, ValueError):
         return str(quantity)
+
+
+def _decimal_value(value):
+    try:
+        return Decimal(str(value or 0))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal('0')
+
+
+def quote_recurring_and_onetime_totals(line_items):
+    recurring_total = Decimal('0')
+    one_time_total = Decimal('0')
+
+    for item in line_items:
+        line_total = _decimal_value(getattr(item, 'line_total', 0))
+        if line_total <= 0:
+            continue
+
+        code = _short_code(getattr(item, 'product_service', ''))
+        if code in SUBSCRIPTION_CODES:
+            recurring_total += line_total
+        else:
+            one_time_total += line_total
+
+    return recurring_total, one_time_total
 
 
 def derive_payment_schedule(quote, format_duration):
@@ -409,15 +435,24 @@ def build_quote_pdf(quote, entity, logo_path, format_address_multiline, format_d
         tax_pct = (quote.tax_amount / after_discount * 100) if after_discount > 0 else 0
         totals_data.append([f'{tax_label} ({tax_pct:.0f}%):', f"{currency_symbol}{quote.tax_amount:,.2f}"])
 
+    recurring_total, one_time_total = quote_recurring_and_onetime_totals(line_items)
+    has_mixed_recurring_and_onetime = recurring_total > 0 and one_time_total > 0
+
     if billing_freq == 'one-time':
         # One-off charge (hardware / setup): never annualise — no "per year" and no multi-year
         # contract-value multiply. The single figure IS the total. (INC-20260622-af80a5)
         totals_data.append(['<b>Total (one-time):</b>', f"<b>{currency_symbol}{quote.total_value:,.2f}</b>"])
     elif duration_months > 12:
         duration_label = format_duration(duration_months)
-        totals_data.append(['<b>Annual subscription:</b>', f"<b>{currency_symbol}{quote.total_value:,.2f} / year</b>"])
+        annual_subscription = recurring_total if has_mixed_recurring_and_onetime else quote.total_value
+        totals_data.append(['<b>Annual subscription:</b>', f"<b>{currency_symbol}{annual_subscription:,.2f} / year</b>"])
+        if has_mixed_recurring_and_onetime:
+            totals_data.append(['<b>One-time charges:</b>', f"<b>{currency_symbol}{one_time_total:,.2f}</b>"])
         years = duration_months / 12
-        total_contract_value = float(quote.total_value) * years
+        if has_mixed_recurring_and_onetime:
+            total_contract_value = float(recurring_total) * years + float(one_time_total)
+        else:
+            total_contract_value = float(quote.total_value) * years
         totals_data.append([f'<b>Total Contract Value ({duration_label}):</b>',
                             f"<b>{currency_symbol}{total_contract_value:,.2f}</b>"])
     elif duration_months < 12:
@@ -431,8 +466,13 @@ def build_quote_pdf(quote, entity, logo_path, format_address_multiline, format_d
         # line items, the Term/Billing header and the notes. Normal annual quotes keep Pom's label.
         prorated = ('prorat' in (getattr(quote, 'notes', '') or '').lower()
                     or any('prorat' in (getattr(li, 'description', '') or '').lower() for li in line_items))
-        total_label = 'Total:' if prorated else 'Total (per year):'
-        totals_data.append([f'<b>{total_label}</b>', f"<b>{currency_symbol}{quote.total_value:,.2f}</b>"])
+        if has_mixed_recurring_and_onetime and not prorated:
+            totals_data.append(['<b>Total (per year):</b>', f"<b>{currency_symbol}{recurring_total:,.2f}</b>"])
+            totals_data.append(['<b>One-time charges:</b>', f"<b>{currency_symbol}{one_time_total:,.2f}</b>"])
+            totals_data.append(['<b>Total:</b>', f"<b>{currency_symbol}{quote.total_value:,.2f}</b>"])
+        else:
+            total_label = 'Total:' if prorated else 'Total (per year):'
+            totals_data.append([f'<b>{total_label}</b>', f"<b>{currency_symbol}{quote.total_value:,.2f}</b>"])
 
     totals_data_parsed = [[Paragraph(label, body_style), Paragraph(value, body_style)] for label, value in totals_data]
     totals_table = Table(totals_data_parsed, colWidths=[5 * inch, 1.9 * inch])
