@@ -1738,7 +1738,10 @@ class ContractViewSet(BaseModelViewSet):
         company = contract.company
         prop_style = ParagraphStyle('ZoneProp', fontName='DejaVuSans', fontSize=9, textColor=colors.HexColor(TEXT_DARK))
 
-        platform_labels = {'soundtrack': 'Soundtrack', 'beatbreeze': 'Beat Breeze'}
+        platform_labels = {'soundtrack': 'Soundtrack Your Brand', 'beatbreeze': 'Beat Breeze'}
+
+        def location_zone_names(loc):
+            return [name.strip() for name in str(loc.location_name).splitlines() if name.strip()]
 
         loc_list = list(service_locations)
         has_pricing = contract.show_zone_pricing_detail and (
@@ -1772,16 +1775,19 @@ class ContractViewSet(BaseModelViewSet):
             for idx, loc in enumerate(platform_locs, 1):
                 property_name = Paragraph(contract.property_name or company.name, prop_style) if row_idx == 0 else ''
                 service_name = Paragraph(platform_labels[platform_key], prop_style) if idx == 1 else ''
-                zone_label = Paragraph(f"Zone {idx}: {loc.location_name}", prop_style)
-                row = [property_name, service_name, zone_label]
-                if has_pricing:
-                    zone_price = loc.price or contract.price_per_zone
-                    price_str = f"{contract.currency} {zone_price:,.2f}" if zone_price else ''
-                    row.append(price_str)
-                zone_data.append(row)
-                row_idx += 1
+                for zone_name in location_zone_names(loc):
+                    row_idx += 1
+                    zone_label = Paragraph(f"Zone {row_idx}: {zone_name}", prop_style)
+                    row = [property_name, service_name, zone_label]
+                    if has_pricing:
+                        zone_price = loc.price or contract.price_per_zone
+                        price_str = f"{contract.currency} {zone_price:,.2f}" if zone_price else ''
+                        row.append(price_str)
+                    zone_data.append(row)
+                    property_name = ''
+                    service_name = ''
             group_end = row_idx
-            if len(platform_locs) > 1:
+            if group_end > group_start:
                 service_spans.append((group_start, group_end))
 
         # Render custom product groups
@@ -1792,16 +1798,19 @@ class ContractViewSet(BaseModelViewSet):
             for idx, loc in enumerate(locs, 1):
                 property_name = Paragraph(contract.property_name or company.name, prop_style) if row_idx == 0 else ''
                 service_name = Paragraph(custom_name, prop_style) if idx == 1 else ''
-                zone_label = Paragraph(f"Zone {idx}: {loc.location_name}", prop_style)
-                row = [property_name, service_name, zone_label]
-                if has_pricing:
-                    zone_price = loc.price or contract.price_per_zone
-                    price_str = f"{contract.currency} {zone_price:,.2f}" if zone_price else ''
-                    row.append(price_str)
-                zone_data.append(row)
-                row_idx += 1
+                for zone_name in location_zone_names(loc):
+                    row_idx += 1
+                    zone_label = Paragraph(f"Zone {row_idx}: {zone_name}", prop_style)
+                    row = [property_name, service_name, zone_label]
+                    if has_pricing:
+                        zone_price = loc.price or contract.price_per_zone
+                        price_str = f"{contract.currency} {zone_price:,.2f}" if zone_price else ''
+                        row.append(price_str)
+                    zone_data.append(row)
+                    property_name = ''
+                    service_name = ''
             group_end = row_idx
-            if len(locs) > 1:
+            if group_end > group_start:
                 service_spans.append((group_start, group_end))
 
         zone_count = row_idx
