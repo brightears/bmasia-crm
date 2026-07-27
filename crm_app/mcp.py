@@ -36,7 +36,7 @@ across Thailand and Hong Kong.
 Use `query_data_collections` to search and filter any collection using MongoDB-style
 aggregation pipelines. Available collections: company, contact, contract, invoice,
 quote, opportunity, task, zone, clienttechdetail, device, ticket, kbarticle,
-quotelineitem, contractlineitem, invoicelineitem.
+quotelineitem, contractlineitem, servicelocation, invoicelineitem.
 
 ### CRUD Tools (write)
 Use these 3 generic tools for all write operations:
@@ -46,7 +46,7 @@ Use these 3 generic tools for all write operations:
 
 Supported collections: company, contact, contract, invoice, quote, opportunity,
 task, zone, clienttechdetail, device, ticket, kbarticle, quotelineitem,
-contractlineitem, invoicelineitem.
+contractlineitem, servicelocation, invoicelineitem.
 
 ### PDF Tools
 Each returns a JSON string with `filename`, `size`, and `content_b64` (base64-
@@ -243,6 +243,20 @@ class ContractLineItemQuery(ModelQueryToolset):
     extra_instructions = "Line items attached to contracts. Use to verify what's on a contract PDF or audit nested-write results."
 
 
+class ContractServiceLocationQuery(ModelQueryToolset):
+    model = ContractServiceLocation
+    fields = [
+        'id', 'contract', 'location_name', 'platform', 'custom_service_name',
+        'sort_order', 'price', 'created_at', 'updated_at',
+    ]
+    search_fields = ['location_name', 'custom_service_name']
+    extra_instructions = (
+        "Service-location rows control the product and zone labels on contract PDFs. "
+        "platform: soundtrack, beatbreeze, or custom. Update rows individually by ID; "
+        "standalone deletion is blocked because omission must never silently erase contract data."
+    )
+
+
 class InvoiceLineItemQuery(ModelQueryToolset):
     model = InvoiceLineItem
     fields = [
@@ -279,6 +293,7 @@ _COLLECTION_MAP = {
     'kbarticle': (KBArticle, 'crm_app.serializers.KBArticleSerializer'),
     'quotelineitem': (QuoteLineItem, 'crm_app.serializers.QuoteLineItemSerializer'),
     'contractlineitem': (ContractLineItem, 'crm_app.serializers.ContractLineItemSerializer'),
+    'servicelocation': (ContractServiceLocation, 'crm_app.serializers.ContractServiceLocationSerializer'),
     'invoicelineitem': (InvoiceLineItem, 'crm_app.serializers.InvoiceLineItemSerializer'),
 }
 
@@ -319,7 +334,7 @@ def create_record(collection: str, data: str) -> str:
     Args:
         collection: Collection name (company, contact, contract, invoice, quote,
                     opportunity, task, zone, clienttechdetail, device, ticket, kbarticle,
-                    quotelineitem, contractlineitem, invoicelineitem)
+                    quotelineitem, contractlineitem, servicelocation, invoicelineitem)
         data: JSON string with field values. Use query_data_collections to check
               field names and valid choices first.
 
@@ -423,6 +438,12 @@ def delete_record(collection: str, id: str) -> str:
     """
     if collection not in _COLLECTION_MAP:
         return f"Error: Unknown collection '{collection}'. Valid: {', '.join(sorted(_COLLECTION_MAP))}"
+    if collection == 'servicelocation':
+        return (
+            "Error: Standalone service-location deletion is blocked. "
+            "Use a contract update with replace_service_locations=true and the complete "
+            "intended row list so removal is explicit and pricing is revalidated atomically."
+        )
 
     model, _ = _COLLECTION_MAP[collection]
 

@@ -55,6 +55,7 @@ interface ContractFormProps {
 }
 
 interface ServiceLocationEntry {
+  id?: string;
   location_name: string;
   platform: 'soundtrack' | 'beatbreeze' | 'custom';
   custom_service_name?: string;
@@ -378,6 +379,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
     let dbLocations: ServiceLocationEntry[] = [];
     if (contract.service_locations && contract.service_locations.length > 0) {
       dbLocations = contract.service_locations.map(loc => ({
+        id: loc.id,
         location_name: loc.location_name,
         platform: loc.platform as 'soundtrack' | 'beatbreeze' | 'custom',
         custom_service_name: (loc as any).custom_service_name || '',
@@ -818,11 +820,13 @@ const ContractForm: React.FC<ContractFormProps> = ({
         service_locations: serviceLocations
           .filter(loc => loc.location_name.trim())
           .map((loc, index) => ({
+            ...(loc.id ? { id: loc.id } : {}),
             location_name: loc.location_name.trim(),
             platform: loc.platform,
             sort_order: index,
             ...(loc.platform === 'custom' && loc.custom_service_name ? { custom_service_name: loc.custom_service_name } : {}),
           })),
+        replace_service_locations: true,
       };
 
       let savedContract: Contract;
