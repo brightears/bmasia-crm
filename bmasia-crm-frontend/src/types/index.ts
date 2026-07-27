@@ -378,6 +378,7 @@ export interface Contract {
   line_items?: ContractLineItem[];
   // Service Locations (replaces zone picker)
   service_locations?: ServiceLocation[];
+  replace_service_locations?: boolean;
   created_at: string;
   updated_at: string;
 }

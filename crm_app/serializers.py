@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.utils import timezone
+from django.db import transaction
 from django.db.models import Sum
 from .models import (
     User, Company, Contact, Note, Task, TaskComment, AuditLog,
@@ -619,10 +620,50 @@ class ContractLineItemSerializer(serializers.ModelSerializer):
 
 
 class ContractServiceLocationSerializer(serializers.ModelSerializer):
+    id = serializers.UUIDField(required=False)
+    contract = serializers.PrimaryKeyRelatedField(
+        queryset=Contract.objects.all(),
+        required=False,
+    )
+
     class Meta:
         model = ContractServiceLocation
-        fields = ['id', 'location_name', 'platform', 'sort_order', 'custom_service_name', 'price']
-        read_only_fields = ['id']
+        fields = [
+            'id', 'contract', 'location_name', 'platform', 'sort_order',
+            'custom_service_name', 'price',
+        ]
+
+    def validate(self, attrs):
+        if self.instance is None and self.parent is None and not attrs.get('contract'):
+            raise serializers.ValidationError({
+                'contract': 'This field is required when creating a service location directly.'
+            })
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        instance = super().create(validated_data)
+        self._validate_parent_pricing(instance.contract)
+        return instance
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        validated_data.pop('id', None)
+        validated_data.pop('contract', None)
+        instance = super().update(instance, validated_data)
+        self._validate_parent_pricing(instance.contract)
+        return instance
+
+    @staticmethod
+    def _validate_parent_pricing(contract):
+        from crm_app.services.contract_service_locations import (
+            pricing_mismatch_message,
+            service_location_pricing_mismatch,
+        )
+
+        mismatch = service_location_pricing_mismatch(contract)
+        if mismatch:
+            raise serializers.ValidationError(pricing_mismatch_message(mismatch))
 
 
 class ContractSerializer(serializers.ModelSerializer):
@@ -642,6 +683,15 @@ class ContractSerializer(serializers.ModelSerializer):
 
     # Service locations (simple zone entries for PDF)
     service_locations = ContractServiceLocationSerializer(many=True, required=False)
+    replace_service_locations = serializers.BooleanField(
+        write_only=True,
+        required=False,
+        default=False,
+        help_text=(
+            "Explicit full-replacement mode for UI saves. Without this flag, "
+            "service_locations performs ID-aware partial upserts and never deletes omitted rows."
+        ),
+    )
 
     # NEW FIELDS for zones
     contract_zones = ContractZoneSerializer(many=True, read_only=True)
@@ -673,7 +723,7 @@ class ContractSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'company', 'company_name', 'opportunity', 'opportunity_name',
             'quote', 'quote_number',
-            'contract_number', 'contract_type', 'status', 'start_date', 'end_date',
+            'contract_number', 'contract_type', 'service_type', 'status', 'start_date', 'end_date',
             'sent_date',
             'value', 'tax_rate', 'tax_amount', 'total_value',
             'currency', 'auto_renew', 'renewal_period_months', 'is_active',
@@ -702,7 +752,7 @@ class ContractSerializer(serializers.ModelSerializer):
             'show_zone_pricing_detail', 'price_per_zone',
             'bmasia_contact_name', 'bmasia_contact_email', 'bmasia_contact_title',
             'customer_contact_name', 'customer_contact_email', 'customer_contact_title',
-            'contract_documents', 'line_items', 'service_locations',
+            'contract_documents', 'line_items', 'service_locations', 'replace_service_locations',
             # Finance tracking — Revenue lifecycle.
             # Fix 2026-05-21 (Lyra, per Cira build-request): these were absent from
             # the whitelist, causing DRF to silent-drop the fields on update. Four
@@ -780,10 +830,12 @@ class ContractSerializer(serializers.ModelSerializer):
 
         return validated_data
 
+    @transaction.atomic
     def create(self, validated_data):
         """Create contract with auto-generated contract number, tax calculation, and nested line items"""
         line_items_data = validated_data.pop('line_items', [])
         service_locations_data = validated_data.pop('service_locations', [])
+        validated_data.pop('replace_service_locations', None)
 
         # DRAFT placeholder numbering is handled centrally by Contract.save()
         # (MAX-based — see models.py). Do NOT generate it here.
@@ -802,6 +854,8 @@ class ContractSerializer(serializers.ModelSerializer):
         for item_data in line_items_data:
             ContractLineItem.objects.create(contract=contract, **item_data)
         for loc_data in service_locations_data:
+            loc_data.pop('id', None)
+            loc_data.pop('contract', None)
             ContractServiceLocation.objects.create(contract=contract, **loc_data)
 
         # Auto-sum line items to contract.value
@@ -816,12 +870,22 @@ class ContractSerializer(serializers.ModelSerializer):
             contract.total_value = tax_data['total_value']
             contract.save()
 
+        self._validate_service_location_pricing(contract)
         return contract
 
+    @transaction.atomic
     def update(self, instance, validated_data):
         """Update contract with tax recalculation and nested line items"""
         line_items_data = validated_data.pop('line_items', None)
         service_locations_data = validated_data.pop('service_locations', None)
+        replace_service_locations = validated_data.pop('replace_service_locations', False)
+        pricing_fields_changed = any(
+            field in validated_data
+            for field in (
+                'value', 'currency', 'price_per_zone',
+                'show_zone_pricing_detail', 'discount_percentage',
+            )
+        )
 
         # Check if value or currency changed
         value_changed = 'value' in validated_data
@@ -859,11 +923,91 @@ class ContractSerializer(serializers.ModelSerializer):
                 instance.save()
 
         if service_locations_data is not None:
-            instance.service_locations.all().delete()
-            for loc_data in service_locations_data:
-                ContractServiceLocation.objects.create(contract=instance, **loc_data)
+            self._upsert_service_locations(
+                instance,
+                service_locations_data,
+                replace=replace_service_locations,
+            )
+
+        if (
+            service_locations_data is not None
+            or pricing_fields_changed
+        ):
+            self._validate_service_location_pricing(instance)
 
         return instance
+
+    def _upsert_service_locations(self, contract, locations_data, *, replace=False):
+        """Apply ID-aware partial updates without destructive implicit deletes."""
+
+        existing = {
+            str(location.id): location
+            for location in contract.service_locations.all()
+        }
+        seen_ids = set()
+
+        for index, raw_data in enumerate(locations_data):
+            loc_data = dict(raw_data)
+            loc_id = loc_data.pop('id', None)
+            loc_data.pop('contract', None)
+
+            if loc_id is not None:
+                location = existing.get(str(loc_id))
+                if location is None:
+                    raise serializers.ValidationError({
+                        'service_locations': {
+                            index: {
+                                'id': (
+                                    "This service-location ID does not belong to the contract. "
+                                    "No rows were changed."
+                                )
+                            }
+                        }
+                    })
+                for attr, value in loc_data.items():
+                    setattr(location, attr, value)
+                location.save()
+            else:
+                matching_name = next(
+                    (
+                        location for location in existing.values()
+                        if location.location_name == loc_data.get('location_name')
+                    ),
+                    None,
+                )
+                if matching_name is not None and not replace:
+                    raise serializers.ValidationError({
+                        'service_locations': {
+                            index: {
+                                'id': (
+                                    "Existing service locations must be updated by ID. "
+                                    f"Use id={matching_name.id} for {matching_name.location_name!r}."
+                                )
+                            }
+                        }
+                    })
+                location = ContractServiceLocation.objects.create(
+                    contract=contract,
+                    **loc_data,
+                )
+
+            seen_ids.add(str(location.id))
+
+        if replace:
+            contract.service_locations.exclude(id__in=seen_ids).delete()
+
+    @staticmethod
+    def _validate_service_location_pricing(contract):
+        from crm_app.services.contract_service_locations import (
+            pricing_mismatch_message,
+            service_location_pricing_mismatch,
+        )
+
+        mismatch = service_location_pricing_mismatch(contract)
+        if mismatch:
+            raise serializers.ValidationError({
+                'service_locations': pricing_mismatch_message(mismatch),
+            })
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

@@ -1446,6 +1446,26 @@ class ContractViewSet(BaseModelViewSet):
     def pdf(self, request, pk=None):
         """Generate and download PDF for contract based on template's pdf_format or contract_category"""
         contract = self.get_object()
+        from crm_app.services.contract_service_locations import (
+            pricing_mismatch_message,
+            service_location_pricing_mismatch,
+        )
+
+        mismatch = service_location_pricing_mismatch(contract)
+        if mismatch:
+            return Response(
+                {
+                    'error': 'Contract PDF blocked because pricing does not reconcile.',
+                    'detail': pricing_mismatch_message(mismatch),
+                    'evidence': {
+                        'zone_count': mismatch['zone_count'],
+                        'expected_value': str(mismatch['expected_value']),
+                        'actual_value': str(mismatch['actual_value']),
+                        'currency': mismatch['currency'],
+                    },
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
 
         # Determine PDF format: prefer template's pdf_format, fallback to contract_category
         pdf_format = 'standard'  # default
