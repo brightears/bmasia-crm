@@ -1,23 +1,14 @@
-"""
-Pytest configuration and shared fixtures for Contract-Zone tests.
+"""Pytest config for the CRM test suite.
+
+Fix 2026-08-22: the previous `django_db_setup` no-op disabled test-database
+creation entirely, so the suite could only run against a pre-existing database.
+Combined with `--no-migrations` in pytest.ini (build the schema directly from the
+current models), the suite now builds a correct throwaway test DB from zero on
+any Postgres, independent of the legacy migration history.
 """
 import pytest
-from django.conf import settings
-
-
-# Configure Django settings for tests
-def pytest_configure(config):
-    """Configure Django settings for pytest"""
-    settings.DEBUG = False
-
-
-@pytest.fixture(scope='session')
-def django_db_setup():
-    """Setup test database"""
-    pass
 
 
 @pytest.fixture(autouse=True)
 def enable_db_access_for_all_tests(db):
-    """Enable database access for all tests"""
     pass

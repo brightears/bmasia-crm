@@ -29,7 +29,7 @@ class TestContractTerminationSignal:
         ContractZoneFactory(contract=contract, zone=zone2, is_active=True)
 
         # Terminate the contract
-        contract.status = 'Terminated'
+        contract.status = 'Cancelled'
         contract.save()
 
         # Zones should be marked as cancelled
@@ -52,7 +52,7 @@ class TestContractTerminationSignal:
         )
 
         # Terminate the contract
-        contract.status = 'Terminated'
+        contract.status = 'Cancelled'
         contract.save()
 
         # ContractZone should be inactive
@@ -75,7 +75,7 @@ class TestContractTerminationSignal:
         today = timezone.now().date()
 
         # Terminate the contract
-        contract.status = 'Terminated'
+        contract.status = 'Cancelled'
         contract.save()
 
         # ContractZone should have end_date set to today
@@ -104,7 +104,7 @@ class TestContractTerminationSignal:
         )
 
         # Terminate the contract
-        contract.status = 'Terminated'
+        contract.status = 'Cancelled'
         contract.save()
 
         # Active zone should be cancelled
@@ -134,7 +134,7 @@ class TestContractTerminationSignal:
         )
 
         # Terminate the contract
-        contract.status = 'Terminated'
+        contract.status = 'Cancelled'
         contract.save()
 
         # Zone should remain cancelled (not double-processed)
@@ -153,7 +153,7 @@ class TestContractTerminationSignal:
         # Create contract with Terminated status (edge case)
         contract = ContractFactory(
             company=company,
-            status='Terminated'
+            status='Cancelled'
         )
 
         # Create link after contract creation
@@ -222,7 +222,7 @@ class TestContractTerminationSignal:
         ]
 
         # Terminate the contract
-        contract.status = 'Terminated'
+        contract.status = 'Cancelled'
         contract.save()
 
         # All zones should be cancelled
@@ -257,7 +257,7 @@ class TestContractTerminationSignal:
                                        start_date=date.today() + timedelta(days=365))
 
         # Terminate contract1 only
-        contract1.status = 'Terminated'
+        contract1.status = 'Cancelled'
         contract1.save()
 
         # Contract1's links should be terminated
@@ -291,7 +291,7 @@ class TestContractTerminationSignal:
         )
 
         # Terminate the contract
-        contract.status = 'Terminated'
+        contract.status = 'Cancelled'
         contract.save()
 
         # Save again (should not cause errors)
@@ -325,7 +325,7 @@ class TestContractTerminationSignal:
             ContractZoneFactory(contract=contract, zone=zone, is_active=True)
 
         # Terminate the contract
-        contract.status = 'Terminated'
+        contract.status = 'Cancelled'
         contract.save()
 
         # All zones should now be cancelled regardless of initial status
