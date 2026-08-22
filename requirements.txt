@@ -16,4 +16,5 @@ reportlab==4.0.7
 django-encrypted-model-fields==0.6.5
 setuptools>=70.0.0
 Pillow>=10.0.0
-django-mcp-server>=0.5.7
+django-mcp-server==0.5.7
+mcp==1.28.1  # pin: newer mcp moved FastMCP out of mcp.server, breaking django-mcp-server 0.5.7 import (2026-08-22)
