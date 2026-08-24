@@ -107,9 +107,11 @@ The record separately binds:
 The final-number rule is exactly
 `RESERVE_UNUSED_DOCUMENT_SEQUENCE_BEFORE_PDF`. The post-send rule is exactly
 `PREPARED_TO_SENT_SOURCE_UNCHANGED`. Unknown, placeholder, pending, malformed,
-or unreviewed evidence is a hold. The admin requires a revision increase when
-reviewed evidence or a reviewed rule changes. Service execution re-reads these
-records and mutating operations lock the policy row.
+or unreviewed evidence is a hold. Revisions can never decrease, and the admin
+requires a revision increase whenever policy evidence or a rule changes,
+including while a record is pending or while a review flag is being changed.
+Service execution re-reads these records and mutating operations lock the
+policy row.
 
 Operator path: a superuser records the exact reviewed Chat/record reference and
 evidence hash in Django admin, checks the source label and rule, increments the
@@ -190,11 +192,24 @@ RenePreparedContract: ready_for_review
 source Contract: unchanged
 ```
 
+The target ID must be one canonical lowercase UUID. Renewal price is positive
+canonical two-decimal money, and base value, derived tax, and derived total
+must each fit the CRM `DecimalField(12,2)` before number reservation. Migration
+`0098_unique_rene_preparation_per_source` also enforces at most one Rene
+preparation for a source. Validation and execution fail closed if any generic
+or Rene renewal successor already points at that source; only replay of the
+exact already-journaled request returns its existing receipt.
+
 The reviewed rule reserves the next unused official `DocumentSequence` number
 inside the transaction before PDF rendering. The review PDF is generated from
 the normal CRM renderer with that non-temporary number already present. Exact
-portable bytes, filename, size, and SHA-256 are stored and returned. No email,
-publication, source renewal, activation, retirement, or deactivation occurs.
+portable bytes are stored exactly once on `RenePreparedContract`. Durable
+request receipts store only the bound filename, size, SHA-256, and portable
+operation binding; the dedicated MCP response reconstructs `content_base64`
+from the immutable stored bytes for first response, exact duplicate, and
+receipt lookup.
+No email, publication, source renewal, activation, retirement, or deactivation
+occurs.
 
 The service does not trust asserted PDF metadata. It parses the actual rendered
 bytes with pinned `pypdf==6.16.1`, rejects encrypted/unparseable/empty or

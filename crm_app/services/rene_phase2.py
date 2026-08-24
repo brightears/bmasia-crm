@@ -11,6 +11,7 @@ verification, and receipt lookup are non-mutating.
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import re
@@ -20,6 +21,7 @@ from datetime import date, datetime, timedelta, timezone as datetime_timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from io import BytesIO
 from pathlib import Path
+from uuid import UUID
 
 from django.db import IntegrityError, transaction
 from django.contrib.auth.models import AnonymousUser
@@ -68,6 +70,8 @@ MUTATING_OPERATIONS = {
 TOKEN_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$')
 SHA_RE = re.compile(r'^[0-9a-f]{64}$')
 FILENAME_RE = re.compile(r'^[^/\\\x00-\x1f\x7f]{1,128}\.pdf$', re.IGNORECASE)
+MONEY_RE = re.compile(r'^(?:0|[1-9][0-9]{0,9})\.[0-9]{2}$')
+MAX_CONTRACT_MONEY = Decimal('9999999999.99')
 MAILBOX_RE = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+$")
 RFC_MESSAGE_ID_RE = re.compile(r'^<[^<>\s@]+@[^<>\s@]+>$')
 FINAL_NUMBER_RULE = 'RESERVE_UNUSED_DOCUMENT_SEQUENCE_BEFORE_PDF'
@@ -242,6 +246,18 @@ def _token(label, value):
     return value
 
 
+def _canonical_uuid(label, value):
+    if not isinstance(value, str):
+        _fail('INVALID_SCHEMA', f'{label} must be one canonical UUID')
+    try:
+        canonical = str(UUID(value))
+    except (AttributeError, ValueError):
+        _fail('INVALID_SCHEMA', f'{label} must be one canonical UUID')
+    if value != canonical:
+        _fail('INVALID_SCHEMA', f'{label} must be one canonical UUID')
+    return canonical
+
+
 def _sha(label, value):
     if not isinstance(value, str) or SHA_RE.fullmatch(value) is None:
         _fail('INVALID_SCHEMA', f'{label} must be one SHA-256 digest')
@@ -293,6 +309,28 @@ def _decimal(label, value):
     if not parsed.is_finite():
         _fail('INVALID_SCHEMA', f'{label} must be finite')
     return parsed
+
+
+def _renewal_amounts(value, tax_rate):
+    """Return storage-safe exact CRM money values for one renewal."""
+
+    if not isinstance(value, str) or MONEY_RE.fullmatch(value) is None:
+        _fail(
+            'INVALID_SCHEMA',
+            'renewal price must be positive canonical money with exactly two decimals',
+        )
+    price = _decimal('renewal price', value)
+    if price <= 0 or price > MAX_CONTRACT_MONEY:
+        _fail('INVALID_SCHEMA', 'renewal price is outside CRM money bounds')
+    if not isinstance(tax_rate, Decimal) or not tax_rate.is_finite() or tax_rate < 0:
+        _fail('NEEDS_CLARIFICATION', 'source tax rate is not a non-negative finite value')
+    tax_amount = (price * tax_rate / Decimal('100')).quantize(
+        Decimal('0.01'), rounding=ROUND_HALF_UP
+    )
+    total_value = price + tax_amount
+    if tax_amount > MAX_CONTRACT_MONEY or total_value > MAX_CONTRACT_MONEY:
+        _fail('INVALID_SCHEMA', 'renewal price and tax exceed CRM money bounds')
+    return price, tax_amount, total_value
 
 
 def _versioned_contract(contract, include_status=False):
@@ -566,8 +604,9 @@ def _parse_envelope(value):
     operation = envelope['verb']
     if operation not in ALLOWED_OPERATIONS:
         _fail('FORBIDDEN', 'operation is not allowlisted for Rene')
-    for field in ('request_id', 'id', 'expected_version'):
+    for field in ('request_id', 'expected_version'):
         _token(field, envelope[field])
+    _canonical_uuid('id', envelope['id'])
     _sha('intent_sha256', envelope['intent_sha256'])
     data = _exact(
         'request data',
@@ -773,7 +812,12 @@ def _load_inspection(intent, source):
     return observed
 
 
-def _validate_prepare(envelope, lock=False):
+def _validate_prepare(
+    envelope,
+    lock=False,
+    *,
+    existing_preparation=None,
+):
     intent = _exact(
         'prepare intent',
         envelope['data']['intent'],
@@ -805,6 +849,28 @@ def _validate_prepare(envelope, lock=False):
         or rfc3339(contract.updated_at) != inspection['contract_updated_at']
     ):
         _fail('VERSION_CONFLICT', 'source contract changed after inspection')
+    successor_query = Contract.objects.filter(renewed_from_id=contract.id)
+    preparation_query = RenePreparedContract.objects.filter(source_contract_id=contract.id)
+    if lock:
+        successor_query = successor_query.select_for_update()
+        preparation_query = preparation_query.select_for_update()
+    if existing_preparation is None:
+        successor_conflict = successor_query.exists()
+        preparation_conflict = preparation_query.exists()
+    else:
+        successor_conflict = (
+            not successor_query.filter(pk=existing_preparation.contract_id).exists()
+            or successor_query.exclude(pk=existing_preparation.contract_id).exists()
+        )
+        preparation_conflict = (
+            not preparation_query.filter(pk=existing_preparation.pk).exists()
+            or preparation_query.exclude(pk=existing_preparation.pk).exists()
+        )
+    if successor_conflict or preparation_conflict:
+        _fail(
+            'SOURCE_LIFECYCLE_CHANGED',
+            'source contract already has a renewal successor; another prepare is forbidden',
+        )
     document, filename, content = _read_unique_signed_document(contract, lock=lock)
     if (
         str(document.id) != inspection['document']['document_id']
@@ -840,7 +906,7 @@ def _validate_prepare(envelope, lock=False):
         or terms['currency'] != contract.currency
     ):
         _fail('EVIDENCE_CHANGED', 'renewal terms differ from reviewed policies or currency')
-    _decimal('renewal price', terms['price'])
+    _renewal_amounts(terms['price'], contract.tax_rate)
     sheet = _exact(
         'sheet evidence', intent['sheet_evidence'], {'spreadsheet_id', 'tab', 'row', 'sha256'}
     )
@@ -909,9 +975,8 @@ def _clone_contract(source, contract_number, terms):
         if field.primary_key or field.name in excluded:
             continue
         values[field.attname] = getattr(source, field.attname)
-    price = _decimal('renewal price', terms['price'])
-    tax_amount = (price * source.tax_rate / Decimal('100')).quantize(
-        Decimal('0.01'), rounding=ROUND_HALF_UP
+    price, tax_amount, total_value = _renewal_amounts(
+        terms['price'], source.tax_rate
     )
     values.update(
         {
@@ -921,7 +986,7 @@ def _clone_contract(source, contract_number, terms):
             'end_date': _date('renewal end_date', terms['end_date']),
             'value': price,
             'tax_amount': tax_amount,
-            'total_value': price + tax_amount,
+            'total_value': total_value,
             'currency': terms['currency'],
             'is_active': False,
             'renewed_from_id': source.id,
@@ -1004,7 +1069,7 @@ def _prepared_mapping(metadata):
     }
 
 
-def _portable_artifact(metadata):
+def _artifact_descriptor(metadata):
     content = bytes(metadata.pdf_content)
     _validate_pdf_bytes(content)
     if hashlib.sha256(content).hexdigest() != metadata.pdf_sha256:
@@ -1013,6 +1078,14 @@ def _portable_artifact(metadata):
         'filename': metadata.pdf_filename,
         'sha256': metadata.pdf_sha256,
         'size_bytes': len(content),
+    }
+
+
+def _portable_artifact(metadata):
+    content = bytes(metadata.pdf_content)
+    descriptor = _artifact_descriptor(metadata)
+    return {
+        **descriptor,
         'content_base64': base64.b64encode(content).decode('ascii'),
     }
 
@@ -1051,7 +1124,7 @@ def _execute_prepare(envelope):
     after = _versioned_contract(source, include_status=True)
     if after != before:
         _fail('SOURCE_LIFECYCLE_CHANGED', 'preparation changed the source contract')
-    artifact = _portable_artifact(metadata)
+    artifact = _artifact_descriptor(metadata)
     receipt = _receipt_base(envelope, 'prepared', before, after, artifact)
     receipt['prepared_contract'] = _prepared_mapping(metadata)
     return receipt
@@ -1065,7 +1138,12 @@ def _receipt_binding(receipt):
             'filename': artifact['filename'],
             'sha256': artifact['sha256'],
             'size_bytes': artifact['size_bytes'],
-            'portable': 'content_base64' in artifact,
+            # Prepare and verify are frozen as portable-PDF operations.  This
+            # stays true in the compact journal descriptor and in the MCP wire
+            # copy that additionally contains ``content_base64``.
+            'portable': receipt.get('operation') in {
+                'prepare_renewal_contract', 'verify_prepared_contract',
+            },
         }
     source = receipt.get('source_inspection')
     return canonical_sha256(
@@ -1131,7 +1209,11 @@ def _verify_prepared_source_live(metadata, lock=False):
     if record is None or not isinstance(record.envelope, dict):
         _fail('MISSING_EVIDENCE', 'prepared contract lacks its exact prepare request')
     envelope = _parse_envelope(record.envelope)
-    source, _, terms, sheet, inspection = _validate_prepare(envelope, lock=lock)
+    source, _, terms, sheet, inspection = _validate_prepare(
+        envelope,
+        lock=lock,
+        existing_preparation=metadata,
+    )
     if (
         source.id != metadata.source_contract_id
         or inspection['binding_sha256'] != metadata.source_inspection_sha256
@@ -1241,7 +1323,7 @@ def _execute_verify(envelope):
         'prepared_contract_verified',
         before,
         dict(before),
-        _portable_artifact(metadata),
+        _artifact_descriptor(metadata),
     )
     receipt['prepared_contract'] = prepared
     return receipt
@@ -1822,6 +1904,45 @@ def lookup_rene_receipt(value):
         'status': status,
         'receipt': receipt,
     }
+
+
+def _materialize_receipt_artifact(receipt):
+    """Attach PDF bytes to a wire copy without expanding the journal JSON."""
+
+    portable_outcomes = {
+        'prepare_renewal_contract': 'prepared',
+        'verify_prepared_contract': 'prepared_contract_verified',
+    }
+    if (
+        not isinstance(receipt, dict)
+        or portable_outcomes.get(receipt.get('operation')) != receipt.get('outcome')
+    ):
+        return receipt
+    artifact = receipt.get('artifact')
+    prepared = receipt.get('prepared_contract')
+    if not isinstance(artifact, dict) or not isinstance(prepared, dict):
+        _fail('EVIDENCE_CHANGED', 'portable receipt artifact binding is missing')
+    if set(artifact) != {'filename', 'sha256', 'size_bytes'}:
+        _fail('EVIDENCE_CHANGED', 'stored receipt artifact descriptor differs')
+    metadata = _load_prepared(prepared.get('contract_id'))
+    if _artifact_descriptor(metadata) != artifact:
+        _fail('EVIDENCE_CHANGED', 'stored receipt and prepared PDF artifact differ')
+    wire = copy.deepcopy(receipt)
+    wire['artifact'] = _portable_artifact(metadata)
+    return wire
+
+
+def materialize_rene_wire_response(value):
+    """Materialize portable PDF bytes only for the scoped MCP response."""
+
+    if not isinstance(value, dict):
+        return value
+    wire = copy.deepcopy(value)
+    if wire.get('schema') == LOOKUP_SCHEMA:
+        if isinstance(wire.get('receipt'), dict):
+            wire['receipt'] = _materialize_receipt_artifact(wire['receipt'])
+        return wire
+    return _materialize_receipt_artifact(wire)
 
 
 def safe_error(exc):

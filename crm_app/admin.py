@@ -3992,28 +3992,41 @@ class ReneRenewalPolicyAdminForm(forms.ModelForm):
                                     'contract_number_source_ref',
                                     'contract_number_source_label'),
             }
-            if previous.review_status == 'reviewed':
-                for prefix, fields in groups.items():
-                    if any(cleaned.get(field) != getattr(previous, field) for field in fields):
-                        revision_field = f'{prefix}_revision'
-                        if (cleaned.get(revision_field) or 0) <= getattr(
-                            previous, revision_field
-                        ):
-                            self.add_error(
-                                revision_field,
-                                'Increase the revision when reviewed evidence or rules change.',
-                            )
+            for prefix, fields in groups.items():
+                revision_field = f'{prefix}_revision'
+                previous_revision = getattr(previous, revision_field)
+                proposed_revision = cleaned.get(revision_field) or 0
+                evidence_changed = any(
+                    cleaned.get(field) != getattr(previous, field) for field in fields
+                )
+                if proposed_revision < previous_revision:
+                    self.add_error(
+                        revision_field,
+                        'A policy evidence revision cannot decrease.',
+                    )
+                elif evidence_changed and proposed_revision == previous_revision:
+                    self.add_error(
+                        revision_field,
+                        'Increase the revision when policy evidence or rules change.',
+                    )
             post_fields = (
                 'post_send_state_semantics_reviewed', 'post_send_policy_id',
                 'post_send_rule', 'post_send_evidence_sha256',
                 'post_send_source_ref', 'post_send_source_label',
             )
-            if previous.post_send_state_semantics_reviewed and any(
+            proposed_post_revision = cleaned.get('post_send_revision') or 0
+            post_changed = any(
                 cleaned.get(field) != getattr(previous, field) for field in post_fields
-            ) and (cleaned.get('post_send_revision') or 0) <= previous.post_send_revision:
+            )
+            if proposed_post_revision < previous.post_send_revision:
                 self.add_error(
                     'post_send_revision',
-                    'Increase the revision when reviewed post-send policy changes.',
+                    'A post-send policy revision cannot decrease.',
+                )
+            elif post_changed and proposed_post_revision == previous.post_send_revision:
+                self.add_error(
+                    'post_send_revision',
+                    'Increase the revision when post-send policy evidence or rules change.',
                 )
         return cleaned
 

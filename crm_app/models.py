@@ -1437,6 +1437,12 @@ class RenePreparedContract(TimestampedModel):
     post_send_policy_revision = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['source_contract'],
+                name='unique_rene_preparation_per_source',
+            ),
+        ]
         indexes = [
             models.Index(
                 fields=['state', 'source_contract'],

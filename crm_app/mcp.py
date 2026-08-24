@@ -94,6 +94,7 @@ class RenePhase2MCPToolset(MCPToolset):
             RenePhase2Error,
             execute_rene_request,
             lookup_rene_receipt,
+            materialize_rene_wire_response,
             safe_error,
             unbound_error,
         )
@@ -115,6 +116,7 @@ class RenePhase2MCPToolset(MCPToolset):
                     crm_mcp_invoked=True,
                 )
             )
+        result_ready = False
         try:
             raw = request_json.encode('utf-8')
             request = parse_cira_json_bytes(raw)
@@ -122,7 +124,8 @@ class RenePhase2MCPToolset(MCPToolset):
                 result = lookup_rene_receipt(request)
             else:
                 result = execute_rene_request(request, crm_mcp_invoked=True)
-            return canonical_json(result)
+            result_ready = True
+            return canonical_json(materialize_rene_wire_response(result))
         except CiraJsonParseError as exc:
             return canonical_json(
                 unbound_error(
@@ -142,6 +145,16 @@ class RenePhase2MCPToolset(MCPToolset):
         except RenePhase2BoundError as exc:
             return canonical_json(safe_error(exc))
         except RenePhase2Error:
+            if result_ready:
+                logger.exception('Rene Phase 2 portable artifact delivery failed')
+                return canonical_json(
+                    unbound_error(
+                        'INTERNAL_ERROR',
+                        'durable CRM receipt exists but its portable PDF is unavailable; '
+                        'retry receipt lookup',
+                        crm_mcp_invoked=True,
+                    )
+                )
             # Schema/hash/authority failures before durable request admission
             # have no trustworthy binding or effect proof.
             return canonical_json(

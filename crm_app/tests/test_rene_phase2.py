@@ -1,3 +1,4 @@
+import base64
 import copy
 import hashlib
 import json
@@ -9,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import IntegrityError, transaction
 from django.forms.models import model_to_dict
 from django.test import override_settings
 from mcp_server import mcp_server
@@ -39,6 +41,7 @@ from crm_app.services.rene_phase2 import (
     RenePhase2Error,
     execute_rene_request,
     lookup_rene_receipt,
+    materialize_rene_wire_response,
 )
 from crm_app.services.rene_phase2_common import canonical_sha256, contract_version
 from crm_app.services.renewal_book_service import build_renewal_book
@@ -231,7 +234,14 @@ def _inspect_request(contract, request_id='inspect-1', evidence_revision=1):
     )
 
 
-def _prepare_request(contract, inspect_request, inspect_receipt):
+def _prepare_request(
+    contract,
+    inspect_request,
+    inspect_receipt,
+    *,
+    request_id='prepare-1',
+    price='1325.00',
+):
     source = inspect_receipt['source_inspection']
     start = {
         key: source['renewal_start_policy'][key]
@@ -274,7 +284,7 @@ def _prepare_request(contract, inspect_request, inspect_receipt):
             'renewal_terms': {
                 'start_date': start['next_start_date'],
                 'end_date': end['next_end_date'],
-                'price': '1325.00',
+                'price': price,
                 'currency': 'USD',
             },
             'sheet_evidence': {
@@ -291,7 +301,7 @@ def _prepare_request(contract, inspect_request, inspect_receipt):
             },
             'delivery': 'return_pdf_for_nikki_review',
         },
-        'prepare-1',
+        request_id,
     )
 
 
@@ -515,6 +525,120 @@ def test_inspect_is_non_mutating_and_requires_unique_official_signed_pdf(tmp_pat
     assert source['renewal_end_policy']['next_end_date'] == '2027-10-31'
     assert source['pricing_structure']['mapping_status'] == 'UNIQUE_SIMPLE_TOTAL'
     assert execute_rene_request(request) == receipt
+
+
+@pytest.mark.django_db
+def test_target_id_must_be_canonical_uuid_before_request_admission():
+    contract = _contract(_company())
+    valid = _inspect_request(contract)
+    bad_ids = ('not-a-uuid', str(contract.id).upper(), contract.id.hex)
+
+    for index, bad_id in enumerate(bad_ids, start=1):
+        request = _envelope(
+            valid['verb'],
+            bad_id,
+            valid['expected_version'],
+            copy.deepcopy(valid['data']['intent']),
+            f'inspect-invalid-uuid-{index}',
+        )
+        with pytest.raises(RenePhase2Error) as caught:
+            execute_rene_request(request)
+        assert caught.value.code == 'INVALID_SCHEMA'
+
+    assert ReneCiraRequest.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_prepare_rejects_noncanonical_or_unstorable_money_before_number_reservation(
+    tmp_path, settings
+):
+    settings.MEDIA_ROOT = tmp_path
+    source = _contract(_company())
+    source.tax_rate = Decimal('7.00')
+    source.save(update_fields=['tax_rate', 'updated_at'])
+    _policy()
+    _signed_document(source)
+    inspect = _inspect_request(source, request_id='inspect-money-bounds')
+    inspected = execute_rene_request(inspect)
+    original_contract_count = Contract.objects.count()
+    invalid_prices = (
+        '-1.00',
+        '0.00',
+        '1.001',
+        '01.00',
+        '1E+2',
+        '10000000000.00',
+        # Base value fits Decimal(12,2), but its derived tax/total do not.
+        '9999999999.99',
+    )
+
+    for index, price in enumerate(invalid_prices, start=1):
+        prepare = _prepare_request(
+            source,
+            inspect,
+            inspected,
+            request_id=f'prepare-invalid-money-{index}',
+            price=price,
+        )
+        with pytest.raises(RenePhase2BoundError) as caught:
+            execute_rene_request(_validate(prepare, f'validate-invalid-money-{index}'))
+        assert caught.value.code == 'INVALID_SCHEMA'
+
+    assert Contract.objects.count() == original_contract_count
+    assert not Contract.objects.filter(renewed_from=source).exists()
+    assert RenePreparedContract.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_prepare_fails_closed_when_source_already_has_any_renewal_successor(
+    tmp_path, settings
+):
+    settings.MEDIA_ROOT = tmp_path
+    company = _company()
+    source = _contract(company)
+    _policy()
+    _signed_document(source)
+    inspect = _inspect_request(source, request_id='inspect-existing-successor')
+    inspected = execute_rene_request(inspect)
+    prepare = _prepare_request(
+        source,
+        inspect,
+        inspected,
+        request_id='prepare-existing-successor',
+    )
+    execute_rene_request(_validate(prepare, 'validate-before-existing-successor'))
+    successor = _contract(
+        company,
+        end_date=date(2027, 10, 31),
+        contract_number='HK-CT26998',
+        status='Draft',
+    )
+    successor.renewed_from = source
+    successor.save(update_fields=['renewed_from', 'updated_at'])
+
+    with pytest.raises(RenePhase2BoundError) as caught:
+        execute_rene_request(prepare)
+    assert caught.value.code == 'SOURCE_LIFECYCLE_CHANGED'
+    terminal_lookup = lookup_rene_receipt(
+        _lookup_for(prepare, 'lookup-existing-successor-terminal')
+    )
+    assert terminal_lookup['status'] == 'rejected_terminal'
+    assert materialize_rene_wire_response(terminal_lookup) == terminal_lookup
+
+    revised = _prepare_request(
+        source,
+        inspect,
+        inspected,
+        request_id='prepare-existing-successor-revised',
+        price='1326.00',
+    )
+    with pytest.raises(RenePhase2BoundError) as validation_caught:
+        execute_rene_request(
+            _validate(revised, 'validate-existing-successor-revised')
+        )
+    assert validation_caught.value.code == 'SOURCE_LIFECYCLE_CHANGED'
+    assert list(Contract.objects.filter(renewed_from=source)) == [successor]
+    assert RenePreparedContract.objects.count() == 0
 
 
 @pytest.mark.django_db
@@ -785,6 +909,134 @@ def test_dedicated_rene_mcp_handler_has_scoped_registry_and_auth(
         f'/mcp/rene-phase2/?token={generic_token.key}',
         {'jsonrpc': '2.0', 'id': 7, 'method': 'tools/list', 'params': {}},
     ).status_code == 401
+
+
+@pytest.mark.django_db
+def test_scoped_mcp_materializes_one_stored_pdf_for_direct_duplicate_and_lookup(
+    tmp_path, settings, monkeypatch
+):
+    settings.MEDIA_ROOT = tmp_path
+    cira = User.objects.create_user(username='artifact-cira-mcp')
+    settings.CIRA_RENE_MCP_TOKEN_SHA256 = MCP_TOKEN_SHA
+    settings.CIRA_RENE_MCP_USER_ID = str(cira.id)
+    source = _contract(_company())
+    _policy()
+    _signed_document(source)
+    inspect = _inspect_request(source, request_id='inspect-wire-artifact')
+    inspected = execute_rene_request(inspect)
+    prepare = _prepare_request(
+        source,
+        inspect,
+        inspected,
+        request_id='prepare-wire-artifact',
+    )
+    execute_rene_request(_validate(prepare, 'validate-prepare-wire-artifact'))
+    monkeypatch.setattr(
+        'crm_app.services.rene_phase2._render_contract_pdf', lambda contract: PDF
+    )
+    client = APIClient()
+
+    def wire_call(request, rpc_id):
+        response = _mcp_post(
+            client,
+            '/mcp/rene-phase2/',
+            {
+                'jsonrpc': '2.0',
+                'id': rpc_id,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'rene_phase2_request',
+                    'arguments': {'request_json': json.dumps(request)},
+                },
+            },
+            authorization=f'Rene {MCP_TOKEN}',
+        )
+        assert response.status_code == 200
+        return json.loads(response.json()['result']['content'][0]['text'])
+
+    prepared_wire = wire_call(prepare, 20)
+    expected_base64 = base64.b64encode(PDF).decode('ascii')
+    assert prepared_wire['artifact']['content_base64'] == expected_base64
+    prepare_journal = ReneCiraRequest.objects.get(request_id=prepare['request_id'])
+    assert 'content_base64' not in json.dumps(prepare_journal.receipt)
+    assert set(prepare_journal.receipt['artifact']) == {
+        'filename', 'sha256', 'size_bytes',
+    }
+    assert bytes(RenePreparedContract.objects.get().pdf_content) == PDF
+
+    monkeypatch.setattr(
+        'crm_app.services.rene_phase2._render_contract_pdf',
+        lambda contract: (_ for _ in ()).throw(AssertionError('must not re-render')),
+    )
+    assert wire_call(prepare, 21) == prepared_wire
+    prepare_lookup = wire_call(
+        _lookup_for(prepare, 'lookup-prepare-wire-artifact'), 22
+    )
+    assert prepare_lookup['status'] == 'found'
+    assert prepare_lookup['receipt'] == prepared_wire
+
+    prepared = Contract.objects.get(
+        pk=prepared_wire['prepared_contract']['contract_id']
+    )
+    verify = _verify_request(
+        prepared,
+        prepare,
+        prepared_wire,
+        request_id='verify-wire-artifact',
+    )
+    verified_wire = wire_call(verify, 23)
+    assert verified_wire['artifact']['content_base64'] == expected_base64
+    verify_journal = ReneCiraRequest.objects.get(request_id=verify['request_id'])
+    assert 'content_base64' not in json.dumps(verify_journal.receipt)
+    assert RenePreparedContract.objects.count() == 1
+    assert wire_call(verify, 24) == verified_wire
+    verify_lookup = wire_call(
+        _lookup_for(verify, 'lookup-verify-wire-artifact'), 25
+    )
+    assert verify_lookup['receipt'] == verified_wire
+
+    metadata = RenePreparedContract.objects.get(contract=prepared)
+    duplicate_contract = _contract(
+        source.company,
+        end_date=date(2027, 10, 31),
+        contract_number='HK-CT26997',
+        status='Draft',
+    )
+    duplicate_values = {
+        field.attname: getattr(metadata, field.attname)
+        for field in RenePreparedContract._meta.concrete_fields
+        if field.name not in {
+            'id', 'created_at', 'updated_at', 'contract', 'source_contract',
+        }
+    }
+    duplicate_values.update(
+        {
+            'prepare_request_id': 'db-constraint-prepare-request',
+            'prepare_request_key': 'db-constraint-prepare-key',
+            'prepare_intent_sha256': '9' * 64,
+        }
+    )
+    with pytest.raises(IntegrityError):
+        with transaction.atomic():
+            RenePreparedContract.objects.create(
+                contract=duplicate_contract,
+                source_contract=source,
+                **duplicate_values,
+            )
+    assert RenePreparedContract.objects.count() == 1
+
+    prepared.status = 'Sent'
+    prepared.save(update_fields=['status', 'updated_at'])
+    metadata.state = 'Sent'
+    metadata.save(update_fields=['state', 'updated_at'])
+    sent_prepare_lookup = wire_call(
+        _lookup_for(prepare, 'lookup-prepare-wire-artifact-sent'), 26
+    )
+    sent_verify_lookup = wire_call(
+        _lookup_for(verify, 'lookup-verify-wire-artifact-sent'), 27
+    )
+    assert sent_prepare_lookup['receipt'] == prepared_wire
+    assert sent_verify_lookup['receipt'] == verified_wire
 
 
 @pytest.mark.django_db
@@ -1286,7 +1538,7 @@ def test_inspection_holds_on_missing_or_ambiguous_source_and_structured_pricing(
 
 
 @pytest.mark.django_db
-def test_reviewed_policy_admin_requires_revision_bump_for_evidence_change():
+def test_policy_admin_revisions_are_monotonic_across_review_state_changes():
     from crm_app.admin import ReneRenewalPolicyAdminForm
 
     policy = _policy()
@@ -1299,3 +1551,28 @@ def test_reviewed_policy_admin_requires_revision_bump_for_evidence_change():
     data['start_revision'] = 2
     revised = ReneRenewalPolicyAdminForm(data=data, instance=policy)
     assert revised.is_valid(), revised.errors
+    revised.save()
+
+    # Moving out of reviewed state cannot open a same-revision edit bypass.
+    data = model_to_dict(policy)
+    data['review_status'] = 'pending'
+    pending = ReneRenewalPolicyAdminForm(data=data, instance=policy)
+    assert pending.is_valid(), pending.errors
+    pending.save()
+    data = model_to_dict(policy)
+    data['end_source_label'] = 'Changed while policy is pending'
+    stale_pending = ReneRenewalPolicyAdminForm(data=data, instance=policy)
+    assert not stale_pending.is_valid()
+    assert 'end_revision' in stale_pending.errors
+
+    data = model_to_dict(policy)
+    data['start_revision'] = 1
+    decreased = ReneRenewalPolicyAdminForm(data=data, instance=policy)
+    assert not decreased.is_valid()
+    assert 'start_revision' in decreased.errors
+
+    data = model_to_dict(policy)
+    data['post_send_state_semantics_reviewed'] = False
+    stale_post_send = ReneRenewalPolicyAdminForm(data=data, instance=policy)
+    assert not stale_post_send.is_valid()
+    assert 'post_send_revision' in stale_post_send.errors
