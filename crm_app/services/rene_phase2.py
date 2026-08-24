@@ -74,6 +74,9 @@ MONEY_RE = re.compile(r'^(?:0|[1-9][0-9]{0,9})\.[0-9]{2}$')
 MAX_CONTRACT_MONEY = Decimal('9999999999.99')
 MAILBOX_RE = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+$")
 RFC_MESSAGE_ID_RE = re.compile(r'^<[^<>\s@]+@[^<>\s@]+>$')
+UNRESOLVED_POLICY_ID_PARTS = frozenset(
+    {'draft', 'pending', 'placeholder', 'temp', 'temporary', 'unknown', 'unresolved'}
+)
 FINAL_NUMBER_RULE = 'RESERVE_UNUSED_DOCUMENT_SEQUENCE_BEFORE_PDF'
 POST_SEND_RULE = 'PREPARED_TO_SENT_SOURCE_UNCHANGED'
 INSPECTION_RETURN_FIELDS = [
@@ -246,6 +249,18 @@ def _token(label, value):
     return value
 
 
+def _reviewed_policy_identifier(label, value):
+    identifier = _token(label, value)
+    parts = {
+        part
+        for part in re.split(r'[._:@/+\-]+', identifier.casefold())
+        if part
+    }
+    if parts & UNRESOLVED_POLICY_ID_PARTS:
+        _fail('NEEDS_CLARIFICATION', f'{label} is not a reviewed source identity')
+    return identifier
+
+
 def _canonical_uuid(label, value):
     if not isinstance(value, str):
         _fail('INVALID_SCHEMA', f'{label} must be one canonical UUID')
@@ -366,10 +381,13 @@ def _reviewed_policy(lock=False):
         _fail('NEEDS_CLARIFICATION', 'renewal end rule is not reviewed')
     for name in (
         'start_policy_id',
-        'start_source_ref',
         'end_policy_id',
-        'end_source_ref',
         'contract_number_policy_id',
+    ):
+        _reviewed_policy_identifier(name, getattr(policy, name))
+    for name in (
+        'start_source_ref',
+        'end_source_ref',
         'contract_number_source_ref',
     ):
         value = _token(name, getattr(policy, name))

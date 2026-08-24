@@ -528,6 +528,66 @@ def test_inspect_is_non_mutating_and_requires_unique_official_signed_pdf(tmp_pat
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize(
+    ('field', 'identifier'),
+    (
+        ('start_policy_id', 'nikki-draft-v2'),
+        ('start_policy_id', 'nikki.pending.v2'),
+        ('end_policy_id', 'nikki/temp/v2'),
+        ('end_policy_id', 'nikki:temporary:v2'),
+        ('contract_number_policy_id', 'pom+unknown+v2'),
+        ('contract_number_policy_id', 'pom_placeholder_v2'),
+        ('contract_number_policy_id', 'pom/unresolved/v2'),
+    ),
+)
+def test_temporary_policy_identifier_components_are_terminal_before_mutation(
+    tmp_path, settings, field, identifier
+):
+    settings.MEDIA_ROOT = tmp_path
+    contract = _contract(_company(f'Temporary Policy {field}'))
+    policy = _policy()
+    setattr(policy, field, identifier)
+    policy.save(update_fields=[field])
+    _signed_document(contract)
+    before = (Contract.objects.count(), contract_version(contract), contract.status)
+    request = _inspect_request(contract, request_id=f'inspect-{field}-{identifier}')
+
+    with pytest.raises(RenePhase2BoundError) as caught:
+        execute_rene_request(request, crm_mcp_invoked=True)
+
+    assert caught.value.code == 'NEEDS_CLARIFICATION'
+    assert caught.value.receipt['outcome'] == 'rejected_terminal'
+    contract.refresh_from_db()
+    assert (Contract.objects.count(), contract_version(contract), contract.status) == before
+    assert not Contract.objects.filter(renewed_from=contract).exists()
+    assert RenePreparedContract.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_policy_identifier_reserved_substrings_remain_reviewed(tmp_path, settings):
+    settings.MEDIA_ROOT = tmp_path
+    contract = _contract(_company('Reviewed Policy Substrings'))
+    policy = _policy()
+    policy.start_policy_id = 'nikki-drafting-v2'
+    policy.end_policy_id = 'nikki-pendingreview-v2'
+    policy.contract_number_policy_id = 'pom-attempt-temporarypolicy-v2'
+    policy.save(
+        update_fields=[
+            'start_policy_id',
+            'end_policy_id',
+            'contract_number_policy_id',
+        ]
+    )
+    _signed_document(contract)
+
+    receipt = execute_rene_request(
+        _inspect_request(contract, request_id='inspect-reviewed-policy-substrings')
+    )
+
+    assert receipt['outcome'] == 'inspected'
+
+
+@pytest.mark.django_db
 def test_target_id_must_be_canonical_uuid_before_request_admission():
     contract = _contract(_company())
     valid = _inspect_request(contract)
