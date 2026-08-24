@@ -12,6 +12,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.forms.models import model_to_dict
 from django.test import override_settings
 from mcp_server import mcp_server
+from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -27,6 +28,8 @@ from crm_app.models import (
     User,
 )
 from crm_app.mcp import RenePhase2MCPToolset
+from crm_app.rene_auth import RenePhase2MCPCredential
+from crm_app.rene_mcp_server import rene_phase2_mcp_server
 from crm_app.services.rene_phase2 import (
     _prepared_live_state,
     _receipt_binding,
@@ -44,7 +47,26 @@ from crm_app.services.rene_phase2_transport import MAX_CIRA_REQUEST_BYTES
 
 TOKEN = 'rene-read-token-0123456789'
 TOKEN_SHA = hashlib.sha256(TOKEN.encode('ascii')).hexdigest()
+MCP_TOKEN = 'rene-phase2-mcp-test-secret-0123456789'
+MCP_TOKEN_SHA = hashlib.sha256(MCP_TOKEN.encode('ascii')).hexdigest()
 PDF = b'%PDF-1.4\n%%EOF'
+
+
+def _mcp_post(client, path, payload, authorization=None):
+    extra = {'HTTP_ACCEPT': 'application/json, text/event-stream'}
+    if authorization is not None:
+        extra['HTTP_AUTHORIZATION'] = authorization
+    return client.post(path, payload, format='json', **extra)
+
+
+def _scoped_mcp_request(user):
+    return SimpleNamespace(
+        user=user,
+        auth=RenePhase2MCPCredential(
+            token_fingerprint_sha256=MCP_TOKEN_SHA,
+            user_id=str(user.id),
+        ),
+    )
 
 
 def _envelope(operation, target, version, intent, request_id):
@@ -598,13 +620,17 @@ def test_dedicated_cira_mcp_tool_requires_exact_principal_and_strict_json(
     _signed_document(contract)
     request = _inspect_request(contract, request_id='inspect-via-mcp')
 
+    settings.CIRA_RENE_MCP_TOKEN_SHA256 = MCP_TOKEN_SHA
     settings.CIRA_RENE_MCP_USER_ID = ''
-    disabled_tool = RenePhase2MCPToolset(request=SimpleNamespace(user=cira))
+    disabled_tool = RenePhase2MCPToolset(request=_scoped_mcp_request(cira))
     disabled = json.loads(disabled_tool.rene_phase2_request(json.dumps(request)))
     assert disabled['error']['code'] == 'FORBIDDEN'
 
     settings.CIRA_RENE_MCP_USER_ID = str(cira.id)
-    registered = mcp_server._tool_manager._tools['rene_phase2_request']
+    assert 'rene_phase2_request' not in mcp_server._tool_manager._tools
+    registered = rene_phase2_mcp_server._tool_manager._tools[
+        'rene_phase2_request'
+    ]
     assert callable(registered.fn)
     assert registered.parameters == {
         'properties': {'request_json': {'title': 'Request Json', 'type': 'string'}},
@@ -612,7 +638,7 @@ def test_dedicated_cira_mcp_tool_requires_exact_principal_and_strict_json(
         'title': 'rene_phase2_requestArguments',
         'type': 'object',
     }
-    denied_tool = RenePhase2MCPToolset(request=SimpleNamespace(user=other))
+    denied_tool = RenePhase2MCPToolset(request=_scoped_mcp_request(other))
     denied = json.loads(denied_tool.rene_phase2_request(json.dumps(request)))
     assert denied['schema'] == 'bmasia.cira.rene.crm-uncertain.v1'
     assert denied['outcome'] == 'uncertain'
@@ -621,13 +647,13 @@ def test_dedicated_cira_mcp_tool_requires_exact_principal_and_strict_json(
 
     cira.is_active = False
     cira.save(update_fields=['is_active'])
-    inactive_tool = RenePhase2MCPToolset(request=SimpleNamespace(user=cira))
+    inactive_tool = RenePhase2MCPToolset(request=_scoped_mcp_request(cira))
     inactive = json.loads(inactive_tool.rene_phase2_request(json.dumps(request)))
     assert inactive['error']['code'] == 'FORBIDDEN'
     cira.is_active = True
     cira.save(update_fields=['is_active'])
 
-    tool = RenePhase2MCPToolset(request=SimpleNamespace(user=cira))
+    tool = RenePhase2MCPToolset(request=_scoped_mcp_request(cira))
     duplicate = json.loads(
         tool.rene_phase2_request('{"schema":"first","schema":"second"}')
     )
@@ -650,13 +676,174 @@ def test_dedicated_cira_mcp_tool_requires_exact_principal_and_strict_json(
 
 
 @pytest.mark.django_db
+def test_dedicated_rene_mcp_handler_has_scoped_registry_and_auth(
+    tmp_path, settings
+):
+    settings.MEDIA_ROOT = tmp_path
+    cira = User.objects.create_user(username='handler-cira-mcp')
+    generic_token = Token.objects.create(user=cira)
+    settings.CIRA_RENE_MCP_TOKEN_SHA256 = MCP_TOKEN_SHA
+    settings.CIRA_RENE_MCP_USER_ID = str(cira.id)
+    contract = _contract(_company())
+    _policy()
+    _signed_document(contract)
+    request = _inspect_request(contract, request_id='inspect-via-handler')
+    client = APIClient()
+
+    listed = _mcp_post(
+        client,
+        '/mcp/rene-phase2/',
+        {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}},
+        authorization=f'Rene {MCP_TOKEN}',
+    )
+    assert listed.status_code == 200
+    names = {tool['name'] for tool in listed.json()['result']['tools']}
+    assert names == {'get_server_instructions', 'rene_phase2_request'}
+    assert names.isdisjoint(
+        {
+            'query_data_collections',
+            'create_record',
+            'update_record',
+            'delete_record',
+            'convert_quote_to_contract',
+            'generate_contract_pdf',
+            'generate_proforma_pdf',
+            'generate_quote_pdf',
+            'generate_invoice_pdf',
+        }
+    )
+
+    called = _mcp_post(
+        client,
+        '/mcp/rene-phase2/',
+        {
+            'jsonrpc': '2.0',
+            'id': 2,
+            'method': 'tools/call',
+            'params': {
+                'name': 'rene_phase2_request',
+                'arguments': {'request_json': json.dumps(request)},
+            },
+        },
+        authorization=f'Rene {MCP_TOKEN}',
+    )
+    assert called.status_code == 200
+    receipt = json.loads(called.json()['result']['content'][0]['text'])
+    assert receipt['schema'] == 'bmasia.cira.rene.v1'
+    assert receipt['request_id'] == request['request_id']
+    assert receipt['outcome'] == 'inspected'
+
+    global_list = _mcp_post(
+        client,
+        '/mcp/',
+        {'jsonrpc': '2.0', 'id': 3, 'method': 'tools/list', 'params': {}},
+        authorization=f'Token {generic_token.key}',
+    )
+    assert global_list.status_code == 200
+    global_names = {
+        tool['name'] for tool in global_list.json()['result']['tools']
+    }
+    assert 'rene_phase2_request' not in global_names
+    assert {'create_record', 'update_record', 'delete_record'} <= global_names
+
+    assert _mcp_post(
+        client,
+        '/mcp/',
+        {'jsonrpc': '2.0', 'id': 4, 'method': 'tools/list', 'params': {}},
+        authorization=f'Rene {MCP_TOKEN}',
+    ).status_code == 401
+    assert _mcp_post(
+        client,
+        '/mcp/',
+        {'jsonrpc': '2.0', 'id': 5, 'method': 'tools/list', 'params': {}},
+        authorization=f'Token {MCP_TOKEN}',
+    ).status_code == 401
+    before = Contract.objects.count()
+    rest = client.post(
+        '/api/v1/contracts/',
+        {},
+        format='json',
+        HTTP_AUTHORIZATION=f'Rene {MCP_TOKEN}',
+    )
+    assert rest.status_code == 401
+    assert Contract.objects.count() == before
+    assert client.post(
+        '/api/v1/contracts/',
+        {},
+        format='json',
+        HTTP_AUTHORIZATION=f'Token {MCP_TOKEN}',
+    ).status_code == 401
+    assert Contract.objects.count() == before
+    assert _mcp_post(
+        client,
+        '/mcp/rene-phase2/',
+        {'jsonrpc': '2.0', 'id': 6, 'method': 'tools/list', 'params': {}},
+        authorization=f'Token {generic_token.key}',
+    ).status_code == 401
+    assert _mcp_post(
+        client,
+        f'/mcp/rene-phase2/?token={generic_token.key}',
+        {'jsonrpc': '2.0', 'id': 7, 'method': 'tools/list', 'params': {}},
+    ).status_code == 401
+
+
+@pytest.mark.django_db
+def test_dedicated_rene_mcp_handler_fails_closed_for_bad_configuration(settings):
+    cira = User.objects.create_user(username='handler-config-cira')
+    client = APIClient()
+    payload = {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list', 'params': {}}
+    configurations = (
+        ('', str(cira.id)),
+        ('f' * 63, str(cira.id)),
+        (MCP_TOKEN_SHA, ''),
+        (MCP_TOKEN_SHA, 'not-a-uuid'),
+        (MCP_TOKEN_SHA, str(uuid4())),
+    )
+    for fingerprint, user_id in configurations:
+        settings.CIRA_RENE_MCP_TOKEN_SHA256 = fingerprint
+        settings.CIRA_RENE_MCP_USER_ID = user_id
+        denied = _mcp_post(
+            client,
+            '/mcp/rene-phase2/',
+            payload,
+            authorization=f'Rene {MCP_TOKEN}',
+        )
+        assert denied.status_code == 401
+        assert denied['WWW-Authenticate'] == 'Rene'
+
+    settings.CIRA_RENE_MCP_TOKEN_SHA256 = MCP_TOKEN_SHA
+    settings.CIRA_RENE_MCP_USER_ID = str(cira.id)
+    assert _mcp_post(
+        client,
+        '/mcp/rene-phase2/',
+        payload,
+        authorization='Rene wrong-but-long-enough-secret-0123456789',
+    ).status_code == 401
+    assert _mcp_post(
+        client,
+        '/mcp/rene-phase2/',
+        payload,
+        authorization='Rene short',
+    ).status_code == 401
+    cira.is_active = False
+    cira.save(update_fields=['is_active'])
+    assert _mcp_post(
+        client,
+        '/mcp/rene-phase2/',
+        payload,
+        authorization=f'Rene {MCP_TOKEN}',
+    ).status_code == 401
+
+
+@pytest.mark.django_db
 def test_cira_mcp_terminal_rejection_is_bound_lookup_only_and_never_replayed(
     tmp_path, settings
 ):
     settings.MEDIA_ROOT = tmp_path
     cira = User.objects.create_user(username='terminal-cira-mcp')
+    settings.CIRA_RENE_MCP_TOKEN_SHA256 = MCP_TOKEN_SHA
     settings.CIRA_RENE_MCP_USER_ID = str(cira.id)
-    tool = RenePhase2MCPToolset(request=SimpleNamespace(user=cira))
+    tool = RenePhase2MCPToolset(request=_scoped_mcp_request(cira))
     contract = _contract(_company())
     _signed_document(contract)
     request = _inspect_request(contract, request_id='mcp-terminal-r1')

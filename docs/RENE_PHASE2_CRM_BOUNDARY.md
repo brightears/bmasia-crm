@@ -12,21 +12,33 @@ Cira, change a live CRM, or expose a general CRM write credential.
 |---|---|---|
 | `GET /api/v1/auth/token-capabilities/` | Rene opaque bearer | Return the exact read capability receipt |
 | `GET /api/v1/contracts/renewal-book/` | Existing JWT/session/DRF token, or Rene opaque bearer | Read the renewal book only |
-| MCP tool `rene_phase2_request(request_json)` on the existing `/mcp/` transport | Existing Cira DRF-token user, exact configured User UUID | Execute or look up only the frozen Rene operations |
+| `POST /mcp/rene-phase2/` with MCP tool `rene_phase2_request(request_json)` | Dedicated `Authorization: Rene <opaque-secret>` credential, bound to one exact active User UUID | Execute or look up only the frozen Rene operations |
+| Existing `/mcp/` transport | Existing DRF token/query-token authentication | Existing generic CRM tools; the Rene tool is absent |
 
 The existing renewal-book router action remains the public path for current
 authenticated CRM callers. There is no shadow route. Rene's bearer is accepted
 only by the capability endpoint and that existing action. It is never accepted
 by MCP.
 
-The Cira boundary uses Cira's already-existing authenticated, serialized MCP
-lane. This patch adds one dedicated tool and does not mint a user, token, role,
-or permission. The tool checks that `request.user` is active, authenticated,
-and has the exact UUID configured as `CIRA_RENE_MCP_USER_ID`; missing or invalid
-configuration denies every invocation. Configuring that UUID does not make
-generic MCP tools newly accessible: Cira retains only the capabilities of its
-pre-existing CRM principal. The Rene relay must invoke this dedicated tool and
-must never adapt the envelope to generic create/update/delete or
+The Cira boundary has its own stateless `DjangoMCP` instance, tool manager,
+handler, authentication class, and permission class. Its registry contains
+only the library's harmless `get_server_instructions` tool and
+`rene_phase2_request`; generic query/create/update/delete, convert, and PDF
+tools remain only on `/mcp/`. The Rene tool is not registered globally.
+
+The endpoint accepts one separately generated opaque secret in the `Rene`
+authorization scheme. Only its SHA-256 digest is configured. The authentication
+class constant-time compares the digest, then loads the exact canonical UUID in
+`CIRA_RENE_MCP_USER_ID` and requires that user to remain active. It also attaches
+a request-local scoped credential marker that the permission and tool both
+recheck. The secret is not a DRF Token: it cannot authenticate at `/mcp/` or any
+REST route, while an ordinary DRF token (including one for the same user) cannot
+authenticate at `/mcp/rene-phase2/`. Query-parameter tokens are not accepted on
+the dedicated endpoint.
+
+This patch does not mint a user, token, role, or permission. The relay must hold
+only this scoped plaintext secret, invoke only the dedicated endpoint/tool, and
+must never receive a generic CRM token or adapt the envelope to generic CRUD or
 `duplicate_for_renewal`. The obsolete direct REST write adapter and its bearer
 settings are deliberately absent.
 
@@ -35,13 +47,14 @@ The CRM stores only SHA-256 token digests and reviewed expiries:
 ```text
 RENE_RENEWAL_BOOK_TOKEN_SHA256
 RENE_RENEWAL_BOOK_TOKEN_EXPIRES_AT
+CIRA_RENE_MCP_TOKEN_SHA256
 CIRA_RENE_MCP_USER_ID
 ```
 
-The CRM stores only Rene's read-token digest and expiry. Plain tokens remain in
-their respective secret stores. Missing, malformed, expired, or wrong Rene
-credentials fail closed; a missing/malformed Cira UUID disables the dedicated
-tool.
+The CRM stores only credential digests (plus the read-token expiry). Plain
+tokens remain in their respective secret stores. Missing, malformed, expired,
+wrong, or non-canonical settings fail closed; a missing, inactive, or unknown
+configured MCP user disables the dedicated endpoint.
 
 ## Stable renewal-book identity
 
@@ -220,13 +233,20 @@ The sanitized response fixtures at
 nested product totals, integer status totals, and requested-undated shapes.
 They are intended for direct cross-repository parsing by Rene.
 
-Before deployment, review the migration and dedicated MCP tool, run focused
+Before deployment, review the migration and dedicated MCP endpoint, run focused
 and full tests under the production Python version and PostgreSQL, install the
-pinned dependency, configure `CIRA_RENE_MCP_USER_ID` to the exact existing Cira
-user UUID, configure the forced-command relay/Hermes serialized lane, and
-record the exact reviewed policies. After deployment, perform read-only checks
-of Rene's capability receipt, existing JWT renewal-book access, wrong-token
-denial, Cira-principal allow, other-principal denial, duplicate/oversized MCP
-input rejection, lookup semantics, and visible-PDF inspection. Do not activate
-Phase 2 from this CRM change. Rene's own activation gates and supervised-first-
-send ceremony remain separate.
+pinned dependency, generate a separate high-entropy MCP secret, configure only
+its SHA-256 as `CIRA_RENE_MCP_TOKEN_SHA256`, configure
+`CIRA_RENE_MCP_USER_ID` as one exact canonical existing active user UUID, and
+record the exact reviewed policies. Do not create a DRF Token from or alongside
+the scoped secret for the relay. Configure the forced-command relay/Hermes lane
+with only the scoped plaintext secret and `/mcp/rene-phase2/`.
+
+After deployment, perform read-only checks of Rene's capability receipt,
+existing JWT renewal-book access, dedicated `tools/list` exact allowlist,
+dedicated `tools/call`, wrong/unset/malformed scoped-auth denial, scoped-secret
+denial on global MCP and REST, generic-token denial on the dedicated endpoint,
+global absence of `rene_phase2_request`, duplicate/oversized input rejection,
+lookup semantics, and visible-PDF inspection. Do not activate Phase 2 from this
+CRM change. Rene's own activation gates and supervised-first-send ceremony
+remain separate.

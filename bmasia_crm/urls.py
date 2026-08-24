@@ -20,6 +20,7 @@ from django.views.generic import RedirectView
 from rest_framework.authtoken.views import obtain_auth_token
 from django.conf import settings
 from crm_app.admin_setup import create_admin_view
+from crm_app.rene_mcp_server import RenePhase2MCPView
 from crm_app.views import debug_soundtrack_api, apply_migration_0025_view, email_tracking_pixel
 from django.http import HttpResponse
 import subprocess
@@ -75,6 +76,11 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('crm_app.urls')),  # API endpoints under /api/
     path('api-auth/', include('rest_framework.urls')),
+    path(
+        'mcp/rene-phase2/',
+        RenePhase2MCPView.as_view(),
+        name='rene_phase2_mcp',
+    ),
     path('', include('mcp_server.urls')),  # MCP server at /mcp/
     path('api-token-auth/', obtain_auth_token, name='api_token_auth'),  # DRF token auth
     # SECURITY 2026-07-02: removed unauthenticated setup-admin/reset-admin routes — they granted full

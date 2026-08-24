@@ -7,9 +7,7 @@ Endpoint: /mcp/ with Token authentication.
 import base64
 import json
 import logging
-from uuid import UUID
 
-from django.conf import settings
 from mcp_server import mcp_server
 from mcp_server.djangomcp import MCPToolset
 from mcp_server.query_tool import ModelQueryToolset
@@ -19,6 +17,8 @@ from crm_app.models import (
     Task, Zone, ContractLineItem, InvoiceLineItem, QuoteLineItem,
     ContractServiceLocation, ClientTechDetail, Device, Ticket, KBArticle,
 )
+from crm_app.rene_auth import is_exact_rene_phase2_mcp_request
+from crm_app.rene_mcp_server import rene_phase2_mcp_server
 from crm_app.views import ContractViewSet, QuoteViewSet, InvoiceViewSet  # Only for PDF tools
 
 logger = logging.getLogger(__name__)
@@ -61,13 +61,6 @@ to recover the raw PDF. On failure returns `{"error": "..."}`.
 - `generate_quote_pdf(id)` — generate quote PDF
 - `generate_invoice_pdf(id)` — generate invoice PDF
 
-### Rene Phase 2 (Cira only)
-`rene_phase2_request(request_json)` accepts only the frozen Rene renewal
-business or receipt-lookup envelope. It is not generic CRUD. The tool requires
-the exact active Cira MCP user UUID configured by the CRM operator; every other
-MCP principal is denied. Its JSON string response must be treated as an exact
-receipt or request-bound terminal/uncertain state, never as authority to replay.
-
 ## Key Concepts
 - **billing_entity**: 'BMAsia (Thailand) Co., Ltd.' (THB) or 'BMAsia Limited' (USD)
 - **Contract status**: Draft → Sent → Active → Renewed/Expired/Cancelled
@@ -79,23 +72,10 @@ receipt or request-bound terminal/uncertain state, never as authority to replay.
 """)
 
 
-def _is_exact_cira_rene_mcp_principal(request):
-    expected = str(getattr(settings, 'CIRA_RENE_MCP_USER_ID', '')).strip().lower()
-    try:
-        expected = str(UUID(expected))
-    except (TypeError, ValueError, AttributeError):
-        return False
-    user = getattr(request, 'user', None)
-    return bool(
-        user is not None
-        and getattr(user, 'is_authenticated', False)
-        and getattr(user, 'is_active', False)
-        and str(getattr(user, 'pk', '')).lower() == expected
-    )
-
-
 class RenePhase2MCPToolset(MCPToolset):
     """Dedicated Cira adapter for the frozen Rene renewal contract."""
+
+    mcp_server = rene_phase2_mcp_server
 
     def rene_phase2_request(self, request_json: str) -> str:
         """Execute or look up one exact frozen Rene request.
@@ -119,7 +99,7 @@ class RenePhase2MCPToolset(MCPToolset):
         )
         from crm_app.services.rene_phase2_common import canonical_json
 
-        if not _is_exact_cira_rene_mcp_principal(self.request):
+        if not is_exact_rene_phase2_mcp_request(self.request):
             return canonical_json(
                 unbound_error(
                     'FORBIDDEN',

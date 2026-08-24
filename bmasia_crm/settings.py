@@ -299,8 +299,13 @@ RENE_RENEWAL_BOOK_TOKEN_SHA256 = config(
 RENE_RENEWAL_BOOK_TOKEN_EXPIRES_AT = config(
     'RENE_RENEWAL_BOOK_TOKEN_EXPIRES_AT', default=''
 )
-# The dedicated Rene MCP tool is callable only by this exact existing Cira
-# DRF-token user UUID. An unset or malformed value disables the tool.
+# The dedicated Rene MCP endpoint accepts only its separate opaque credential
+# and binds it to this exact existing active user UUID. Store no plaintext
+# token and do not create a DRF Token for this credential. Either blank or
+# malformed setting disables the endpoint.
+CIRA_RENE_MCP_TOKEN_SHA256 = config(
+    'CIRA_RENE_MCP_TOKEN_SHA256', default=''
+)
 CIRA_RENE_MCP_USER_ID = config('CIRA_RENE_MCP_USER_ID', default='')
 
 # ============================================================
