@@ -3922,8 +3922,12 @@ class ReneRenewalPolicyAdminForm(forms.ModelForm):
     """Fail closed when a reviewed policy lacks exact audit evidence."""
 
     TOKEN_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$')
+    TOKEN_PART_RE = re.compile(r'[._:@/+\-]+')
     SHA_RE = re.compile(r'^[0-9a-f]{64}$')
-    UNRESOLVED = {'unknown', 'unresolved', 'placeholder', 'pending'}
+    UNRESOLVED = {
+        'draft', 'pending', 'placeholder', 'temp', 'temporary', 'unknown',
+        'unresolved',
+    }
 
     class Meta:
         model = ReneRenewalPolicy
@@ -3936,11 +3940,20 @@ class ReneRenewalPolicyAdminForm(forms.ModelForm):
 
         def require_token(field):
             value = cleaned.get(field)
-            if (
+            malformed = (
                 not isinstance(value, str)
                 or self.TOKEN_RE.fullmatch(value) is None
-                or value.casefold() in self.UNRESOLVED
-            ):
+            )
+            parts = (
+                set()
+                if malformed
+                else {
+                    part
+                    for part in self.TOKEN_PART_RE.split(value.casefold())
+                    if part
+                }
+            )
+            if malformed or parts & self.UNRESOLVED:
                 self.add_error(field, 'Enter one exact reviewed source identifier.')
 
         def require_sha(field):

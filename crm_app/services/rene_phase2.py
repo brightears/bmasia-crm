@@ -390,9 +390,7 @@ def _reviewed_policy(lock=False):
         'end_source_ref',
         'contract_number_source_ref',
     ):
-        value = _token(name, getattr(policy, name))
-        if value.casefold() in {'unknown', 'unresolved', 'placeholder', 'pending'}:
-            _fail('NEEDS_CLARIFICATION', f'{name} is not a reviewed source identity')
+        _reviewed_policy_identifier(name, getattr(policy, name))
     for name in (
         'start_evidence_sha256',
         'end_evidence_sha256',
@@ -421,9 +419,7 @@ def _reviewed_post_send_policy(policy):
     ):
         _fail('NEEDS_CLARIFICATION', 'ready_for_review to Sent semantics are not reviewed')
     for name in ('post_send_policy_id', 'post_send_source_ref'):
-        value = _token(name, getattr(policy, name))
-        if value.casefold() in {'unknown', 'unresolved', 'placeholder', 'pending'}:
-            _fail('NEEDS_CLARIFICATION', f'{name} is not a reviewed source identity')
+        _reviewed_policy_identifier(name, getattr(policy, name))
     _sha('post_send_evidence_sha256', policy.post_send_evidence_sha256)
     _label('post_send_source_label', policy.post_send_source_label)
     if (

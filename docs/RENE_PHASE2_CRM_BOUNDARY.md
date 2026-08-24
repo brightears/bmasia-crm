@@ -106,8 +106,11 @@ The record separately binds:
 
 The final-number rule is exactly
 `RESERVE_UNUSED_DOCUMENT_SEQUENCE_BEFORE_PDF`. The post-send rule is exactly
-`PREPARED_TO_SENT_SOURCE_UNCHANGED`. Unknown, placeholder, pending, malformed,
-or unreviewed evidence is a hold. Revisions can never decrease, and the admin
+`PREPARED_TO_SENT_SOURCE_UNCHANGED`. Every start, end, final-number, and
+post-send policy/source identifier rejects the punctuation-delimited components
+`draft`, `pending`, `placeholder`, `temp`, `temporary`, `unknown`, and
+`unresolved`; longer substrings such as `drafting` remain valid. Malformed or
+unreviewed evidence is a hold. Revisions can never decrease, and the admin
 requires a revision increase whenever policy evidence or a rule changes,
 including while a record is pending or while a review flag is being changed.
 Service execution re-reads these records and mutating operations lock the
@@ -227,8 +230,12 @@ PDF bytes. It returns the live portable PDF.
 Record-sent is a separate validated transaction after exact Gmail Sent proof.
 It accepts only authenticated mailbox `norbert@bmasiamusic.com`, visible sender
 `nikki.h@bmasiamusic.com`, exact recipients/content/attachment hashes, Gmail
-IDs, RFC Message-ID, and matching Gmail `internalDate`/sent time. After the
-reviewed post-send policy passes, it changes only the prepared contract from
+IDs, RFC Message-ID, and matching Gmail `internalDate`/sent time. Execution
+re-reads every reviewed start, end, final-number, and post-send policy/source
+identifier. A temporary or unresolved identifier is a terminal rejection at
+the CRM atomic-rollback boundary: the Draft, prepared metadata, Gmail evidence,
+and stored policy snapshots remain unchanged. After all reviewed policy checks
+pass, record-sent changes only the prepared contract from
 Draft/`ready_for_review` to Sent and stores the Gmail and policy evidence. The
 final number/PDF/source binding remain unchanged. The source contract is never
 changed. A bookkeeping failure can never authorize another customer email.

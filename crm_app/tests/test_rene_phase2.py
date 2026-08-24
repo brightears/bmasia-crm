@@ -36,6 +36,7 @@ from crm_app.services.rene_phase2 import (
     _prepared_live_state,
     _receipt_binding,
     _render_contract_pdf,
+    _reviewed_post_send_policy,
     _verify_rendered_contract_terms,
     RenePhase2BoundError,
     RenePhase2Error,
@@ -334,6 +335,163 @@ def _verify_request(prepared, prepare, prepare_receipt, request_id='verify-1'):
     )
 
 
+def _validated_record_sent_pipeline(
+    tmp_path,
+    settings,
+    monkeypatch,
+    *,
+    suffix,
+    source_refs=None,
+):
+    """Build one valid, unsent draft with an admitted record-sent request."""
+
+    settings.MEDIA_ROOT = tmp_path
+    source = _contract(_company(f'Record Sent Source Ref {suffix}'))
+    policy = _policy(post_send=True)
+    if source_refs:
+        for field, value in source_refs.items():
+            setattr(policy, field, value)
+        policy.save(update_fields=list(source_refs))
+    _signed_document(source)
+
+    inspect = _inspect_request(
+        source,
+        request_id=f'inspect-source-ref-{suffix}',
+    )
+    inspected = execute_rene_request(inspect)
+    prepare = _prepare_request(
+        source,
+        inspect,
+        inspected,
+        request_id=f'prepare-source-ref-{suffix}',
+    )
+    execute_rene_request(
+        _validate(prepare, f'validate-prepare-source-ref-{suffix}')
+    )
+    monkeypatch.setattr(
+        'crm_app.services.rene_phase2._render_contract_pdf', lambda contract: PDF
+    )
+    prepared_receipt = execute_rene_request(prepare)
+    prepared_map = prepared_receipt['prepared_contract']
+    prepared = Contract.objects.get(pk=prepared_map['contract_id'])
+    metadata = RenePreparedContract.objects.get(contract=prepared)
+
+    verify = _verify_request(
+        prepared,
+        prepare,
+        prepared_receipt,
+        request_id=f'verify-source-ref-{suffix}',
+    )
+    verified = execute_rene_request(verify)
+    artifact = prepared_receipt['artifact']
+    gmail = {
+        'action_id': f'renew-source-ref-{suffix}',
+        'revision': 1,
+        'draft_sha256': '1' * 64,
+        'gmail_message_id': f'gmail-message-source-ref-{suffix}',
+        'gmail_thread_id': f'gmail-thread-source-ref-{suffix}',
+        'gmail_internal_date': '1780000000000',
+        'rfc_message_id': f'<rene-source-ref-{suffix}@bmasiamusic.com>',
+        'sent_at': '2026-05-28T20:26:40Z',
+        'authenticated_mailbox': 'norbert@bmasiamusic.com',
+        'visible_from': 'nikki.h@bmasiamusic.com',
+        'to': ['client@example.com'],
+        'cc': [],
+        'subject_sha256': '2' * 64,
+        'plain_body_sha256': '3' * 64,
+        'html_body_sha256': '4' * 64,
+        'attachment': {
+            'filename': artifact['filename'],
+            'sha256': artifact['sha256'],
+            'size_bytes': artifact['size_bytes'],
+        },
+        'reconciliation': 'EXACT_GMAIL_SENT',
+    }
+    record = _envelope(
+        'record_prepared_contract_sent',
+        prepared.id,
+        contract_version(prepared),
+        {
+            'prepared_verification': {
+                'request_id': verify['request_id'],
+                'request_key': verify['request_key'],
+                'intent_sha256': verify['intent_sha256'],
+                'receipt_binding_sha256': _receipt_binding(verified),
+            },
+            'prepared_contract': prepared_map,
+            'gmail_sent_evidence': gmail,
+            'gmail_sent_evidence_sha256': canonical_sha256(gmail),
+            'mutation': {
+                'field': 'state',
+                'from': 'ready_for_review',
+                'to': 'Sent',
+                'contract_number_must_remain': prepared.contract_number,
+                'source_contract_must_not_change': {
+                    'contract_id': prepared_map['source_contract_id'],
+                    'version': prepared_map['source_contract_version'],
+                    'updated_at': prepared_map['source_contract_updated_at'],
+                    'status': prepared_map['source_contract_status'],
+                },
+            },
+        },
+        f'record-source-ref-{suffix}',
+    )
+    execute_rene_request(
+        _validate(record, f'validate-record-source-ref-{suffix}')
+    )
+    return SimpleNamespace(
+        source=source,
+        policy=policy,
+        prepared=prepared,
+        metadata=metadata,
+        record=record,
+    )
+
+
+def _record_sent_mutation_snapshot(flow):
+    metadata_fields = (
+        'state',
+        'pdf_filename',
+        'pdf_sha256',
+        'contract_number_policy_id',
+        'contract_number_policy_rule',
+        'contract_number_policy_evidence_sha256',
+        'contract_number_policy_source_ref',
+        'contract_number_policy_source_label',
+        'contract_number_policy_revision',
+        'gmail_sent_evidence_sha256',
+        'post_send_policy_id',
+        'post_send_policy_rule',
+        'post_send_policy_evidence_sha256',
+        'post_send_policy_source_ref',
+        'post_send_policy_source_label',
+        'post_send_policy_revision',
+        'updated_at',
+    )
+    return {
+        'contract_counts': (
+            Contract.objects.count(),
+            RenePreparedContract.objects.count(),
+        ),
+        'source': (
+            contract_version(flow.source),
+            flow.source.status,
+            flow.source.contract_number,
+            flow.source.updated_at,
+        ),
+        'prepared': (
+            contract_version(flow.prepared),
+            flow.prepared.status,
+            flow.prepared.contract_number,
+            flow.prepared.updated_at,
+        ),
+        'metadata': {
+            **{field: getattr(flow.metadata, field) for field in metadata_fields},
+            'pdf_content': bytes(flow.metadata.pdf_content),
+        },
+    }
+
+
 @pytest.mark.django_db
 @override_settings(
     RENE_RENEWAL_BOOK_TOKEN_SHA256=TOKEN_SHA,
@@ -571,11 +729,17 @@ def test_policy_identifier_reserved_substrings_remain_reviewed(tmp_path, setting
     policy.start_policy_id = 'nikki-drafting-v2'
     policy.end_policy_id = 'nikki-pendingreview-v2'
     policy.contract_number_policy_id = 'pom-attempt-temporarypolicy-v2'
+    policy.start_source_ref = 'chat:drafting:review-v2'
+    policy.end_source_ref = 'chat:pendingreview:review-v2'
+    policy.contract_number_source_ref = 'crm:temporarypolicy:number-v2'
     policy.save(
         update_fields=[
             'start_policy_id',
             'end_policy_id',
             'contract_number_policy_id',
+            'start_source_ref',
+            'end_source_ref',
+            'contract_number_source_ref',
         ]
     )
     _signed_document(contract)
@@ -585,6 +749,53 @@ def test_policy_identifier_reserved_substrings_remain_reviewed(tmp_path, setting
     )
 
     assert receipt['outcome'] == 'inspected'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ('field', 'identifier'),
+    (
+        ('post_send_policy_id', 'draft'),
+        ('post_send_policy_id', 'temp'),
+        ('post_send_policy_id', 'temporary'),
+        ('post_send_policy_id', 'nikki-draft-v2'),
+        ('post_send_policy_id', 'nikki.pending.v2'),
+        ('post_send_policy_id', 'nikki/temp/v2'),
+        ('post_send_policy_id', 'nikki:temporary:v2'),
+        ('post_send_source_ref', 'chat+placeholder+post-send'),
+    ),
+)
+def test_post_send_policy_rejects_temporary_identifier_components_before_mutation(
+    field, identifier
+):
+    policy = _policy(post_send=True)
+    setattr(policy, field, identifier)
+    policy.save(update_fields=[field])
+    before = (
+        Contract.objects.count(),
+        RenePreparedContract.objects.count(),
+        ReneCiraRequest.objects.count(),
+    )
+
+    with pytest.raises(RenePhase2Error) as caught:
+        _reviewed_post_send_policy(policy)
+
+    assert caught.value.code == 'NEEDS_CLARIFICATION'
+    assert (
+        Contract.objects.count(),
+        RenePreparedContract.objects.count(),
+        ReneCiraRequest.objects.count(),
+    ) == before
+
+
+@pytest.mark.django_db
+def test_post_send_policy_reserved_substrings_remain_reviewed():
+    policy = _policy(post_send=True)
+    policy.post_send_policy_id = 'nikki-drafting-pendingreview-v2'
+    policy.post_send_source_ref = 'chat:temporarypolicy:post-send'
+    policy.save(update_fields=['post_send_policy_id', 'post_send_source_ref'])
+
+    assert _reviewed_post_send_policy(policy) is policy
 
 
 @pytest.mark.django_db
@@ -1389,6 +1600,125 @@ def test_prepare_verify_and_record_sent_preserve_source_and_final_number(
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize(
+    ('field', 'identifier', 'suffix'),
+    (
+        ('start_source_ref', 'chat:renewals:draft:v2', 'start-draft'),
+        ('start_source_ref', 'chat/renewals/temp/v2', 'start-temp'),
+        ('start_source_ref', 'chat+renewals+temporary+v2', 'start-temporary'),
+        ('end_source_ref', 'chat.renewals.draft.v2', 'end-draft'),
+        ('end_source_ref', 'chat_renewals_temp_v2', 'end-temp'),
+        ('end_source_ref', 'chat-renewals-temporary-v2', 'end-temporary'),
+        (
+            'contract_number_source_ref',
+            'crm:document/draft:v2',
+            'number-draft',
+        ),
+        (
+            'contract_number_source_ref',
+            'crm.document+temp:v2',
+            'number-temp',
+        ),
+        (
+            'contract_number_source_ref',
+            'crm-document_temporary/v2',
+            'number-temporary',
+        ),
+    ),
+)
+def test_record_sent_source_ref_components_reject_terminally_without_mutation(
+    tmp_path,
+    settings,
+    monkeypatch,
+    field,
+    identifier,
+    suffix,
+):
+    flow = _validated_record_sent_pipeline(
+        tmp_path,
+        settings,
+        monkeypatch,
+        suffix=suffix,
+    )
+    setattr(flow.policy, field, identifier)
+    flow.policy.save(update_fields=[field])
+    flow.source.refresh_from_db()
+    flow.prepared.refresh_from_db()
+    flow.metadata.refresh_from_db()
+    before = _record_sent_mutation_snapshot(flow)
+
+    with pytest.raises(RenePhase2BoundError) as caught:
+        execute_rene_request(flow.record, crm_mcp_invoked=True)
+
+    terminal = caught.value.receipt
+    assert caught.value.code == 'NEEDS_CLARIFICATION'
+    assert terminal['schema'] == 'bmasia.cira.rene.crm-terminal-rejection.v1'
+    assert terminal['outcome'] == 'rejected_terminal'
+    assert terminal['error']['code'] == 'NEEDS_CLARIFICATION'
+    assert terminal['effect'] == {
+        'boundary': 'crm_atomic_rollback',
+        'crm_mcp_invoked': True,
+        'transaction_committed': False,
+        'effect_persisted': False,
+        'request_state': 'failed',
+    }
+
+    flow.source.refresh_from_db()
+    flow.prepared.refresh_from_db()
+    flow.metadata.refresh_from_db()
+    assert _record_sent_mutation_snapshot(flow) == before
+    assert flow.prepared.status == 'Draft'
+    assert flow.metadata.state == 'ready_for_review'
+    assert flow.metadata.gmail_sent_evidence_sha256 is None
+    assert not flow.metadata.post_send_policy_id
+    assert not flow.metadata.post_send_policy_rule
+    assert not flow.metadata.post_send_policy_evidence_sha256
+    assert not flow.metadata.post_send_policy_source_ref
+    assert not flow.metadata.post_send_policy_source_label
+    assert flow.metadata.post_send_policy_revision is None
+
+    journal = ReneCiraRequest.objects.get(request_id=flow.record['request_id'])
+    assert journal.state == 'failed'
+    assert journal.failure_code == 'NEEDS_CLARIFICATION'
+    assert journal.receipt == terminal
+    lookup = lookup_rene_receipt(
+        _lookup_for(flow.record, f'lookup-record-source-ref-{suffix}')
+    )
+    assert lookup['status'] == 'rejected_terminal'
+    assert lookup['receipt'] == terminal
+
+
+@pytest.mark.django_db
+def test_record_sent_source_ref_reserved_substrings_remain_reviewed(
+    tmp_path,
+    settings,
+    monkeypatch,
+):
+    flow = _validated_record_sent_pipeline(
+        tmp_path,
+        settings,
+        monkeypatch,
+        suffix='valid-substrings',
+        source_refs={
+            'start_source_ref': 'chat:drafting:review-v2',
+            'end_source_ref': 'chat:pendingreview:review-v2',
+            'contract_number_source_ref': 'crm:temporarypolicy:number-v2',
+        },
+    )
+
+    receipt = execute_rene_request(flow.record)
+
+    flow.prepared.refresh_from_db()
+    flow.metadata.refresh_from_db()
+    assert receipt['outcome'] == 'prepared_contract_marked_sent'
+    assert flow.prepared.status == 'Sent'
+    assert flow.metadata.state == 'Sent'
+    assert flow.metadata.gmail_sent_evidence_sha256 == (
+        flow.record['data']['intent']['gmail_sent_evidence_sha256']
+    )
+
+
+@pytest.mark.django_db
 def test_live_verify_holds_when_signed_source_document_changes(
     tmp_path, settings, monkeypatch
 ):
@@ -1636,3 +1966,71 @@ def test_policy_admin_revisions_are_monotonic_across_review_state_changes():
     stale_post_send = ReneRenewalPolicyAdminForm(data=data, instance=policy)
     assert not stale_post_send.is_valid()
     assert 'post_send_revision' in stale_post_send.errors
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ('field', 'identifier', 'revision_field'),
+    (
+        ('start_source_ref', 'chat:renewals:draft:v2', 'start_revision'),
+        ('start_source_ref', 'chat/renewals/temp/v2', 'start_revision'),
+        ('start_source_ref', 'chat+renewals+temporary+v2', 'start_revision'),
+        ('end_source_ref', 'chat.renewals.draft.v2', 'end_revision'),
+        ('end_source_ref', 'chat_renewals_temp_v2', 'end_revision'),
+        ('end_source_ref', 'chat-renewals-temporary-v2', 'end_revision'),
+        (
+            'contract_number_source_ref',
+            'crm:document/draft:v2',
+            'contract_number_revision',
+        ),
+        (
+            'contract_number_source_ref',
+            'crm.document+temp:v2',
+            'contract_number_revision',
+        ),
+        (
+            'contract_number_source_ref',
+            'crm-document_temporary/v2',
+            'contract_number_revision',
+        ),
+    ),
+)
+def test_policy_admin_rejects_reserved_source_ref_components(
+    field,
+    identifier,
+    revision_field,
+):
+    from crm_app.admin import ReneRenewalPolicyAdminForm
+
+    policy = _policy()
+    data = model_to_dict(policy)
+    data[field] = identifier
+    data[revision_field] = 2
+
+    form = ReneRenewalPolicyAdminForm(data=data, instance=policy)
+
+    assert not form.is_valid()
+    assert field in form.errors
+    assert revision_field not in form.errors
+
+
+@pytest.mark.django_db
+def test_policy_admin_source_ref_reserved_substrings_remain_reviewed():
+    from crm_app.admin import ReneRenewalPolicyAdminForm
+
+    policy = _policy()
+    data = model_to_dict(policy)
+    data.update(
+        {
+            'start_source_ref': 'chat:drafting:review-v2',
+            'start_revision': 2,
+            'end_source_ref': 'chat:pendingreview:review-v2',
+            'end_revision': 2,
+            'contract_number_source_ref': 'crm:temporarypolicy:number-v2',
+            'contract_number_revision': 2,
+        }
+    )
+
+    form = ReneRenewalPolicyAdminForm(data=data, instance=policy)
+
+    assert form.is_valid(), form.errors
