@@ -768,7 +768,7 @@ class Contract(TimestampedModel):
     service_type = models.CharField(max_length=50, choices=SERVICE_TYPE_CHOICES, blank=True, help_text="Specific service or plan")
     status = models.CharField(max_length=20, choices=CONTRACT_STATUS_CHOICES, default='Draft')
     start_date = models.DateField()
-    end_date = models.DateField()
+    end_date = models.DateField(null=True, blank=True)
     value = models.DecimalField(
         max_digits=12,
         decimal_places=2,
@@ -1318,6 +1318,170 @@ class ContractDocument(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.get_document_type_display()})"
+
+
+class ReneRenewalPolicy(TimestampedModel):
+    """Human-reviewed rules required by Rene's renewal contract lane.
+
+    No row is seeded by migration.  Cira must hold until a reviewer records the
+    date-boundary, final-number, and post-send lifecycle decisions with their
+    evidence.  A single named scope keeps policy lookup deterministic.
+    """
+
+    START_RULE_CHOICES = [('SAME_DAY', 'Same day'), ('NEXT_DAY', 'Next day')]
+    END_RULE_CHOICES = [
+        ('INCLUSIVE_MINUS_ONE', 'Anniversary minus one day'),
+        ('ANNIVERSARY_DAY', 'Anniversary day'),
+    ]
+    REVIEW_STATUS_CHOICES = [('pending', 'Pending'), ('reviewed', 'Reviewed')]
+    CONTRACT_NUMBER_RULE_CHOICES = [
+        (
+            'RESERVE_UNUSED_DOCUMENT_SEQUENCE_BEFORE_PDF',
+            'Reserve the next unused DocumentSequence number before PDF review',
+        ),
+    ]
+    POST_SEND_RULE_CHOICES = [
+        (
+            'PREPARED_TO_SENT_SOURCE_UNCHANGED',
+            'Move only the prepared draft to Sent; leave the source unchanged',
+        ),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    scope_key = models.CharField(max_length=64, unique=True, default='global')
+    review_status = models.CharField(
+        max_length=16, choices=REVIEW_STATUS_CHOICES, default='pending'
+    )
+
+    start_policy_id = models.CharField(max_length=128)
+    start_rule = models.CharField(max_length=32, choices=START_RULE_CHOICES)
+    start_evidence_sha256 = models.CharField(max_length=64)
+    start_source_ref = models.CharField(max_length=256)
+    start_source_label = models.CharField(max_length=160)
+    start_revision = models.PositiveIntegerField(default=1)
+
+    end_policy_id = models.CharField(max_length=128)
+    end_rule = models.CharField(max_length=32, choices=END_RULE_CHOICES)
+    end_evidence_sha256 = models.CharField(max_length=64)
+    end_source_ref = models.CharField(max_length=256)
+    end_source_label = models.CharField(max_length=160)
+    end_revision = models.PositiveIntegerField(default=1)
+
+    contract_number_policy_id = models.CharField(max_length=128)
+    contract_number_rule = models.CharField(
+        max_length=64, choices=CONTRACT_NUMBER_RULE_CHOICES
+    )
+    contract_number_evidence_sha256 = models.CharField(max_length=64)
+    contract_number_source_ref = models.CharField(max_length=256)
+    contract_number_source_label = models.CharField(max_length=160)
+    contract_number_revision = models.PositiveIntegerField(default=1)
+
+    post_send_state_semantics_reviewed = models.BooleanField(default=False)
+    post_send_policy_id = models.CharField(max_length=128, blank=True)
+    post_send_rule = models.CharField(
+        max_length=64, choices=POST_SEND_RULE_CHOICES, blank=True
+    )
+    post_send_evidence_sha256 = models.CharField(max_length=64, blank=True)
+    post_send_source_ref = models.CharField(max_length=256, blank=True)
+    post_send_source_label = models.CharField(max_length=160, blank=True)
+    post_send_revision = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        verbose_name = 'Rene renewal policy'
+        verbose_name_plural = 'Rene renewal policies'
+
+
+class RenePreparedContract(TimestampedModel):
+    """Review-only contract/PDF identity created through Cira for Rene."""
+
+    STATE_CHOICES = [('ready_for_review', 'Ready for review'), ('Sent', 'Sent')]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    contract = models.OneToOneField(
+        Contract, on_delete=models.PROTECT, related_name='rene_preparation'
+    )
+    source_contract = models.ForeignKey(
+        Contract, on_delete=models.PROTECT, related_name='rene_prepared_renewals'
+    )
+    state = models.CharField(max_length=32, choices=STATE_CHOICES)
+
+    prepare_request_id = models.CharField(max_length=256, unique=True)
+    prepare_request_key = models.CharField(max_length=512, unique=True)
+    prepare_intent_sha256 = models.CharField(max_length=64)
+    source_inspection_sha256 = models.CharField(max_length=64)
+    source_contract_version = models.CharField(max_length=128)
+    source_contract_updated_at = models.DateTimeField()
+    source_contract_status = models.CharField(max_length=20)
+    terms_sha256 = models.CharField(max_length=64)
+    sheet_evidence = models.JSONField()
+
+    pdf_filename = models.CharField(max_length=128)
+    pdf_sha256 = models.CharField(max_length=64)
+    pdf_content = models.BinaryField()
+
+    contract_number_policy_id = models.CharField(max_length=128)
+    contract_number_policy_rule = models.CharField(max_length=64)
+    contract_number_policy_evidence_sha256 = models.CharField(max_length=64)
+    contract_number_policy_source_ref = models.CharField(max_length=256)
+    contract_number_policy_source_label = models.CharField(max_length=160)
+    contract_number_policy_revision = models.PositiveIntegerField()
+
+    gmail_sent_evidence_sha256 = models.CharField(
+        max_length=64, null=True, blank=True, unique=True
+    )
+    post_send_policy_id = models.CharField(max_length=128, blank=True)
+    post_send_policy_rule = models.CharField(max_length=64, blank=True)
+    post_send_policy_evidence_sha256 = models.CharField(max_length=64, blank=True)
+    post_send_policy_source_ref = models.CharField(max_length=256, blank=True)
+    post_send_policy_source_label = models.CharField(max_length=160, blank=True)
+    post_send_policy_revision = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=['state', 'source_contract'],
+                name='crm_app_ren_state_20ac95_idx',
+            ),
+            models.Index(
+                fields=['prepare_intent_sha256'],
+                name='crm_app_ren_prepare_a9eb42_idx',
+            ),
+        ]
+
+
+class ReneCiraRequest(TimestampedModel):
+    """Non-expiring, payload-bound dedupe and receipt journal for Cira."""
+
+    STATE_CHOICES = [
+        ('accepted', 'Accepted'),
+        ('succeeded', 'Succeeded'),
+        ('failed', 'Failed'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request_id = models.CharField(max_length=256, unique=True)
+    request_key = models.CharField(max_length=512, unique=True)
+    intent_sha256 = models.CharField(max_length=64)
+    operation = models.CharField(max_length=64)
+    envelope = models.JSONField()
+    canonical_envelope_sha256 = models.CharField(max_length=64)
+    state = models.CharField(max_length=16, choices=STATE_CHOICES, default='accepted')
+    receipt = models.JSONField(null=True, blank=True)
+    failure_code = models.CharField(max_length=64, blank=True)
+    target_request_key = models.CharField(max_length=512, blank=True, db_index=True)
+    target_intent_sha256 = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=['operation', 'state'],
+                name='crm_app_ren_operati_30e75e_idx',
+            ),
+            models.Index(
+                fields=['target_request_key', 'target_intent_sha256'],
+                name='crm_app_ren_target__db247f_idx',
+            ),
+        ]
 
 
 class Invoice(TimestampedModel):

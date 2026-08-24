@@ -291,6 +291,18 @@ PROSPECT_REPLY_EMAIL = config('PROSPECT_REPLY_EMAIL', default='norbert@bmasiamus
 PROSPECT_REPLY_IMAP_PASSWORD = config('PROSPECT_REPLY_IMAP_PASSWORD', default='')
 PROSPECT_IMAP_HOST = config('PROSPECT_IMAP_HOST', default='imap.gmail.com')
 
+# Dedicated opaque read credential for Rene. Store only its SHA-256 digest;
+# this token is accepted solely by the capability and renewal-book views.
+RENE_RENEWAL_BOOK_TOKEN_SHA256 = config(
+    'RENE_RENEWAL_BOOK_TOKEN_SHA256', default=''
+)
+RENE_RENEWAL_BOOK_TOKEN_EXPIRES_AT = config(
+    'RENE_RENEWAL_BOOK_TOKEN_EXPIRES_AT', default=''
+)
+# The dedicated Rene MCP tool is callable only by this exact existing Cira
+# DRF-token user UUID. An unset or malformed value disables the tool.
+CIRA_RENE_MCP_USER_ID = config('CIRA_RENE_MCP_USER_ID', default='')
+
 # ============================================================
 # MCP Server Configuration (django-mcp-server)
 # ============================================================

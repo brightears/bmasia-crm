@@ -7,6 +7,7 @@ from rest_framework_simplejwt.views import (
     TokenVerifyView,
 )
 from . import views, admin_views
+from .rene_views import ReneTokenCapabilitiesView
 
 # Create a router and register our viewsets
 router = DefaultRouter()
@@ -100,6 +101,13 @@ router.register(r'ai-email-drafts', views.AIEmailDraftViewSet, basename='ai-emai
 
 # The API URLs are now determined automatically by the router.
 urlpatterns = [
+    # These exact paths precede the router. Rene's opaque credential is
+    # accepted nowhere else and this surface allows GET only.
+    path(
+        'v1/auth/token-capabilities/',
+        ReneTokenCapabilitiesView.as_view(),
+        name='rene-token-capabilities',
+    ),
     path('v1/', include(router.urls)),
 
     # Authentication endpoints

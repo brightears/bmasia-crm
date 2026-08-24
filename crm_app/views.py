@@ -3,6 +3,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.authentication import SessionAuthentication, TokenAuthentication
+from rest_framework_simplejwt.authentication import JWTAuthentication
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Sum, Count, Avg
 from django.utils import timezone
@@ -91,6 +93,10 @@ from .serializers import (
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
     TaskAssigneePermission, ReadOnlyForNonOwner
+)
+from .rene_auth import (
+    IsReneRenewalReaderOrAuthenticatedUser,
+    ReneRenewalBearerAuthentication,
 )
 
 
@@ -1244,11 +1250,26 @@ class ContractViewSet(BaseModelViewSet):
         serializer = self.get_serializer(expiring, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['get'], url_path='renewal-book')
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='renewal-book',
+        authentication_classes=[
+            ReneRenewalBearerAuthentication,
+            JWTAuthentication,
+            SessionAuthentication,
+            TokenAuthentication,
+        ],
+        permission_classes=[IsReneRenewalReaderOrAuthenticatedUser],
+    )
     def renewal_book(self, request):
         """Renewal Book — the CRM equivalent of a renewal-funnel month tab, agent-first.
 
         GET /api/v1/contracts/renewal-book/?year=2026&month=9[&currency=USD]
+        Optional repeated contract_id=<canonical UUID> values return only those
+        exact referenced contracts whose end_date is null. This lets sheet
+        parity bind an undated CRM row without ever listing all undated rows or
+        matching by company name.
         Returns every contract whose term ends in that month (up for renewal) with the
         renewal-relevant fields — corporate group, product (Soundtrack/Beat Breeze), zones,
         value, status, successor + its status, paid state, quarterly-billing flag — plus footer
@@ -1262,6 +1283,7 @@ class ContractViewSet(BaseModelViewSet):
                 request.query_params.get('year'),
                 request.query_params.get('month'),
                 request.query_params.get('currency') or None,
+                request.query_params.getlist('contract_id'),
             )
         except (TypeError, ValueError):
             return Response(

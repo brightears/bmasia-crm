@@ -10,6 +10,7 @@ from django.contrib import messages
 from django.db.models import Count, Sum, Q
 from django.utils import timezone
 import csv
+import re
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
@@ -26,7 +27,7 @@ from .models import (
     CorporatePdfTemplate, ContractTemplate, ServicePackageItem, ContractDocument,
     SeasonalTriggerDate, ZoneOfflineAlert,
     ProspectSequence, ProspectSequenceStep, ProspectEnrollment, ProspectStepExecution, AIEmailDraft,
-    DocumentSequence
+    DocumentSequence, ReneRenewalPolicy, RenePreparedContract, ReneCiraRequest
 )
 
 
@@ -3896,3 +3897,159 @@ class DocumentSequenceAdmin(admin.ModelAdmin):
     list_display = ['region', 'doc_type', 'year', 'next_sequence']
     list_filter = ['region', 'doc_type']
     ordering = ['region', 'doc_type', 'year']
+
+
+class _ReneSuperuserAdmin(admin.ModelAdmin):
+    """Rene cannot administer its own policy or audit records."""
+
+    def has_module_permission(self, request):
+        return bool(request.user.is_active and request.user.is_superuser)
+
+    def has_view_permission(self, request, obj=None):
+        return bool(request.user.is_active and request.user.is_superuser)
+
+    def has_add_permission(self, request):
+        return bool(request.user.is_active and request.user.is_superuser)
+
+    def has_change_permission(self, request, obj=None):
+        return bool(request.user.is_active and request.user.is_superuser)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class ReneRenewalPolicyAdminForm(forms.ModelForm):
+    """Fail closed when a reviewed policy lacks exact audit evidence."""
+
+    TOKEN_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,255}$')
+    SHA_RE = re.compile(r'^[0-9a-f]{64}$')
+    UNRESOLVED = {'unknown', 'unresolved', 'placeholder', 'pending'}
+
+    class Meta:
+        model = ReneRenewalPolicy
+        fields = '__all__'
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get('scope_key') != 'global':
+            self.add_error('scope_key', 'The reviewed Rene policy scope must be exactly global.')
+
+        def require_token(field):
+            value = cleaned.get(field)
+            if (
+                not isinstance(value, str)
+                or self.TOKEN_RE.fullmatch(value) is None
+                or value.casefold() in self.UNRESOLVED
+            ):
+                self.add_error(field, 'Enter one exact reviewed source identifier.')
+
+        def require_sha(field):
+            value = cleaned.get(field)
+            if not isinstance(value, str) or self.SHA_RE.fullmatch(value) is None:
+                self.add_error(field, 'Enter one 64-character lowercase SHA-256 digest.')
+
+        def require_label(field):
+            value = cleaned.get(field)
+            if (
+                not isinstance(value, str)
+                or value != value.strip()
+                or not value
+                or any(ord(character) < 32 or ord(character) == 127 for character in value)
+            ):
+                self.add_error(field, 'Enter one plain, non-empty evidence label.')
+
+        if cleaned.get('review_status') == 'reviewed':
+            for prefix in ('start', 'end'):
+                require_token(f'{prefix}_policy_id')
+                require_token(f'{prefix}_source_ref')
+                require_sha(f'{prefix}_evidence_sha256')
+                require_label(f'{prefix}_source_label')
+            require_token('contract_number_policy_id')
+            require_token('contract_number_source_ref')
+            require_sha('contract_number_evidence_sha256')
+            require_label('contract_number_source_label')
+
+        if cleaned.get('post_send_state_semantics_reviewed') is True:
+            require_token('post_send_policy_id')
+            require_token('post_send_source_ref')
+            require_sha('post_send_evidence_sha256')
+            require_label('post_send_source_label')
+            if cleaned.get('post_send_rule') != 'PREPARED_TO_SENT_SOURCE_UNCHANGED':
+                self.add_error(
+                    'post_send_rule',
+                    'The reviewed transition must leave the source contract unchanged.',
+                )
+
+        if not self.instance._state.adding:
+            previous = ReneRenewalPolicy.objects.get(pk=self.instance.pk)
+            groups = {
+                'start': ('start_policy_id', 'start_rule', 'start_evidence_sha256',
+                          'start_source_ref', 'start_source_label'),
+                'end': ('end_policy_id', 'end_rule', 'end_evidence_sha256',
+                        'end_source_ref', 'end_source_label'),
+                'contract_number': ('contract_number_policy_id', 'contract_number_rule',
+                                    'contract_number_evidence_sha256',
+                                    'contract_number_source_ref',
+                                    'contract_number_source_label'),
+            }
+            if previous.review_status == 'reviewed':
+                for prefix, fields in groups.items():
+                    if any(cleaned.get(field) != getattr(previous, field) for field in fields):
+                        revision_field = f'{prefix}_revision'
+                        if (cleaned.get(revision_field) or 0) <= getattr(
+                            previous, revision_field
+                        ):
+                            self.add_error(
+                                revision_field,
+                                'Increase the revision when reviewed evidence or rules change.',
+                            )
+            post_fields = (
+                'post_send_state_semantics_reviewed', 'post_send_policy_id',
+                'post_send_rule', 'post_send_evidence_sha256',
+                'post_send_source_ref', 'post_send_source_label',
+            )
+            if previous.post_send_state_semantics_reviewed and any(
+                cleaned.get(field) != getattr(previous, field) for field in post_fields
+            ) and (cleaned.get('post_send_revision') or 0) <= previous.post_send_revision:
+                self.add_error(
+                    'post_send_revision',
+                    'Increase the revision when reviewed post-send policy changes.',
+                )
+        return cleaned
+
+
+@admin.register(ReneRenewalPolicy)
+class ReneRenewalPolicyAdmin(_ReneSuperuserAdmin):
+    form = ReneRenewalPolicyAdminForm
+    list_display = [
+        'scope_key', 'review_status', 'start_rule', 'end_rule',
+        'post_send_state_semantics_reviewed', 'updated_at',
+    ]
+    readonly_fields = ['created_at', 'updated_at']
+
+    def has_add_permission(self, request):
+        return super().has_add_permission(request) and not ReneRenewalPolicy.objects.exists()
+
+
+@admin.register(RenePreparedContract)
+class RenePreparedContractAdmin(_ReneSuperuserAdmin):
+    list_display = ['contract', 'source_contract', 'state', 'pdf_filename', 'updated_at']
+    readonly_fields = [field.name for field in RenePreparedContract._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ReneCiraRequest)
+class ReneCiraRequestAdmin(_ReneSuperuserAdmin):
+    list_display = ['request_id', 'operation', 'state', 'created_at', 'updated_at']
+    readonly_fields = [field.name for field in ReneCiraRequest._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

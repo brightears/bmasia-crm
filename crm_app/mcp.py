@@ -7,8 +7,11 @@ Endpoint: /mcp/ with Token authentication.
 import base64
 import json
 import logging
+from uuid import UUID
 
+from django.conf import settings
 from mcp_server import mcp_server
+from mcp_server.djangomcp import MCPToolset
 from mcp_server.query_tool import ModelQueryToolset
 
 from crm_app.models import (
@@ -58,6 +61,13 @@ to recover the raw PDF. On failure returns `{"error": "..."}`.
 - `generate_quote_pdf(id)` — generate quote PDF
 - `generate_invoice_pdf(id)` — generate invoice PDF
 
+### Rene Phase 2 (Cira only)
+`rene_phase2_request(request_json)` accepts only the frozen Rene renewal
+business or receipt-lookup envelope. It is not generic CRUD. The tool requires
+the exact active Cira MCP user UUID configured by the CRM operator; every other
+MCP principal is denied. Its JSON string response must be treated as an exact
+receipt or request-bound terminal/uncertain state, never as authority to replay.
+
 ## Key Concepts
 - **billing_entity**: 'BMAsia (Thailand) Co., Ltd.' (THB) or 'BMAsia Limited' (USD)
 - **Contract status**: Draft → Sent → Active → Renewed/Expired/Cancelled
@@ -67,6 +77,109 @@ to recover the raw PDF. On failure returns `{"error": "..."}`.
   what appears in the PDF "Locations for Provision of Services" table.
 - Contract numbers are auto-generated (read-only).
 """)
+
+
+def _is_exact_cira_rene_mcp_principal(request):
+    expected = str(getattr(settings, 'CIRA_RENE_MCP_USER_ID', '')).strip().lower()
+    try:
+        expected = str(UUID(expected))
+    except (TypeError, ValueError, AttributeError):
+        return False
+    user = getattr(request, 'user', None)
+    return bool(
+        user is not None
+        and getattr(user, 'is_authenticated', False)
+        and getattr(user, 'is_active', False)
+        and str(getattr(user, 'pk', '')).lower() == expected
+    )
+
+
+class RenePhase2MCPToolset(MCPToolset):
+    """Dedicated Cira adapter for the frozen Rene renewal contract."""
+
+    def rene_phase2_request(self, request_json: str) -> str:
+        """Execute or look up one exact frozen Rene request.
+
+        ``request_json`` must be one duplicate-free UTF-8 JSON object no larger
+        than 2 MiB. This tool never accepts a collection name or CRUD verb.
+        """
+
+        from crm_app.services.rene_phase2_transport import (
+            CiraJsonParseError,
+            parse_cira_json_bytes,
+        )
+        from crm_app.services.rene_phase2 import (
+            LOOKUP_SCHEMA,
+            RenePhase2BoundError,
+            RenePhase2Error,
+            execute_rene_request,
+            lookup_rene_receipt,
+            safe_error,
+            unbound_error,
+        )
+        from crm_app.services.rene_phase2_common import canonical_json
+
+        if not _is_exact_cira_rene_mcp_principal(self.request):
+            return canonical_json(
+                unbound_error(
+                    'FORBIDDEN',
+                    'the exact configured Cira MCP principal is required',
+                    crm_mcp_invoked=True,
+                )
+            )
+        if not isinstance(request_json, str):
+            return canonical_json(
+                unbound_error(
+                    'INVALID_JSON',
+                    'Cira request must be one UTF-8 JSON string',
+                    crm_mcp_invoked=True,
+                )
+            )
+        try:
+            raw = request_json.encode('utf-8')
+            request = parse_cira_json_bytes(raw)
+            if request.get('schema') == LOOKUP_SCHEMA:
+                result = lookup_rene_receipt(request)
+            else:
+                result = execute_rene_request(request, crm_mcp_invoked=True)
+            return canonical_json(result)
+        except CiraJsonParseError as exc:
+            return canonical_json(
+                unbound_error(
+                    exc.code,
+                    str(exc),
+                    crm_mcp_invoked=True,
+                )
+            )
+        except UnicodeError:
+            return canonical_json(
+                unbound_error(
+                    'INVALID_JSON',
+                    'Cira request must be one UTF-8 JSON string',
+                    crm_mcp_invoked=True,
+                )
+            )
+        except RenePhase2BoundError as exc:
+            return canonical_json(safe_error(exc))
+        except RenePhase2Error:
+            # Schema/hash/authority failures before durable request admission
+            # have no trustworthy binding or effect proof.
+            return canonical_json(
+                unbound_error(
+                    'INVALID_REQUEST',
+                    'Cira request was rejected before durable CRM admission',
+                    crm_mcp_invoked=True,
+                )
+            )
+        except Exception:
+            logger.exception('Rene Phase 2 MCP request became uncertain')
+            return canonical_json(
+                unbound_error(
+                    'INTERNAL_ERROR',
+                    'Rene CRM operation outcome is uncertain; use receipt lookup',
+                    crm_mcp_invoked=True,
+                )
+            )
 
 # ============================================================
 # Query Toolsets (read — MongoDB-style aggregation pipeline)
