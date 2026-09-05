@@ -128,6 +128,7 @@ must remain blocked; Rene cannot substitute its own answer.
 object (2 MiB maximum), rejects duplicate keys at every nesting level,
 recomputes the canonical intent hash and request key, and allowlists only:
 
+- `inspect_renewal_source_candidates`;
 - `inspect_renewal_source`;
 - `validate_only`;
 - `prepare_renewal_contract`;
@@ -175,12 +176,27 @@ owner permit. Malformed, unbound, or internal MCP failures use
 
 ### Inspect
 
-Inspection is non-mutating. It requires one exact stable contract/company
-identity, an optimistic version match, one and only one official signed
-`ContractDocument`, actual bounded PDF bytes, a signed date, reviewed start/end
-policies, a 1–120 month term, and explicit pricing evidence. Only one simple
-non-zone total may proceed; line-item, service-location, per-zone, or mixed
-pricing becomes clarification rather than inference.
+Inspection is non-mutating. The bounded candidate operation lists at most 32
+existing `ContractDocument` PDFs in ascending document-ID order. Each candidate
+binds the exact document ID, filename, PDF digest and size, upload timestamp,
+current official/signed flags, and nullable recorded signing date. It reopens
+each row, rechecks the complete document set and contract version, and returns
+identical before/after business state plus a content-derived receipt binding.
+
+Normal source inspection still requires one and only one official signed
+`ContractDocument`. A second closed path accepts one source Nikki confirmed in
+the exact Rene clarification thread. That request must carry the successful
+candidate receipt and its full binding, the selected candidate's exact current
+metadata, and the authenticated answer binding. The service reloads the stored
+candidate receipt and live document by ID; a same-name replacement, changed
+bytes, changed timestamp, changed flags/date, stale contract, or altered answer
+binding fails closed. It never marks the source official or signed and never
+changes its signing date.
+
+Both source paths require actual bounded PDF bytes, reviewed start/end policies,
+a 1–120 month term, and explicit pricing evidence. Only one simple non-zone
+total may proceed; line-item, service-location, per-zone, or mixed pricing
+becomes clarification rather than inference.
 
 ### Prepare
 

@@ -44,7 +44,7 @@ from crm_app.services.rene_phase2 import (
     lookup_rene_receipt,
     materialize_rene_wire_response,
 )
-from crm_app.services.rene_phase2_common import canonical_sha256, contract_version
+from crm_app.services.rene_phase2_common import canonical_sha256, contract_version, rfc3339
 from crm_app.services.renewal_book_service import build_renewal_book
 from crm_app.services.rene_phase2_transport import MAX_CIRA_REQUEST_BYTES
 
@@ -235,6 +235,83 @@ def _inspect_request(contract, request_id='inspect-1', evidence_revision=1):
     )
 
 
+def _candidate_request(contract, request_id='inspect-candidates-1', evidence_revision=1):
+    return _envelope(
+        'inspect_renewal_source_candidates',
+        contract.id,
+        contract_version(contract),
+        {
+            'target_company_id': str(contract.company_id),
+            'evidence_revision': evidence_revision,
+            'document_scope': 'contract_documents',
+            'maximum_candidates': 32,
+            'return': [
+                'contract_id', 'company_id', 'version', 'contract_updated_at',
+                'evidence_revision', 'candidates',
+            ],
+            'must_not_mutate': True,
+        },
+        request_id,
+    )
+
+
+def _confirmed_inspect_request(
+    contract,
+    candidate_request,
+    candidate_receipt,
+    *,
+    request_id='inspect-confirmed-1',
+    signed_date='2025-10-15',
+):
+    source = candidate_receipt['source_candidates']
+    assert len(source['candidates']) == 1
+    candidate = source['candidates'][0]
+    confirmation = {
+        'candidate_receipt': {
+            'request_id': candidate_request['request_id'],
+            'request_key': candidate_request['request_key'],
+            'intent_sha256': candidate_request['intent_sha256'],
+            'binding_sha256': source['binding_sha256'],
+            'receipt_binding_sha256': _receipt_binding(candidate_receipt),
+        },
+        'source_contract_id': str(contract.id),
+        'source_company_id': str(contract.company_id),
+        'expected_document_id': candidate['document_id'],
+        'expected_filename': candidate['filename'],
+        'expected_pdf_sha256': candidate['pdf_sha256'],
+        'expected_uploaded_at': candidate['uploaded_at'],
+        'expected_is_official': candidate['is_official'],
+        'expected_is_signed': candidate['is_signed'],
+        'expected_record_signed_date': candidate['record_signed_date'],
+        'signed_date': signed_date,
+        'clarification_id': 'rene-clarify-source-1',
+        'clarification_revision': 3,
+        'clarification_request_sha256': 'a' * 64,
+        'answer_sha256': 'b' * 64,
+        'answer_message_name': 'spaces/renewals/messages/answer-1',
+        'answer_sender': 'users/123456789',
+        'answer_received_at': '2026-09-05T03:00:00Z',
+        'chat_space': 'spaces/renewals',
+        'chat_thread_name': 'spaces/renewals/threads/source-1',
+        'document_metadata_must_remain_unchanged': True,
+    }
+    native = _inspect_request(contract)
+    intent = dict(native['data']['intent'])
+    intent.update({
+        'document_selection': 'unique_nikki_confirmed_signed_document',
+        'required_document_flags': {'preserve_current_values': True},
+        'return': [*intent['return'], 'source_confirmation'],
+        'confirmed_source': confirmation,
+    })
+    return _envelope(
+        'inspect_renewal_source',
+        contract.id,
+        contract_version(contract),
+        intent,
+        request_id,
+    )
+
+
 def _prepare_request(
     contract,
     inspect_request,
@@ -258,6 +335,24 @@ def _prepare_request(
             'revision', 'next_end_date',
         )
     }
+    source_reference = {
+        'request_id': inspect_request['request_id'],
+        'request_key': inspect_request['request_key'],
+        'intent_sha256': inspect_request['intent_sha256'],
+        'binding_sha256': source['binding_sha256'],
+        'document_id': source['document']['document_id'],
+        'filename': source['document']['filename'],
+        'contract_updated_at': source['contract_updated_at'],
+        'evidence_revision': source['evidence_revision'],
+        'terms': source['terms'],
+        'term_duration': source['term_duration'],
+        'renewal_start_policy': start,
+        'renewal_end_policy': end,
+        'pricing_structure': source['pricing_structure'],
+    }
+    if source.get('source_confirmation') is not None:
+        source_reference['document_selection'] = source['document_selection']
+        source_reference['source_confirmation'] = source['source_confirmation']
     return _envelope(
         'prepare_renewal_contract',
         contract.id,
@@ -266,21 +361,7 @@ def _prepare_request(
             'source_contract_id': str(contract.id),
             'source_company_id': str(contract.company_id),
             'source_contract_pdf_sha256': source['document']['pdf_sha256'],
-            'source_inspection': {
-                'request_id': inspect_request['request_id'],
-                'request_key': inspect_request['request_key'],
-                'intent_sha256': inspect_request['intent_sha256'],
-                'binding_sha256': source['binding_sha256'],
-                'document_id': source['document']['document_id'],
-                'filename': source['document']['filename'],
-                'contract_updated_at': source['contract_updated_at'],
-                'evidence_revision': source['evidence_revision'],
-                'terms': source['terms'],
-                'term_duration': source['term_duration'],
-                'renewal_start_policy': start,
-                'renewal_end_policy': end,
-                'pricing_structure': source['pricing_structure'],
-            },
+            'source_inspection': source_reference,
             'desired_filename': 'Exact_Rene_Hotel_Renewal.pdf',
             'renewal_terms': {
                 'start_date': start['next_start_date'],
@@ -686,6 +767,288 @@ def test_inspect_is_non_mutating_and_requires_unique_official_signed_pdf(tmp_pat
 
 
 @pytest.mark.django_db
+def test_nikki_confirmed_source_preserves_false_flags_and_nullable_signed_date(
+    tmp_path, settings
+):
+    settings.MEDIA_ROOT = tmp_path
+    contract = _contract(_company('Nikki Confirmed Source'))
+    _policy()
+    document = ContractDocument.objects.create(
+        contract=contract,
+        document_type='other',
+        title='Signed source supplied by Nikki',
+        file=SimpleUploadedFile('nikki-signed.pdf', PDF, content_type='application/pdf'),
+        is_official=False,
+        is_signed=False,
+        signed_date=None,
+    )
+    candidate_request = _candidate_request(contract)
+    candidate_receipt = execute_rene_request(candidate_request)
+    assert candidate_receipt['outcome'] == 'source_candidates_inspected'
+    assert candidate_receipt['before'] == candidate_receipt['after']
+    assert candidate_receipt['artifact'] is None
+    candidate = candidate_receipt['source_candidates']['candidates'][0]
+    assert candidate['document_id'] == str(document.id)
+    assert candidate['uploaded_at'] == rfc3339(document.uploaded_at)
+    assert candidate['record_signed_date'] is None
+    request = _confirmed_inspect_request(
+        contract,
+        candidate_request,
+        candidate_receipt,
+    )
+    receipt = execute_rene_request(request)
+    document.refresh_from_db()
+    observed = receipt['source_inspection']['document']
+    assert observed['document_id'] == str(document.id)
+    assert observed['pdf_sha256'] == hashlib.sha256(PDF).hexdigest()
+    assert observed['is_official'] is False and observed['is_signed'] is False
+    assert observed['signed_date'] == '2025-10-15'
+    assert observed['record_signed_date'] is None
+    assert document.is_official is False and document.is_signed is False
+    assert document.signed_date is None
+
+    prepare = _prepare_request(
+        contract,
+        request,
+        receipt,
+        request_id='prepare-confirmed-after-metadata-change',
+    )
+    document.signed_date = date(2025, 10, 15)
+    document.save(update_fields=['signed_date'])
+    with pytest.raises(RenePhase2Error) as caught:
+        execute_rene_request(
+            _validate(prepare, 'validate-confirmed-after-metadata-change')
+        )
+    assert caught.value.code == 'EVIDENCE_CHANGED'
+
+
+@pytest.mark.django_db
+def test_confirmed_source_rejects_same_filename_document_replacement(tmp_path, settings):
+    settings.MEDIA_ROOT = tmp_path
+    contract = _contract(_company('Replaced Confirmed Source'))
+    _policy()
+    original = ContractDocument.objects.create(
+        contract=contract,
+        document_type='other',
+        title='Original source supplied by Nikki',
+        file=SimpleUploadedFile('same-name.pdf', PDF, content_type='application/pdf'),
+        is_official=False,
+        is_signed=False,
+        signed_date=None,
+    )
+    candidate_request = _candidate_request(
+        contract,
+        request_id='inspect-candidates-before-replacement',
+    )
+    candidate_receipt = execute_rene_request(candidate_request)
+    request = _confirmed_inspect_request(
+        contract,
+        candidate_request,
+        candidate_receipt,
+        request_id='inspect-confirmed-after-replacement',
+    )
+    stored_name = original.file.name
+    original.delete()
+    replacement = ContractDocument.objects.create(
+        contract=contract,
+        document_type='other',
+        title='Replacement with same visible filename',
+        file=stored_name,
+        is_official=False,
+        is_signed=False,
+        signed_date=None,
+    )
+    assert Path(replacement.file.name).name == 'same-name.pdf'
+
+    with pytest.raises(RenePhase2BoundError) as caught:
+        execute_rene_request(request)
+    assert caught.value.code == 'EVIDENCE_CHANGED'
+    replacement.refresh_from_db()
+    assert replacement.is_official is False
+    assert replacement.is_signed is False
+    assert replacement.signed_date is None
+    assert not Contract.objects.filter(renewed_from=contract).exists()
+    assert RenePreparedContract.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_confirmed_source_rejects_oversized_document_id_terminally(
+    tmp_path, settings
+):
+    settings.MEDIA_ROOT = tmp_path
+    contract = _contract(_company('Oversized Confirmed Source ID'))
+    _policy()
+    document = ContractDocument.objects.create(
+        contract=contract,
+        document_type='other',
+        title='Bound source candidate',
+        file=SimpleUploadedFile('bound-source.pdf', PDF, content_type='application/pdf'),
+        is_official=False,
+        is_signed=False,
+        signed_date=None,
+    )
+    candidate_request = _candidate_request(
+        contract,
+        request_id='candidate-before-oversized-document-id',
+    )
+    candidate_receipt = execute_rene_request(candidate_request)
+    original = _confirmed_inspect_request(
+        contract,
+        candidate_request,
+        candidate_receipt,
+        request_id='confirmed-before-oversized-document-id',
+    )
+    intent = copy.deepcopy(original['data']['intent'])
+    intent['confirmed_source']['expected_document_id'] = '9' * 5000
+    request = _envelope(
+        'inspect_renewal_source',
+        contract.id,
+        contract_version(contract),
+        intent,
+        'confirmed-with-oversized-document-id',
+    )
+    before = (
+        contract_version(contract),
+        contract.status,
+        document.is_official,
+        document.is_signed,
+        document.signed_date,
+        Contract.objects.count(),
+        ContractDocument.objects.count(),
+        RenePreparedContract.objects.count(),
+    )
+
+    with pytest.raises(RenePhase2BoundError) as caught:
+        execute_rene_request(request)
+    assert caught.value.code == 'INVALID_SCHEMA'
+    journal = ReneCiraRequest.objects.get(request_id=request['request_id'])
+    assert journal.state == 'failed'
+    assert journal.failure_code == 'INVALID_SCHEMA'
+    assert journal.receipt == caught.value.receipt
+    lookup = lookup_rene_receipt(
+        _lookup_for(request, 'lookup-oversized-confirmed-document-id')
+    )
+    assert lookup['status'] == 'rejected_terminal'
+    assert lookup['receipt'] == caught.value.receipt
+    assert not ReneCiraRequest.objects.filter(state='accepted').exists()
+    contract.refresh_from_db()
+    document.refresh_from_db()
+    assert (
+        contract_version(contract),
+        contract.status,
+        document.is_official,
+        document.is_signed,
+        document.signed_date,
+        Contract.objects.count(),
+        ContractDocument.objects.count(),
+        RenePreparedContract.objects.count(),
+    ) == before
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ('path', 'replacement'),
+    (
+        (('expected_pdf_sha256',), 'c' * 64),
+        (('expected_uploaded_at',), '2026-09-05T00:00:00Z'),
+        (('expected_is_signed',), True),
+        (('candidate_receipt', 'receipt_binding_sha256'), 'd' * 64),
+    ),
+)
+def test_confirmed_source_rejects_candidate_or_receipt_binding_drift(
+    tmp_path, settings, path, replacement
+):
+    settings.MEDIA_ROOT = tmp_path
+    contract = _contract(_company(f'Confirmed Drift {path[-1]}'))
+    _policy()
+    ContractDocument.objects.create(
+        contract=contract,
+        document_type='other',
+        title='Bound source candidate',
+        file=SimpleUploadedFile('bound-source.pdf', PDF, content_type='application/pdf'),
+        is_official=False,
+        is_signed=False,
+        signed_date=None,
+    )
+    candidate_request = _candidate_request(
+        contract,
+        request_id=f'candidate-before-drift-{path[-1]}',
+    )
+    candidate_receipt = execute_rene_request(candidate_request)
+    original = _confirmed_inspect_request(
+        contract,
+        candidate_request,
+        candidate_receipt,
+        request_id=f'confirmed-before-drift-{path[-1]}',
+    )
+    intent = copy.deepcopy(original['data']['intent'])
+    target = intent['confirmed_source']
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = replacement
+    changed = _envelope(
+        'inspect_renewal_source',
+        contract.id,
+        contract_version(contract),
+        intent,
+        f'confirmed-with-drift-{path[-1]}',
+    )
+
+    with pytest.raises(RenePhase2BoundError) as caught:
+        execute_rene_request(changed)
+    assert caught.value.code == 'EVIDENCE_CHANGED'
+    assert not Contract.objects.filter(renewed_from=contract).exists()
+    assert RenePreparedContract.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_confirmed_source_prepares_review_pdf_without_changing_source_metadata(
+    tmp_path, settings
+):
+    settings.MEDIA_ROOT = tmp_path
+    contract = _contract(_company('Confirmed Source Prepare'))
+    _policy()
+    document = ContractDocument.objects.create(
+        contract=contract,
+        document_type='other',
+        title='Nikki confirmed signed source',
+        file=SimpleUploadedFile('confirmed-prepare.pdf', PDF, content_type='application/pdf'),
+        is_official=False,
+        is_signed=False,
+        signed_date=None,
+    )
+    source_before = model_to_dict(document)
+    candidate_request = _candidate_request(
+        contract,
+        request_id='inspect-candidates-for-prepare',
+    )
+    candidate_receipt = execute_rene_request(candidate_request)
+    inspect_request = _confirmed_inspect_request(
+        contract,
+        candidate_request,
+        candidate_receipt,
+        request_id='inspect-confirmed-for-prepare',
+    )
+    inspected = execute_rene_request(inspect_request)
+    prepare = _prepare_request(
+        contract,
+        inspect_request,
+        inspected,
+        request_id='prepare-from-confirmed-source',
+    )
+    execute_rene_request(_validate(prepare, 'validate-confirmed-source-prepare'))
+    prepared = execute_rene_request(prepare)
+
+    document.refresh_from_db()
+    assert model_to_dict(document) == source_before
+    assert prepared['outcome'] == 'prepared'
+    assert prepared['artifact']['filename'] == 'Exact_Rene_Hotel_Renewal.pdf'
+    assert prepared['artifact']['sha256']
+    assert prepared['artifact']['size_bytes'] > 0
+    assert Contract.objects.filter(renewed_from=contract, status='Draft').count() == 1
+
+
+@pytest.mark.django_db
 @pytest.mark.parametrize(
     ('field', 'identifier'),
     (
@@ -817,6 +1180,66 @@ def test_target_id_must_be_canonical_uuid_before_request_admission():
         assert caught.value.code == 'INVALID_SCHEMA'
 
     assert ReneCiraRequest.objects.count() == 0
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('malformed_source', (None, [], 'not-an-inspection-object'))
+def test_prepare_rejects_malformed_source_inspection_terminally(
+    tmp_path, settings, malformed_source
+):
+    settings.MEDIA_ROOT = tmp_path
+    source = _contract(_company('Malformed Source Inspection'))
+    _policy()
+    _signed_document(source)
+    inspect = _inspect_request(source, request_id='inspect-before-malformed-source')
+    inspected = execute_rene_request(inspect)
+    original = _prepare_request(
+        source,
+        inspect,
+        inspected,
+        request_id='prepare-before-malformed-source',
+    )
+    intent = copy.deepcopy(original['data']['intent'])
+    intent['source_inspection'] = malformed_source
+    proposed = _envelope(
+        'prepare_renewal_contract',
+        source.id,
+        contract_version(source),
+        intent,
+        'prepare-with-malformed-source',
+    )
+    validation = _validate(proposed, 'validate-malformed-source')
+    before = (
+        contract_version(source),
+        source.status,
+        source.contract_number,
+        Contract.objects.count(),
+        ContractDocument.objects.count(),
+        RenePreparedContract.objects.count(),
+    )
+
+    with pytest.raises(RenePhase2BoundError) as caught:
+        execute_rene_request(validation)
+    assert caught.value.code == 'INVALID_SCHEMA'
+    journal = ReneCiraRequest.objects.get(request_id=validation['request_id'])
+    assert journal.state == 'failed'
+    assert journal.failure_code == 'INVALID_SCHEMA'
+    assert journal.receipt == caught.value.receipt
+    lookup = lookup_rene_receipt(
+        _lookup_for(validation, 'lookup-malformed-source-validation')
+    )
+    assert lookup['status'] == 'rejected_terminal'
+    assert lookup['receipt'] == caught.value.receipt
+    assert not ReneCiraRequest.objects.filter(state='accepted').exists()
+    source.refresh_from_db()
+    assert (
+        contract_version(source),
+        source.status,
+        source.contract_number,
+        Contract.objects.count(),
+        ContractDocument.objects.count(),
+        RenePreparedContract.objects.count(),
+    ) == before
 
 
 @pytest.mark.django_db

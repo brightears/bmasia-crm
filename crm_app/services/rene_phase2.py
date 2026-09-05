@@ -54,7 +54,9 @@ UNBOUND_ERROR_SCHEMA = 'bmasia.cira.rene.crm-uncertain.v1'
 AGENT = 'rene'
 COLLECTION = 'contract'
 MAX_PDF_BYTES = 10 * 1024 * 1024
+MAX_SOURCE_CANDIDATES = 32
 ALLOWED_OPERATIONS = {
+    'inspect_renewal_source_candidates',
     'inspect_renewal_source',
     'validate_only',
     'prepare_renewal_contract',
@@ -92,6 +94,16 @@ INSPECTION_RETURN_FIELDS = [
     'renewal_end_policy',
     'pricing_structure',
 ]
+SOURCE_CANDIDATE_RETURN_FIELDS = [
+    'contract_id',
+    'company_id',
+    'version',
+    'contract_updated_at',
+    'evidence_revision',
+    'candidates',
+]
+NATIVE_SIGNED_SOURCE = 'unique_official_signed_document'
+NIKKI_CONFIRMED_SOURCE = 'unique_nikki_confirmed_signed_document'
 
 
 class RenePhase2Error(RuntimeError):
@@ -314,6 +326,36 @@ def _date(label, value):
     return parsed
 
 
+def _timestamp(label, value):
+    if not isinstance(value, str) or value != value.strip() or not value:
+        _fail('INVALID_SCHEMA', f'{label} must be one canonical timezone timestamp')
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    except ValueError:
+        _fail('INVALID_SCHEMA', f'{label} must be one canonical timezone timestamp')
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        _fail('INVALID_SCHEMA', f'{label} must include a timezone')
+    canonical = parsed.isoformat()
+    if value.endswith('Z') and parsed.utcoffset() == timedelta(0):
+        canonical = canonical.removesuffix('+00:00') + 'Z'
+    if canonical != value:
+        _fail('INVALID_SCHEMA', f'{label} must be one canonical timezone timestamp')
+    return parsed
+
+
+def _positive_decimal_id(label, value):
+    if (
+        not isinstance(value, str)
+        or not value.isascii()
+        or not value.isdigit()
+        or value.startswith('0')
+        or len(value) > 19
+        or int(value) > 9223372036854775807
+    ):
+        _fail('INVALID_SCHEMA', f'{label} must be one canonical positive record ID')
+    return value
+
+
 def _decimal(label, value):
     if not isinstance(value, str) or value != value.strip() or not value:
         _fail('INVALID_SCHEMA', f'{label} must be one exact decimal string')
@@ -487,6 +529,217 @@ def _read_unique_signed_document(contract, lock=False):
     return document, filename, content
 
 
+def _confirmed_source(value, contract):
+    confirmation = _exact('confirmed source', value, {
+        'candidate_receipt',
+        'source_contract_id', 'source_company_id', 'expected_document_id',
+        'expected_filename', 'expected_pdf_sha256', 'expected_uploaded_at',
+        'expected_is_official', 'expected_is_signed', 'expected_record_signed_date',
+        'signed_date', 'clarification_id', 'clarification_revision',
+        'clarification_request_sha256', 'answer_sha256', 'answer_message_name',
+        'answer_sender', 'answer_received_at', 'chat_space', 'chat_thread_name',
+        'document_metadata_must_remain_unchanged',
+    })
+    for name in (
+        'source_contract_id', 'source_company_id', 'clarification_id',
+        'answer_message_name', 'answer_sender', 'chat_space', 'chat_thread_name',
+    ):
+        _token(f'confirmed source {name}', confirmation[name])
+    _positive_decimal_id(
+        'confirmed source expected_document_id', confirmation['expected_document_id']
+    )
+    _filename(confirmation['expected_filename'])
+    _sha('confirmed source PDF hash', confirmation['expected_pdf_sha256'])
+    _timestamp('confirmed source upload time', confirmation['expected_uploaded_at'])
+    _date('confirmed source signed date', confirmation['signed_date'])
+    if confirmation['expected_record_signed_date'] is not None:
+        _date(
+            'confirmed source record signed date',
+            confirmation['expected_record_signed_date'],
+        )
+    _sha('confirmed source request hash', confirmation['clarification_request_sha256'])
+    _sha('confirmed source answer hash', confirmation['answer_sha256'])
+    _timestamp('confirmed source answer time', confirmation['answer_received_at'])
+    if (
+        isinstance(confirmation['clarification_revision'], bool)
+        or not isinstance(confirmation['clarification_revision'], int)
+        or confirmation['clarification_revision'] < 1
+        or confirmation['source_contract_id'] != str(contract.id)
+        or confirmation['source_company_id'] != str(contract.company_id)
+        or not isinstance(confirmation['expected_is_official'], bool)
+        or not isinstance(confirmation['expected_is_signed'], bool)
+        or confirmation['document_metadata_must_remain_unchanged'] is not True
+    ):
+        _fail('INVALID_SCHEMA', 'confirmed source identity or safety binding differs')
+    _load_confirmed_candidate(confirmation, contract)
+    return confirmation
+
+
+def _candidate_binding_material(envelope, source):
+    return {
+        'inspection_request_id': envelope['request_id'],
+        'inspection_request_key': envelope['request_key'],
+        'inspection_intent_sha256': envelope['intent_sha256'],
+        'contract_id': source['contract_id'],
+        'company_id': source['company_id'],
+        'version': source['version'],
+        'contract_updated_at': source['contract_updated_at'],
+        'evidence_revision': source['evidence_revision'],
+        'candidates': source['candidates'],
+    }
+
+
+def _load_confirmed_candidate(confirmation, contract):
+    reference = _exact(
+        'confirmed source candidate receipt',
+        confirmation['candidate_receipt'],
+        {
+            'request_id', 'request_key', 'intent_sha256', 'binding_sha256',
+            'receipt_binding_sha256',
+        },
+    )
+    _token('candidate receipt request_id', reference['request_id'])
+    _token('candidate receipt request_key', reference['request_key'])
+    _sha('candidate receipt intent hash', reference['intent_sha256'])
+    _sha('candidate receipt binding hash', reference['binding_sha256'])
+    _sha('candidate full receipt binding hash', reference['receipt_binding_sha256'])
+    record = ReneCiraRequest.objects.filter(
+        request_id=reference['request_id'],
+        request_key=reference['request_key'],
+        intent_sha256=reference['intent_sha256'],
+        operation='inspect_renewal_source_candidates',
+        state='succeeded',
+    ).first()
+    if record is None or not isinstance(record.receipt, dict):
+        _fail('MISSING_EVIDENCE', 'confirmed source lacks its candidate inspection')
+    source = record.receipt.get('source_candidates')
+    if (
+        record.receipt.get('outcome') != 'source_candidates_inspected'
+        or not isinstance(source, dict)
+        or set(source) != {
+            'contract_id', 'company_id', 'version', 'contract_updated_at',
+            'evidence_revision', 'candidates', 'binding_sha256',
+        }
+        or source.get('binding_sha256') != reference['binding_sha256']
+        or _receipt_binding(record.receipt) != reference['receipt_binding_sha256']
+        or canonical_sha256(_candidate_binding_material({
+            'request_id': reference['request_id'],
+            'request_key': reference['request_key'],
+            'intent_sha256': reference['intent_sha256'],
+        }, source))
+        != reference['binding_sha256']
+        or source.get('contract_id') != str(contract.id)
+        or source.get('company_id') != str(contract.company_id)
+        or source.get('version') != contract_version(contract)
+        or source.get('contract_updated_at') != rfc3339(contract.updated_at)
+    ):
+        _fail('EVIDENCE_CHANGED', 'source candidate inspection binding differs')
+    candidates = source.get('candidates')
+    if (
+        not isinstance(candidates, list)
+        or len(candidates) > MAX_SOURCE_CANDIDATES
+    ):
+        _fail('EVIDENCE_CHANGED', 'source candidate inspection list differs')
+    selected = {
+        'document_id': confirmation['expected_document_id'],
+        'filename': confirmation['expected_filename'],
+        'pdf_sha256': confirmation['expected_pdf_sha256'],
+        'size_bytes': None,
+        'uploaded_at': confirmation['expected_uploaded_at'],
+        'is_official': confirmation['expected_is_official'],
+        'is_signed': confirmation['expected_is_signed'],
+        'record_signed_date': confirmation['expected_record_signed_date'],
+    }
+    matches = []
+    observed_ids = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or set(candidate) != set(selected):
+            _fail('EVIDENCE_CHANGED', 'source candidate receipt shape differs')
+        _positive_decimal_id('candidate document_id', candidate['document_id'])
+        _filename(candidate['filename'])
+        _sha('candidate PDF hash', candidate['pdf_sha256'])
+        _timestamp('candidate upload time', candidate['uploaded_at'])
+        if (
+            isinstance(candidate['size_bytes'], bool)
+            or not isinstance(candidate['size_bytes'], int)
+            or not 9 <= candidate['size_bytes'] <= MAX_PDF_BYTES
+            or not isinstance(candidate['is_official'], bool)
+            or not isinstance(candidate['is_signed'], bool)
+        ):
+            _fail('EVIDENCE_CHANGED', 'source candidate values differ')
+        if candidate['record_signed_date'] is not None:
+            _date('candidate record signed date', candidate['record_signed_date'])
+        observed_ids.append(int(candidate['document_id']))
+        if candidate.get('document_id') == confirmation['expected_document_id']:
+            matches.append(candidate)
+    if observed_ids != sorted(set(observed_ids)):
+        _fail('EVIDENCE_CHANGED', 'source candidates are not uniquely ordered')
+    if len(matches) != 1:
+        _fail('EVIDENCE_CHANGED', 'confirmed source is not unique in its candidate receipt')
+    selected['size_bytes'] = matches[0].get('size_bytes')
+    if matches[0] != selected:
+        _fail('EVIDENCE_CHANGED', 'confirmed source differs from its candidate receipt')
+
+
+def _read_confirmed_document(contract, confirmation, lock=False):
+    """Read one exact existing PDF and prove its CRM metadata was not changed."""
+    documents = contract.contract_documents.filter(
+        pk=int(confirmation['expected_document_id'])
+    ).order_by('id')
+    if lock:
+        documents = documents.select_for_update()
+    documents = list(documents[:2])
+    if len(documents) != 1:
+        _fail('EVIDENCE_CHANGED', 'confirmed CRM document no longer exists on this contract')
+    document = documents[0]
+    before = (
+        str(document.id), document.file.name, document.is_official, document.is_signed,
+        document.signed_date, rfc3339(document.uploaded_at),
+    )
+    if (
+        str(document.id) != confirmation['expected_document_id']
+        or Path(document.file.name).name != confirmation['expected_filename']
+        or rfc3339(document.uploaded_at) != confirmation['expected_uploaded_at']
+        or document.is_official is not confirmation['expected_is_official']
+        or document.is_signed is not confirmation['expected_is_signed']
+        or (
+            document.signed_date.isoformat()
+            if document.signed_date is not None
+            else None
+        ) != confirmation['expected_record_signed_date']
+        or (
+        document.signed_date is not None
+        and document.signed_date.isoformat() != confirmation['signed_date']
+        )
+    ):
+        _fail('EVIDENCE_CHANGED', 'confirmed source document metadata differs')
+    filename = _filename(Path(document.file.name).name)
+    try:
+        document.file.open('rb')
+        content = document.file.read(MAX_PDF_BYTES + 1)
+    except (OSError, ValueError):
+        _fail('ARTIFACT_UNAVAILABLE', 'confirmed source PDF bytes are unavailable')
+    finally:
+        try:
+            document.file.close()
+        except Exception:
+            pass
+    _validate_pdf_bytes(content)
+    if hashlib.sha256(content).hexdigest() != confirmation['expected_pdf_sha256']:
+        _fail('EVIDENCE_CHANGED', 'confirmed source PDF bytes differ')
+    try:
+        document.refresh_from_db()
+    except document.__class__.DoesNotExist:
+        _fail('EVIDENCE_CHANGED', 'confirmed CRM document changed during inspection')
+    after = (
+        str(document.id), document.file.name, document.is_official, document.is_signed,
+        document.signed_date, rfc3339(document.uploaded_at),
+    )
+    if before != after or filename != confirmation['expected_filename']:
+        _fail('EVIDENCE_CHANGED', 'confirmed source PDF or metadata changed during inspection')
+    return document, filename, content
+
+
 def _validate_pdf_bytes(content):
     if (
         not isinstance(content, bytes)
@@ -495,6 +748,49 @@ def _validate_pdf_bytes(content):
         or not content.rstrip().endswith(b'%%EOF')
     ):
         _fail('INVALID_ARTIFACT', 'PDF bytes are missing, malformed, or above 10 MiB')
+
+
+def _read_source_candidate(document):
+    before = (
+        str(document.id), document.file.name, document.is_official, document.is_signed,
+        document.signed_date, rfc3339(document.uploaded_at),
+    )
+    filename = _filename(Path(document.file.name).name)
+    try:
+        document.file.open('rb')
+        content = document.file.read(MAX_PDF_BYTES + 1)
+    except (OSError, ValueError):
+        _fail('ARTIFACT_UNAVAILABLE', 'source candidate PDF bytes are unavailable')
+    finally:
+        try:
+            document.file.close()
+        except Exception:
+            pass
+    _validate_pdf_bytes(content)
+    try:
+        document.refresh_from_db()
+    except document.__class__.DoesNotExist:
+        _fail('EVIDENCE_CHANGED', 'source candidate changed during inspection')
+    after = (
+        str(document.id), document.file.name, document.is_official, document.is_signed,
+        document.signed_date, rfc3339(document.uploaded_at),
+    )
+    if before != after or Path(document.file.name).name != filename:
+        _fail('EVIDENCE_CHANGED', 'source candidate changed during inspection')
+    return {
+        'document_id': str(document.id),
+        'filename': filename,
+        'pdf_sha256': hashlib.sha256(content).hexdigest(),
+        'size_bytes': len(content),
+        'uploaded_at': rfc3339(document.uploaded_at),
+        'is_official': document.is_official,
+        'is_signed': document.is_signed,
+        'record_signed_date': (
+            document.signed_date.isoformat()
+            if document.signed_date is not None
+            else None
+        ),
+    }
 
 
 def _visible_pdf_text(content):
@@ -662,6 +958,74 @@ def _receipt_base(envelope, outcome, before, after, artifact=None):
     }
 
 
+def _source_candidates_inspection(envelope):
+    intent = _exact(
+        'source candidate inspection intent',
+        envelope['data']['intent'],
+        {
+            'target_company_id', 'evidence_revision', 'document_scope',
+            'maximum_candidates', 'return', 'must_not_mutate',
+        },
+    )
+    if (
+        intent['document_scope'] != 'contract_documents'
+        or intent['maximum_candidates'] != MAX_SOURCE_CANDIDATES
+        or intent['return'] != SOURCE_CANDIDATE_RETURN_FIELDS
+        or intent['must_not_mutate'] is not True
+        or isinstance(intent['evidence_revision'], bool)
+        or not isinstance(intent['evidence_revision'], int)
+        or intent['evidence_revision'] < 1
+    ):
+        _fail('INVALID_SCHEMA', 'source candidate inspection requirements differ')
+    _canonical_uuid('source candidate company', intent['target_company_id'])
+    contract = Contract.objects.select_related('company').get(pk=envelope['id'])
+    before = _versioned_contract(contract)
+    if (
+        str(contract.company_id) != intent['target_company_id']
+        or before['version'] != envelope['expected_version']
+    ):
+        _fail('VERSION_CONFLICT', 'source contract identity or version changed')
+    documents = list(
+        contract.contract_documents.order_by('id')[:MAX_SOURCE_CANDIDATES + 1]
+    )
+    if len(documents) > MAX_SOURCE_CANDIDATES:
+        _fail('NEEDS_CLARIFICATION', 'source contract has more than 32 documents')
+    before_ids = [str(document.id) for document in documents]
+    candidates = [_read_source_candidate(document) for document in documents]
+    try:
+        contract.refresh_from_db()
+    except Contract.DoesNotExist:
+        _fail('EVIDENCE_CHANGED', 'source contract changed during candidate inspection')
+    after_documents = list(
+        contract.contract_documents.order_by('id')[:MAX_SOURCE_CANDIDATES + 1]
+    )
+    after = _versioned_contract(contract)
+    if (
+        before != after
+        or before_ids != [str(document.id) for document in after_documents]
+    ):
+        _fail('EVIDENCE_CHANGED', 'source contract documents changed during inspection')
+    source = {
+        'contract_id': before['contract_id'],
+        'company_id': before['company_id'],
+        'version': before['version'],
+        'contract_updated_at': before['updated_at'],
+        'evidence_revision': intent['evidence_revision'],
+        'candidates': candidates,
+    }
+    source['binding_sha256'] = canonical_sha256(
+        _candidate_binding_material(envelope, source)
+    )
+    receipt = _receipt_base(
+        envelope,
+        'source_candidates_inspected',
+        before,
+        dict(after),
+    )
+    receipt['source_candidates'] = source
+    return receipt
+
+
 def _source_inspection(envelope):
     intent = envelope['data']['intent']
     expected_intent = {
@@ -670,19 +1034,20 @@ def _source_inspection(envelope):
         'require_reviewed_renewal_end_policy', 'require_pricing_structure_evidence',
         'evidence_revision', 'return', 'must_not_mutate',
     }
+    selection = intent.get('document_selection')
+    if selection == NIKKI_CONFIRMED_SOURCE:
+        expected_intent.add('confirmed_source')
     if set(intent) != expected_intent:
         _fail('INVALID_SCHEMA', 'inspection intent fields differ')
     if (
-        intent['document_selection'] != 'unique_official_signed_document'
+        selection not in {NATIVE_SIGNED_SOURCE, NIKKI_CONFIRMED_SOURCE}
         or intent['required_document_count'] != 1
-        or intent['required_document_flags'] != {'is_official': True, 'is_signed': True}
         or intent['require_reviewed_renewal_start_policy'] is not True
         or intent['require_reviewed_renewal_end_policy'] is not True
         or intent['require_pricing_structure_evidence'] is not True
         or isinstance(intent['evidence_revision'], bool)
         or not isinstance(intent['evidence_revision'], int)
         or intent['evidence_revision'] < 1
-        or intent['return'] != INSPECTION_RETURN_FIELDS
         or intent['must_not_mutate'] is not True
     ):
         _fail('INVALID_SCHEMA', 'inspection safety requirements differ')
@@ -693,7 +1058,24 @@ def _source_inspection(envelope):
         _fail('VERSION_CONFLICT', 'source contract version changed')
     policy = _reviewed_policy()
     next_start, next_end = _policy_dates(contract, policy)
-    document, filename, content = _read_unique_signed_document(contract)
+    confirmation = None
+    if selection == NATIVE_SIGNED_SOURCE:
+        if (
+            intent['required_document_flags'] != {'is_official': True, 'is_signed': True}
+            or intent['return'] != INSPECTION_RETURN_FIELDS
+        ):
+            _fail('INVALID_SCHEMA', 'native signed-source requirements differ')
+        document, filename, content = _read_unique_signed_document(contract)
+        signed_date = document.signed_date.isoformat()
+    else:
+        if (
+            intent['required_document_flags'] != {'preserve_current_values': True}
+            or intent['return'] != [*INSPECTION_RETURN_FIELDS, 'source_confirmation']
+        ):
+            _fail('INVALID_SCHEMA', 'confirmed-source requirements differ')
+        confirmation = _confirmed_source(intent['confirmed_source'], contract)
+        document, filename, content = _read_confirmed_document(contract, confirmation)
+        signed_date = confirmation['signed_date']
     pricing = _pricing_structure(contract)
     terms = {
         'start_date': contract.start_date.isoformat(),
@@ -702,7 +1084,7 @@ def _source_inspection(envelope):
         'currency': contract.currency,
     }
     source = {
-        'document_selection': 'unique_official_signed_document',
+        'document_selection': selection,
         'document_count': 1,
         'contract_id': str(contract.id),
         'company_id': str(contract.company_id),
@@ -714,9 +1096,9 @@ def _source_inspection(envelope):
             'filename': filename,
             'pdf_sha256': hashlib.sha256(content).hexdigest(),
             'size_bytes': len(content),
-            'is_official': True,
-            'is_signed': True,
-            'signed_date': document.signed_date.isoformat(),
+            'is_official': document.is_official,
+            'is_signed': document.is_signed,
+            'signed_date': signed_date,
             'uploaded_at': rfc3339(document.uploaded_at),
         },
         'terms': terms,
@@ -746,6 +1128,13 @@ def _source_inspection(envelope):
         },
         'pricing_structure': pricing,
     }
+    if confirmation is not None:
+        source['document']['record_signed_date'] = (
+            document.signed_date.isoformat()
+            if document.signed_date is not None
+            else None
+        )
+        source['source_confirmation'] = confirmation
     binding_material = {
         'inspection_request_id': envelope['request_id'],
         'inspection_request_key': envelope['request_key'],
@@ -762,6 +1151,9 @@ def _source_inspection(envelope):
         'renewal_end_policy': source['renewal_end_policy'],
         'pricing_structure': pricing,
     }
+    if confirmation is not None:
+        binding_material['document_selection'] = selection
+        binding_material['source_confirmation'] = confirmation
     source['binding_sha256'] = canonical_sha256(binding_material)
     identity = _versioned_contract(contract)
     receipt = _receipt_base(envelope, 'inspected', identity, dict(identity))
@@ -770,15 +1162,18 @@ def _source_inspection(envelope):
 
 
 def _load_inspection(intent, source):
+    source = _mapping('source inspection reference', source)
+    reference_fields = {
+        'request_id', 'request_key', 'intent_sha256', 'binding_sha256',
+        'document_id', 'filename', 'contract_updated_at', 'evidence_revision', 'terms',
+        'term_duration', 'renewal_start_policy', 'renewal_end_policy', 'pricing_structure',
+    }
+    if source.get('document_selection') == NIKKI_CONFIRMED_SOURCE:
+        reference_fields.update({'document_selection', 'source_confirmation'})
     reference = _exact(
         'source inspection reference',
         source,
-        {
-            'request_id', 'request_key', 'intent_sha256', 'binding_sha256',
-            'document_id', 'filename', 'contract_updated_at', 'evidence_revision', 'terms',
-            'term_duration', 'renewal_start_policy', 'renewal_end_policy',
-            'pricing_structure',
-        },
+        reference_fields,
     )
     record = ReneCiraRequest.objects.filter(
         request_id=reference['request_id'],
@@ -819,6 +1214,9 @@ def _load_inspection(intent, source):
         },
         'pricing_structure': observed['pricing_structure'],
     }
+    if observed.get('source_confirmation') is not None:
+        expected_reference['document_selection'] = observed['document_selection']
+        expected_reference['source_confirmation'] = observed['source_confirmation']
     if reference != expected_reference:
         _fail('EVIDENCE_CHANGED', 'prepare inspection reference is not exact')
     if intent['source_contract_pdf_sha256'] != observed['document']['pdf_sha256']:
@@ -885,13 +1283,35 @@ def _validate_prepare(
             'SOURCE_LIFECYCLE_CHANGED',
             'source contract already has a renewal successor; another prepare is forbidden',
         )
-    document, filename, content = _read_unique_signed_document(contract, lock=lock)
+    confirmation = inspection.get('source_confirmation')
+    if confirmation is None:
+        document, filename, content = _read_unique_signed_document(contract, lock=lock)
+    else:
+        confirmation = _confirmed_source(confirmation, contract)
+        document, filename, content = _read_confirmed_document(
+            contract, confirmation, lock=lock
+        )
     if (
         str(document.id) != inspection['document']['document_id']
         or filename != inspection['document']['filename']
         or hashlib.sha256(content).hexdigest() != inspection['document']['pdf_sha256']
+        or document.is_official != inspection['document']['is_official']
+        or document.is_signed != inspection['document']['is_signed']
+        or (
+            confirmation is None
+            and document.signed_date.isoformat() != inspection['document']['signed_date']
+        )
+        or (
+            confirmation is not None
+            and (
+                document.signed_date.isoformat()
+                if document.signed_date is not None
+                else None
+            )
+            != inspection['document']['record_signed_date']
+        )
     ):
-        _fail('EVIDENCE_CHANGED', 'official signed source document changed')
+        _fail('EVIDENCE_CHANGED', 'exact source document or current flags changed')
     policy = _reviewed_policy(lock=lock)
     next_start, next_end = _policy_dates(contract, policy)
     for prefix, observed in (
@@ -1651,6 +2071,8 @@ def _require_validation(envelope):
 
 def _execute(envelope):
     operation = envelope['verb']
+    if operation == 'inspect_renewal_source_candidates':
+        return _source_candidates_inspection(envelope)
     if operation == 'inspect_renewal_source':
         return _source_inspection(envelope)
     if operation == 'validate_only':
