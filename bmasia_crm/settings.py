@@ -308,6 +308,11 @@ CIRA_RENE_MCP_TOKEN_SHA256 = config(
 )
 CIRA_RENE_MCP_USER_ID = config('CIRA_RENE_MCP_USER_ID', default='')
 
+# One 10 MiB renewal PDF is transported as canonical base64 inside the
+# dedicated Rene MCP JSON envelope.  Django must admit that authenticated
+# request before the narrower 15 MiB Rene parser can enforce its exact bound.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024 * 1024
+
 # ============================================================
 # MCP Server Configuration (django-mcp-server)
 # ============================================================

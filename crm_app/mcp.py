@@ -81,7 +81,7 @@ class RenePhase2MCPToolset(MCPToolset):
         """Execute or look up one exact frozen Rene request.
 
         ``request_json`` must be one duplicate-free UTF-8 JSON object no larger
-        than 2 MiB. This tool never accepts a collection name or CRUD verb.
+        than 15 MiB. This tool never accepts a collection name or CRUD verb.
         """
 
         from crm_app.services.rene_phase2_transport import (

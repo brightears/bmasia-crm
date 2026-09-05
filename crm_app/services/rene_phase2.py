@@ -55,7 +55,7 @@ UNBOUND_ERROR_SCHEMA = 'bmasia.cira.rene.crm-uncertain.v1'
 AGENT = 'rene'
 COLLECTION = 'contract'
 MAX_PDF_BYTES = 10 * 1024 * 1024
-MAX_PORTABLE_SOURCE_PDF_BYTES = 1 * 1024 * 1024
+MAX_PORTABLE_SOURCE_PDF_BYTES = MAX_PDF_BYTES
 MAX_SOURCE_CANDIDATES = 32
 ALLOWED_OPERATIONS = {
     'inspect_renewal_source_candidates',
@@ -111,7 +111,7 @@ GMAIL_SOURCE_SCHEMA = 'bmasia.cira.rene.gmail-pdf-source.v1'
 DURABLE_ENVELOPE_SCHEMA = 'bmasia.cira.rene.crm-durable-envelope.v1'
 AUTHENTICATED_MAILBOX = 'norbert@bmasiamusic.com'
 VISIBLE_FROM = 'nikki.h@bmasiamusic.com'
-GMAIL_ID_RE = re.compile(r'^[A-Za-z0-9_-]+$')
+GMAIL_ID_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,511}$')
 
 
 class RenePhase2Error(RuntimeError):
@@ -364,7 +364,7 @@ def _positive_decimal_id(label, value):
     return value
 
 
-def _gmail_id(label, value, maximum=4096):
+def _gmail_id(label, value, maximum=512):
     if (
         not isinstance(value, str)
         or not value
@@ -435,7 +435,7 @@ def _portable_gmail_source_metadata(value):
         or not isinstance(source['size_bytes'], int)
         or not 9 <= source['size_bytes'] <= MAX_PORTABLE_SOURCE_PDF_BYTES
     ):
-        _fail('INVALID_ARTIFACT', 'portable Gmail source exceeds the 1 MiB bound')
+        _fail('INVALID_ARTIFACT', 'portable Gmail source exceeds the 10 MiB bound')
     return source, canonical_sha256(source)
 
 

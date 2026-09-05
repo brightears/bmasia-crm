@@ -125,7 +125,8 @@ must remain blocked; Rene cannot substitute its own answer.
 ## Cira-only MCP operation
 
 `rene_phase2_request` accepts one JSON **string** containing a bounded UTF-8
-object (2 MiB maximum), rejects duplicate keys at every nesting level,
+object (15 MiB maximum, including at most one 10 MiB portable source PDF),
+rejects duplicate keys at every nesting level,
 recomputes the canonical intent hash and request key, and allowlists only:
 
 - `inspect_renewal_source_candidates`;

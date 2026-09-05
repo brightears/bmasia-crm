@@ -3,7 +3,7 @@
 import json
 
 
-MAX_CIRA_REQUEST_BYTES = 2 * 1024 * 1024
+MAX_CIRA_REQUEST_BYTES = 15 * 1024 * 1024
 
 
 class CiraJsonParseError(ValueError):
@@ -32,7 +32,7 @@ def parse_cira_json_bytes(content):
         raise TypeError('content must be bytes')
     if len(content) > MAX_CIRA_REQUEST_BYTES:
         raise CiraJsonParseError(
-            'REQUEST_TOO_LARGE', 'Cira request exceeds the reviewed 2 MiB bound'
+            'REQUEST_TOO_LARGE', 'Cira request exceeds the reviewed 15 MiB bound'
         )
     try:
         value = json.loads(

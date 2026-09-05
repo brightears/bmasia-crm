@@ -9,10 +9,11 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
 from django.forms.models import model_to_dict
-from django.test import override_settings
+from django.test import RequestFactory, override_settings
 from mcp_server import mcp_server
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
@@ -34,6 +35,8 @@ from crm_app.rene_auth import RenePhase2MCPCredential
 from crm_app.rene_mcp_server import rene_phase2_mcp_server
 from crm_app.services.rene_phase2 import (
     DURABLE_ENVELOPE_SCHEMA,
+    MAX_PORTABLE_SOURCE_PDF_BYTES,
+    _portable_gmail_source as parse_portable_gmail_source,
     _prepared_live_state,
     _receipt_binding,
     _render_contract_pdf,
@@ -287,6 +290,41 @@ def _portable_inspect_request(
         intent,
         request_id,
     )
+
+
+def test_portable_gmail_contract_accepts_cira_size_and_identifier_bounds():
+    content = b'%PDF-1.7\n' + (b'x' * (1024 * 1024)) + b'\n%%EOF'
+    source = _portable_gmail_source(content)
+    source['gmail_attachment_id'] = 'A.' + ('b' * 510)
+
+    metadata, parsed, _locator = parse_portable_gmail_source(source)
+
+    assert len(source['gmail_attachment_id']) == 512
+    assert metadata['size_bytes'] == len(content)
+    assert parsed == content
+    assert MAX_PORTABLE_SOURCE_PDF_BYTES == 10 * 1024 * 1024
+    assert settings.DATA_UPLOAD_MAX_MEMORY_SIZE >= MAX_CIRA_REQUEST_BYTES + 1024 * 1024
+
+
+def test_portable_gmail_contract_rejects_identifier_above_shared_bound():
+    source = _portable_gmail_source(PDF)
+    source['gmail_message_id'] = 'A' + ('b' * 512)
+
+    with pytest.raises(RenePhase2Error) as caught:
+        parse_portable_gmail_source(source)
+
+    assert caught.value.code == 'INVALID_SCHEMA'
+
+
+def test_django_admits_large_dedicated_cira_json_before_inner_bound():
+    body = b'{"request_json":"' + (b'x' * (3 * 1024 * 1024)) + b'"}'
+    request = RequestFactory().post(
+        '/mcp/rene-phase2/',
+        data=body,
+        content_type='application/json',
+    )
+
+    assert request.body == body
 
 
 def _candidate_request(contract, request_id='inspect-candidates-1', evidence_revision=1):
@@ -991,7 +1029,11 @@ def test_portable_gmail_pdf_rejects_ambiguous_changed_or_invalid_source(
     if mutation == 'non_pdf':
         content = b'not-a-pdf-document'
     elif mutation == 'oversized':
-        content = b'%PDF-1.4\n' + (b'x' * (1024 * 1024)) + b'%%EOF'
+        content = (
+            b'%PDF-1.4\n'
+            + (b'x' * MAX_PORTABLE_SOURCE_PDF_BYTES)
+            + b'%%EOF'
+        )
     else:
         content = PDF
     request = _portable_inspect_request(
@@ -1831,6 +1873,30 @@ def test_dedicated_rene_mcp_handler_has_scoped_registry_and_auth(
     assert receipt['schema'] == 'bmasia.cira.rene.v1'
     assert receipt['request_id'] == request['request_id']
     assert receipt['outcome'] == 'inspected'
+
+    admitted_large = _mcp_post(
+        client,
+        '/mcp/rene-phase2/',
+        {
+            'jsonrpc': '2.0',
+            'id': 20,
+            'method': 'tools/call',
+            'params': {
+                'name': 'rene_phase2_request',
+                'arguments': {
+                    'request_json': json.dumps(
+                        {'padding': 'x' * (3 * 1024 * 1024)}
+                    ),
+                },
+            },
+        },
+        authorization=f'Rene {MCP_TOKEN}',
+    )
+    assert admitted_large.status_code == 200
+    admitted_result = json.loads(
+        admitted_large.json()['result']['content'][0]['text']
+    )
+    assert admitted_result['error']['code'] == 'INVALID_REQUEST'
 
     global_list = _mcp_post(
         client,
