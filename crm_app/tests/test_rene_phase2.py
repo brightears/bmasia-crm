@@ -33,6 +33,7 @@ from crm_app.mcp import RenePhase2MCPToolset
 from crm_app.rene_auth import RenePhase2MCPCredential
 from crm_app.rene_mcp_server import rene_phase2_mcp_server
 from crm_app.services.rene_phase2 import (
+    DURABLE_ENVELOPE_SCHEMA,
     _prepared_live_state,
     _receipt_binding,
     _render_contract_pdf,
@@ -54,6 +55,8 @@ TOKEN_SHA = hashlib.sha256(TOKEN.encode('ascii')).hexdigest()
 MCP_TOKEN = 'rene-phase2-mcp-test-secret-0123456789'
 MCP_TOKEN_SHA = hashlib.sha256(MCP_TOKEN.encode('ascii')).hexdigest()
 PDF = b'%PDF-1.4\n%%EOF'
+PORTABLE_SOURCE_SELECTOR = 'exact_nikki_sent_gmail_pdf'
+PORTABLE_SOURCE_SCHEMA = 'bmasia.cira.rene.gmail-pdf-source.v1'
 
 
 def _mcp_post(client, path, payload, authorization=None):
@@ -235,6 +238,57 @@ def _inspect_request(contract, request_id='inspect-1', evidence_revision=1):
     )
 
 
+def _portable_gmail_source(content=PDF):
+    return {
+        'schema': PORTABLE_SOURCE_SCHEMA,
+        'authenticated_mailbox': 'norbert@bmasiamusic.com',
+        'visible_sender': 'nikki.h@bmasiamusic.com',
+        'gmail_message_id': '18fabc123',
+        'gmail_thread_id': '18fabc100',
+        'gmail_attachment_id': 'ANGjdJ8_source_1',
+        'rfc_message_id': '<source-1@bmasiamusic.com>',
+        'sent_at': '2026-06-15T09:30:00+07:00',
+        'filename': 'signed-source.pdf',
+        'mime_type': 'application/pdf',
+        'matching_attachment_count': 1,
+        'search_evidence_sha256': 'f' * 64,
+        'size_bytes': len(content),
+        'pdf_sha256': hashlib.sha256(content).hexdigest(),
+        'content_base64': base64.b64encode(content).decode('ascii'),
+    }
+
+
+def _portable_inspect_request(
+    contract,
+    request_id='inspect-portable-1',
+    evidence_revision=1,
+    content=PDF,
+):
+    native = _inspect_request(contract, evidence_revision=evidence_revision)
+    intent = dict(native['data']['intent'])
+    intent.update({
+        'document_selection': PORTABLE_SOURCE_SELECTOR,
+        'required_document_flags': {
+            'source_bytes_must_remain_request_bound': True,
+        },
+        'return': [*intent['return'], 'source_locator_sha256'],
+        'portable_gmail_source': _portable_gmail_source(content),
+        'expected_source_terms': {
+            'contract_number': contract.contract_number,
+            'end_date': contract.end_date.isoformat(),
+            'price': str(contract.value),
+            'currency': contract.currency,
+        },
+    })
+    return _envelope(
+        'inspect_renewal_source',
+        contract.id,
+        contract_version(contract),
+        intent,
+        request_id,
+    )
+
+
 def _candidate_request(contract, request_id='inspect-candidates-1', evidence_revision=1):
     return _envelope(
         'inspect_renewal_source_candidates',
@@ -340,7 +394,6 @@ def _prepare_request(
         'request_key': inspect_request['request_key'],
         'intent_sha256': inspect_request['intent_sha256'],
         'binding_sha256': source['binding_sha256'],
-        'document_id': source['document']['document_id'],
         'filename': source['document']['filename'],
         'contract_updated_at': source['contract_updated_at'],
         'evidence_revision': source['evidence_revision'],
@@ -350,14 +403,15 @@ def _prepare_request(
         'renewal_end_policy': end,
         'pricing_structure': source['pricing_structure'],
     }
+    if source['document_selection'] == PORTABLE_SOURCE_SELECTOR:
+        source_reference['document_selection'] = PORTABLE_SOURCE_SELECTOR
+        source_reference['source_locator_sha256'] = source['source_locator_sha256']
+    else:
+        source_reference['document_id'] = source['document']['document_id']
     if source.get('source_confirmation') is not None:
         source_reference['document_selection'] = source['document_selection']
         source_reference['source_confirmation'] = source['source_confirmation']
-    return _envelope(
-        'prepare_renewal_contract',
-        contract.id,
-        contract_version(contract),
-        {
+    intent = {
             'source_contract_id': str(contract.id),
             'source_company_id': str(contract.company_id),
             'source_contract_pdf_sha256': source['document']['pdf_sha256'],
@@ -382,7 +436,19 @@ def _prepare_request(
                 'require_reviewed_policy': True,
             },
             'delivery': 'return_pdf_for_nikki_review',
-        },
+        }
+    if source['document_selection'] == PORTABLE_SOURCE_SELECTOR:
+        intent['portable_gmail_source'] = copy.deepcopy(
+            inspect_request['data']['intent']['portable_gmail_source']
+        )
+        intent['expected_source_terms'] = copy.deepcopy(
+            inspect_request['data']['intent']['expected_source_terms']
+        )
+    return _envelope(
+        'prepare_renewal_contract',
+        contract.id,
+        contract_version(contract),
+        intent,
         request_id,
     )
 
@@ -764,6 +830,221 @@ def test_inspect_is_non_mutating_and_requires_unique_official_signed_pdf(tmp_pat
     assert source['renewal_end_policy']['next_end_date'] == '2027-10-31'
     assert source['pricing_structure']['mapping_status'] == 'UNIQUE_SIMPLE_TOTAL'
     assert execute_rene_request(request) == receipt
+
+
+@pytest.mark.django_db
+def test_portable_gmail_pdf_inspects_and_prepares_without_crm_document(
+    tmp_path, settings
+):
+    settings.MEDIA_ROOT = tmp_path
+    contract = _contract(_company('Portable Gmail Source'))
+    _policy()
+    source_before = model_to_dict(contract)
+    inspect = _portable_inspect_request(contract)
+
+    inspected = execute_rene_request(inspect)
+
+    contract.refresh_from_db()
+    assert model_to_dict(contract) == source_before
+    assert ContractDocument.objects.count() == 0
+    source = inspected['source_inspection']
+    assert source['document_selection'] == PORTABLE_SOURCE_SELECTOR
+    assert source['document'] == {
+        'source_kind': 'gmail_attachment',
+        'source_locator_sha256': source['source_locator_sha256'],
+        'filename': 'signed-source.pdf',
+        'pdf_sha256': hashlib.sha256(PDF).hexdigest(),
+        'size_bytes': len(PDF),
+        'mime_type': 'application/pdf',
+        'sent_at': '2026-06-15T09:30:00+07:00',
+    }
+    encoded_receipt = json.dumps(inspected, sort_keys=True).encode('utf-8')
+    assert b'content_base64' not in encoded_receipt
+    assert base64.b64encode(PDF) not in encoded_receipt
+    assert 'document_id' not in source['document']
+    assert 'is_signed' not in source['document']
+    assert 'signed_date' not in source['document']
+
+    prepare = _prepare_request(
+        contract,
+        inspect,
+        inspected,
+        request_id='prepare-portable-gmail-source',
+    )
+    validated = execute_rene_request(
+        _validate(prepare, 'validate-portable-gmail-source')
+    )
+    assert validated['outcome'] == 'validated'
+    prepared = execute_rene_request(prepare)
+
+    contract.refresh_from_db()
+    assert model_to_dict(contract) == source_before
+    assert ContractDocument.objects.filter(contract=contract).count() == 0
+    assert prepared['outcome'] == 'prepared'
+    assert prepared['artifact']['size_bytes'] > 0
+    assert Contract.objects.filter(renewed_from=contract, status='Draft').count() == 1
+
+    encoded_source = base64.b64encode(PDF).decode('ascii')
+    for record in ReneCiraRequest.objects.order_by('request_id'):
+        durable_record = json.dumps(
+            {'envelope': record.envelope, 'receipt': record.receipt},
+            sort_keys=True,
+        )
+        assert 'content_base64' not in durable_record
+        assert encoded_source not in durable_record
+    stored_inspection = ReneCiraRequest.objects.get(request_id=inspect['request_id'])
+    assert stored_inspection.envelope['schema'] == DURABLE_ENVELOPE_SCHEMA
+    assert stored_inspection.envelope['original_envelope_sha256'] == canonical_sha256(
+        inspect
+    )
+    stored_prepare = ReneCiraRequest.objects.get(request_id=prepare['request_id'])
+    assert stored_prepare.envelope['schema'] == DURABLE_ENVELOPE_SCHEMA
+    assert stored_prepare.envelope['original_envelope_sha256'] == canonical_sha256(
+        prepare
+    )
+
+
+@pytest.mark.django_db
+def test_portable_prepare_reopens_unchanged_stored_request_and_requires_fresh_source(
+    tmp_path, settings
+):
+    settings.MEDIA_ROOT = tmp_path
+    contract = _contract(_company('Portable Gmail Re-read'))
+    _policy()
+    inspect = _portable_inspect_request(
+        contract,
+        request_id='inspect-portable-before-reread',
+    )
+    inspected = execute_rene_request(inspect)
+    original = _prepare_request(
+        contract,
+        inspect,
+        inspected,
+        request_id='prepare-portable-before-fresh-change',
+    )
+    changed_intent = copy.deepcopy(original['data']['intent'])
+    changed_intent['portable_gmail_source']['gmail_attachment_id'] = 'ANGjdJ8_changed'
+    metadata = {
+        key: value
+        for key, value in changed_intent['portable_gmail_source'].items()
+        if key != 'content_base64'
+    }
+    changed_intent['source_inspection']['source_locator_sha256'] = canonical_sha256(
+        metadata
+    )
+    changed = _envelope(
+        'prepare_renewal_contract',
+        contract.id,
+        contract_version(contract),
+        changed_intent,
+        'prepare-portable-with-changed-fresh-source',
+    )
+
+    with pytest.raises(RenePhase2BoundError) as caught:
+        execute_rene_request(
+            _validate(changed, 'validate-portable-with-changed-fresh-source')
+        )
+    assert caught.value.code == 'EVIDENCE_CHANGED'
+    assert not Contract.objects.filter(renewed_from=contract).exists()
+
+    stored = ReneCiraRequest.objects.get(request_id=inspect['request_id'])
+    tampered = copy.deepcopy(stored.envelope)
+    tampered['envelope']['data']['intent']['portable_gmail_source']['gmail_attachment_id'] = (
+        'ANGjdJ8_tampered'
+    )
+    tampered['compact_envelope_sha256'] = canonical_sha256(tampered['envelope'])
+    stored.envelope = tampered
+    stored.save(update_fields=['envelope', 'updated_at'])
+    retry = _prepare_request(
+        contract,
+        inspect,
+        inspected,
+        request_id='prepare-portable-after-stored-change',
+    )
+    with pytest.raises(RenePhase2BoundError) as caught:
+        execute_rene_request(
+            _validate(retry, 'validate-portable-after-stored-change')
+        )
+    assert caught.value.code == 'EVIDENCE_CHANGED'
+    assert not Contract.objects.filter(renewed_from=contract).exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ('mutation', 'expected_code'),
+    (
+        ('ambiguous', 'NEEDS_CLARIFICATION'),
+        ('ambiguous_bool', 'NEEDS_CLARIFICATION'),
+        ('wrong_mime', 'INVALID_ARTIFACT'),
+        ('wrong_hash', 'EVIDENCE_CHANGED'),
+        ('wrong_selector', 'INVALID_SCHEMA'),
+        ('non_pdf', 'INVALID_ARTIFACT'),
+        ('oversized', 'INVALID_ARTIFACT'),
+    ),
+)
+def test_portable_gmail_pdf_rejects_ambiguous_changed_or_invalid_source(
+    tmp_path, settings, mutation, expected_code
+):
+    settings.MEDIA_ROOT = tmp_path
+    contract = _contract(_company(f'Portable Reject {mutation}'))
+    _policy()
+    if mutation == 'non_pdf':
+        content = b'not-a-pdf-document'
+    elif mutation == 'oversized':
+        content = b'%PDF-1.4\n' + (b'x' * (1024 * 1024)) + b'%%EOF'
+    else:
+        content = PDF
+    request = _portable_inspect_request(
+        contract,
+        request_id=f'inspect-portable-reject-{mutation}',
+        content=content,
+    )
+    source = request['data']['intent']['portable_gmail_source']
+    if mutation in {'ambiguous', 'ambiguous_bool'}:
+        source['matching_attachment_count'] = (
+            True if mutation == 'ambiguous_bool' else 2
+        )
+    elif mutation == 'wrong_mime':
+        source['mime_type'] = 'application/octet-stream'
+    elif mutation == 'wrong_hash':
+        source['pdf_sha256'] = '0' * 64
+    elif mutation == 'wrong_selector':
+        request['data']['intent']['document_selection'] = 'gmail_pdf'
+    request = _envelope(
+        'inspect_renewal_source',
+        contract.id,
+        contract_version(contract),
+        request['data']['intent'],
+        f'inspect-portable-reject-{mutation}',
+    )
+
+    with pytest.raises(RenePhase2BoundError) as caught:
+        execute_rene_request(request)
+    assert caught.value.code == expected_code
+    assert not Contract.objects.filter(renewed_from=contract).exists()
+    assert RenePreparedContract.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_portable_gmail_expected_terms_must_match_current_contract(tmp_path, settings):
+    settings.MEDIA_ROOT = tmp_path
+    contract = _contract(_company('Portable Term Mismatch'))
+    _policy()
+    request = _portable_inspect_request(contract)
+    intent = copy.deepcopy(request['data']['intent'])
+    intent['expected_source_terms']['price'] = '1201.00'
+    request = _envelope(
+        'inspect_renewal_source',
+        contract.id,
+        contract_version(contract),
+        intent,
+        'inspect-portable-term-mismatch',
+    )
+
+    with pytest.raises(RenePhase2BoundError) as caught:
+        execute_rene_request(request)
+    assert caught.value.code == 'EVIDENCE_CHANGED'
+    assert not Contract.objects.filter(renewed_from=contract).exists()
 
 
 @pytest.mark.django_db

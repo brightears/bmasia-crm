@@ -11,6 +11,7 @@ verification, and receipt lookup are non-mutating.
 from __future__ import annotations
 
 import base64
+import binascii
 import copy
 import hashlib
 import json
@@ -54,6 +55,7 @@ UNBOUND_ERROR_SCHEMA = 'bmasia.cira.rene.crm-uncertain.v1'
 AGENT = 'rene'
 COLLECTION = 'contract'
 MAX_PDF_BYTES = 10 * 1024 * 1024
+MAX_PORTABLE_SOURCE_PDF_BYTES = 1 * 1024 * 1024
 MAX_SOURCE_CANDIDATES = 32
 ALLOWED_OPERATIONS = {
     'inspect_renewal_source_candidates',
@@ -104,6 +106,12 @@ SOURCE_CANDIDATE_RETURN_FIELDS = [
 ]
 NATIVE_SIGNED_SOURCE = 'unique_official_signed_document'
 NIKKI_CONFIRMED_SOURCE = 'unique_nikki_confirmed_signed_document'
+GMAIL_PORTABLE_SOURCE = 'exact_nikki_sent_gmail_pdf'
+GMAIL_SOURCE_SCHEMA = 'bmasia.cira.rene.gmail-pdf-source.v1'
+DURABLE_ENVELOPE_SCHEMA = 'bmasia.cira.rene.crm-durable-envelope.v1'
+AUTHENTICATED_MAILBOX = 'norbert@bmasiamusic.com'
+VISIBLE_FROM = 'nikki.h@bmasiamusic.com'
+GMAIL_ID_RE = re.compile(r'^[A-Za-z0-9_-]+$')
 
 
 class RenePhase2Error(RuntimeError):
@@ -354,6 +362,133 @@ def _positive_decimal_id(label, value):
     ):
         _fail('INVALID_SCHEMA', f'{label} must be one canonical positive record ID')
     return value
+
+
+def _gmail_id(label, value, maximum=4096):
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > maximum
+        or GMAIL_ID_RE.fullmatch(value) is None
+    ):
+        _fail('INVALID_SCHEMA', f'{label} must be one bounded Gmail identifier')
+    return value
+
+
+def _mailbox(label, value):
+    if (
+        not isinstance(value, str)
+        or value != value.strip()
+        or len(value) > 254
+        or MAILBOX_RE.fullmatch(value) is None
+    ):
+        _fail('INVALID_SCHEMA', f'{label} must be one exact mailbox')
+    return value.casefold()
+
+
+PORTABLE_GMAIL_METADATA_FIELDS = {
+    'schema', 'authenticated_mailbox', 'visible_sender',
+    'gmail_message_id', 'gmail_thread_id', 'gmail_attachment_id',
+    'rfc_message_id', 'sent_at', 'filename', 'mime_type',
+    'matching_attachment_count', 'search_evidence_sha256',
+    'size_bytes', 'pdf_sha256',
+}
+
+
+def _portable_gmail_source_metadata(value):
+    source = _exact(
+        'portable Gmail source',
+        value,
+        PORTABLE_GMAIL_METADATA_FIELDS,
+    )
+    if source['schema'] != GMAIL_SOURCE_SCHEMA:
+        _fail('INVALID_SCHEMA', 'portable Gmail source schema differs')
+    if _mailbox(
+        'portable Gmail source authenticated mailbox',
+        source['authenticated_mailbox'],
+    ) != AUTHENTICATED_MAILBOX:
+        _fail('IDENTITY_MISMATCH', 'portable Gmail source belongs to another mailbox')
+    if _mailbox(
+        'portable Gmail source visible sender', source['visible_sender']
+    ) != VISIBLE_FROM:
+        _fail('IDENTITY_MISMATCH', 'portable Gmail source was not sent by Nikki')
+    for field in ('gmail_message_id', 'gmail_thread_id', 'gmail_attachment_id'):
+        _gmail_id(f'portable Gmail source {field}', source[field])
+    if (
+        not isinstance(source['rfc_message_id'], str)
+        or RFC_MESSAGE_ID_RE.fullmatch(source['rfc_message_id']) is None
+    ):
+        _fail('INVALID_SCHEMA', 'portable Gmail source RFC Message-ID is invalid')
+    _timestamp('portable Gmail source sent_at', source['sent_at'])
+    _filename(source['filename'])
+    if source['mime_type'] != 'application/pdf':
+        _fail('INVALID_ARTIFACT', 'portable Gmail source must be application/pdf')
+    if (
+        isinstance(source['matching_attachment_count'], bool)
+        or source['matching_attachment_count'] != 1
+    ):
+        _fail('NEEDS_CLARIFICATION', 'portable Gmail source is absent or ambiguous')
+    _sha('portable Gmail source search evidence', source['search_evidence_sha256'])
+    _sha('portable Gmail source PDF hash', source['pdf_sha256'])
+    if (
+        isinstance(source['size_bytes'], bool)
+        or not isinstance(source['size_bytes'], int)
+        or not 9 <= source['size_bytes'] <= MAX_PORTABLE_SOURCE_PDF_BYTES
+    ):
+        _fail('INVALID_ARTIFACT', 'portable Gmail source exceeds the 1 MiB bound')
+    return source, canonical_sha256(source)
+
+
+def _portable_gmail_source(value, *, require_content=True):
+    expected_fields = set(PORTABLE_GMAIL_METADATA_FIELDS)
+    if require_content:
+        expected_fields.add('content_base64')
+    source = _exact('portable Gmail source', value, expected_fields)
+    metadata = {
+        key: item for key, item in source.items() if key != 'content_base64'
+    }
+    metadata, locator = _portable_gmail_source_metadata(metadata)
+    if not require_content:
+        return metadata, None, locator
+    encoded = source['content_base64']
+    if (
+        not isinstance(encoded, str)
+        or not encoded
+        or not encoded.isascii()
+        or len(encoded) > ((MAX_PORTABLE_SOURCE_PDF_BYTES + 2) // 3) * 4
+    ):
+        _fail('INVALID_ARTIFACT', 'portable Gmail source base64 is invalid or oversized')
+    try:
+        content = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        _fail('INVALID_ARTIFACT', 'portable Gmail source base64 is invalid')
+    if base64.b64encode(content).decode('ascii') != encoded:
+        _fail('INVALID_ARTIFACT', 'portable Gmail source base64 is not canonical')
+    _validate_pdf_bytes(content)
+    if (
+        len(content) != metadata['size_bytes']
+        or hashlib.sha256(content).hexdigest() != metadata['pdf_sha256']
+    ):
+        _fail('EVIDENCE_CHANGED', 'portable Gmail source bytes differ from size or hash')
+    return source, content, locator
+
+
+def _expected_source_terms(value):
+    terms = _exact(
+        'expected source terms',
+        value,
+        {'contract_number', 'end_date', 'price', 'currency'},
+    )
+    _token('expected source contract number', terms['contract_number'])
+    _date('expected source end date', terms['end_date'])
+    if not isinstance(terms['price'], str) or MONEY_RE.fullmatch(terms['price']) is None:
+        _fail('INVALID_SCHEMA', 'expected source price must be exact decimal money')
+    if (
+        not isinstance(terms['currency'], str)
+        or re.fullmatch(r'[A-Z]{3}', terms['currency']) is None
+    ):
+        _fail('INVALID_SCHEMA', 'expected source currency must be uppercase ISO currency')
+    return terms
 
 
 def _decimal(label, value):
@@ -894,7 +1029,7 @@ def _pricing_structure(contract, lock=False):
     }
 
 
-def _parse_envelope(value):
+def _parse_envelope(value, *, portable_compact=False):
     envelope = _exact(
         'request envelope',
         value,
@@ -937,10 +1072,101 @@ def _parse_envelope(value):
         _fail('INVALID_SCHEMA', 'request data identity differs from its envelope')
     _mapping('request intent', data['intent'])
     observed_hash = canonical_sha256(data)
-    expected_key = f"rene:{operation}:{envelope['id']}:{observed_hash}"
-    if envelope['intent_sha256'] != observed_hash or envelope['request_key'] != expected_key:
+    expected_hash = envelope['intent_sha256'] if portable_compact else observed_hash
+    expected_key = f"rene:{operation}:{envelope['id']}:{expected_hash}"
+    if (
+        (not portable_compact and envelope['intent_sha256'] != observed_hash)
+        or envelope['request_key'] != expected_key
+    ):
         _fail('HASH_MISMATCH', 'request intent hash or key is invalid')
     return envelope
+
+
+def _portable_source_container(envelope):
+    data = envelope.get('data') if isinstance(envelope, dict) else None
+    intent = data.get('intent') if isinstance(data, dict) else None
+    if not isinstance(intent, dict):
+        return None, None
+    operation = envelope.get('verb')
+    if operation == 'validate_only':
+        target = intent.get('target_envelope')
+        if not isinstance(target, dict):
+            return None, None
+        return _portable_source_container(target)
+    if operation == 'inspect_renewal_source':
+        selection = intent.get('document_selection')
+    elif operation == 'prepare_renewal_contract':
+        inspection = intent.get('source_inspection')
+        selection = (
+            inspection.get('document_selection')
+            if isinstance(inspection, dict)
+            else None
+        )
+    else:
+        return None, None
+    if selection != GMAIL_PORTABLE_SOURCE:
+        return None, None
+    return intent, intent.get('portable_gmail_source')
+
+
+def _durable_envelope(envelope):
+    intent, source = _portable_source_container(envelope)
+    if intent is None:
+        return envelope
+    compact = copy.deepcopy(envelope)
+    _compact_intent, compact_source = _portable_source_container(compact)
+    if not isinstance(source, dict) or not isinstance(compact_source, dict):
+        _fail('INVALID_SCHEMA', 'portable Gmail source is missing')
+    if 'content_base64' not in compact_source:
+        _fail('INVALID_SCHEMA', 'portable Gmail source bytes are missing')
+    compact_source.pop('content_base64')
+    encoded = canonical_json(compact)
+    if '"content_base64":' in encoded:
+        _fail('INVALID_SCHEMA', 'durable request still contains portable source bytes')
+    return {
+        'schema': DURABLE_ENVELOPE_SCHEMA,
+        'original_envelope_sha256': canonical_sha256(envelope),
+        'compact_envelope_sha256': canonical_sha256(compact),
+        'envelope': compact,
+    }
+
+
+def _parse_stored_envelope(value, *, expected_original_sha256=None):
+    if not isinstance(value, dict) or value.get('schema') != DURABLE_ENVELOPE_SCHEMA:
+        envelope = _parse_envelope(value)
+        if (
+            expected_original_sha256 is not None
+            and canonical_sha256(envelope) != expected_original_sha256
+        ):
+            _fail('EVIDENCE_CHANGED', 'stored request hash differs')
+        return envelope, False
+    durable = _exact(
+        'durable request envelope',
+        value,
+        {
+            'schema', 'original_envelope_sha256',
+            'compact_envelope_sha256', 'envelope',
+        },
+    )
+    _sha('durable original envelope hash', durable['original_envelope_sha256'])
+    _sha('durable compact envelope hash', durable['compact_envelope_sha256'])
+    compact = _mapping('durable compact envelope', durable['envelope'])
+    if (
+        canonical_sha256(compact) != durable['compact_envelope_sha256']
+        or '"content_base64":' in canonical_json(compact)
+        or (
+            expected_original_sha256 is not None
+            and durable['original_envelope_sha256'] != expected_original_sha256
+        )
+    ):
+        _fail('EVIDENCE_CHANGED', 'stored compact request changed')
+    envelope = _parse_envelope(compact, portable_compact=True)
+    intent, source = _portable_source_container(envelope)
+    if not isinstance(intent, dict) or not isinstance(source, dict):
+        _fail('EVIDENCE_CHANGED', 'stored compact request is not portable')
+    _portable_gmail_source(source, require_content=False)
+    _expected_source_terms(intent.get('expected_source_terms'))
+    return envelope, True
 
 
 def _receipt_base(envelope, outcome, before, after, artifact=None):
@@ -1037,10 +1263,13 @@ def _source_inspection(envelope):
     selection = intent.get('document_selection')
     if selection == NIKKI_CONFIRMED_SOURCE:
         expected_intent.add('confirmed_source')
+    elif selection == GMAIL_PORTABLE_SOURCE:
+        expected_intent.update({'portable_gmail_source', 'expected_source_terms'})
     if set(intent) != expected_intent:
         _fail('INVALID_SCHEMA', 'inspection intent fields differ')
     if (
-        selection not in {NATIVE_SIGNED_SOURCE, NIKKI_CONFIRMED_SOURCE}
+        selection
+        not in {NATIVE_SIGNED_SOURCE, NIKKI_CONFIRMED_SOURCE, GMAIL_PORTABLE_SOURCE}
         or intent['required_document_count'] != 1
         or intent['require_reviewed_renewal_start_policy'] is not True
         or intent['require_reviewed_renewal_end_policy'] is not True
@@ -1067,7 +1296,7 @@ def _source_inspection(envelope):
             _fail('INVALID_SCHEMA', 'native signed-source requirements differ')
         document, filename, content = _read_unique_signed_document(contract)
         signed_date = document.signed_date.isoformat()
-    else:
+    elif selection == NIKKI_CONFIRMED_SOURCE:
         if (
             intent['required_document_flags'] != {'preserve_current_values': True}
             or intent['return'] != [*INSPECTION_RETURN_FIELDS, 'source_confirmation']
@@ -1076,6 +1305,26 @@ def _source_inspection(envelope):
         confirmation = _confirmed_source(intent['confirmed_source'], contract)
         document, filename, content = _read_confirmed_document(contract, confirmation)
         signed_date = confirmation['signed_date']
+    else:
+        if (
+            intent['required_document_flags']
+            != {'source_bytes_must_remain_request_bound': True}
+            or intent['return'] != [*INSPECTION_RETURN_FIELDS, 'source_locator_sha256']
+        ):
+            _fail('INVALID_SCHEMA', 'portable Gmail source requirements differ')
+        portable, content, source_locator_sha256 = _portable_gmail_source(
+            intent['portable_gmail_source']
+        )
+        expected_source_terms = _expected_source_terms(intent['expected_source_terms'])
+        current_source_terms = {
+            'contract_number': contract.contract_number,
+            'end_date': contract.end_date.isoformat() if contract.end_date else None,
+            'price': str(contract.value),
+            'currency': contract.currency,
+        }
+        if current_source_terms != expected_source_terms:
+            _fail('EVIDENCE_CHANGED', 'portable source expectations differ from the CRM contract')
+        filename = portable['filename']
     pricing = _pricing_structure(contract)
     terms = {
         'start_date': contract.start_date.isoformat(),
@@ -1091,16 +1340,6 @@ def _source_inspection(envelope):
         'version': contract_version(contract),
         'contract_updated_at': rfc3339(contract.updated_at),
         'evidence_revision': intent['evidence_revision'],
-        'document': {
-            'document_id': str(document.id),
-            'filename': filename,
-            'pdf_sha256': hashlib.sha256(content).hexdigest(),
-            'size_bytes': len(content),
-            'is_official': document.is_official,
-            'is_signed': document.is_signed,
-            'signed_date': signed_date,
-            'uploaded_at': rfc3339(document.uploaded_at),
-        },
         'terms': terms,
         'term_duration': {
             'kind': 'calendar_months',
@@ -1128,6 +1367,28 @@ def _source_inspection(envelope):
         },
         'pricing_structure': pricing,
     }
+    if selection == GMAIL_PORTABLE_SOURCE:
+        source['source_locator_sha256'] = source_locator_sha256
+        source['document'] = {
+            'source_kind': 'gmail_attachment',
+            'source_locator_sha256': source_locator_sha256,
+            'filename': filename,
+            'pdf_sha256': hashlib.sha256(content).hexdigest(),
+            'size_bytes': len(content),
+            'mime_type': portable['mime_type'],
+            'sent_at': portable['sent_at'],
+        }
+    else:
+        source['document'] = {
+            'document_id': str(document.id),
+            'filename': filename,
+            'pdf_sha256': hashlib.sha256(content).hexdigest(),
+            'size_bytes': len(content),
+            'is_official': document.is_official,
+            'is_signed': document.is_signed,
+            'signed_date': signed_date,
+            'uploaded_at': rfc3339(document.uploaded_at),
+        }
     if confirmation is not None:
         source['document']['record_signed_date'] = (
             document.signed_date.isoformat()
@@ -1154,6 +1415,9 @@ def _source_inspection(envelope):
     if confirmation is not None:
         binding_material['document_selection'] = selection
         binding_material['source_confirmation'] = confirmation
+    elif selection == GMAIL_PORTABLE_SOURCE:
+        binding_material['document_selection'] = selection
+        binding_material['source_locator_sha256'] = source_locator_sha256
     source['binding_sha256'] = canonical_sha256(binding_material)
     identity = _versioned_contract(contract)
     receipt = _receipt_base(envelope, 'inspected', identity, dict(identity))
@@ -1162,14 +1426,23 @@ def _source_inspection(envelope):
 
 
 def _load_inspection(intent, source):
+    portable_expected_terms = None
     source = _mapping('source inspection reference', source)
     reference_fields = {
         'request_id', 'request_key', 'intent_sha256', 'binding_sha256',
-        'document_id', 'filename', 'contract_updated_at', 'evidence_revision', 'terms',
+        'filename', 'contract_updated_at', 'evidence_revision', 'terms',
         'term_duration', 'renewal_start_policy', 'renewal_end_policy', 'pricing_structure',
     }
     if source.get('document_selection') == NIKKI_CONFIRMED_SOURCE:
-        reference_fields.update({'document_selection', 'source_confirmation'})
+        reference_fields.update(
+            {'document_selection', 'document_id', 'source_confirmation'}
+        )
+    elif source.get('document_selection') == GMAIL_PORTABLE_SOURCE:
+        reference_fields.update(
+            {'document_selection', 'source_locator_sha256'}
+        )
+    else:
+        reference_fields.add('document_id')
     reference = _exact(
         'source inspection reference',
         source,
@@ -1184,15 +1457,23 @@ def _load_inspection(intent, source):
     ).first()
     if record is None or not isinstance(record.receipt, dict):
         _fail('MISSING_EVIDENCE', 'prepare lacks a received source inspection')
+    if not isinstance(record.envelope, dict):
+        _fail('EVIDENCE_CHANGED', 'stored source inspection request changed')
+    stored_envelope, stored_is_compact = _parse_stored_envelope(
+        record.envelope,
+        expected_original_sha256=record.canonical_envelope_sha256,
+    )
     observed = record.receipt.get('source_inspection')
-    if not isinstance(observed, dict) or observed.get('binding_sha256') != reference['binding_sha256']:
+    if (
+        not isinstance(observed, dict)
+        or observed.get('binding_sha256') != reference['binding_sha256']
+    ):
         _fail('EVIDENCE_CHANGED', 'source inspection binding differs')
     expected_reference = {
         'request_id': record.request_id,
         'request_key': record.request_key,
         'intent_sha256': record.intent_sha256,
         'binding_sha256': observed['binding_sha256'],
-        'document_id': observed['document']['document_id'],
         'filename': observed['document']['filename'],
         'contract_updated_at': observed['contract_updated_at'],
         'evidence_revision': observed['evidence_revision'],
@@ -1214,6 +1495,11 @@ def _load_inspection(intent, source):
         },
         'pricing_structure': observed['pricing_structure'],
     }
+    if observed.get('document_selection') == GMAIL_PORTABLE_SOURCE:
+        expected_reference['document_selection'] = observed['document_selection']
+        expected_reference['source_locator_sha256'] = observed['source_locator_sha256']
+    else:
+        expected_reference['document_id'] = observed['document']['document_id']
     if observed.get('source_confirmation') is not None:
         expected_reference['document_selection'] = observed['document_selection']
         expected_reference['source_confirmation'] = observed['source_confirmation']
@@ -1221,7 +1507,37 @@ def _load_inspection(intent, source):
         _fail('EVIDENCE_CHANGED', 'prepare inspection reference is not exact')
     if intent['source_contract_pdf_sha256'] != observed['document']['pdf_sha256']:
         _fail('EVIDENCE_CHANGED', 'prepare source PDF hash differs')
-    return observed
+    if observed.get('document_selection') == GMAIL_PORTABLE_SOURCE:
+        stored = stored_envelope
+        if (
+            stored['request_id'] != record.request_id
+            or stored['request_key'] != record.request_key
+            or stored['intent_sha256'] != record.intent_sha256
+            or stored['verb'] != 'inspect_renewal_source'
+        ):
+            _fail('EVIDENCE_CHANGED', 'stored portable source identity changed')
+        portable, _content, locator = _portable_gmail_source(
+            stored['data']['intent'].get('portable_gmail_source'),
+            require_content=not stored_is_compact,
+        )
+        portable_expected_terms = _expected_source_terms(
+            stored['data']['intent'].get('expected_source_terms')
+        )
+        if (
+            stored['data']['intent'].get('document_selection') != GMAIL_PORTABLE_SOURCE
+            or locator != observed['source_locator_sha256']
+            or locator != observed['document']['source_locator_sha256']
+            or portable['filename'] != observed['document']['filename']
+            or portable['mime_type'] != observed['document']['mime_type']
+            or portable['sent_at'] != observed['document']['sent_at']
+            or portable['size_bytes'] != observed['document']['size_bytes']
+            or portable['pdf_sha256'] != observed['document']['pdf_sha256']
+            or portable_expected_terms['end_date'] != observed['terms']['end_date']
+            or portable_expected_terms['price'] != observed['terms']['price']
+            or portable_expected_terms['currency'] != observed['terms']['currency']
+        ):
+            _fail('EVIDENCE_CHANGED', 'stored portable Gmail source changed')
+    return observed, portable_expected_terms
 
 
 def _validate_prepare(
@@ -1229,15 +1545,30 @@ def _validate_prepare(
     lock=False,
     *,
     existing_preparation=None,
+    portable_compact=False,
 ):
+    raw_intent = envelope['data']['intent']
+    inspection_value = (
+        raw_intent.get('source_inspection')
+        if isinstance(raw_intent, dict)
+        else None
+    )
+    inspection_selection = (
+        inspection_value.get('document_selection')
+        if isinstance(inspection_value, dict)
+        else None
+    )
+    expected_fields = {
+        'source_contract_id', 'source_company_id', 'source_contract_pdf_sha256',
+        'source_inspection', 'desired_filename', 'renewal_terms',
+        'sheet_evidence', 'contract_number_requirements', 'delivery',
+    }
+    if inspection_selection == GMAIL_PORTABLE_SOURCE:
+        expected_fields.update({'portable_gmail_source', 'expected_source_terms'})
     intent = _exact(
         'prepare intent',
-        envelope['data']['intent'],
-        {
-            'source_contract_id', 'source_company_id', 'source_contract_pdf_sha256',
-            'source_inspection', 'desired_filename', 'renewal_terms',
-            'sheet_evidence', 'contract_number_requirements', 'delivery',
-        },
+        raw_intent,
+        expected_fields,
     )
     if intent['source_contract_id'] != envelope['id']:
         _fail('IDENTITY_MISMATCH', 'prepare target differs from source contract')
@@ -1250,7 +1581,28 @@ def _validate_prepare(
         'require_reviewed_policy': True,
     } or intent['delivery'] != 'return_pdf_for_nikki_review':
         _fail('INVALID_SCHEMA', 'prepare final-number or delivery requirements differ')
-    inspection = _load_inspection(intent, intent['source_inspection'])
+    inspection, portable_expected_terms = _load_inspection(
+        intent, intent['source_inspection']
+    )
+    if inspection_selection == GMAIL_PORTABLE_SOURCE:
+        fresh_source, fresh_content, fresh_locator = _portable_gmail_source(
+            intent['portable_gmail_source'],
+            require_content=not portable_compact,
+        )
+        fresh_expected_terms = _expected_source_terms(intent['expected_source_terms'])
+        if (
+            fresh_locator != inspection['source_locator_sha256']
+            or fresh_source['filename'] != inspection['document']['filename']
+            or fresh_source['mime_type'] != inspection['document']['mime_type']
+            or fresh_source['sent_at'] != inspection['document']['sent_at']
+            or fresh_source['pdf_sha256'] != intent['source_contract_pdf_sha256']
+            or fresh_source['size_bytes'] != inspection['document']['size_bytes']
+            or fresh_source['pdf_sha256'] != inspection['document']['pdf_sha256']
+            or fresh_expected_terms != portable_expected_terms
+        ):
+            _fail('EVIDENCE_CHANGED', 'fresh portable Gmail source differs from inspection')
+        if not portable_compact and fresh_content is None:
+            _fail('INVALID_ARTIFACT', 'fresh portable Gmail source bytes are missing')
     contract_query = Contract.objects.select_related('company')
     if lock:
         contract_query = contract_query.select_for_update()
@@ -1261,6 +1613,13 @@ def _validate_prepare(
         or rfc3339(contract.updated_at) != inspection['contract_updated_at']
     ):
         _fail('VERSION_CONFLICT', 'source contract changed after inspection')
+    if portable_expected_terms is not None and portable_expected_terms != {
+        'contract_number': contract.contract_number,
+        'end_date': contract.end_date.isoformat() if contract.end_date else None,
+        'price': str(contract.value),
+        'currency': contract.currency,
+    }:
+        _fail('EVIDENCE_CHANGED', 'portable source expectations differ from the live contract')
     successor_query = Contract.objects.filter(renewed_from_id=contract.id)
     preparation_query = RenePreparedContract.objects.filter(source_contract_id=contract.id)
     if lock:
@@ -1284,14 +1643,19 @@ def _validate_prepare(
             'source contract already has a renewal successor; another prepare is forbidden',
         )
     confirmation = inspection.get('source_confirmation')
-    if confirmation is None:
+    if inspection.get('document_selection') == GMAIL_PORTABLE_SOURCE:
+        # _load_inspection has just reopened the exact persisted request,
+        # rechecked its compact metadata, expected terms, locator, and digest;
+        # this prepare request separately supplied and validated fresh bytes.
+        document = filename = content = None
+    elif confirmation is None:
         document, filename, content = _read_unique_signed_document(contract, lock=lock)
     else:
         confirmation = _confirmed_source(confirmation, contract)
         document, filename, content = _read_confirmed_document(
             contract, confirmation, lock=lock
         )
-    if (
+    if inspection.get('document_selection') != GMAIL_PORTABLE_SOURCE and (
         str(document.id) != inspection['document']['document_id']
         or filename != inspection['document']['filename']
         or hashlib.sha256(content).hexdigest() != inspection['document']['pdf_sha256']
@@ -1642,11 +2006,15 @@ def _verify_prepared_source_live(metadata, lock=False):
     ).first()
     if record is None or not isinstance(record.envelope, dict):
         _fail('MISSING_EVIDENCE', 'prepared contract lacks its exact prepare request')
-    envelope = _parse_envelope(record.envelope)
+    envelope, portable_compact = _parse_stored_envelope(
+        record.envelope,
+        expected_original_sha256=record.canonical_envelope_sha256,
+    )
     source, _, terms, sheet, inspection = _validate_prepare(
         envelope,
         lock=lock,
         existing_preparation=metadata,
+        portable_compact=portable_compact,
     )
     if (
         source.id != metadata.source_contract_id
@@ -2102,6 +2470,7 @@ def execute_rene_request(value, *, crm_mcp_invoked=False):
 
     envelope = _parse_envelope(value)
     envelope_hash = canonical_sha256(envelope)
+    durable_envelope = _durable_envelope(envelope)
     target_key = ''
     target_hash = ''
     if envelope['verb'] == 'validate_only':
@@ -2187,7 +2556,7 @@ def execute_rene_request(value, *, crm_mcp_invoked=False):
                     request_key=envelope['request_key'],
                     intent_sha256=envelope['intent_sha256'],
                     operation=envelope['verb'],
-                    envelope=envelope,
+                    envelope=durable_envelope,
                     canonical_envelope_sha256=envelope_hash,
                     state='accepted',
                     target_request_key=target_key,
