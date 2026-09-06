@@ -55,7 +55,10 @@ contractlineitem, servicelocation, invoicelineitem.
 Each returns a JSON string with `filename`, `size`, and `content_b64` (base64-
 encoded PDF bytes). Parse with `json.loads`, then `base64.b64decode(content_b64)`
 to recover the raw PDF. On failure returns `{"error": "..."}`.
-- `generate_contract_pdf(id)` — generate contract PDF
+- `generate_contract_pdf(id, reserve_renewal_number=false, expected_version="")` — generate
+  a contract PDF. Cira may opt in to reserve a linked renewal Draft's final number
+  before Nikki reviews it, supplying current updated_at as expected_version.
+  This preserves Draft status and does not mark or send the contract as delivered.
 - `generate_proforma_pdf(id)` — generate PROFORMA INVOICE PDF from a contract (advance-payment
   request for the renewal pack; marked "not a tax invoice"; creates no Invoice/AR/tax record)
 - `generate_quote_pdf(id)` — generate quote PDF
@@ -648,28 +651,52 @@ def _pdf_response_payload(response, default_filename: str) -> str:
 
 
 @mcp_server.tool()
-def generate_contract_pdf(id: str) -> str:
+def generate_contract_pdf(
+    id: str, reserve_renewal_number: bool = False, expected_version: str = ""
+) -> str:
     """Generate a contract PDF by contract ID.
 
     Returns JSON string: {"filename": str, "size": int, "content_b64": str}.
     Parse with json.loads, then base64.b64decode(content_b64) for raw bytes.
     On failure returns {"error": "..."}.
+
+    Cira's renewal review option: reserve_renewal_number=True requires the exact
+    current contract updated_at in expected_version and an existing linked Draft
+    renewal. Reserve its final number before rendering without changing status,
+    sent_date, activation, or its predecessor. Retrying a numbered Draft reuses
+    its number. Inspect the returned PDF and obtain Nikki's approval before any
+    delivery; never change the approved PDF after approval.
     """
     from django.test import RequestFactory
     from crm_app.models import Contract
 
+    def render(contract):
+        factory = RequestFactory()
+        request = factory.get(f'/api/v1/contracts/{contract.id}/pdf/')
+        request.user = _get_system_user()
+        viewset = ContractViewSet.as_view({'get': 'pdf'})
+        return viewset(request, pk=contract.id)
+
+    from django.core.exceptions import ValidationError
+    from crm_app.services.contract_review import (
+        ContractReviewError,
+        generate_numbered_renewal_review,
+    )
+
+    if type(reserve_renewal_number) is not bool:
+        return json.dumps({"error": "reserve_renewal_number must be a boolean."})
     try:
-        Contract.objects.get(id=id)
+        if reserve_renewal_number:
+            response, metadata = generate_numbered_renewal_review(id, expected_version, render)
+            return json.dumps({**json.loads(_pdf_response_payload(response, f'contract_{id}.pdf')), **metadata})
+        contract = Contract.objects.get(id=id)
+        return _pdf_response_payload(render(contract), f'contract_{id}.pdf')
     except Contract.DoesNotExist:
         return json.dumps({"error": f"Contract with ID '{id}' not found."})
-
-    factory = RequestFactory()
-    request = factory.get(f'/api/v1/contracts/{id}/pdf/')
-    request.user = _get_system_user()
-
-    viewset = ContractViewSet.as_view({'get': 'pdf'})
-    response = viewset(request, pk=id)
-    return _pdf_response_payload(response, f'contract_{id}.pdf')
+    except ContractReviewError as exc:
+        return json.dumps({"error": str(exc)})
+    except (ValidationError, ValueError):
+        return json.dumps({"error": "Invalid contract ID or review version."})
 
 
 @mcp_server.tool()
