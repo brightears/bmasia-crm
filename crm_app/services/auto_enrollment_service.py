@@ -289,6 +289,11 @@ class AutoEnrollmentService:
         Returns:
             int: Number of enrollments created
         """
+        from crm_app.cara_ownership import legacy_quarterly_enabled
+        if not legacy_quarterly_enabled():
+            logger.info("CRM quarterly enrollment held by dedicated Cara ownership")
+            return 0
+
         from crm_app.models import EmailSequence, SequenceEnrollment, Contract
 
         today = date.today()
