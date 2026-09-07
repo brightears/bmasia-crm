@@ -710,6 +710,10 @@ class EmailService:
 
     def send_quarterly_checkins(self) -> Dict[str, int]:
         """Send quarterly check-in emails"""
+        from crm_app.cara_ownership import legacy_quarterly_enabled
+        if not legacy_quarterly_enabled():
+            logger.info("CRM quarterly sender held by dedicated Cara ownership")
+            return {'sent': 0, 'failed': 0, 'skipped': 0, 'held_by_cara': 1}
         results = {
             'sent': 0,
             'failed': 0,
@@ -2030,6 +2034,14 @@ class EmailService:
             ).get(id=execution_id)
         except SequenceStepExecution.DoesNotExist:
             logger.error(f"SequenceStepExecution with ID {execution_id} not found")
+            return False
+
+        # Preserve existing scheduled work without sending or advancing it when
+        # Cara owns routine quarterly care. Formal renewal sequences are untouched.
+        from crm_app.cara_ownership import legacy_quarterly_enabled
+        if (execution.enrollment.sequence.sequence_type == 'auto_quarterly'
+                and not legacy_quarterly_enabled()):
+            logger.info("CRM quarterly sequence held by dedicated Cara ownership")
             return False
 
         # Increment attempt count

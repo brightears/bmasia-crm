@@ -291,6 +291,11 @@ PROSPECT_REPLY_EMAIL = config('PROSPECT_REPLY_EMAIL', default='norbert@bmasiamus
 PROSPECT_REPLY_IMAP_PASSWORD = config('PROSPECT_REPLY_IMAP_PASSWORD', default='')
 PROSPECT_IMAP_HOST = config('PROSPECT_IMAP_HOST', default='imap.gmail.com')
 
+# Dedicated Cara projection; plaintext bearer credentials never enter settings.
+CARA_CUSTOMER_CARE_TOKEN_SHA256 = config('CARA_CUSTOMER_CARE_TOKEN_SHA256', default='')
+CARA_CUSTOMER_CARE_TOKEN_EXPIRES_AT = config('CARA_CUSTOMER_CARE_TOKEN_EXPIRES_AT', default='')
+CARA_QUARTERLY_OWNER = config('CARA_QUARTERLY_OWNER', default='legacy')
+
 # Dedicated opaque read credential for Rene. Store only its SHA-256 digest;
 # this token is accepted solely by the capability and renewal-book views.
 RENE_RENEWAL_BOOK_TOKEN_SHA256 = config(

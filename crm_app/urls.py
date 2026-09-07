@@ -8,6 +8,7 @@ from rest_framework_simplejwt.views import (
 )
 from . import views, admin_views
 from .rene_views import ReneTokenCapabilitiesView
+from .cara_api import CaraCapabilitiesView, CaraCustomerCareView
 
 # Create a router and register our viewsets
 router = DefaultRouter()
@@ -101,6 +102,8 @@ router.register(r'ai-email-drafts', views.AIEmailDraftViewSet, basename='ai-emai
 
 # The API URLs are now determined automatically by the router.
 urlpatterns = [
+    path('v1/cara/capabilities/', CaraCapabilitiesView.as_view(), name='cara-capabilities'),
+    path('v1/cara/customer-care/', CaraCustomerCareView.as_view(), name='cara-customer-care'),
     # These exact paths precede the router. Rene's opaque credential is
     # accepted nowhere else and this surface allows GET only.
     path(
