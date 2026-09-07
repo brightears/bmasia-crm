@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from django.conf import settings
 from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory
@@ -21,13 +22,16 @@ DIGEST = hashlib.sha256(TOKEN.encode()).hexdigest()
 FACTORY = APIRequestFactory()
 
 
-@pytest.fixture(autouse=True)
-def credential_settings():
+@pytest.fixture(autouse=True, params=["dated", "never"])
+def credential_settings(request):
+    expiry = (
+        "never"
+        if request.param == "never"
+        else (timezone.now() + timedelta(days=7)).isoformat()
+    )
     with override_settings(
         CARA_CUSTOMER_CARE_TOKEN_SHA256=DIGEST,
-        CARA_CUSTOMER_CARE_TOKEN_EXPIRES_AT=(
-            timezone.now() + timedelta(days=7)
-        ).isoformat(),
+        CARA_CUSTOMER_CARE_TOKEN_EXPIRES_AT=expiry,
     ):
         yield
 
@@ -73,7 +77,10 @@ def test_capability_is_dedicated_exact_and_no_store():
     response = request()
     assert response.status_code == 200
     assert response.data["subject"] == "cara"
+    assert response.data["expires_at"] == settings.CARA_CUSTOMER_CARE_TOKEN_EXPIRES_AT
     assert response.data["allowed_methods"] == ["GET"]
+    assert response.data["allowed_paths"] == [api.CAPABILITY_PATH, api.BOOK_PATH]
+    assert response.data["maximum_page_size"] == 50
     assert response.data["permissions"] == [api.PERMISSION]
     assert response["Cache-Control"] == "no-store, private"
     assert TOKEN not in str(response.data)
@@ -82,6 +89,7 @@ def test_capability_is_dedicated_exact_and_no_store():
 @pytest.mark.parametrize("token", ["", "bad", "rene_" + "y" * 48, "a.b.c", "x" * 200])
 def test_wrong_principal_does_not_receive_capability(token):
     assert request(token=token).status_code == 401
+    assert request(api.CaraCustomerCareView, token=token).status_code == 401
 
 
 @pytest.mark.parametrize(
@@ -103,6 +111,50 @@ def test_expired_or_unconfigured_secret_denied():
         assert request().status_code == 401
     with override_settings(CARA_CUSTOMER_CARE_TOKEN_EXPIRES_AT="2020-01-01T00:00:00Z"):
         assert request().status_code == 401
+
+
+@pytest.mark.parametrize(
+    "expiry",
+    [
+        None,
+        "",
+        " ",
+        "NEVER",
+        " never",
+        "never ",
+        "forever",
+        False,
+        0,
+        [],
+        {},
+        "not-a-date",
+        "2030-01-01",
+        "2020-01-01T00:00:00Z",
+    ],
+)
+def test_only_explicit_never_or_valid_future_expiry_grants_access(expiry):
+    with override_settings(CARA_CUSTOMER_CARE_TOKEN_EXPIRES_AT=expiry):
+        for view in (api.CaraCapabilitiesView, api.CaraCustomerCareView):
+            response = request(view)
+            assert response.status_code == 401
+            assert "accounts" not in response.data
+            assert TOKEN not in str(response.data)
+
+
+def test_indefinite_credential_remains_revocable():
+    with override_settings(CARA_CUSTOMER_CARE_TOKEN_EXPIRES_AT="never"):
+        assert request().data["expires_at"] == "never"
+        for revoked_digest in ("", "f" * 64):
+            with override_settings(CARA_CUSTOMER_CARE_TOKEN_SHA256=revoked_digest):
+                assert request().status_code == 401
+                assert request(api.CaraCustomerCareView).status_code == 401
+
+
+def test_missing_expiry_is_not_indefinite_access():
+    with override_settings(CARA_CUSTOMER_CARE_TOKEN_EXPIRES_AT="never"):
+        del settings.CARA_CUSTOMER_CARE_TOKEN_EXPIRES_AT
+        assert request().status_code == 401
+        assert request(api.CaraCustomerCareView).status_code == 401
 
 
 def test_projection_uses_real_model_preferences_and_excludes_private_data():

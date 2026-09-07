@@ -41,6 +41,12 @@ def configured_credential():
     try:
         if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
             raise ValueError
+        if not isinstance(expiry, str):
+            raise TypeError
+        # Explicit operator choice only; missing/blank expiry never grants access.
+        # An indefinite credential is still revoked by clearing/changing its digest.
+        if expiry == "never":
+            return digest, "never"
         expires = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
         if expires.tzinfo is None or expires <= datetime.now(UTC):
             raise ValueError
