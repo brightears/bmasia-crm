@@ -29,6 +29,16 @@ from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
+# Production ContractTemplate primary key for the maintained Hilton HPA. Keep
+# the exact-name aliases for fixtures and newly seeded environments, but do not
+# let a cosmetic CRM rename turn off the Hilton signing-copy safety policy.
+HILTON_FULL_TEMPLATE_IDS = frozenset({'12'})
+HILTON_FULL_TEMPLATE_NAMES = frozenset({
+    'hilton international',
+    'hilton participation agreement',
+    'hilton hpa',
+})
+
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
@@ -1318,6 +1328,12 @@ class ContractViewSet(BaseModelViewSet):
         )
 
         if not success:
+            if isinstance(message, dict):
+                response_status = message.get('status_code', status.HTTP_409_CONFLICT)
+                if not isinstance(response_status, int) or not 400 <= response_status <= 599:
+                    response_status = status.HTTP_500_INTERNAL_SERVER_ERROR
+                payload = {key: value for key, value in message.items() if key != 'status_code'}
+                return Response(payload, status=response_status)
             return Response(
                 {'error': message},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -1617,26 +1633,379 @@ class ContractViewSet(BaseModelViewSet):
                 status=500
             )
 
+    @staticmethod
+    def _is_hilton_full_template(contract):
+        """Identify the maintained Hilton HPA without trusting its mutable format."""
+        template = getattr(contract, 'preamble_template', None)
+        if not template:
+            return False
+        template_id = getattr(template, 'pk', None)
+        if template_id is None:
+            template_id = getattr(template, 'id', None)
+        template_name = (getattr(template, 'name', '') or '').strip().casefold()
+        return str(template_id) in HILTON_FULL_TEMPLATE_IDS or template_name in HILTON_FULL_TEMPLATE_NAMES
+
+    def _resolve_template_contact(self, contract):
+        """Resolve one coherent customer contact for template substitution.
+
+        Contract-level fields are authoritative because renewals may intentionally
+        name a hotel contact who is not linked to the billing Company record. A
+        Hilton HPA never falls back to an arbitrary Company contact.
+        """
+        explicit = {
+            'name': (getattr(contract, 'customer_contact_name', '') or '').strip(),
+            'email': (getattr(contract, 'customer_contact_email', '') or '').strip(),
+            'title': (getattr(contract, 'customer_contact_title', '') or '').strip(),
+            'source': 'contract',
+            'ambiguous': False,
+        }
+        if explicit['name'] and explicit['email']:
+            return explicit
+        if (explicit['name'] or explicit['email'] or explicit['title']) and self._is_hilton_full_template(contract):
+            return explicit
+
+        company = getattr(contract, 'company', None)
+        contacts = getattr(company, 'contacts', None) if company else None
+        if not contacts:
+            return {'name': '', 'email': '', 'title': '', 'source': 'missing', 'ambiguous': False}
+
+        primary_contacts = contacts.filter(is_primary=True, is_active=True)
+        try:
+            primary_count = primary_contacts.count()
+        except TypeError:  # list-like test doubles
+            primary_count = len(primary_contacts)
+        if primary_count == 1:
+            primary = primary_contacts.first()
+            return {
+                'name': (getattr(primary, 'name', '') or '').strip(),
+                'email': (getattr(primary, 'email', '') or '').strip(),
+                'title': (getattr(primary, 'title', '') or '').strip(),
+                'source': 'company_primary',
+                'ambiguous': False,
+            }
+        if primary_count > 1:
+            return {'name': '', 'email': '', 'title': '', 'source': 'company_primary', 'ambiguous': True}
+
+        if self._is_hilton_full_template(contract):
+            return {'name': '', 'email': '', 'title': '', 'source': 'missing', 'ambiguous': False}
+
+        # Preserve the historic fallback for unrelated templates.
+        fallback = contacts.filter(is_active=True).first() or contacts.first()
+        if fallback:
+            return {
+                'name': (getattr(fallback, 'name', '') or '').strip(),
+                'email': (getattr(fallback, 'email', '') or '').strip(),
+                'title': (getattr(fallback, 'title', '') or '').strip(),
+                'source': 'company_fallback',
+                'ambiguous': False,
+            }
+        return {'name': '', 'email': '', 'title': '', 'source': 'missing', 'ambiguous': False}
+
+    def _template_service_labels(self, contract):
+        """Return de-duplicated customer-facing products from canonical location rows."""
+        service_locations = getattr(contract, 'service_locations', None)
+        locations = list(service_locations.all()) if service_locations else []
+        if locations:
+            sources = locations
+        else:
+            get_active_zones = getattr(contract, 'get_active_zones', None)
+            sources = list(get_active_zones()) if get_active_zones else []
+
+        labels = []
+        for source in sources:
+            platform = (getattr(source, 'platform', '') or '').strip().casefold()
+            if platform == 'soundtrack':
+                label = 'Soundtrack Your Brand'
+            elif platform == 'beatbreeze':
+                label = 'Beat Breeze'
+            elif platform == 'custom':
+                label = self._canonical_product_label(getattr(source, 'custom_service_name', ''))
+            else:
+                label = ''
+            label = (label or '').strip()
+            if label and label not in labels:
+                labels.append(label)
+        return labels
+
+    @staticmethod
+    def _template_zone_count(contract):
+        """Count rendered zones, including newline-separated location names."""
+        service_locations = getattr(contract, 'service_locations', None)
+        locations = list(service_locations.all()) if service_locations else []
+        if locations:
+            return sum(
+                len([name for name in str(getattr(loc, 'location_name', '')).splitlines() if name.strip()]) or 1
+                for loc in locations
+            )
+        get_zone_count = getattr(contract, 'get_zone_count', None)
+        return int(get_zone_count()) if get_zone_count else 0
+
+    @staticmethod
+    def _hilton_attachment_b(contract):
+        """Return the approved document explicitly titled as Hilton Attachment/Exhibit B."""
+        documents = getattr(contract, 'contract_documents', None)
+        if not documents:
+            return None
+        candidates = documents.filter(
+            is_official=True,
+            document_type='insurance',
+        ).order_by('-uploaded_at', '-id')
+        return next(
+            (
+                document for document in candidates
+                if re.search(r'\b(?:Attachment|Exhibit)\s+B\b', document.title, flags=re.IGNORECASE)
+            ),
+            None,
+        )
+
+    def _hilton_template_pdf_blockers(self, contract):
+        """Return actionable reasons a fresh Hilton HPA signing copy is unsafe."""
+        template = contract.preamble_template
+        content = getattr(template, 'content', '') or ''
+        rendered = self._substitute_template_variables(content, contract)
+        blockers = []
+
+        def add(code, detail, evidence=None):
+            item = {'code': code, 'detail': detail}
+            if evidence:
+                item['evidence'] = evidence
+            blockers.append(item)
+
+        if (getattr(template, 'pdf_format', '') or 'standard') != 'standard':
+            add(
+                'unsupported_hilton_pdf_format',
+                'The Hilton International template must use the standard full-template renderer; the legacy participation/master renderers contain different legal text.',
+                {'configured_pdf_format': getattr(template, 'pdf_format', '')},
+            )
+
+        contact = self._resolve_template_contact(contract)
+        if contact['ambiguous']:
+            add('ambiguous_hotel_contact', 'More than one active primary contact is linked to the contract company.')
+        elif not contact['name'] or not contact['email']:
+            add(
+                'missing_hotel_contact',
+                'Provide one verified hotel contact name and email on the contract, or one active primary contact on its company.',
+            )
+
+        bmasia_contact_tokens = {
+            '{{bmasia_contact_name}}',
+            '{{bmasia_contact_email}}',
+            '{{bmasia_contact_title}}',
+        }
+        if any(token in content for token in bmasia_contact_tokens):
+            if not (getattr(contract, 'bmasia_contact_name', '') or '').strip() or not (
+                getattr(contract, 'bmasia_contact_email', '') or ''
+            ).strip():
+                add(
+                    'missing_bmasia_contact',
+                    'The Hilton template requests a BMAsia contact; provide a verified contract-level name and email.',
+                )
+
+        labels = self._template_service_labels(contract)
+        service_locations = list(contract.service_locations.all())
+        if any(not (getattr(location, 'location_name', '') or '').strip() for location in service_locations):
+            add(
+                'missing_service_location_name',
+                'Every Hilton service-location row must have a verified rendered zone/location name.',
+            )
+        if not labels:
+            add('missing_service_product', 'Add a verified product/service location before generating the Hilton HPA.')
+        else:
+            expected = {label.casefold() for label in labels}
+            dynamic_product_tokens = ('{{service_product_name}}', '{{service_product_managed_name}}')
+            uses_dynamic_product = any(token in content for token in dynamic_product_tokens)
+            content_lower = content.casefold()
+            static_products = {
+                static_label.casefold()
+                for static_label in ('Soundtrack Your Brand', 'Beat Breeze')
+                if f'{static_label} - Managed'.casefold() in content_lower
+            }
+            has_static_conflict = bool(static_products - expected)
+            if has_static_conflict or (not uses_dynamic_product and static_products != expected):
+                add(
+                    'service_product_mismatch',
+                    'The Hilton template managed-service wording does not represent every canonical contract service product.',
+                    {
+                        'template_labels': sorted(static_products),
+                        'contract_labels': labels,
+                        'required_template_token': '{{service_product_managed_name}}',
+                    },
+                )
+
+        allowed_special = {'zones_table', 'signature_blocks'}
+        unresolved = sorted({
+            payload.strip() or '<empty>'
+            for payload in re.findall(r'\{\{(.*?)\}\}', rendered, flags=re.DOTALL)
+            if (payload.strip() or '<empty>') not in allowed_special
+        })
+        balanced_tokens_removed = re.sub(r'\{\{.*?\}\}', '', rendered, flags=re.DOTALL)
+        if '{' in balanced_tokens_removed or '}' in balanced_tokens_removed:
+            unresolved.append('<malformed-template-delimiter>')
+            unresolved = sorted(set(unresolved))
+        if unresolved:
+            add(
+                'unresolved_template_variables',
+                'The Hilton template contains variables the renderer cannot resolve.',
+                {'variables': unresolved},
+            )
+
+        enter_placeholders = sorted(set(re.findall(
+            r'\[\s*(?:enter|insert|tbd|to be confirmed)[^\]]*\]',
+            rendered,
+            flags=re.IGNORECASE,
+        )))
+        if re.search(
+            r'\[\s*(?:enter|insert|tbd|to be confirmed)(?:(?!\]).)*$',
+            rendered,
+            flags=re.IGNORECASE | re.DOTALL,
+        ):
+            enter_placeholders.append('<unclosed-bracketed-source-placeholder>')
+            enter_placeholders = sorted(set(enter_placeholders))
+        if enter_placeholders:
+            add(
+                'unresolved_source_placeholders',
+                'Replace bracketed source placeholders with approved facts; signature/date execution blanks remain allowed.',
+                {'placeholders': enter_placeholders},
+            )
+
+        company = getattr(contract, 'company', None)
+        if (
+            company
+            and getattr(company, 'billing_entity', '') == 'BMAsia Limited'
+            and '0105548025073' in rendered
+        ):
+            add(
+                'supplier_entity_identifier_mismatch',
+                'The Hilton template prints BMAsia Thailand\'s tax identifier for a BMAsia Limited Hong Kong contract.',
+                {'printed_identifier': '0105548025073'},
+            )
+
+        legal_name = ((getattr(company, 'legal_entity_name', '') or getattr(company, 'name', '')) if company else '').strip()
+        trading_name = (
+            getattr(contract, 'property_name', '') or (getattr(company, 'name', '') if company else '')
+        ).strip()
+        if legal_name and trading_name and legal_name.casefold() != trading_name.casefold():
+            reversed_relationship = f'{trading_name} (trading as {legal_name})'
+            if reversed_relationship.casefold() in rendered.casefold():
+                add(
+                    'reversed_legal_trading_names',
+                    'Use the legal contracting entity first and the hotel/property trading name second.',
+                    {'legal_name': legal_name, 'trading_name': trading_name},
+                )
+
+        if re.search(r'\b(?:Attachment|Exhibit)\s+B\b', rendered, flags=re.IGNORECASE):
+            approved_attachment = self._hilton_attachment_b(contract)
+            if approved_attachment:
+                add(
+                    'attachment_b_not_assembled',
+                    'An approved Hilton Attachment/Exhibit B is recorded, but this renderer cannot yet prove a complete integrity-preserving package.',
+                )
+            else:
+                add(
+                    'missing_attachment_b',
+                    'Attach the approved Hilton Attachment/Exhibit B as an official insurance contract document with the matching title.',
+                )
+
+        return blockers
+
+    @staticmethod
+    def _split_template_zones_preamble(content):
+        """Separate the final zones heading and preserve an intentional page break."""
+        separator_pattern = r'(?:<br\s*/?>)*\s*(?:<b>)?(?<!-)---(?!-)(?:</b>)?\s*(?:<br\s*/?>)*'
+
+        def split_heading(value):
+            value = re.sub(r'(?:<br\s*/?>\s*)+$', '', value, flags=re.IGNORECASE).strip()
+            if not value:
+                return '', ''
+
+            def looks_like_heading(candidate):
+                plain = re.sub(r'<[^>]+>', '', candidate).strip()
+                return len(plain) <= 200 and (
+                    plain.endswith(':') or 'description of the services' in plain.casefold()
+                )
+
+            double_breaks = list(re.finditer(r'(?:<br\s*/?>\s*){2,}', value, flags=re.IGNORECASE))
+            if double_breaks:
+                last_break = double_breaks[-1]
+                candidate = value[last_break.end():].strip()
+                if candidate:
+                    return value[:last_break.start()].rstrip(), candidate
+
+            single_breaks = list(re.finditer(r'<br\s*/?>', value, flags=re.IGNORECASE))
+            if single_breaks:
+                last_break = single_breaks[-1]
+                candidate = value[last_break.end():].strip()
+                if looks_like_heading(candidate):
+                    return value[:last_break.start()].rstrip(), candidate
+
+            if looks_like_heading(value):
+                return '', value
+            return value, ''
+
+        page_breaks = list(re.finditer(separator_pattern, content, flags=re.IGNORECASE))
+        if page_breaks:
+            last_break = page_breaks[-1]
+            prefix = content[:last_break.start()].rstrip()
+            suffix = content[last_break.end():].strip()
+            if suffix:
+                suffix_bulk, heading = split_heading(suffix)
+                if heading and not suffix_bulk:
+                    return prefix, heading, True
+                if heading:
+                    combined_bulk = f'{prefix}<br/>---<br/>{suffix_bulk}' if prefix else f'---<br/>{suffix_bulk}'
+                    return combined_bulk, heading, False
+                return content.strip(), '', False
+
+            prefix_bulk, heading = split_heading(prefix)
+            if heading:
+                return prefix_bulk, heading, True
+            return prefix, '', True
+
+        bulk, heading = split_heading(content)
+        return bulk, heading, False
+
+    def _hilton_template_blocked_response(self, contract, blockers):
+        return Response(
+            {
+                'error': 'Hilton Participation Agreement PDF blocked because required source data is incomplete or inconsistent.',
+                'detail': 'Resolve every blocker against an approved source, then generate a fresh PDF.',
+                'template': contract.preamble_template.name,
+                'contract_number': contract.contract_number,
+                'blockers': blockers,
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    def _reject_hilton_legacy_renderer(self, contract):
+        """Prevent the mutable pdf_format field from selecting obsolete Hilton legal text."""
+        if not self._is_hilton_full_template(contract):
+            return None
+        blockers = self._hilton_template_pdf_blockers(contract)
+        if not any(item['code'] == 'unsupported_hilton_pdf_format' for item in blockers):
+            blockers.insert(0, {
+                'code': 'unsupported_hilton_pdf_format',
+                'detail': 'Hilton International must be rendered through its standard full-template path, not a legacy renderer.',
+                'evidence': {'configured_pdf_format': getattr(contract.preamble_template, 'pdf_format', '')},
+            })
+        return self._hilton_template_blocked_response(contract, blockers)
+
     def _substitute_template_variables(self, content, contract):
         """Replace template variables with actual values"""
         company = contract.company
 
-        # Get primary contact
-        primary_contact = None
-        if company:
-            primary_contact = company.contacts.filter(is_primary=True).first()
-            if not primary_contact:
-                primary_contact = company.contacts.first()
+        contact = self._resolve_template_contact(contract)
 
         # Get venue/zone names — prefer service_locations, fall back to legacy zones
         service_locs = contract.service_locations.all()
         if service_locs.exists():
             venue_names = ', '.join([loc.location_name for loc in service_locs])
-            zone_count_str = str(service_locs.count())
+            zone_count_str = str(self._template_zone_count(contract))
         else:
             zones = contract.get_active_zones()
             venue_names = ', '.join([z.name for z in zones]) if zones.exists() else ''
             zone_count_str = str(contract.get_zone_count())
+
+        service_labels = self._template_service_labels(contract)
 
         replacements = {
             # Company & Client Info
@@ -1645,8 +2014,14 @@ class ContractViewSet(BaseModelViewSet):
             '{{company_legal_name}}': company.legal_entity_name or company.name if company else '',  # alias
             '{{client_address}}': self._format_company_address(company) if company else '',
             '{{company_address}}': self._format_company_address(company) if company else '',  # alias
-            '{{contact_name}}': primary_contact.name if primary_contact else '',
-            '{{contact_email}}': primary_contact.email if primary_contact else '',
+            '{{contact_name}}': contact['name'],
+            '{{contact_email}}': contact['email'],
+            '{{contact_title}}': contact['title'],
+            '{{customer_contact_name}}': contact['name'],
+            '{{customer_contact_email}}': contact['email'],
+            '{{customer_contact_title}}': contact['title'],
+            '{{hotel_legal_name}}': company.legal_entity_name or company.name if company else '',
+            '{{hotel_trading_name}}': getattr(contract, 'property_name', '') or company.name if company else '',
 
             # Contract Details
             '{{contract_number}}': contract.contract_number or '',
@@ -1662,6 +2037,16 @@ class ContractViewSet(BaseModelViewSet):
             '{{venue_names}}': venue_names,
             '{{number_of_zones}}': zone_count_str,
             '{{zone_count}}': zone_count_str,  # alias
+            '{{music_zone_label}}': f"{zone_count_str} music {'zone' if zone_count_str == '1' else 'zones'}",
+            '{{service_product_name}}': ' and '.join(service_labels),
+            '{{service_product_managed_name}}': (
+                f"{' and '.join(service_labels)} - Managed" if service_labels else ''
+            ),
+
+            # Named BMAsia operational contact (never inferred from unrelated users/settings)
+            '{{bmasia_contact_name}}': getattr(contract, 'bmasia_contact_name', '') or '',
+            '{{bmasia_contact_email}}': getattr(contract, 'bmasia_contact_email', '') or '',
+            '{{bmasia_contact_title}}': getattr(contract, 'bmasia_contact_title', '') or '',
 
             # Signatories
             '{{client_signatory_name}}': contract.customer_signatory_name or '',
@@ -1700,6 +2085,11 @@ class ContractViewSet(BaseModelViewSet):
 
         for var, value in replacements.items():
             content = content.replace(var, str(value))
+
+        # Existing Hilton template text places the numeric variable before a
+        # literal plural noun. Correct the one-zone grammar without changing
+        # any commercial value or legal wording.
+        content = re.sub(r'\b1\s+music\s+zones\b', '1 music zone', content, flags=re.IGNORECASE)
 
         # Note: contract.payment_terms is an internal CRM field (e.g., "Net 30", "Due on Receipt")
         # used for tracking/invoicing — it should NOT be appended to contract PDF text.
@@ -2177,10 +2567,18 @@ class ContractViewSet(BaseModelViewSet):
 
     def _generate_principal_terms_pdf(self, contract):
         """Generate Principal Terms PDF for standard contracts"""
+        # This guard belongs in the generator, not only the public API action:
+        # Rene and other internal review flows call the renderer directly.
+        # Stored/previously issued ContractDocument files are never modified.
+        if self._is_hilton_full_template(contract):
+            blockers = self._hilton_template_pdf_blockers(contract)
+            if blockers:
+                return self._hilton_template_blocked_response(contract, blockers)
+
         from reportlab.lib.pagesizes import letter, A4
         from reportlab.lib import colors
         from reportlab.lib.units import inch
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable, KeepTogether
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable, KeepTogether, PageBreak
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
         from io import BytesIO
@@ -2226,6 +2624,8 @@ class ContractViewSet(BaseModelViewSet):
             canvas_obj.drawCentredString(page_width / 2, 0.48*inch, f"{entity_name}  ·  Wherever Music Matters")
             canvas_obj.setFont('DejaVuSans', 7)
             canvas_obj.drawCentredString(page_width / 2, 0.35*inch, f"{entity_address} | Phone: {entity_phone}")
+            if self._is_hilton_full_template(contract):
+                canvas_obj.drawRightString(page_width - doc_obj.rightMargin, 0.48*inch, f"Page {doc_obj.page}")
             canvas_obj.restoreState()
 
         # Container for PDF elements
@@ -2472,7 +2872,11 @@ class ContractViewSet(BaseModelViewSet):
         if contract.preamble_template:
             # FULL TEMPLATE MODE: Template contains complete contract text
             # Skip all hardcoded clauses and render only template content
-            template_content = contract.preamble_template.content
+            template_content = re.sub(
+                r'\{\{\s*zones_table\s*\}\}',
+                '{{zones_table}}',
+                contract.preamble_template.content,
+            )
             zones = contract.get_active_zones()
             has_locations = contract.service_locations.exists() or zones.exists()
 
@@ -2484,12 +2888,14 @@ class ContractViewSet(BaseModelViewSet):
                 separator_pattern = r'(?:<br/>)*\s*(?:<b>)?---(?:</b>)?\s*(?:<br/>)*'
                 if _re_pb.search(separator_pattern, content):
                     section_parts = _re_pb.split(separator_pattern, content)
+                    while section_parts and not section_parts[-1].strip():
+                        section_parts.pop()
                     for i, section in enumerate(section_parts):
+                        if i:
+                            elements.append(PB())
                         if section.strip():
                             elements.append(Paragraph(section.strip(), body_style))
                             elements.append(Spacer(1, 0.2*inch))
-                        if i < len(section_parts) - 1:
-                            elements.append(PB())
                 else:
                     elements.append(Paragraph(content, body_style))
                     elements.append(Spacer(1, 0.2*inch))
@@ -2530,65 +2936,36 @@ class ContractViewSet(BaseModelViewSet):
                 if '{{zones_table}}' in segment:
                     parts = segment.split('{{zones_table}}', 1)
                     before = self._substitute_template_variables(parts[0], contract)
+                    bulk_content, heading_content, force_page_break = self._split_template_zones_preamble(before)
 
-                    # Split "before" at last <br/><br/> to separate bulk from heading
-                    # This allows bulk content to flow naturally while keeping heading with zones table
-                    if '<br/><br/>' in before:
-                        last_break = before.rfind('<br/><br/>')
-                        heading_content = before[last_break + len('<br/><br/>'):]
+                    if bulk_content.strip():
+                        render_paragraph(bulk_content)
+                    if force_page_break:
+                        if elements and isinstance(elements[-1], Spacer):
+                            elements.pop()
+                        elements.append(PageBreak())
 
-                        # If heading is empty, the actual heading is BEFORE the last break
-                        # Find second-to-last break to capture the heading
-                        if not heading_content.strip():
-                            second_last = before.rfind('<br/><br/>', 0, last_break)
-                            if second_last != -1:
-                                bulk_content = before[:second_last]
-                                heading_content = before[second_last + len('<br/><br/>'):]
-                            else:
-                                # Only one <br/><br/>, just wrap zones table
-                                bulk_content = before[:last_break]
-                                heading_content = ''
-                        else:
-                            bulk_content = before[:last_break]
-
-                        # Render bulk content (with page break support for '---' separators)
-                        if bulk_content.strip():
-                            render_paragraph(bulk_content)
-
-                        # Add heading + zones table
-                        if has_locations:
-                            zone_table = self._build_zones_table(contract, zones)
-                            if zone_table:
-                                loc_count = contract.service_locations.count() or zones.count()
-                                if loc_count <= 15:
-                                    # Bundle heading + table + spacer in a single KeepTogether
-                                    # so the heading never orphans onto a page without the table.
-                                    kt_list = []
-                                    if heading_content.strip():
-                                        heading_style = body_style.clone('section_heading', spaceAfter=6)
-                                        kt_list.append(Paragraph(heading_content, heading_style))
-                                    kt_list.append(zone_table)
-                                    kt_list.append(Spacer(1, 0.15*inch))
-                                    elements.append(KeepTogether(kt_list))
-                                else:
-                                    if heading_content.strip():
-                                        elements.append(Paragraph(heading_content, body_style))
-                                    elements.append(zone_table)
-                                    elements.append(Spacer(1, 0.15*inch))
+                    if has_locations:
+                        zone_table = self._build_zones_table(contract, zones)
+                        if zone_table:
+                            loc_count = self._template_zone_count(contract)
+                            if loc_count <= 15:
+                                kt_list = []
+                                if heading_content.strip():
+                                    heading_style = body_style.clone('section_heading', spaceAfter=6)
+                                    kt_list.append(Paragraph(heading_content, heading_style))
+                                kt_list.append(zone_table)
+                                kt_list.append(Spacer(1, 0.15*inch))
+                                elements.append(KeepTogether(kt_list))
                             else:
                                 if heading_content.strip():
                                     elements.append(Paragraph(heading_content, body_style))
-                        else:
-                            if heading_content.strip():
-                                elements.append(Paragraph(heading_content, body_style))
-                    else:
-                        # No <br/><br/> found - just wrap zones table in KeepTogether
-                        if before.strip():
-                            elements.append(Paragraph(before, body_style))
-                        if has_locations:
-                            zone_table = self._build_zones_table(contract, zones)
-                            if zone_table:
-                                elements.append(KeepTogether([zone_table, Spacer(1, 0.15*inch)]))
+                                elements.append(zone_table)
+                                elements.append(Spacer(1, 0.15*inch))
+                        elif heading_content.strip():
+                            elements.append(Paragraph(heading_content, body_style))
+                    elif heading_content.strip():
+                        elements.append(Paragraph(heading_content, body_style))
 
                     # Process content after {{zones_table}} (may contain other special vars)
                     if len(parts) > 1 and parts[1].strip():
@@ -2627,7 +3004,7 @@ class ContractViewSet(BaseModelViewSet):
             render_segment(template_content)
 
             # If locations exist but {{zones_table}} wasn't in template, append at end
-            if has_locations and '{{zones_table}}' not in contract.preamble_template.content:
+            if has_locations and '{{zones_table}}' not in template_content:
                 zone_table = self._build_zones_table(contract, zones)
                 if zone_table:
                     elements.append(Paragraph("<b>Locations for provision of services:</b>", clause_style))
@@ -2637,6 +3014,11 @@ class ContractViewSet(BaseModelViewSet):
             # Template mode: Skip Additional Terms, Status Indicator, and Signatures
             # (template already contains complete contract with signatures)
             # Footer is drawn via canvas callback — no flowable footer needed
+
+            # A trailing spacer or page-break can otherwise create a footer-only
+            # final page when the final legal paragraph exactly fills a page.
+            while elements and isinstance(elements[-1], (Spacer, PageBreak)):
+                elements.pop()
 
             # Build PDF and return early
             doc.build(elements, onFirstPage=draw_contract_footer, onLaterPages=draw_contract_footer)
@@ -3207,6 +3589,10 @@ and<br/><br/>
 
     def _generate_master_agreement_pdf(self, contract):
         """Generate Master Agreement PDF for corporate_master contracts"""
+        blocked = self._reject_hilton_legacy_renderer(contract)
+        if blocked:
+            return blocked
+
         from reportlab.lib.pagesizes import letter
         from reportlab.lib import colors
         from reportlab.lib.units import inch
@@ -3487,6 +3873,10 @@ and<br/><br/>
 
     def _generate_participation_agreement_pdf(self, contract):
         """Generate Participation Agreement PDF for participation contracts"""
+        blocked = self._reject_hilton_legacy_renderer(contract)
+        if blocked:
+            return blocked
+
         company = contract.company
 
         # Check if this contract should use Hilton HPA format
@@ -3844,6 +4234,10 @@ and<br/><br/>
 
     def _generate_hilton_combined_pdf(self, contract):
         """Generate combined Hilton HPA PDF: Attachment A (Scope of Work) + Exhibit D (Legal Terms) with full signature blocks"""
+        blocked = self._reject_hilton_legacy_renderer(contract)
+        if blocked:
+            return blocked
+
         from reportlab.lib.pagesizes import letter
         from reportlab.lib import colors
         from reportlab.lib.units import inch

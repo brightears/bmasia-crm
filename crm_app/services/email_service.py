@@ -1009,7 +1009,7 @@ class EmailService:
         body=None,
         sender='admin',
         request=None
-    ) -> Tuple[bool, str]:
+    ) -> Tuple[bool, str | Dict]:
         """
         Send contract email with PDF attachment
 
@@ -1022,7 +1022,8 @@ class EmailService:
             request: HTTP request object (for per-user SMTP authentication)
 
         Returns:
-            Tuple of (success: bool, message: str)
+            Tuple of (success: bool, message: str), or a structured PDF
+            blocker payload when attachment generation is unsafe.
         """
         from django.conf import settings
         from django.core.mail import get_connection
@@ -1128,6 +1129,14 @@ class EmailService:
             viewset.action = 'pdf'
 
             pdf_response = viewset.pdf(pdf_request, pk=contract.id)
+            if pdf_response.status_code != 200:
+                payload = getattr(pdf_response, 'data', None)
+                if isinstance(payload, dict):
+                    return False, {
+                        **payload,
+                        'status_code': pdf_response.status_code,
+                    }
+                return False, f'Contract PDF generation was blocked (HTTP {pdf_response.status_code})'
             pdf_data = pdf_response.content
             pdf_filename = f"Contract_{contract.contract_number}.pdf"
         except Exception as e:

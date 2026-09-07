@@ -1728,7 +1728,7 @@ def test_failed_exact_request_is_terminal_and_new_evidence_revision_can_succeed(
 
 
 @pytest.mark.django_db
-def test_internal_contract_renderer_returns_pdf_without_api_or_audit_mutation():
+def test_internal_contract_renderer_returns_pdf_without_api_or_audit_mutation(monkeypatch):
     contract = _contract(_company())
     before = contract_version(contract)
     pdf = _render_contract_pdf(contract)
@@ -1747,6 +1747,29 @@ def test_internal_contract_renderer_returns_pdf_without_api_or_audit_mutation():
     assert pdf.startswith(b'%PDF-') and pdf.rstrip().endswith(b'%%EOF')
     assert contract_version(contract) == before
     assert AuditLog.objects.count() == 0
+
+    from crm_app.views import ContractViewSet
+    from rest_framework.response import Response
+
+    monkeypatch.setattr(
+        ContractViewSet,
+        '_generate_principal_terms_pdf',
+        lambda self, value: Response(
+            {
+                'blockers': [
+                    {
+                        'code': 'missing_attachment_b',
+                        'detail': 'Approved Hilton Attachment B is missing.',
+                    }
+                ]
+            },
+            status=409,
+        ),
+    )
+    with pytest.raises(RenePhase2Error) as caught:
+        _render_contract_pdf(contract)
+    assert caught.value.code == 'PDF_RENDER_BLOCKED'
+    assert 'missing_attachment_b: Approved Hilton Attachment B is missing.' in str(caught.value)
 
 
 @pytest.mark.django_db

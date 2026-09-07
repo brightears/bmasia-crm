@@ -15,6 +15,61 @@ import {
 import { authApi } from './authService';
 import { MockApiService } from './mockData';
 
+export interface ContractPdfBlocker {
+  code?: string;
+  detail?: string;
+}
+
+export class ContractPdfDownloadError extends Error {
+  status?: number;
+  blockers: ContractPdfBlocker[];
+
+  constructor(message: string, status?: number, blockers: ContractPdfBlocker[] = []) {
+    super(message);
+    this.name = 'ContractPdfDownloadError';
+    this.status = status;
+    this.blockers = blockers;
+  }
+}
+
+async function readContractPdfErrorBlob(payload: Blob): Promise<string> {
+  if (typeof payload.text === 'function') {
+    return payload.text();
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(reader.error || new Error('Unable to read PDF error response'));
+    reader.readAsText(payload);
+  });
+}
+
+export async function parseContractPdfDownloadError(error: any): Promise<Error> {
+  const response = error?.response;
+  let payload = response?.data;
+
+  if (typeof Blob !== 'undefined' && payload instanceof Blob) {
+    try {
+      payload = JSON.parse(await readContractPdfErrorBlob(payload));
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (payload && typeof payload === 'object') {
+    const blockers = Array.isArray(payload.blockers) ? payload.blockers : [];
+    const blockerText = blockers
+      .filter((item: any) => item && (item.code || item.detail))
+      .map((item: ContractPdfBlocker) => `[${item.code || 'blocked'}] ${item.detail || ''}`.trim());
+    const messageParts = [payload.error || payload.detail, ...blockerText].filter(Boolean);
+    if (messageParts.length) {
+      return new ContractPdfDownloadError(messageParts.join(' — '), response?.status, blockers);
+    }
+  }
+
+  return error instanceof Error ? error : new Error('Failed to download contract PDF');
+}
+
 class ApiService {
   private useMockData = process.env.REACT_APP_BYPASS_AUTH === 'true' && process.env.NODE_ENV === 'development';
 
@@ -638,7 +693,14 @@ class ApiService {
 
   // Email Sending
   async sendContractEmail(contractId: string, data: EmailSendData): Promise<void> {
-    await authApi.post(`/contracts/${contractId}/send/`, data);
+    try {
+      await authApi.post(`/contracts/${contractId}/send/`, data);
+    } catch (error) {
+      // The send endpoint performs the same PDF preflight as download. Preserve
+      // its structured no-send blockers so EmailSendDialog can show the exact
+      // source corrections instead of a generic failure.
+      throw await parseContractPdfDownloadError(error);
+    }
   }
 
   async sendQuoteEmail(quoteId: string, data: EmailSendData): Promise<void> {
@@ -651,10 +713,14 @@ class ApiService {
 
   // Download Contract PDF
   async downloadContractPDF(id: string): Promise<Blob> {
-    const response = await authApi.get(`/contracts/${id}/pdf/`, {
-      responseType: 'blob'
-    });
-    return response.data;
+    try {
+      const response = await authApi.get(`/contracts/${id}/pdf/`, {
+        responseType: 'blob'
+      });
+      return response.data;
+    } catch (error) {
+      throw await parseContractPdfDownloadError(error);
+    }
   }
 
   // Download Proforma Invoice PDF (advance-payment request generated from the

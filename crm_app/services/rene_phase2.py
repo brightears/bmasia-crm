@@ -1751,7 +1751,17 @@ def _render_contract_pdf(contract):
     else:
         response = view._generate_principal_terms_pdf(contract)
     if response.status_code != 200 or not hasattr(response, 'content'):
-        _fail('PDF_RENDER_BLOCKED', 'prepared contract PDF could not be rendered safely')
+        payload = getattr(response, 'data', None)
+        blockers = payload.get('blockers', []) if isinstance(payload, dict) else []
+        blocker_context = '; '.join(
+            f"{item.get('code', 'unknown')}: {item.get('detail', 'blocked')}"
+            for item in blockers[:10]
+            if isinstance(item, dict)
+        )
+        message = 'prepared contract PDF could not be rendered safely'
+        if blocker_context:
+            message = f'{message}: {blocker_context}'
+        _fail('PDF_RENDER_BLOCKED', message)
     content = bytes(response.content)
     _validate_pdf_bytes(content)
     _verify_rendered_contract_terms(content, contract)

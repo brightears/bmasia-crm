@@ -314,8 +314,8 @@ const Contracts: React.FC = () => {
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-    } catch (err) {
-      setError('Failed to download PDF');
+    } catch (err: any) {
+      setError(err instanceof Error ? err.message : 'Failed to download PDF');
     }
     setActionMenuAnchor(null);
   };

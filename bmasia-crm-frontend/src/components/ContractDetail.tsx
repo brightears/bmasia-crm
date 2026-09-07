@@ -184,7 +184,8 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
       const blob = await ApiService.downloadContractPDF(contract.id);
       const url = window.URL.createObjectURL(blob);
       window.open(url, '_blank');
-    } catch (err) {
+    } catch (err: any) {
+      setError(err instanceof Error ? err.message : 'Failed to preview PDF');
       console.error('Failed to preview PDF:', err);
     } finally {
       setLoading(false);
@@ -203,7 +204,8 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-    } catch (err) {
+    } catch (err: any) {
+      setError(err instanceof Error ? err.message : 'Failed to download PDF');
       console.error('Failed to download PDF:', err);
     }
   };
