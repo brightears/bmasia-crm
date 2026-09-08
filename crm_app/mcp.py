@@ -14,7 +14,7 @@ from mcp_server.query_tool import ModelQueryToolset
 
 from crm_app.models import (
     Company, Contact, Contract, Invoice, Quote, Opportunity,
-    Task, Zone, ContractLineItem, InvoiceLineItem, QuoteLineItem,
+    Task, Zone, ContractTemplate, ContractLineItem, InvoiceLineItem, QuoteLineItem,
     ContractServiceLocation, ClientTechDetail, Device, Ticket, KBArticle,
 )
 from crm_app.rene_auth import is_exact_rene_phase2_mcp_request
@@ -39,7 +39,8 @@ across Thailand and Hong Kong.
 Use `query_data_collections` to search and filter any collection using MongoDB-style
 aggregation pipelines. Available collections: company, contact, contract, invoice,
 quote, opportunity, task, zone, clienttechdetail, device, ticket, kbarticle,
-quotelineitem, contractlineitem, servicelocation, invoicelineitem.
+quotelineitem, contractlineitem, servicelocation, invoicelineitem,
+contracttemplate.
 
 ### CRUD Tools (write)
 Use these 3 generic tools for all write operations:
@@ -49,7 +50,9 @@ Use these 3 generic tools for all write operations:
 
 Supported collections: company, contact, contract, invoice, quote, opportunity,
 task, zone, clienttechdetail, device, ticket, kbarticle, quotelineitem,
-contractlineitem, servicelocation, invoicelineitem.
+contractlineitem, servicelocation, invoicelineitem, contracttemplate.
+Contract templates may be queried, created, and updated through these tools;
+generic template deletion is intentionally blocked.
 
 ### PDF Tools
 Each returns a JSON string with `filename`, `size`, and `content_b64` (base64-
@@ -228,6 +231,20 @@ class ContractQuery(ModelQueryToolset):
     )
 
 
+class ContractTemplateQuery(ModelQueryToolset):
+    model = ContractTemplate
+    fields = [
+        'id', 'name', 'template_type', 'content', 'pdf_format',
+        'is_default', 'is_active', 'version', 'created_at', 'updated_at',
+    ]
+    search_fields = ['name', 'content', 'version']
+    extra_instructions = (
+        "Pre-approved contract language and rendering format. pdf_format: standard, "
+        "corporate_master, or participation. Read the exact current content and "
+        "updated_at before a guarded update; generic deletion is blocked."
+    )
+
+
 class InvoiceQuery(ModelQueryToolset):
     model = Invoice
     fields = [
@@ -403,6 +420,7 @@ _COLLECTION_MAP = {
     'quotelineitem': (QuoteLineItem, 'crm_app.serializers.QuoteLineItemSerializer'),
     'contractlineitem': (ContractLineItem, 'crm_app.serializers.ContractLineItemSerializer'),
     'servicelocation': (ContractServiceLocation, 'crm_app.serializers.ContractServiceLocationSerializer'),
+    'contracttemplate': (ContractTemplate, 'crm_app.serializers.ContractTemplateSerializer'),
     'invoicelineitem': (InvoiceLineItem, 'crm_app.serializers.InvoiceLineItemSerializer'),
 }
 
@@ -443,7 +461,8 @@ def create_record(collection: str, data: str) -> str:
     Args:
         collection: Collection name (company, contact, contract, invoice, quote,
                     opportunity, task, zone, clienttechdetail, device, ticket, kbarticle,
-                    quotelineitem, contractlineitem, servicelocation, invoicelineitem)
+                    quotelineitem, contractlineitem, servicelocation, invoicelineitem,
+                    contracttemplate)
         data: JSON string with field values. Use query_data_collections to check
               field names and valid choices first.
 
@@ -547,6 +566,11 @@ def delete_record(collection: str, id: str) -> str:
     """
     if collection not in _COLLECTION_MAP:
         return f"Error: Unknown collection '{collection}'. Valid: {', '.join(sorted(_COLLECTION_MAP))}"
+    if collection == 'contracttemplate':
+        return (
+            "Error: Generic contract-template deletion is blocked. "
+            "Use the authenticated CRM template-management workflow for any approved retirement."
+        )
     if collection == 'servicelocation':
         return (
             "Error: Standalone service-location deletion is blocked. "
