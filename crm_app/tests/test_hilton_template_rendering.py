@@ -184,6 +184,62 @@ def test_custom_beat_breeze_location_drives_product_and_singular_zone_tokens():
     assert rendered == 'Beat Breeze|Beat Breeze - Managed|1 music zone'
 
 
+def test_hilton_dynamic_values_are_escaped_without_changing_template_markup():
+    contract = _contract(
+        '<b>{{hotel_legal_name}}</b> (trading as {{hotel_trading_name}})'
+    )
+    contract.company.legal_entity_name = 'HOAN KIEM T&T CO., LTD'
+    contract.property_name = 'Hilton Garden Inn A&B'
+
+    rendered = ContractViewSet()._substitute_template_variables(
+        contract.preamble_template.content,
+        contract,
+        escape_for_paragraph=True,
+    )
+
+    assert rendered == (
+        '<b>HOAN KIEM T&amp;T CO., LTD</b> '
+        '(trading as Hilton Garden Inn A&amp;B)'
+    )
+    assert ContractViewSet()._substitute_template_variables(
+        contract.preamble_template.content,
+        contract,
+    ) == (
+        '<b>HOAN KIEM T&T CO., LTD</b> '
+        '(trading as Hilton Garden Inn A&B)'
+    )
+
+
+def test_hilton_pdf_renders_ampersands_literally_in_parties_and_zone_table():
+    contract = _contract(
+        '{{hotel_legal_name}} (trading as {{hotel_trading_name}})<br/>'
+        '{{service_product_managed_name}}<br/>{{zones_table}}'
+    )
+    contract.company.legal_entity_name = 'HOAN KIEM T&T CO., LTD'
+    contract.property_name = 'Hilton Garden Inn A&B'
+    contract.service_locations = FakeRelatedManager([
+        _service_location(
+            custom_service_name='Rhythm&Breeze',
+            location_name='Lobby&Atrium',
+        ),
+    ])
+    view = ContractViewSet()
+    view.request = SimpleNamespace(user=SimpleNamespace(is_authenticated=False))
+
+    response = view._generate_principal_terms_pdf(contract)
+    text = '\n'.join(page.extract_text() or '' for page in PdfReader(BytesIO(response.content)).pages)
+
+    assert response.status_code == 200
+    assert 'HOAN KIEM T&T CO., LTD' in text
+    assert 'Hilton Garden Inn A&B' in text
+    assert 'Rhythm&Breeze - Managed' in text
+    assert 'Lobby&Atrium' in text
+    assert 'T&T;' not in text
+    assert 'A&B;' not in text
+    assert 'Rhythm&Breeze;' not in text
+    assert 'Lobby&Atrium;' not in text
+
+
 def test_existing_numeric_zone_variable_gets_singular_grammar():
     contract = _contract('{{number_of_zones}} music zones')
 
@@ -227,6 +283,19 @@ def test_hilton_blockers_report_concrete_source_and_contract_conflicts():
         'reversed_legal_trading_names',
         'missing_attachment_b',
     }
+
+
+def test_reversed_legal_trading_guard_handles_ampersands():
+    contract = _contract(
+        '{{hotel_trading_name}} (trading as {{hotel_legal_name}})<br/>'
+        '{{service_product_managed_name}}'
+    )
+    contract.company.legal_entity_name = 'HOAN KIEM T&T CO., LTD'
+    contract.property_name = 'Hilton Garden Inn Hanoi'
+
+    blockers = ContractViewSet()._hilton_template_pdf_blockers(contract)
+
+    assert 'reversed_legal_trading_names' in {item['code'] for item in blockers}
 
 
 def test_matching_attachment_stays_blocked_until_package_assembly_is_verified():
@@ -469,6 +538,23 @@ def test_hilton_guard_survives_a_cosmetic_template_rename():
     blockers = ContractViewSet()._hilton_template_pdf_blockers(contract)
 
     assert ContractViewSet._is_hilton_full_template(contract) is True
+    assert 'unsupported_hilton_pdf_format' in {item['code'] for item in blockers}
+
+
+def test_stream_only_hilton_alias_stays_on_full_template_safety_path():
+    contract = _contract(
+        '{{service_product_managed_name}} {{zones_table}} '
+        'The insurance requirements are attached as Attachment B.'
+    )
+    contract.preamble_template.name = 'Hilton International — Stream-only'
+
+    blockers = ContractViewSet()._hilton_template_pdf_blockers(contract)
+
+    assert ContractViewSet._is_hilton_full_template(contract) is True
+    assert 'missing_attachment_b' in {item['code'] for item in blockers}
+
+    contract.preamble_template.pdf_format = 'participation'
+    blockers = ContractViewSet()._hilton_template_pdf_blockers(contract)
     assert 'unsupported_hilton_pdf_format' in {item['code'] for item in blockers}
 
 

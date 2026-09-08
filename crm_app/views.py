@@ -26,6 +26,7 @@ import os
 import re
 import uuid
 from decimal import Decimal
+from xml.sax.saxutils import escape as xml_escape
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ logger = logging.getLogger(__name__)
 HILTON_FULL_TEMPLATE_IDS = frozenset({'12'})
 HILTON_FULL_TEMPLATE_NAMES = frozenset({
     'hilton international',
+    'hilton international — stream-only',
     'hilton participation agreement',
     'hilton hpa',
 })
@@ -1989,7 +1991,7 @@ class ContractViewSet(BaseModelViewSet):
             })
         return self._hilton_template_blocked_response(contract, blockers)
 
-    def _substitute_template_variables(self, content, contract):
+    def _substitute_template_variables(self, content, contract, *, escape_for_paragraph=False):
         """Replace template variables with actual values"""
         company = contract.company
 
@@ -2084,7 +2086,14 @@ class ContractViewSet(BaseModelViewSet):
                 replacements['{{rate_per_zone}}'] = f"{contract.currency} {rate:,.2f}"
 
         for var, value in replacements.items():
-            content = content.replace(var, str(value))
+            replacement = str(value)
+            if escape_for_paragraph:
+                # ContractTemplate.content is trusted ReportLab paragraph markup,
+                # while CRM values are plain text. Escape only the dynamic value
+                # so legal names such as "T&T" render literally without allowing
+                # customer data to be parsed as paragraph markup.
+                replacement = xml_escape(replacement)
+            content = content.replace(var, replacement)
 
         # Existing Hilton template text places the numeric variable before a
         # literal plural noun. Correct the one-zone grammar without changing
@@ -2124,6 +2133,11 @@ class ContractViewSet(BaseModelViewSet):
             return None
 
         company = contract.company
+        escape_dynamic_values = self._is_hilton_full_template(contract)
+
+        def paragraph_text(value):
+            text = str(value or '')
+            return xml_escape(text) if escape_dynamic_values else text
         has_pricing = contract.show_zone_pricing_detail and contract.price_per_zone
 
         # Style for property name (enables word-wrap for long names)
@@ -2154,7 +2168,10 @@ class ContractViewSet(BaseModelViewSet):
                 continue
             group_start = row_idx + 1  # +1 for header row
             for idx, zone in enumerate(platform_zones, 1):
-                property_name = Paragraph(contract.property_name or company.name, prop_style) if row_idx == 0 else ''
+                property_name = Paragraph(
+                    paragraph_text(contract.property_name or company.name),
+                    prop_style,
+                ) if row_idx == 0 else ''
                 service_name = platform_labels[platform_key] if idx == 1 else ''
                 row = [property_name, service_name, f"Zone {idx}: {str(zone)}"]
                 if has_pricing:
@@ -2276,6 +2293,11 @@ class ContractViewSet(BaseModelViewSet):
         GRID_COLOR = '#E8E0D8'
 
         company = contract.company
+        escape_dynamic_values = self._is_hilton_full_template(contract)
+
+        def paragraph_text(value):
+            text = str(value or '')
+            return xml_escape(text) if escape_dynamic_values else text
         prop_style = ParagraphStyle('ZoneProp', fontName='DejaVuSans', fontSize=9, textColor=colors.HexColor(TEXT_DARK))
 
         platform_labels = {'soundtrack': 'Soundtrack Your Brand', 'beatbreeze': 'Beat Breeze'}
@@ -2313,11 +2335,14 @@ class ContractViewSet(BaseModelViewSet):
                 continue
             group_start = row_idx + 1
             for idx, loc in enumerate(platform_locs, 1):
-                property_name = Paragraph(contract.property_name or company.name, prop_style) if row_idx == 0 else ''
+                property_name = Paragraph(
+                    paragraph_text(contract.property_name or company.name),
+                    prop_style,
+                ) if row_idx == 0 else ''
                 service_name = Paragraph(platform_labels[platform_key], prop_style) if idx == 1 else ''
                 for zone_name in location_zone_names(loc):
                     row_idx += 1
-                    zone_label = Paragraph(f"Zone {row_idx}: {zone_name}", prop_style)
+                    zone_label = Paragraph(paragraph_text(f"Zone {row_idx}: {zone_name}"), prop_style)
                     row = [property_name, service_name, zone_label]
                     if has_pricing:
                         zone_price = loc.price or contract.price_per_zone
@@ -2336,11 +2361,14 @@ class ContractViewSet(BaseModelViewSet):
                 continue
             group_start = row_idx + 1
             for idx, loc in enumerate(locs, 1):
-                property_name = Paragraph(contract.property_name or company.name, prop_style) if row_idx == 0 else ''
-                service_name = Paragraph(custom_name, prop_style) if idx == 1 else ''
+                property_name = Paragraph(
+                    paragraph_text(contract.property_name or company.name),
+                    prop_style,
+                ) if row_idx == 0 else ''
+                service_name = Paragraph(paragraph_text(custom_name), prop_style) if idx == 1 else ''
                 for zone_name in location_zone_names(loc):
                     row_idx += 1
-                    zone_label = Paragraph(f"Zone {row_idx}: {zone_name}", prop_style)
+                    zone_label = Paragraph(paragraph_text(f"Zone {row_idx}: {zone_name}"), prop_style)
                     row = [property_name, service_name, zone_label]
                     if has_pricing:
                         zone_price = loc.price or contract.price_per_zone
@@ -2837,10 +2865,19 @@ class ContractViewSet(BaseModelViewSet):
             ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#E8910C')),
         ]))
 
-        # Create card-style BILL TO section
+        # Create card-style BILL TO section. Hilton values are plain CRM text,
+        # while Paragraph parses XML-like markup; preserve only our explicit
+        # line breaks and escape every dynamic line at this boundary.
+        bill_to_name = company.legal_entity_name or company.name
+        bill_to_address = format_address_multiline(company)
+        if self._is_hilton_full_template(contract):
+            bill_to_name = xml_escape(str(bill_to_name or ''))
+            bill_to_address = '<br/>'.join(
+                xml_escape(line) for line in bill_to_address.split('<br/>')
+            )
         bill_to_content = Paragraph(f"""
-            <b>{company.legal_entity_name or company.name}</b><br/>
-            {format_address_multiline(company)}
+            <b>{bill_to_name}</b><br/>
+            {bill_to_address}
         """, from_content_style)
 
         bill_card_data = [
@@ -2879,6 +2916,7 @@ class ContractViewSet(BaseModelViewSet):
             )
             zones = contract.get_active_zones()
             has_locations = contract.service_locations.exists() or zones.exists()
+            escape_template_values = self._is_hilton_full_template(contract)
 
             # Helper to render paragraph content, splitting on '---' for page breaks
             def render_paragraph(content):
@@ -2917,7 +2955,11 @@ class ContractViewSet(BaseModelViewSet):
                     # Process {{signature_blocks}} first
                     before_sig = segment[:sig_pos]
                     after_sig = segment[sig_match.end():]
-                    before = self._substitute_template_variables(before_sig, contract)
+                    before = self._substitute_template_variables(
+                        before_sig,
+                        contract,
+                        escape_for_paragraph=escape_template_values,
+                    )
                     before = before.rstrip()
                     while before.endswith('<br/>') or before.endswith('<br />'):
                         before = before[:-5].rstrip() if before.endswith('<br/>') else before[:-6].rstrip()
@@ -2935,7 +2977,11 @@ class ContractViewSet(BaseModelViewSet):
                 # Check for {{zones_table}}
                 if '{{zones_table}}' in segment:
                     parts = segment.split('{{zones_table}}', 1)
-                    before = self._substitute_template_variables(parts[0], contract)
+                    before = self._substitute_template_variables(
+                        parts[0],
+                        contract,
+                        escape_for_paragraph=escape_template_values,
+                    )
                     bulk_content, heading_content, force_page_break = self._split_template_zones_preamble(before)
 
                     if bulk_content.strip():
@@ -2979,7 +3025,11 @@ class ContractViewSet(BaseModelViewSet):
                     before_sig = segment[:sig_match.start()]
                     after_sig = segment[sig_match.end():]
                     # Render content before signature blocks
-                    before = self._substitute_template_variables(before_sig, contract)
+                    before = self._substitute_template_variables(
+                        before_sig,
+                        contract,
+                        escape_for_paragraph=escape_template_values,
+                    )
                     before = before.rstrip()
                     while before.endswith('<br/>') or before.endswith('<br />'):
                         before = before[:-5].rstrip() if before.endswith('<br/>') else before[:-6].rstrip()
@@ -2996,7 +3046,11 @@ class ContractViewSet(BaseModelViewSet):
                     return
 
                 # No special variables — render as paragraph(s) with page break support
-                content = self._substitute_template_variables(segment, contract)
+                content = self._substitute_template_variables(
+                    segment,
+                    contract,
+                    escape_for_paragraph=escape_template_values,
+                )
                 if content.strip():
                     render_paragraph(content)
 
