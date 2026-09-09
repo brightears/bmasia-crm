@@ -6122,7 +6122,7 @@ class InvoiceViewSet(BaseModelViewSet):
         invoice = self.get_object()
         if not invoice.receipt_number:
             return Response({'error': 'No receipt generated for this invoice'}, status=status.HTTP_400_BAD_REQUEST)
-        if settings.COMMERCIAL_DOCUMENT_V2_INVOICE_LIVE:
+        if settings.COMMERCIAL_DOCUMENT_V2_RECEIPT_LIVE:
             return self._build_invoice_pdf_v2_response(invoice, is_receipt=True, preview=False)
         return self._build_invoice_pdf(invoice, is_receipt=True)
 

@@ -227,6 +227,29 @@ def test_ordinary_invoice_download_remains_attachment_and_records_audit(live):
     assert AuditLog.objects.count() == before + 1
 
 
+@override_settings(
+    COMMERCIAL_DOCUMENT_V2_INVOICE_LIVE=True,
+    COMMERCIAL_DOCUMENT_V2_RECEIPT_LIVE=False,
+)
+def test_receipt_release_is_independent_from_invoice_release():
+    user = _user("Finance")
+    invoice = _invoice(_company())
+    invoice.receipt_number = "TH-RCP-PREVIEW-API"
+    invoice.status = "Paid"
+    invoice.save(update_fields=["receipt_number", "status"])
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    response = client.get(f"/api/v1/invoices/{invoice.id}/receipt-pdf/")
+
+    assert response.status_code == 200
+    assert response["Content-Disposition"].startswith(
+        'attachment; filename="Receipt_Tax_Invoice_'
+    )
+    page_width = float(PdfReader(BytesIO(response.content)).pages[0].mediabox.width)
+    assert abs(page_width - 612.0) < 1
+
+
 @override_settings(COMMERCIAL_DOCUMENT_V2_PREVIEW_ENABLED=True)
 def test_receipt_preview_is_watermarked_and_side_effect_free():
     user = _user("Finance")

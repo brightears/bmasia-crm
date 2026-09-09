@@ -61,6 +61,27 @@ def _invoice_bytes(invoice=None):
     )
 
 
+def _hong_kong_quote_bytes():
+    return build_quote_pdf_v2(
+        sample_quote(),
+        entity_profile_for("BMAsia Limited"),
+        str(LOGO),
+        format_address_multiline,
+        format_duration,
+        preview=True,
+    )
+
+
+def _hong_kong_invoice_bytes():
+    return build_invoice_pdf_v2(
+        sample_invoice(),
+        entity_profile_for("BMAsia Limited"),
+        str(LOGO),
+        format_address_multiline,
+        preview=True,
+    )
+
+
 def test_shared_layout_contract_uses_print_safe_numeric_gutters():
     assert AMOUNT_RIGHT_PADDING >= 18
     assert TOTALS_SIDE_PADDING >= 26
@@ -394,3 +415,11 @@ def test_invoice_supports_hong_kong_customer_thailand_issuer_and_usd():
     assert "USD 1,300.00" in joined
     assert "TMBThanachart Bank" in joined
     assert "HSBC" not in joined
+
+
+def test_hong_kong_issuer_registration_number_is_visible_on_quote_and_invoice():
+    for pdf_bytes in (_hong_kong_quote_bytes(), _hong_kong_invoice_bytes()):
+        joined = "\n".join(_page_texts(_reader(pdf_bytes)))
+        assert "BMAsia Limited" in joined
+        assert "Business Registration Certificate No.: 34683002-000-05-26-3" in joined
+        assert "HSBC, HK" in joined

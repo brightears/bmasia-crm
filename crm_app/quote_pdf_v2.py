@@ -145,6 +145,10 @@ def build_quote_pdf_v2(
     issuer_lines = [entity["name"], entity["address"], f"Phone: {entity['phone']}"]
     if entity.get("tax"):
         issuer_lines.append(f"Tax ID: {entity['tax']}")
+    if entity.get("registration_number"):
+        issuer_lines.append(
+            f"Business Registration Certificate No.: {entity['registration_number']}"
+        )
 
     company = quote.company
     customer_lines = [

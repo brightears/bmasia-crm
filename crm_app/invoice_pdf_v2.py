@@ -111,6 +111,10 @@ def build_invoice_pdf_v2(
         issuer_lines.insert(1, "Head Office")
     if entity.get("tax"):
         issuer_lines.append(f"Tax ID: {entity['tax']}")
+    if entity.get("registration_number"):
+        issuer_lines.append(
+            f"Business Registration Certificate No.: {entity['registration_number']}"
+        )
 
     company = invoice.company
     customer_lines = [
