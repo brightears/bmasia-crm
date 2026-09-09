@@ -146,7 +146,7 @@ def test_hong_kong_preview_routes_show_exact_business_registration_number():
         assert response.status_code == 200
         assert (
             "Business Registration Certificate No.: 34683002-000-05-26-3"
-            in _pdf_text(response.content)
+            in " ".join(_pdf_text(response.content).split())
         )
 
 
