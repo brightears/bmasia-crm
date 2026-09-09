@@ -11,22 +11,26 @@ from crm_app.commercial_pdf import (
     CONTENT_WIDTH,
     build_document_pdf,
     clean_text,
+    commercial_product_label,
+    compact_line_item_description,
+    contains_standard_service_copy,
     document_intro,
     document_styles,
     html_text,
     identity_cards,
     is_duplicate_visible_block,
+    is_subscription_product,
     item_table,
     metadata_table,
     money,
     quantity,
-    remarks_block,
+    PRODUCT_COLUMN_WIDTH,
+    STANDARD_SERVICE_COPY,
     section_start,
     payment_block,
 )
 from crm_app.quote_pdf import (
     BILLING_FREQUENCY_DISPLAY,
-    LEGEND_FULL_NAMES,
     SUBSCRIPTION_CODES,
     _decimal_value,
     _short_code,
@@ -118,10 +122,8 @@ def build_quote_pdf_v2(
 ):
     """Render an A4, flow-based quotation and return raw PDF bytes.
 
-    Existing ``quote.notes`` remain customer-visible because that is the CRM
-    form's explicit contract and the legacy renderer's behavior. They are
-    rendered once only after deduplication against schedule and terms. A future
-    explicit ``customer_remarks`` value takes precedence when supplied.
+    Quote notes are internal CRM context and are never rendered. Explicit
+    schedule and terms fields remain customer-visible in their named sections.
     """
     styles = document_styles()
     duration_months = quote.contract_duration_months or 12
@@ -171,25 +173,44 @@ def build_quote_pdf_v2(
     story.append(Spacer(1, 7))
 
     line_items = list(quote.line_items.all())
+    multi_zone = sum(
+        (_decimal_value(getattr(item, "quantity", 0)) for item in line_items if is_subscription_product(getattr(item, "product_service", ""))),
+        Decimal("0"),
+    ) > 1
+    show_shared_service_copy = multi_zone and any(
+        contains_standard_service_copy(getattr(item, "description", ""))
+        for item in line_items
+    )
     rows = []
     complimentary = []
-    used_codes = set()
     complimentary_value = Decimal("0")
+    zone_index = 0
 
     for item in line_items:
         code = _short_code(getattr(item, "product_service", "") or "Service")
-        if code in SUBSCRIPTION_CODES:
-            used_codes.add(code)
-        description = clean_text(getattr(item, "description", ""))
-        if description and description.strip().lower().startswith(clean_text(code).lower()):
-            description_markup = f"<b>{escape(description)}</b>"
-        elif description:
-            description_markup = f"<b>{escape(clean_text(code))}</b><br/>{html_text(description)}"
-        else:
-            description_markup = f"<b>{escape(clean_text(code))}</b>"
-        description_cell = Paragraph(description_markup, styles["body"])
-
         item_quantity = _decimal_value(getattr(item, "quantity", 0))
+        is_subscription = code in SUBSCRIPTION_CODES
+        if is_subscription:
+            zone_index += 1
+        description = compact_line_item_description(
+            getattr(item, "description", ""),
+            product=getattr(item, "product_service", ""),
+            strip_standard_service_copy=show_shared_service_copy,
+        )
+        if not description:
+            if is_subscription and item_quantity == 1:
+                description = f"Zone {zone_index:02d}"
+            elif is_subscription and item_quantity > 1:
+                description = f"{quantity(item_quantity)} zones"
+            else:
+                description = "Service"
+        description_cell = Paragraph(html_text(description), styles["body"])
+        product_label = commercial_product_label(getattr(item, "product_service", ""))
+        product_markup = escape(product_label)
+        if product_label == "Beat Breeze":
+            product_markup = product_markup.replace(" ", "&#160;")
+        product_cell = Paragraph(product_markup, styles["body"])
+
         unit_price = _decimal_value(getattr(item, "unit_price", 0))
         if unit_price == 0:
             unit_value = _decimal_value(getattr(item, "unit_value", 0))
@@ -199,13 +220,14 @@ def build_quote_pdf_v2(
                 value = f"Value {money(quote.currency, line_value)}"
             else:
                 value = "Included"
-            complimentary.append([description_cell, quantity(item_quantity), "Included", value])
+            complimentary.append([product_cell, description_cell, quantity(item_quantity), "Included", value])
             continue
 
         unit_value = money(quote.currency, unit_price)
         if code in SUBSCRIPTION_CODES:
             unit_value += "\nper zone / year"
         rows.append([
+            product_cell,
             description_cell,
             quantity(item_quantity),
             unit_value,
@@ -215,10 +237,10 @@ def build_quote_pdf_v2(
     group_rows = set()
     if complimentary:
         group_rows.add(len(rows) + 1)
-        rows.append(["Included at no charge", "", "", ""])
+        rows.append(["Included at no charge", "", "", "", ""])
         rows.extend(complimentary)
     if not rows:
-        rows.append(["No line items", "", "", ""])
+        rows.append(["No line items", "", "", "", ""])
 
     totals = _quote_totals(quote, line_items, format_duration, entity)
     if complimentary_value > 0:
@@ -227,20 +249,19 @@ def build_quote_pdf_v2(
             money(quote.currency, complimentary_value),
         ))
 
-    if used_codes:
-        legend = "  |  ".join(f"{code} = {LEGEND_FULL_NAMES[code]}" for code in sorted(used_codes))
+    if show_shared_service_copy:
         story.extend([
-            Paragraph(html_text(legend), styles["small"]),
+            Paragraph(html_text(STANDARD_SERVICE_COPY), styles["small"]),
             Spacer(1, 5),
         ])
 
     story.extend(item_table(
-        ["Description", "Qty", "Unit price", "Amount"],
+        ["Service", "Zone / description", "Qty", "Unit price", "Amount"],
         rows,
-        [CONTENT_WIDTH - 264, 54, 98, 112],
-        {1, 2, 3},
+        [PRODUCT_COLUMN_WIDTH, CONTENT_WIDTH - PRODUCT_COLUMN_WIDTH - 246, 42, 92, 112],
+        {2, 3, 4},
         styles,
-        amount_columns={2, 3},
+        amount_columns={3, 4},
         totals=totals,
         group_rows=group_rows,
     ))
@@ -259,13 +280,6 @@ def build_quote_pdf_v2(
         story.append(KeepTogether(schedule_flowables))
         visible_prior.append(schedule)
     story.extend(payment_block(entity, terms, styles))
-
-    customer_remarks = clean_text(
-        getattr(quote, "customer_remarks", "") or getattr(quote, "notes", "")
-    ).strip()
-    if customer_remarks and not is_duplicate_visible_block(customer_remarks, visible_prior):
-        story.extend([Spacer(1, 10), remarks_block(customer_remarks, styles)])
-        visible_prior.append(customer_remarks)
 
     return build_document_pdf(
         story,

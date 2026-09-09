@@ -47,6 +47,13 @@ CONTENT_WIDTH = PAGE_WIDTH - (2 * PAGE_MARGIN)
 # These are public layout contracts and are intentionally asserted by tests.
 AMOUNT_RIGHT_PADDING = 18
 TOTALS_SIDE_PADDING = 26
+IDENTITY_CARD_GAP = 12
+PRODUCT_COLUMN_WIDTH = 78
+TOTALS_SECTION_GAP = 14
+
+STANDARD_SERVICE_COPY = (
+    "Managed music service with curated scheduling and remote onboarding"
+)
 
 NAVY = colors.HexColor("#06111A")
 INK = colors.HexColor("#101A27")
@@ -163,6 +170,84 @@ def clean_text(value):
     return str(value or "").translate(_DASH_TRANSLATION).replace("\r\n", "\n").replace("\r", "\n")
 
 
+def _product_key(value):
+    return re.sub(r"[^a-z0-9]+", "", clean_text(value).casefold())
+
+
+_SUBSCRIPTION_PRODUCT_LABELS = {
+    "bb": "Beat Breeze",
+    "beatbreze": "Beat Breeze",
+    "beatbreeze": "Beat Breeze",
+    "soundtrack": "Soundtrack",
+    "soundtrackyourbrand": "Soundtrack",
+    "syb": "Soundtrack",
+}
+
+_SUBSCRIPTION_PRODUCT_CODES = {
+    "bb": "BB",
+    "beatbreze": "BB",
+    "beatbreeze": "BB",
+    "soundtrack": "SYB",
+    "soundtrackyourbrand": "SYB",
+    "syb": "SYB",
+}
+
+_STANDARD_SERVICE_RE = re.compile(
+    r"managed\s+music\s+service\s+with\s+curated\s+scheduling\s+and\s+remote\s+onboarding",
+    flags=re.IGNORECASE,
+)
+
+
+def commercial_product_label(value):
+    """Return the concise customer-facing service name used in line-item tables."""
+    raw = clean_text(value).strip()
+    return _SUBSCRIPTION_PRODUCT_LABELS.get(_product_key(raw), raw or "Service")
+
+
+def is_subscription_product(value):
+    return _product_key(value) in _SUBSCRIPTION_PRODUCT_LABELS
+
+
+def contains_standard_service_copy(value):
+    return bool(_STANDARD_SERVICE_RE.search(clean_text(value)))
+
+
+def compact_line_item_description(value, *, product=None, strip_standard_service_copy=False):
+    """Keep a line item's specific zone/detail while removing safe repetition.
+
+    Only the exact shared service sentence is removed, and only when the caller
+    has established a multi-zone presentation. Product names are removed only
+    when they are an explicit prefix followed by a separator. All other
+    customer-authored wording remains untouched.
+    """
+    text = clean_text(value).strip()
+    if not text:
+        return ""
+
+    product_key = _product_key(product)
+    aliases = {
+        clean_text(product).strip(),
+        commercial_product_label(product),
+        _SUBSCRIPTION_PRODUCT_CODES.get(product_key, ""),
+    }
+    for alias in sorted((item for item in aliases if item), key=len, reverse=True):
+        if normalized_visible_text(text) == normalized_visible_text(alias):
+            text = ""
+            break
+        text = re.sub(
+            rf"^\s*{re.escape(alias)}\s*(?:[-:|]\s*)",
+            "",
+            text,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+
+    if strip_standard_service_copy:
+        text = _STANDARD_SERVICE_RE.sub("", text)
+        text = re.sub(r"\s*[-:|]\s*[-:|]\s*", " - ", text)
+    return text.strip(" \t\n-:|")
+
+
 def html_text(value):
     """Escape plain text for a ReportLab Paragraph and preserve explicit lines."""
     return "<br/>".join(escape(line) for line in clean_text(value).split("\n"))
@@ -181,9 +266,9 @@ def normalized_visible_text(value):
 def is_duplicate_visible_block(candidate, prior_blocks):
     """Detect only exact duplicates after safe visible normalization.
 
-    A customer remark may intentionally extend wording that already appears in
-    the payment terms. Treating containment as duplication would silently drop
-    the added instruction, so only a complete normalized match is suppressed.
+    A visible block may intentionally extend wording from another section.
+    Treating containment as duplication would silently drop the added
+    instruction, so only a complete normalized match is suppressed.
     """
     normalized = normalized_visible_text(candidate)
     if not normalized:
@@ -578,7 +663,7 @@ def metadata_table(items, styles):
     return KeepTogether([table, Spacer(1, 14)])
 
 
-def _identity_card(title, lines, styles, width):
+def _identity_card_body(lines, styles):
     content = list(lines)
     if content:
         first, rest = content[0], content[1:]
@@ -587,37 +672,47 @@ def _identity_card(title, lines, styles, width):
             body_markup += "<br/>" + html_lines(rest)
     else:
         body_markup = ""
-    table = Table([
-        [Paragraph(escape(clean_text(title).upper()), styles["label"])],
-        [Paragraph(body_markup, styles["body"])],
-    ], colWidths=[width])
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), WHITE),
-        ("BOX", (0, 0), (-1, -1), 0.65, LINE),
-        ("LINEBELOW", (0, 0), (-1, 0), 1.25, ORANGE),
-        ("LEFTPADDING", (0, 0), (-1, -1), 12),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-        ("TOPPADDING", (0, 0), (-1, 0), 8),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
-        ("TOPPADDING", (0, 1), (-1, 1), 8),
-        ("BOTTOMPADDING", (0, 1), (-1, 1), 10),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-    ]))
-    return table
+    return Paragraph(body_markup, styles["body"])
 
 
 def identity_cards(left_title, left_lines, right_title, right_lines, styles):
-    gap = 12
-    width = (CONTENT_WIDTH - gap) / 2
-    outer = Table([[
-        _identity_card(left_title, left_lines, styles, width),
-        _identity_card(right_title, right_lines, styles, width),
-    ]], colWidths=[width, width], hAlign="LEFT")
+    """Build two true sibling cards with equal outer width and height."""
+    width = (CONTENT_WIDTH - IDENTITY_CARD_GAP) / 2
+    outer = Table([
+        [
+            Paragraph(escape(clean_text(left_title).upper()), styles["label"]),
+            "",
+            Paragraph(escape(clean_text(right_title).upper()), styles["label"]),
+        ],
+        [
+            _identity_card_body(left_lines, styles),
+            "",
+            _identity_card_body(right_lines, styles),
+        ],
+    ], colWidths=[width, IDENTITY_CARD_GAP, width], hAlign="LEFT")
     outer.setStyle(TableStyle([
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-        ("TOPPADDING", (0, 0), (-1, -1), 0),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ("BACKGROUND", (0, 0), (0, 1), WHITE),
+        ("BACKGROUND", (2, 0), (2, 1), WHITE),
+        ("BOX", (0, 0), (0, 1), 0.65, LINE),
+        ("BOX", (2, 0), (2, 1), 0.65, LINE),
+        ("LINEBELOW", (0, 0), (0, 0), 1.25, ORANGE),
+        ("LINEBELOW", (2, 0), (2, 0), 1.25, ORANGE),
+        ("LEFTPADDING", (0, 0), (0, 1), 12),
+        ("RIGHTPADDING", (0, 0), (0, 1), 12),
+        ("LEFTPADDING", (2, 0), (2, 1), 12),
+        ("RIGHTPADDING", (2, 0), (2, 1), 12),
+        ("TOPPADDING", (0, 0), (0, 0), 8),
+        ("TOPPADDING", (2, 0), (2, 0), 8),
+        ("BOTTOMPADDING", (0, 0), (0, 0), 6),
+        ("BOTTOMPADDING", (2, 0), (2, 0), 6),
+        ("TOPPADDING", (0, 1), (0, 1), 8),
+        ("TOPPADDING", (2, 1), (2, 1), 8),
+        ("BOTTOMPADDING", (0, 1), (0, 1), 10),
+        ("BOTTOMPADDING", (2, 1), (2, 1), 10),
+        ("LEFTPADDING", (1, 0), (1, 1), 0),
+        ("RIGHTPADDING", (1, 0), (1, 1), 0),
+        ("TOPPADDING", (1, 0), (1, 1), 0),
+        ("BOTTOMPADDING", (1, 0), (1, 1), 0),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
     ]))
     return KeepTogether([outer, Spacer(1, 9)])
@@ -810,10 +905,11 @@ def item_table(
             splitInRow=1 if allow_in_row_split else 0,
             hAlign="LEFT",
         )
+        content_line_end = local_totals_row - 1 if local_totals_row is not None else -1
         commands = [
             ("BACKGROUND", (0, 0), (-1, 0), SURFACE),
             ("LINEBELOW", (0, 0), (-1, 0), 1.25, ORANGE),
-            ("LINEBELOW", (0, 1), (-1, -1), 0.45, LINE),
+            ("LINEBELOW", (0, 1), (-1, content_line_end), 0.45, LINE),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, ALT_SURFACE]),
             ("LEFTPADDING", (0, 0), (-1, -1), 9),
             ("RIGHTPADDING", (0, 0), (-1, -1), 9),
@@ -844,7 +940,7 @@ def item_table(
                 ("LEFTPADDING", (0, local_totals_row), (-1, local_totals_row), 0),
                 ("RIGHTPADDING", (0, local_totals_row), (-1, local_totals_row), 0),
                 ("TOPPADDING", (0, local_totals_row), (-1, local_totals_row), 12),
-                ("BOTTOMPADDING", (0, local_totals_row), (-1, local_totals_row), 0),
+                ("BOTTOMPADDING", (0, local_totals_row), (-1, local_totals_row), TOTALS_SECTION_GAP),
             ])
             if row_indices and not allow_in_row_split:
                 last_height = measured_row_height(row_indices[-1])
@@ -868,7 +964,7 @@ def item_table(
             ("LEFTPADDING", (0, 0), (-1, 0), 0),
             ("RIGHTPADDING", (0, 0), (-1, 0), 0),
             ("TOPPADDING", (0, 0), (-1, 0), 12),
-            ("BOTTOMPADDING", (0, 0), (-1, 0), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), TOTALS_SECTION_GAP),
         ]))
         return table
 
@@ -980,11 +1076,15 @@ def payment_block(entity, payment_terms, styles):
     # normal Paragraph so they can flow safely over as many pages as needed.
     flowables = [table]
     if clean_text(payment_terms).strip():
+        terms_markup = (
+            f"<font name='{BOLD_FONT}' size='7' color='#66717D'>PAYMENT TERMS</font>"
+            f"<br/>{html_text(payment_terms)}"
+        )
         flowables.extend([
             Spacer(1, 7),
-            Paragraph("PAYMENT TERMS", styles["label"]),
-            Spacer(1, 3),
-            Paragraph(html_text(payment_terms), styles["terms"]),
+            # One splittable paragraph prevents the label from being orphaned
+            # when a short page remainder cannot hold the first terms line.
+            Paragraph(terms_markup, styles["terms"]),
         ])
     return flowables
 

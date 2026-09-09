@@ -11,17 +11,21 @@ from crm_app.commercial_pdf import (
     CONTENT_WIDTH,
     build_document_pdf,
     clean_text,
+    commercial_product_label,
+    compact_line_item_description,
+    contains_standard_service_copy,
     document_intro,
     document_styles,
     html_text,
     identity_cards,
-    is_duplicate_visible_block,
+    is_subscription_product,
     item_table,
     metadata_table,
     money,
     payment_block,
     quantity,
-    remarks_block,
+    PRODUCT_COLUMN_WIDTH,
+    STANDARD_SERVICE_COPY,
     section_start,
 )
 
@@ -74,10 +78,8 @@ def build_invoice_pdf_v2(
 ):
     """Render an A4, flow-based invoice/receipt and return raw PDF bytes.
 
-    Existing ``invoice.notes`` remain customer-visible for compatibility with
-    the CRM form and legacy renderer. They are rendered once only after
-    deduplication against visible payment terms. A future explicit
-    ``customer_remarks`` value takes precedence when supplied.
+    Invoice notes are internal CRM context and are never rendered. Payment
+    terms remain customer-visible in their named section.
     """
     styles = document_styles()
     document_title = "Receipt / Tax Invoice" if is_receipt else "Invoice"
@@ -145,13 +147,43 @@ def build_invoice_pdf_v2(
     story.extend(section_start("01", "Invoice details", styles, minimum_following_height=92))
     line_items = list(invoice.line_items.all())
     has_product = any(clean_text(getattr(item, "product_service", "")).strip() for item in line_items)
+    multi_zone = sum(
+        (_decimal(getattr(item, "quantity", 0)) for item in line_items if is_subscription_product(getattr(item, "product_service", ""))),
+        Decimal("0"),
+    ) > 1
+    show_shared_service_copy = multi_zone and any(
+        contains_standard_service_copy(getattr(item, "description", ""))
+        for item in line_items
+    )
     rows = []
+    zone_index = 0
 
     if line_items:
         for item in line_items:
-            description = clean_text(getattr(item, "description", ""))
+            item_quantity = _decimal(getattr(item, "quantity", 0))
+            is_subscription = is_subscription_product(getattr(item, "product_service", ""))
+            if is_subscription:
+                zone_index += 1
+            description = compact_line_item_description(
+                getattr(item, "description", ""),
+                product=getattr(item, "product_service", ""),
+                strip_standard_service_copy=show_shared_service_copy,
+            )
+            if not description:
+                if is_subscription and item_quantity == 1:
+                    description = f"Zone {zone_index:02d}"
+                elif is_subscription and item_quantity > 1:
+                    description = f"{quantity(item_quantity)} zones"
+                else:
+                    description = "Service"
             period_start = getattr(item, "service_period_start", None)
             period_end = getattr(item, "service_period_end", None)
+            if (
+                period_start == getattr(invoice, "service_period_start", None)
+                and period_end == getattr(invoice, "service_period_end", None)
+            ):
+                period_start = None
+                period_end = None
             description_markup = html_text(description)
             if period_start and period_end:
                 description_markup += (
@@ -164,12 +196,15 @@ def build_invoice_pdf_v2(
                     f"{escape(_format_date(period_start))}</font>"
                 )
             description_cell = Paragraph(description_markup, styles["body"])
-            item_quantity = _decimal(getattr(item, "quantity", 0))
             unit_price = _decimal(getattr(item, "unit_price", 0))
             line_amount = item_quantity * unit_price
             if has_product:
+                product_label = commercial_product_label(getattr(item, "product_service", ""))
+                product_markup = escape(product_label)
+                if product_label == "Beat Breeze":
+                    product_markup = product_markup.replace(" ", "&#160;")
                 rows.append([
-                    getattr(item, "product_service", "") or "",
+                    Paragraph(product_markup, styles["body"]),
                     description_cell,
                     quantity(item_quantity),
                     money(invoice.currency, unit_price),
@@ -199,11 +234,16 @@ def build_invoice_pdf_v2(
         rows.append([description, "1", money(invoice.currency, _decimal(invoice.amount)), money(invoice.currency, _decimal(invoice.amount))])
 
     totals = _invoice_totals(invoice, entity, is_receipt=is_receipt)
+    if show_shared_service_copy:
+        story.extend([
+            Paragraph(html_text(STANDARD_SERVICE_COPY), styles["small"]),
+            Spacer(1, 5),
+        ])
     if has_product:
         story.extend(item_table(
-            ["Product / service", "Description", "Qty", "Unit price", "Amount"],
+            ["Service", "Description", "Qty", "Unit price", "Amount"],
             rows,
-            [68, CONTENT_WIDTH - 314, 42, 92, 112],
+            [PRODUCT_COLUMN_WIDTH, CONTENT_WIDTH - PRODUCT_COLUMN_WIDTH - 246, 42, 92, 112],
             {2, 3, 4},
             styles,
             amount_columns={3, 4},
@@ -234,17 +274,11 @@ def build_invoice_pdf_v2(
             ]),
         ])
 
-    story.extend(section_start("02", "Payment details", styles, minimum_following_height=150))
+    story.extend(section_start("02", "Payment details", styles, minimum_following_height=220))
     payment_terms = clean_text(getattr(invoice, "payment_terms_text", "")).strip()
     if not payment_terms:
         payment_terms = entity["payment_terms_default"]
     story.extend(payment_block(entity, payment_terms, styles))
-
-    customer_remarks = clean_text(
-        getattr(invoice, "customer_remarks", "") or getattr(invoice, "notes", "")
-    ).strip()
-    if customer_remarks and not is_duplicate_visible_block(customer_remarks, [payment_terms]):
-        story.extend([Spacer(1, 10), remarks_block(customer_remarks, styles)])
 
     return build_document_pdf(
         story,

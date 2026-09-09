@@ -50,7 +50,7 @@ def _quote(company, user):
         subtotal=Decimal("1300.00"),
         total_value=Decimal("1300.00"),
         currency="USD",
-        notes="Client-visible quote note.",
+        notes="Internal quote note.",
         created_by=user,
     )
 
@@ -65,7 +65,7 @@ def _invoice(company):
         amount=Decimal("1300.00"),
         total_amount=Decimal("1300.00"),
         currency="USD",
-        notes="Client-visible invoice note.",
+        notes="Internal invoice note.",
     )
 
 
@@ -98,7 +98,8 @@ def test_quote_preview_is_inline_watermarked_and_side_effect_free():
     assert response["Content-Disposition"].startswith('inline; filename="PREVIEW_ONLY_')
     assert response["Cache-Control"] == "private, no-store, max-age=0"
     assert "DRAFT PREVIEW - NOT FOR CUSTOMER" in text
-    assert text.count("Client-visible quote note.") == 1
+    assert "Internal quote note." not in text
+    assert "CUSTOMER REMARKS" not in text
     assert _write_queries(captured) == []
     assert (QuoteActivity.objects.count(), AuditLog.objects.count(), EmailLog.objects.count()) == counts_before
 
@@ -120,7 +121,8 @@ def test_invoice_preview_is_inline_watermarked_and_side_effect_free():
     assert response["Content-Disposition"].startswith('inline; filename="PREVIEW_ONLY_')
     assert response["Cache-Control"] == "private, no-store, max-age=0"
     assert "DRAFT PREVIEW - NOT FOR CUSTOMER" in text
-    assert text.count("Client-visible invoice note.") == 1
+    assert "Internal invoice note." not in text
+    assert "CUSTOMER REMARKS" not in text
     assert _write_queries(captured) == []
     assert (QuoteActivity.objects.count(), AuditLog.objects.count(), EmailLog.objects.count()) == counts_before
 

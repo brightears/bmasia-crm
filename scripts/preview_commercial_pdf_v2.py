@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 import sys
@@ -24,6 +24,42 @@ class RelatedList:
 
     def all(self):
         return list(self._values)
+
+
+ZONE_NAMES = [
+    "Main lobby",
+    "Lobby lounge",
+    "All-day dining",
+    "Breakfast room",
+    "Signature restaurant",
+    "Rooftop bar",
+    "Pool deck",
+    "Pool bar",
+    "Spa reception",
+    "Treatment rooms",
+    "Fitness centre",
+    "Executive lounge",
+    "Ballroom",
+    "Event foyer",
+    "Meeting room 1",
+    "Meeting room 2",
+    "Meeting room 3",
+    "Business centre",
+    "Guest lifts",
+    "Ground-floor corridor",
+    "Guest corridor - level 2",
+    "Guest corridor - level 3",
+    "Guest corridor - level 4",
+    "Guest corridor - level 5",
+    "Club-floor corridor",
+    "Kids club",
+    "Retail gallery",
+    "Arrival court",
+    "Garden terrace",
+    "Private dining room",
+    "Co-working lounge",
+    "VIP lounge",
+]
 
 
 def format_duration(months):
@@ -79,13 +115,13 @@ def sample_quote():
         phone="+852 5555 0101",
     )
     items = []
-    for index in range(1, 29):
+    for index, zone_name in enumerate(ZONE_NAMES[:28], start=1):
         quantity = Decimal("1")
         unit_price = Decimal("260.00")
         items.append(SimpleNamespace(
-            product_service="beatbreeze",
+            product_service="beatbreeze" if index <= 18 else "soundtrack",
             description=(
-                f"Venue zone {index:02d} - managed music service with curated scheduling "
+                f"Venue zone {index:02d}: {zone_name} - managed music service with curated scheduling "
                 "and remote onboarding"
             ),
             quantity=quantity,
@@ -117,7 +153,7 @@ def sample_quote():
         billing_frequency="annual",
         payment_schedule="Billed annually.",
         terms_conditions="",
-        notes="Customer-facing assumptions are shown once only when deliberately supplied.",
+        notes="Internal sales context must not appear on the customer quotation.",
         line_items=RelatedList(items),
     )
 
@@ -125,17 +161,16 @@ def sample_quote():
 def sample_invoice():
     company = sample_company()
     items = []
-    for index in range(1, 33):
-        start = date(2026, 10, 1) + timedelta(days=index - 1)
+    for index, zone_name in enumerate(ZONE_NAMES, start=1):
         items.append(SimpleNamespace(
             product_service="Beat Breeze",
             description=(
-                f"Managed music service - venue zone {index:02d} with a deliberately long "
-                "description to exercise safe row and page breaking"
+                f"Venue zone {index:02d}: {zone_name} - managed music service with curated "
+                "scheduling and remote onboarding"
             ),
             quantity=Decimal("1"),
             unit_price=Decimal("1300.00"),
-            service_period_start=start,
+            service_period_start=date(2026, 10, 1),
             service_period_end=date(2027, 9, 30),
         ))
     amount = sum((item.quantity * item.unit_price for item in items), Decimal("0"))
@@ -158,7 +193,7 @@ def sample_invoice():
         service_period_end=date(2027, 9, 30),
         payment_terms="Net 30",
         payment_terms_text="",
-        notes="Please quote the invoice number with the bank transfer.",
+        notes="Internal finance context must not appear on the customer invoice.",
         line_items=RelatedList(items),
     )
 

@@ -6,8 +6,16 @@ from reportlab.lib.pagesizes import A4
 
 from crm_app.commercial_pdf import (
     AMOUNT_RIGHT_PADDING,
+    CONTENT_WIDTH,
+    IDENTITY_CARD_GAP,
+    PRODUCT_COLUMN_WIDTH,
+    STANDARD_SERVICE_COPY,
+    TOTALS_SECTION_GAP,
     TOTALS_SIDE_PADDING,
+    compact_line_item_description,
+    document_styles,
     entity_profile_for,
+    identity_cards,
 )
 from crm_app.invoice_pdf_v2 import build_invoice_pdf_v2
 from crm_app.quote_pdf_v2 import build_quote_pdf_v2
@@ -56,9 +64,48 @@ def _invoice_bytes(invoice=None):
 def test_shared_layout_contract_uses_print_safe_numeric_gutters():
     assert AMOUNT_RIGHT_PADDING >= 18
     assert TOTALS_SIDE_PADDING >= 26
+    assert TOTALS_SECTION_GAP >= 12
+    assert PRODUCT_COLUMN_WIDTH >= 78
 
 
-def test_quote_preview_is_a4_multipage_and_renders_notes_once():
+def test_identity_cards_use_one_equal_height_sibling_grid():
+    cards = identity_cards(
+        "Issued by",
+        ["Short issuer"],
+        "Prepared for",
+        ["Long customer", "Address line 1", "Address line 2", "Attention: Person"],
+        document_styles(),
+    )
+    table = cards._content[0]
+    table.wrap(CONTENT_WIDTH, A4[1])
+
+    assert len(table._cellvalues) == 2
+    assert table._colWidths == [
+        (CONTENT_WIDTH - IDENTITY_CARD_GAP) / 2,
+        IDENTITY_CARD_GAP,
+        (CONTENT_WIDTH - IDENTITY_CARD_GAP) / 2,
+    ]
+    assert len(table._rowHeights) == 2
+
+
+def test_compact_description_removes_only_the_approved_repeated_copy():
+    description = (
+        "Beat Breeze - Lobby - managed music service with curated scheduling "
+        "and remote onboarding"
+    )
+    assert compact_line_item_description(
+        description,
+        product="Beat Breeze",
+        strip_standard_service_copy=True,
+    ) == "Lobby"
+    assert compact_line_item_description(
+        "Lobby - includes a custom launch workshop",
+        product="Beat Breeze",
+        strip_standard_service_copy=True,
+    ) == "Lobby - includes a custom launch workshop"
+
+
+def test_quote_preview_is_a4_multipage_compact_and_omits_internal_notes():
     reader = _reader(_quote_bytes())
     texts = _page_texts(reader)
     joined = "\n".join(texts)
@@ -67,8 +114,13 @@ def test_quote_preview_is_a4_multipage_and_renders_notes_once():
     assert abs(float(reader.pages[0].mediabox.width) - A4[0]) < 1
     assert abs(float(reader.pages[0].mediabox.height) - A4[1]) < 1
     assert joined.count("DRAFT PREVIEW - NOT FOR CUSTOMER") == len(reader.pages)
-    assert joined.count("DESCRIPTION") >= 2
-    assert joined.count("Customer-facing assumptions are shown once only when deliberately supplied.") == 1
+    assert joined.count("ZONE / DESCRIPTION") >= 2
+    assert joined.count(STANDARD_SERVICE_COPY) == 1
+    assert "Internal sales context" not in joined
+    assert "CUSTOMER REMARKS" not in joined
+    assert joined.lower().count(STANDARD_SERVICE_COPY.lower()) == 1
+    assert "Venue zone 01: Main lobby" in joined
+    assert "Venue zone 28: Arrival court" in joined
     assert all("TH-QT-PREVIEW-001" in text for text in texts)
     assert not any(character in joined for character in "\u2010\u2011\u2012\u2013\u2014")
 
@@ -79,8 +131,12 @@ def test_invoice_preview_repeats_headers_and_keeps_totals_with_final_item():
     joined = "\n".join(texts)
 
     assert len(reader.pages) >= 2
-    assert joined.count("PRODUCT / SERVICE") >= 2
-    assert joined.count("Please quote the invoice number with the bank transfer.") == 1
+    assert joined.count("DESCRIPTION QTY UNIT PRICE AMOUNT") >= 2
+    assert "Internal finance context" not in joined
+    assert "CUSTOMER REMARKS" not in joined
+    assert joined.count(STANDARD_SERVICE_COPY) == 1
+    assert joined.count("SERVICE PERIOD") == 1
+    assert joined.count("01 Oct 2026 - 30 Sep 2027") == 1
     assert all("TH-INV-PREVIEW-001" in text for text in texts)
 
     last_item_page = next(index for index, text in enumerate(texts) if "venue zone 32" in text)
@@ -92,24 +148,26 @@ def test_invoice_preview_repeats_headers_and_keeps_totals_with_final_item():
         assert sum(token in text for text in texts) == 1
 
 
-def test_customer_remarks_are_suppressed_when_already_in_terms():
+def test_quote_internal_notes_are_never_rendered_but_terms_remain_visible():
     quote = sample_quote()
     quote.terms_conditions = "Deliberate customer wording appears exactly once."
-    quote.notes = quote.terms_conditions
+    quote.notes = "INTERNAL-ONLY-QUOTE-NOTE"
 
     joined = "\n".join(_page_texts(_reader(_quote_bytes(quote))))
     assert joined.count("Deliberate customer wording appears exactly once.") == 1
+    assert "INTERNAL-ONLY-QUOTE-NOTE" not in joined
     assert "CUSTOMER REMARKS" not in joined
 
 
-def test_customer_remarks_preserve_wording_that_extends_existing_terms():
-    quote = sample_quote()
-    quote.terms_conditions = "Payment is due immediately."
-    quote.notes = "Payment is due immediately. Please include purchase order PO-123."
+def test_invoice_internal_notes_are_never_rendered_but_payment_terms_remain_visible():
+    invoice = sample_invoice()
+    invoice.notes = "INTERNAL-ONLY-INVOICE-NOTE"
+    invoice.payment_terms_text = "Customer payment terms remain visible."
 
-    joined = "\n".join(_page_texts(_reader(_quote_bytes(quote))))
-    assert "CUSTOMER REMARKS" in joined
-    assert "Please include purchase order PO-123." in joined
+    joined = "\n".join(_page_texts(_reader(_invoice_bytes(invoice))))
+    assert "INTERNAL-ONLY-INVOICE-NOTE" not in joined
+    assert "Customer payment terms remain visible." in joined
+    assert "CUSTOMER REMARKS" not in joined
 
 
 def test_payment_heading_schedule_and_bank_table_stay_together():
@@ -123,14 +181,14 @@ def test_payment_heading_schedule_and_bank_table_stay_together():
     assert heading_page == bank_page
 
 
-def test_product_legend_stays_with_pricing_content():
+def test_product_names_are_full_and_pricing_content_follows():
     quote = sample_quote()
     quote.line_items = type(quote.line_items)(quote.line_items.all()[:1])
 
     texts = _page_texts(_reader(_quote_bytes(quote)))
-    legend_page = next(index for index, text in enumerate(texts) if "BB = Beat Breeze" in text)
+    product_page = next(index for index, text in enumerate(texts) if "Beat Breeze" in text)
 
-    assert "DESCRIPTION" in texts[legend_page]
+    assert "ZONE / DESCRIPTION" in texts[product_page]
 
 
 def test_complimentary_group_heading_stays_with_first_included_item():
@@ -208,7 +266,7 @@ def test_long_payment_terms_flow_across_pages_without_layout_failure():
     assert all("TH-QT-PREVIEW-001" in text for text in _page_texts(reader))
 
 
-def test_long_customer_notes_flow_across_pages_without_layout_failure():
+def test_even_very_long_internal_notes_never_enter_the_customer_pdf():
     quote = sample_quote()
     quote.line_items = type(quote.line_items)(quote.line_items.all()[:1])
     quote.notes = " ".join(
@@ -219,9 +277,8 @@ def test_long_customer_notes_flow_across_pages_without_layout_failure():
     reader = _reader(_quote_bytes(quote))
     joined = "\n".join(_page_texts(reader))
 
-    assert len(reader.pages) >= 3
-    assert "Remark 1:" in joined
-    assert "Remark 500:" in joined
+    assert "Remark 1:" not in joined
+    assert "Remark 500:" not in joined
 
 
 def test_exceptionally_long_line_item_splits_only_when_a_page_cannot_hold_it():
