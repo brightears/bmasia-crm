@@ -128,6 +128,7 @@ def test_quote_preview_is_a4_multipage_compact_and_omits_internal_notes():
 def test_invoice_preview_repeats_headers_and_keeps_totals_with_final_item():
     reader = _reader(_invoice_bytes())
     texts = _page_texts(reader)
+    lower_texts = [text.lower() for text in texts]
     joined = "\n".join(texts)
 
     assert len(reader.pages) >= 2
@@ -139,13 +140,13 @@ def test_invoice_preview_repeats_headers_and_keeps_totals_with_final_item():
     assert joined.count("01 Oct 2026 - 30 Sep 2027") == 1
     assert all("TH-INV-PREVIEW-001" in text for text in texts)
 
-    last_item_page = next(index for index, text in enumerate(texts) if "venue zone 32" in text)
+    last_item_page = next(index for index, text in enumerate(lower_texts) if "venue zone 32" in text)
     total_page = next(index for index, text in enumerate(texts) if "Amount due" in text)
     assert last_item_page == total_page
 
     for item_number in range(1, 33):
         token = f"venue zone {item_number:02d}"
-        assert sum(token in text for text in texts) == 1
+        assert sum(token in text for text in lower_texts) == 1
 
 
 def test_quote_internal_notes_are_never_rendered_but_terms_remain_visible():
@@ -305,7 +306,9 @@ def test_oversized_invoice_row_does_not_orphan_later_final_item_totals():
     )
 
     texts = _page_texts(_reader(_invoice_bytes(invoice)))
-    last_item_page = next(index for index, text in enumerate(texts) if "venue zone 32" in text)
+    last_item_page = next(
+        index for index, text in enumerate(texts) if "venue zone 32" in text.lower()
+    )
     total_page = next(index for index, text in enumerate(texts) if "Amount due" in text)
 
     assert last_item_page == total_page
