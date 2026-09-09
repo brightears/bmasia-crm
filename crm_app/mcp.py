@@ -771,6 +771,7 @@ def generate_quote_pdf(id: str) -> str:
     factory = RequestFactory()
     request = factory.get(f'/api/v1/quotes/{id}/pdf/')
     request.user = _get_system_user()
+    request._bmasia_suppress_pdf_activity = True
 
     viewset = QuoteViewSet.as_view({'get': 'pdf'})
     response = viewset(request, pk=id)
@@ -796,6 +797,7 @@ def generate_invoice_pdf(id: str) -> str:
     factory = RequestFactory()
     request = factory.get(f'/api/v1/invoices/{id}/pdf/')
     request.user = _get_system_user()
+    request._bmasia_suppress_pdf_activity = True
 
     viewset = InvoiceViewSet.as_view({'get': 'pdf'})
     response = viewset(request, pk=id)

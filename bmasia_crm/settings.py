@@ -343,6 +343,20 @@ FIELD_ENCRYPTION_KEY = config('FIELD_ENCRYPTION_KEY', default='3gnXjsPSDoeTaNo0h
 # Disable admin authentication for development
 ADMIN_ENABLED = config('ADMIN_ENABLED', default='False', cast=bool)
 
+# Commercial-document renderer rollout.  The owner-approved v2 layout is
+# available only through authenticated, side-effect-free preview endpoints.
+# Issued/downloaded PDFs remain on the legacy renderers until the separate live
+# switches are deliberately enabled after text-manifest and visual QA.
+COMMERCIAL_DOCUMENT_V2_PREVIEW_ENABLED = config(
+    'COMMERCIAL_DOCUMENT_V2_PREVIEW_ENABLED', default=True, cast=bool
+)
+COMMERCIAL_DOCUMENT_V2_QUOTE_LIVE = config(
+    'COMMERCIAL_DOCUMENT_V2_QUOTE_LIVE', default=False, cast=bool
+)
+COMMERCIAL_DOCUMENT_V2_INVOICE_LIVE = config(
+    'COMMERCIAL_DOCUMENT_V2_INVOICE_LIVE', default=False, cast=bool
+)
+
 # Logging Configuration
 LOGGING = {
     'version': 1,

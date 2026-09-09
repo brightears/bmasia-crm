@@ -104,7 +104,8 @@ from .serializers import (
 )
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
-    TaskAssigneePermission, ReadOnlyForNonOwner
+    TaskAssigneePermission, ReadOnlyForNonOwner,
+    CommercialDocumentPreviewPermission,
 )
 from .rene_auth import (
     IsReneRenewalReaderOrAuthenticatedUser,
@@ -6108,16 +6109,100 @@ class InvoiceViewSet(BaseModelViewSet):
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
         """Generate and download PDF for invoice"""
+        from django.conf import settings
         invoice = self.get_object()
+        if settings.COMMERCIAL_DOCUMENT_V2_INVOICE_LIVE:
+            return self._build_invoice_pdf_v2_response(invoice, is_receipt=False, preview=False)
         return self._build_invoice_pdf(invoice, is_receipt=False)
 
     @action(detail=True, methods=['get'], url_path='receipt-pdf')
     def receipt_pdf(self, request, pk=None):
         """Generate and download Receipt/Tax Invoice PDF"""
+        from django.conf import settings
         invoice = self.get_object()
         if not invoice.receipt_number:
             return Response({'error': 'No receipt generated for this invoice'}, status=status.HTTP_400_BAD_REQUEST)
+        if settings.COMMERCIAL_DOCUMENT_V2_INVOICE_LIVE:
+            return self._build_invoice_pdf_v2_response(invoice, is_receipt=True, preview=False)
         return self._build_invoice_pdf(invoice, is_receipt=True)
+
+    @action(
+        detail=True,
+        methods=['get'],
+        url_path='preview-pdf',
+        permission_classes=[CommercialDocumentPreviewPermission],
+    )
+    def preview_pdf(self, request, pk=None):
+        """Render the owner-approved v2 invoice preview without CRM side effects."""
+        from django.conf import settings
+        if not settings.COMMERCIAL_DOCUMENT_V2_PREVIEW_ENABLED:
+            return Response({'error': 'Commercial document v2 preview is disabled'}, status=status.HTTP_404_NOT_FOUND)
+        return self._build_invoice_pdf_v2_response(self.get_object(), is_receipt=False, preview=True)
+
+    @action(
+        detail=True,
+        methods=['get'],
+        url_path='preview-receipt-pdf',
+        permission_classes=[CommercialDocumentPreviewPermission],
+    )
+    def preview_receipt_pdf(self, request, pk=None):
+        """Render a v2 receipt preview without CRM side effects."""
+        from django.conf import settings
+        invoice = self.get_object()
+        if not settings.COMMERCIAL_DOCUMENT_V2_PREVIEW_ENABLED:
+            return Response({'error': 'Commercial document v2 preview is disabled'}, status=status.HTTP_404_NOT_FOUND)
+        if not invoice.receipt_number:
+            return Response({'error': 'No receipt generated for this invoice'}, status=status.HTTP_400_BAD_REQUEST)
+        return self._build_invoice_pdf_v2_response(invoice, is_receipt=True, preview=True)
+
+    def _build_invoice_pdf_v2_response(self, invoice, *, is_receipt, preview):
+        """HTTP adapter around the request-free v2 invoice renderer."""
+        from django.conf import settings
+        from crm_app.commercial_pdf import entity_profile_for
+        from crm_app.invoice_pdf_v2 import build_invoice_pdf_v2
+
+        try:
+            entity = entity_profile_for(invoice.company.billing_entity)
+        except ValueError as exc:
+            return Response(
+                {'error': str(exc), 'code': 'UNSUPPORTED_BILLING_ENTITY'},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        logo_path = os.path.join(
+            settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png'
+        )
+        pdf_data = build_invoice_pdf_v2(
+            invoice,
+            entity,
+            logo_path,
+            format_address_multiline,
+            is_receipt=is_receipt,
+            preview=preview,
+        )
+        response = HttpResponse(pdf_data, content_type='application/pdf')
+        if is_receipt:
+            filename = f"Receipt_Tax_Invoice_{invoice.receipt_number}.pdf"
+        else:
+            filename = f"Invoice_{invoice.invoice_number}.pdf"
+        if preview:
+            filename = f"PREVIEW_ONLY_{filename}"
+            response['Content-Disposition'] = f'inline; filename="{filename}"'
+            response['Cache-Control'] = 'private, no-store, max-age=0'
+            response['Pragma'] = 'no-cache'
+            response['X-Content-Type-Options'] = 'nosniff'
+        else:
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            raw_request = getattr(self.request, '_request', self.request)
+            if not getattr(raw_request, '_bmasia_suppress_pdf_activity', False):
+                doc_type = 'Receipt/Tax Invoice' if is_receipt else 'Invoice'
+                self.log_action('VIEW', invoice, {
+                    'action': f'{doc_type} PDF generated and downloaded',
+                    'invoice_number': invoice.invoice_number,
+                    'receipt_number': invoice.receipt_number if is_receipt else None,
+                    'status': invoice.status,
+                    'layout': 'commercial_v2',
+                })
+        return response
 
     def _build_invoice_pdf(self, invoice, is_receipt=False):
         """Shared PDF builder for both invoice and receipt/tax invoice"""
@@ -6581,14 +6666,18 @@ class InvoiceViewSet(BaseModelViewSet):
         else:
             response['Content-Disposition'] = f'attachment; filename="Invoice_{invoice.invoice_number}.pdf"'
 
-        # Log activity
-        doc_type = 'Receipt/Tax Invoice' if is_receipt else 'Invoice'
-        self.log_action('VIEW', invoice, {
-            'action': f'{doc_type} PDF generated and downloaded',
-            'invoice_number': invoice.invoice_number,
-            'receipt_number': invoice.receipt_number if is_receipt else None,
-            'status': invoice.status
-        })
+        # MCP generation is a read-only inspection path. The internal request
+        # marker cannot be supplied by an external HTTP caller, so ordinary UI
+        # downloads retain their existing activity record.
+        raw_request = getattr(self.request, '_request', self.request)
+        if not getattr(raw_request, '_bmasia_suppress_pdf_activity', False):
+            doc_type = 'Receipt/Tax Invoice' if is_receipt else 'Invoice'
+            self.log_action('VIEW', invoice, {
+                'action': f'{doc_type} PDF generated and downloaded',
+                'invoice_number': invoice.invoice_number,
+                'receipt_number': invoice.receipt_number if is_receipt else None,
+                'status': invoice.status
+            })
 
         return response
 
@@ -6884,6 +6973,21 @@ class QuoteViewSet(BaseModelViewSet):
 
         quote = self.get_object()
 
+        if settings.COMMERCIAL_DOCUMENT_V2_QUOTE_LIVE:
+            response = self._build_quote_pdf_v2_response(quote, preview=False)
+            raw_request = getattr(request, '_request', request)
+            if (
+                response.status_code == status.HTTP_200_OK
+                and not getattr(raw_request, '_bmasia_suppress_pdf_activity', False)
+            ):
+                QuoteActivity.objects.create(
+                    quote=quote,
+                    user=request.user if request.user.is_authenticated else None,
+                    activity_type='Viewed',
+                    description=f'Quote {quote.quote_number} PDF generated and downloaded (commercial v2)'
+                )
+            return response
+
         # Get entity-specific details based on billing_entity
         billing_entity = quote.company.billing_entity
         if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
@@ -6931,14 +7035,65 @@ class QuoteViewSet(BaseModelViewSet):
         response = HttpResponse(pdf_data, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="Quote_{quote.quote_number}.pdf"'
 
-        # Log activity
-        QuoteActivity.objects.create(
-            quote=quote,
-            user=request.user if request.user.is_authenticated else None,
-            activity_type='Viewed',
-            description=f'Quote {quote.quote_number} PDF generated and downloaded'
-        )
+        # MCP generation is read-only; normal UI downloads still record Viewed.
+        raw_request = getattr(request, '_request', request)
+        if not getattr(raw_request, '_bmasia_suppress_pdf_activity', False):
+            QuoteActivity.objects.create(
+                quote=quote,
+                user=request.user if request.user.is_authenticated else None,
+                activity_type='Viewed',
+                description=f'Quote {quote.quote_number} PDF generated and downloaded'
+            )
 
+        return response
+
+    @action(
+        detail=True,
+        methods=['get'],
+        url_path='preview-pdf',
+        permission_classes=[CommercialDocumentPreviewPermission],
+    )
+    def preview_pdf(self, request, pk=None):
+        """Render the owner-approved v2 quotation preview without CRM writes."""
+        from django.conf import settings
+        if not settings.COMMERCIAL_DOCUMENT_V2_PREVIEW_ENABLED:
+            return Response({'error': 'Commercial document v2 preview is disabled'}, status=status.HTTP_404_NOT_FOUND)
+        return self._build_quote_pdf_v2_response(self.get_object(), preview=True)
+
+    def _build_quote_pdf_v2_response(self, quote, *, preview):
+        """HTTP adapter around the request-free v2 quotation renderer."""
+        from django.conf import settings
+        from crm_app.commercial_pdf import entity_profile_for
+        from crm_app.quote_pdf_v2 import build_quote_pdf_v2
+
+        try:
+            entity = entity_profile_for(quote.company.billing_entity)
+        except ValueError as exc:
+            return Response(
+                {'error': str(exc), 'code': 'UNSUPPORTED_BILLING_ENTITY'},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        logo_path = os.path.join(
+            settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png'
+        )
+        pdf_data = build_quote_pdf_v2(
+            quote,
+            entity,
+            logo_path,
+            format_address_multiline=format_address_multiline,
+            format_duration=_format_duration_from_months,
+            preview=preview,
+        )
+        response = HttpResponse(pdf_data, content_type='application/pdf')
+        filename = f"Quote_{quote.quote_number}.pdf"
+        if preview:
+            filename = f"PREVIEW_ONLY_{filename}"
+            response['Content-Disposition'] = f'inline; filename="{filename}"'
+            response['Cache-Control'] = 'private, no-store, max-age=0'
+            response['Pragma'] = 'no-cache'
+            response['X-Content-Type-Options'] = 'nosniff'
+        else:
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
 
 

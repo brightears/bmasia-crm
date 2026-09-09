@@ -2,6 +2,22 @@ from rest_framework import permissions
 from django.db.models import Q
 
 
+class CommercialDocumentPreviewPermission(permissions.BasePermission):
+    """Match existing document-read access while rejecting inactive users.
+
+    Preview must not be broader than the authenticated PDF endpoints, but it
+    must not leave an already-authorized CRM user with a broken Preview button
+    either.  Document-family role policy can be tightened centrally later when
+    the existing download endpoints receive the same policy.
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_active', False):
+            return False
+        return True
+
+
 class RoleBasedPermission(permissions.BasePermission):
     """
     Custom permission class that checks user roles and field-level permissions
