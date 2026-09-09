@@ -309,6 +309,7 @@ export interface Contract {
   end_date: string;
   value: number;
   currency: string;
+  billing_entity?: string;
   tax_rate: number;
   tax_amount: number;
   total_value: number;
@@ -316,6 +317,7 @@ export interface Contract {
   renewal_period_months: number;
   is_active: boolean;
   payment_terms?: string;
+  payment_schedule?: string;
   billing_frequency: string;
   discount_percentage: number;
   notes?: string;
@@ -356,7 +358,7 @@ export interface Contract {
   soundtrack_account_id?: string;
   effective_soundtrack_account_id?: string;
   // Contract Content Management fields
-  preamble_template?: string;
+  preamble_template?: string | null;
   preamble_custom?: string;
   payment_template?: string;
   payment_custom?: string;
@@ -459,6 +461,7 @@ export interface Invoice {
   discount_amount: number;
   total_amount: number;
   currency: string;
+  billing_entity?: string;
   property_name?: string;
   payment_method?: string;
   payment_terms?: string;
@@ -631,7 +634,9 @@ export interface Quote {
   discount_amount: number;
   total_value: number;
   currency: string;
+  billing_entity?: string;
   terms_conditions?: string;
+  payment_schedule?: string;
   notes?: string;
   is_expired: boolean;
   days_until_expiry: number;

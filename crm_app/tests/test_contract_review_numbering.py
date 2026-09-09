@@ -147,7 +147,9 @@ def test_opt_in_mcp_pdf_has_visible_final_number_while_contract_remains_draft(re
     pdf = base64.b64decode(result['content_b64'])
     text = '\n'.join(page.extract_text() or '' for page in PdfReader(io.BytesIO(pdf)).pages)
     assert result['contract_number'] in text
-    assert 'Contract Number' in text
+    # V2 places the final number in the recurring document header, not the
+    # legacy metadata-table column. Its visibility remains the contract.
+    assert 'PRINCIPAL TERMS' in text
     assert 'DRAFT-' not in text
     assert result['status'] == 'Draft'
     draft.refresh_from_db()

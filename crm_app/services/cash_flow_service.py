@@ -74,6 +74,8 @@ class CashFlowService:
         Returns:
             Complete cash flow statement dictionary
         """
+        from crm_app.services.document_entity_filters import finance_entity_slug
+        billing_entity = finance_entity_slug(billing_entity)
         month_names = [
             '', 'January', 'February', 'March', 'April', 'May', 'June',
             'July', 'August', 'September', 'October', 'November', 'December'
@@ -182,6 +184,8 @@ class CashFlowService:
         Generate Year-to-Date Cash Flow Statement.
         Aggregates monthly cash flows from January through the specified month.
         """
+        from crm_app.services.document_entity_filters import finance_entity_slug
+        billing_entity = finance_entity_slug(billing_entity)
         month_names = [
             '', 'January', 'February', 'March', 'April', 'May', 'June',
             'July', 'August', 'September', 'October', 'November', 'December'
@@ -382,7 +386,12 @@ class CashFlowService:
         )
 
         if billing_entity:
-            queryset = queryset.filter(contract__company__billing_entity=billing_entity)
+            from crm_app.services.document_entity_filters import filter_document_entity
+            if billing_entity == 'all':
+                # Preserve legacy combined-selector behavior in this rollout.
+                queryset = queryset.filter(contract__company__billing_entity=billing_entity)
+            else:
+                queryset = filter_document_entity(queryset, billing_entity)
         if currency:
             queryset = queryset.filter(currency=currency)
 

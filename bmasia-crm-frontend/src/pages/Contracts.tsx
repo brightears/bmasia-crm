@@ -320,6 +320,18 @@ const Contracts: React.FC = () => {
     setActionMenuAnchor(null);
   };
 
+  const handlePreviewPDF = async (contract: Contract) => {
+    try {
+      const blob = await ApiService.previewContractPDF(contract.id);
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+    } catch (err: any) {
+      setError(err instanceof Error ? err.message : 'Failed to preview PDF');
+    }
+    setActionMenuAnchor(null);
+  };
+
   // Proforma invoice: standalone advance-payment request generated from the
   // contract (sent with the renewal pack so the customer can raise a PO and
   // pay before the period starts). Not a tax invoice; creates no Invoice/AR.
@@ -656,6 +668,12 @@ const Contracts: React.FC = () => {
             <GetApp fontSize="small" />
           </ListItemIcon>
           <ListItemText>Download PDF</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => handlePreviewPDF(actionMenuContract!)}>
+          <ListItemIcon>
+            <Visibility fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Preview draft PDF</ListItemText>
         </MenuItem>
         <MenuItem onClick={() => handleDownloadProforma(actionMenuContract!)}>
           <ListItemIcon>

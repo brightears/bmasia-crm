@@ -793,10 +793,18 @@ class Contract(TimestampedModel):
         help_text="Total including tax: value + tax_amount"
     )
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
+    billing_entity = models.CharField(
+        max_length=50, choices=Company.BILLING_ENTITY_CHOICES, blank=True, default='',
+        help_text="Issuer override for this document only. Blank uses the company's billing entity; independent of currency and customer country."
+    )
     auto_renew = models.BooleanField(default=False)
     renewal_period_months = models.IntegerField(default=12)
     is_active = models.BooleanField(default=True)
     payment_terms = models.CharField(max_length=100, blank=True)
+    payment_schedule = models.TextField(
+        blank=True, default='',
+        help_text="Explicit customer-facing payment schedule, preserved independently from legal payment terms."
+    )
     billing_frequency = models.CharField(max_length=20, default='Annual')
     discount_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     notes = models.TextField(blank=True)
@@ -971,6 +979,11 @@ class Contract(TimestampedModel):
             models.Index(fields=['lifecycle_type', 'lifecycle_effective_date']),
         ]
     
+    @property
+    def effective_billing_entity(self):
+        from crm_app.services.document_context import effective_billing_entity
+        return effective_billing_entity(self)
+
     def save(self, *args, **kwargs):
         """Auto-set sent_date when status changes to Sent.
         Deferred contract numbering: drafts get DRAFT-xxxx, real number
@@ -980,7 +993,8 @@ class Contract(TimestampedModel):
 
         # Deferred numbering: assign real contract number when Sent, Active, or Renewed
         if self.status in ('Sent', 'Active', 'Renewed') and (not self.contract_number or self.contract_number.startswith('DRAFT-') or self.contract_number.startswith('C-')):
-            region = 'TH' if self.company and self.company.billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 'HK'
+            from crm_app.services.document_context import document_region
+            region = document_region(self)
             self.contract_number = DocumentSequence.get_next_number(region, 'CT')
         elif not self.contract_number or self.contract_number.startswith('C-'):
             # Draft/new contracts get a temporary DRAFT number
@@ -1519,6 +1533,10 @@ class Invoice(TimestampedModel):
     discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2)
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
+    billing_entity = models.CharField(
+        max_length=50, choices=Company.BILLING_ENTITY_CHOICES, blank=True, default='',
+        help_text="Issuer override for this document only. Blank uses the company's billing entity; independent of currency and customer country."
+    )
     payment_terms = models.CharField(max_length=50, blank=True, default='Net 30')
     payment_terms_text = models.TextField(blank=True)
     service_period_start = models.DateField(null=True, blank=True)
@@ -1549,6 +1567,11 @@ class Invoice(TimestampedModel):
     def __str__(self):
         return f"{self.invoice_number} - {self.company.name}"
     
+    @property
+    def effective_billing_entity(self):
+        from crm_app.services.document_context import effective_billing_entity
+        return effective_billing_entity(self)
+
     @property
     def days_overdue(self):
         """Calculate days overdue"""
@@ -2595,6 +2618,10 @@ class Quote(TimestampedModel):
     discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     total_value = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='USD')
+    billing_entity = models.CharField(
+        max_length=50, choices=Company.BILLING_ENTITY_CHOICES, blank=True, default='',
+        help_text="Issuer override for this document only. Blank uses the company's billing entity; independent of currency and customer country."
+    )
 
     # Billing presentation (drives the quote PDF term/billing band + payment-schedule line)
     BILLING_FREQUENCY_CHOICES = [
@@ -2654,6 +2681,11 @@ class Quote(TimestampedModel):
             return (self.valid_until - timezone.now().date()).days
         return 0
 
+    @property
+    def effective_billing_entity(self):
+        from crm_app.services.document_context import effective_billing_entity
+        return effective_billing_entity(self)
+
     def save(self, *args, **kwargs):
         """Auto-update status dates. Auto-generate quote_number if blank or old format."""
         if self.status == 'Sent' and not self.sent_date:
@@ -2667,7 +2699,8 @@ class Quote(TimestampedModel):
 
         # Auto-generate quote number using atomic sequence
         if not self.quote_number or self.quote_number.startswith('Q-'):
-            region = 'TH' if self.company and self.company.billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 'HK'
+            from crm_app.services.document_context import document_region
+            region = document_region(self)
             self.quote_number = DocumentSequence.get_next_number(region, 'QT')
 
         super().save(*args, **kwargs)

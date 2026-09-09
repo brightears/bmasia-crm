@@ -97,6 +97,8 @@ class ProfitLossService:
                 "net_margin": 3.7
             }
         """
+        from crm_app.services.document_entity_filters import finance_entity_slug
+        billing_entity = finance_entity_slug(billing_entity)
         month_names = [
             '', 'January', 'February', 'March', 'April', 'May', 'June',
             'July', 'August', 'September', 'October', 'November', 'December'
@@ -182,6 +184,8 @@ class ProfitLossService:
         Returns:
             Same structure as get_monthly_profit_loss but with YTD totals
         """
+        from crm_app.services.document_entity_filters import finance_entity_slug
+        billing_entity = finance_entity_slug(billing_entity)
         # Initialize accumulators
         total_revenue = {
             'new_count': 0, 'new_value': Decimal('0'),
@@ -418,7 +422,13 @@ class ProfitLossService:
         )
 
         if billing_entity:
-            base_query = base_query.filter(company__billing_entity=billing_entity)
+            from crm_app.services.document_entity_filters import filter_document_entity
+            if billing_entity == 'all':
+                # Preserve the existing combined-selector behavior alongside
+                # legacy expense/snapshot selectors; this is not a report redesign.
+                base_query = base_query.filter(company__billing_entity=billing_entity)
+            else:
+                base_query = filter_document_entity(base_query, billing_entity)
         if currency:
             base_query = base_query.filter(currency=currency)
 

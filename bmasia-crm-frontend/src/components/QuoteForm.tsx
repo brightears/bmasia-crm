@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -43,6 +43,8 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Quote, QuoteLineItem, Company, Contact, Opportunity } from '../types';
 import ApiService from '../services/api';
+import DocumentIssuerField from './DocumentIssuerField';
+import { documentValidationMessage } from '../utils/documentTailoring';
 
 // Product options for dropdown
 const PRODUCT_OPTIONS = [
@@ -139,8 +141,10 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
     valid_from: new Date(),
     valid_until: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
     terms_conditions: TERMS_OPTIONS.find(t => t.code === '30_days')?.text || 'Payment is due within 30 days of acceptance. This quote is valid for the specified period.',
+    payment_schedule: '',
     notes: '',
     currency: 'USD',
+    billing_entity: '',
   });
 
   const defaultProduct = PRODUCT_OPTIONS.find(p => p.code === 'soundtrack_essential');
@@ -161,6 +165,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
   const [selectedCompanyCountry, setSelectedCompanyCountry] = useState<string>('');
   const [selectedTermsOption, setSelectedTermsOption] = useState<string>('30_days');
   const [isCustomDuration, setIsCustomDuration] = useState(false);
+  const currencyEdited = useRef(false);
 
   const DURATION_PRESETS = [
     { label: '6 months', months: 6 },
@@ -183,9 +188,12 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
           valid_from: new Date(quote.valid_from),
           valid_until: new Date(quote.valid_until),
           terms_conditions: quote.terms_conditions || '',
+          payment_schedule: quote.payment_schedule || '',
           notes: quote.notes || '',
           currency: quote.currency,
+          billing_entity: quote.billing_entity || '',
         });
+        currencyEdited.current = true;
         setLineItems(quote.line_items || []);
 
         // Detect if duration matches a preset
@@ -220,6 +228,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
           ...prev,
           quote_number: quoteNumber,
           company: prefillCompany,
+          billing_entity: quote?.billing_entity || '',
           opportunity: prefillOpportunity,
           contract_duration_months: 12,
         }));
@@ -265,12 +274,14 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
         setFormData(prev => ({
           ...prev,
           company: value,
-          currency: smartCurrency
+          currency: currencyEdited.current ? prev.currency : smartCurrency
         }));
         return;
       }
     }
 
+    if (field === 'currency') currencyEdited.current = true;
+    if (field === 'terms_conditions') setSelectedTermsOption('custom');
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -421,7 +432,9 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
         discount_amount: totals.discountAmount,
         total_value: totals.total,
         currency: formData.currency,
+        billing_entity: formData.billing_entity,
         terms_conditions: formData.terms_conditions,
+        payment_schedule: formData.payment_schedule,
         notes: formData.notes,
         line_items: cleanLineItems as any,
       };
@@ -448,7 +461,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
       onSave(savedQuote);
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to save quote');
+      setError(documentValidationMessage(err.response?.data, 'Failed to save quote'));
     } finally {
       setLoading(false);
     }
@@ -468,9 +481,12 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
       valid_from: new Date(),
       valid_until: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       terms_conditions: defaultTerms,
+      payment_schedule: '',
       notes: '',
       currency: 'USD',
+      billing_entity: '',
     });
+    currencyEdited.current = false;
     setIsCustomDuration(false);
     setLineItems([{
       product_service: defaultProduct?.name || 'Soundtrack Essential (Serviced)',
@@ -754,6 +770,15 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
 
             {/* Line Items */}
             <Grid item xs={12}>
+              <DocumentIssuerField
+                value={formData.billing_entity}
+                companyEntity={companies.find(c => c.id === formData.company)?.billing_entity}
+                onChange={value => handleInputChange('billing_entity', value)}
+              />
+            </Grid>
+
+            {/* Line Items */}
+            <Grid item xs={12}>
               <Box sx={{ mt: 3 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                   <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center' }}>
@@ -994,6 +1019,18 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
             </Grid>
 
             {/* Terms and Notes */}
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Agreed payment schedule (optional)"
+                value={formData.payment_schedule}
+                onChange={event => handleInputChange('payment_schedule', event.target.value)}
+                multiline
+                minRows={2}
+                inputProps={{ maxLength: 255 }}
+                helperText="Printed once in the payment section. Leave blank to use the quotation's billing frequency and duration."
+              />
+            </Grid>
             <Grid item xs={12} md={6}>
               <FormControl fullWidth sx={{ mb: 2 }}>
                 <InputLabel>Terms & Conditions</InputLabel>
@@ -1011,16 +1048,13 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
               </FormControl>
               <TextField
                 fullWidth
-                label={selectedTermsOption === 'custom' ? 'Custom Terms' : 'Terms Preview'}
+                label="Customer-facing terms (editable)"
                 value={formData.terms_conditions}
                 onChange={(e) => handleInputChange('terms_conditions', e.target.value)}
                 multiline
                 rows={3}
                 placeholder="Enter custom terms and conditions..."
-                disabled={selectedTermsOption !== 'custom'}
-                InputProps={{
-                  readOnly: selectedTermsOption !== 'custom',
-                }}
+                helperText="Start from a preset or tailor the wording here. Printed once in the quotation's terms section."
                 sx={{
                   '& .MuiInputBase-input.Mui-disabled': {
                     WebkitTextFillColor: 'rgba(0, 0, 0, 0.6)',
@@ -1032,13 +1066,13 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
             <Grid item xs={12} md={6}>
               <TextField
                 fullWidth
-                label="Notes (shown on PDF)"
+                label="Internal notes (not printed)"
                 value={formData.notes}
                 onChange={(e) => handleInputChange('notes', e.target.value)}
                 multiline
                 rows={4}
-                placeholder="e.g., Zone added prorated on top of existing zones..."
-                helperText="Optional — visible to the client on the quote PDF"
+                placeholder="Internal context for the team..."
+                helperText="Not included on customer PDFs. Put agreed customer-facing conditions in the terms field."
               />
             </Grid>
 

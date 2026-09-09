@@ -181,7 +181,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
     if (!contract) return;
     try {
       setLoading(true);
-      const blob = await ApiService.downloadContractPDF(contract.id);
+      const blob = await ApiService.previewContractPDF(contract.id);
       const url = window.URL.createObjectURL(blob);
       window.open(url, '_blank');
     } catch (err: any) {

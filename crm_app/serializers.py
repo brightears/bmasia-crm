@@ -505,6 +505,7 @@ class InvoiceLineItemSerializer(serializers.ModelSerializer):
 class InvoiceSerializer(serializers.ModelSerializer):
     """Serializer for Invoice model with nested line items"""
     company_name = serializers.CharField(source='company.name', read_only=True)
+    effective_billing_entity = serializers.ReadOnlyField()
     contract = serializers.PrimaryKeyRelatedField(queryset=Contract.objects.all(), required=False, allow_null=True)
     contract_number = serializers.SerializerMethodField()
     days_overdue = serializers.ReadOnlyField()
@@ -518,7 +519,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
             'status', 'issue_date', 'due_date', 'paid_date',
             'service_period_start', 'service_period_end',
             'amount', 'tax_amount',
-            'discount_amount', 'total_amount', 'currency', 'payment_terms', 'payment_terms_text',
+            'discount_amount', 'total_amount', 'currency', 'billing_entity', 'effective_billing_entity', 'payment_terms', 'payment_terms_text',
             'property_name', 'payment_method', 'transaction_id', 'notes', 'days_overdue', 'is_overdue',
             'first_reminder_sent', 'second_reminder_sent', 'final_notice_sent',
             'receipt_number', 'receipt_sent',
@@ -529,9 +530,48 @@ class InvoiceSerializer(serializers.ModelSerializer):
     def get_contract_number(self, obj):
         return obj.contract.contract_number if obj.contract else None
 
+    def validate(self, attrs):
+        if self.instance is not None and {'billing_entity', 'company'} & set(attrs):
+            from types import SimpleNamespace
+            from crm_app.services.document_context import effective_billing_entity
+            candidate = SimpleNamespace(
+                company=attrs.get('company', self.instance.company),
+                billing_entity=attrs.get('billing_entity', self.instance.billing_entity),
+            )
+            try:
+                changes_issuer = effective_billing_entity(candidate) != effective_billing_entity(self.instance)
+            except ValueError as exc:
+                raise serializers.ValidationError({'billing_entity': str(exc)})
+            if changes_issuer and (
+                self.instance.status != 'Draft'
+                or self.instance.receipt_number
+                or self.instance.receipt_sent
+                or self.instance.recognition_schedules.exists()
+            ):
+                raise serializers.ValidationError({
+                    'billing_entity': (
+                        'Issuer cannot be changed on an issued invoice or one with a receipt '
+                        'or revenue-recognition schedule. Use an explicitly approved reissue '
+                        'and accounting-reconciliation workflow; historical records remain unchanged.'
+                    ),
+                })
+        return attrs
+
     def create(self, validated_data):
         """Create invoice with nested line items"""
         line_items_data = validated_data.pop('line_items', [])
+        contract = validated_data.get('contract')
+        company = validated_data.get('company')
+        if (
+            'billing_entity' not in validated_data
+            and contract is not None
+            and company is not None
+            and contract.company_id == company.pk
+        ):
+            # Inherit an explicit contract issuer only on creation. Supplying
+            # blank deliberately requests Company fallback, and updates never
+            # silently change the issuer of an existing invoice.
+            validated_data['billing_entity'] = contract.billing_entity
         invoice = Invoice.objects.create(**validated_data)
         for item_data in line_items_data:
             InvoiceLineItem.objects.create(invoice=invoice, **item_data)
@@ -669,6 +709,7 @@ class ContractServiceLocationSerializer(serializers.ModelSerializer):
 class ContractSerializer(serializers.ModelSerializer):
     """Serializer for Contract model with renewal tracking"""
     company_name = serializers.CharField(source='company.name', read_only=True)
+    effective_billing_entity = serializers.ReadOnlyField()
     opportunity_name = serializers.CharField(source='opportunity.name', read_only=True)
     quote_number = serializers.CharField(source='quote.quote_number', read_only=True, allow_null=True)
     days_until_expiry = serializers.ReadOnlyField()
@@ -726,8 +767,8 @@ class ContractSerializer(serializers.ModelSerializer):
             'contract_number', 'contract_type', 'service_type', 'status', 'start_date', 'end_date',
             'sent_date',
             'value', 'tax_rate', 'tax_amount', 'total_value',
-            'currency', 'auto_renew', 'renewal_period_months', 'is_active',
-            'payment_terms', 'billing_frequency', 'discount_percentage', 'notes',
+            'currency', 'billing_entity', 'effective_billing_entity', 'auto_renew', 'renewal_period_months', 'is_active',
+            'payment_terms', 'payment_schedule', 'billing_frequency', 'discount_percentage', 'notes',
             'renewal_notice_sent', 'renewal_notice_date', 'send_renewal_reminders',
             # Follow-up tracking (unsigned-contract Day-5/Day-10 reminders) — Fix 2026-06-09
             # (Vera, per Cira/Theo build-request via to-vera): absent from this whitelist, so
@@ -808,17 +849,21 @@ class ContractSerializer(serializers.ModelSerializer):
         return obj.soundtrack_account_id or obj.company.soundtrack_account_id
 
     def _calculate_tax_fields(self, validated_data):
-        """Auto-calculate tax fields based on currency."""
+        """Calculate amounts using the explicitly supplied or stored tax rate.
+
+        Retain historical currency defaults only for a new contract without an
+        instructed rate. Currency changes cannot overwrite an agreed tax rate.
+        """
         from decimal import Decimal
 
-        currency = validated_data.get('currency', 'USD')
-        value = validated_data.get('value', Decimal('0'))
-
-        # THB contracts get 7% VAT, others get 0%
-        if currency == 'THB':
-            tax_rate = Decimal('7.00')
+        currency = validated_data.get('currency', getattr(self.instance, 'currency', 'USD'))
+        value = validated_data.get('value', getattr(self.instance, 'value', Decimal('0')))
+        if 'tax_rate' in validated_data:
+            tax_rate = validated_data['tax_rate']
+        elif self.instance is not None:
+            tax_rate = self.instance.tax_rate
         else:
-            tax_rate = Decimal('0.00')
+            tax_rate = Decimal('7.00') if currency == 'THB' else Decimal('0.00')
 
         # Calculate tax amount and total value
         tax_amount = (value * tax_rate / Decimal('100')).quantize(Decimal('0.01'))
@@ -834,6 +879,7 @@ class ContractSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Create contract with auto-generated contract number, tax calculation, and nested line items"""
         line_items_data = validated_data.pop('line_items', [])
+        use_line_tax = 'tax_rate' not in validated_data and any('tax_rate' in item for item in line_items_data)
         service_locations_data = validated_data.pop('service_locations', [])
         validated_data.pop('replace_service_locations', None)
 
@@ -863,8 +909,12 @@ class ContractSerializer(serializers.ModelSerializer):
             total = sum(item.line_total for item in contract.line_items.all())
             contract.value = total
             # Recalculate tax fields with updated value
-            tax_data = {'value': contract.value, 'currency': contract.currency}
-            tax_data = self._calculate_tax_fields(tax_data)
+            tax_data = {'value': contract.value, 'currency': contract.currency, 'tax_rate': contract.tax_rate}
+            if use_line_tax:
+                from crm_app.services.document_context import contract_line_tax_values
+                tax_data = contract_line_tax_values(contract.line_items.all())
+            else:
+                tax_data = self._calculate_tax_fields(tax_data)
             contract.tax_rate = tax_data['tax_rate']
             contract.tax_amount = tax_data['tax_amount']
             contract.total_value = tax_data['total_value']
@@ -877,6 +927,22 @@ class ContractSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         """Update contract with tax recalculation and nested line items"""
         line_items_data = validated_data.pop('line_items', None)
+        use_line_tax = 'tax_rate' not in validated_data and any('tax_rate' in item for item in (line_items_data or []))
+        preserve_line_totals = False
+        if line_items_data and 'tax_rate' not in validated_data and validated_data.get('value', instance.value) == instance.value:
+            from collections import Counter
+            from decimal import Decimal
+            financial_fields = ('quantity', 'unit_price', 'discount_percentage', 'tax_rate')
+
+            def financial_key(item):
+                if isinstance(item, dict):
+                    return tuple(Decimal(str(item.get(name, 1 if name == 'quantity' else 0))) for name in financial_fields)
+                return tuple(getattr(item, name) for name in financial_fields)
+
+            preserve_line_totals = (
+                Counter(financial_key(item) for item in line_items_data)
+                == Counter(financial_key(item) for item in instance.line_items.all())
+            )
         service_locations_data = validated_data.pop('service_locations', None)
         replace_service_locations = validated_data.pop('replace_service_locations', False)
         pricing_fields_changed = any(
@@ -891,7 +957,7 @@ class ContractSerializer(serializers.ModelSerializer):
         value_changed = 'value' in validated_data
         currency_changed = 'currency' in validated_data
 
-        if value_changed or currency_changed:
+        if (value_changed and validated_data['value'] != instance.value) or 'tax_rate' in validated_data:
             # Use new values if provided, otherwise use existing
             if 'value' not in validated_data:
                 validated_data['value'] = instance.value
@@ -911,12 +977,16 @@ class ContractSerializer(serializers.ModelSerializer):
                 ContractLineItem.objects.create(contract=instance, **item_data)
 
             # Auto-sum line items to contract.value
-            if line_items_data:
+            if line_items_data and not preserve_line_totals:
                 total = sum(item.line_total for item in instance.line_items.all())
                 instance.value = total
                 # Recalculate tax fields with updated value
-                tax_data = {'value': instance.value, 'currency': instance.currency}
-                tax_data = self._calculate_tax_fields(tax_data)
+                tax_data = {'value': instance.value, 'currency': instance.currency, 'tax_rate': instance.tax_rate}
+                if use_line_tax:
+                    from crm_app.services.document_context import contract_line_tax_values
+                    tax_data = contract_line_tax_values(instance.line_items.all())
+                else:
+                    tax_data = self._calculate_tax_fields(tax_data)
                 instance.tax_rate = tax_data['tax_rate']
                 instance.tax_amount = tax_data['tax_amount']
                 instance.total_value = tax_data['total_value']
@@ -1188,6 +1258,7 @@ class QuoteSerializer(serializers.ModelSerializer):
 
     # Related names
     company_name = serializers.CharField(source='company.name', read_only=True)
+    effective_billing_entity = serializers.ReadOnlyField()
     contact_name = serializers.CharField(source='contact.name', read_only=True)
     opportunity_name = serializers.CharField(source='opportunity.name', read_only=True)
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
@@ -1206,7 +1277,7 @@ class QuoteSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'quote_number', 'company', 'company_name', 'contact', 'contact_name',
             'opportunity', 'opportunity_name', 'status', 'quote_type', 'contract_duration_months', 'valid_from', 'valid_until',
-            'subtotal', 'tax_amount', 'discount_amount', 'total_value', 'currency',
+            'subtotal', 'tax_amount', 'discount_amount', 'total_value', 'currency', 'billing_entity', 'effective_billing_entity',
             'billing_frequency', 'payment_schedule',
             'terms_conditions', 'notes', 'is_expired', 'days_until_expiry',
             'sent_date', 'accepted_date', 'rejected_date', 'expired_date',

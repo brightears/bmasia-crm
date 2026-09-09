@@ -725,6 +725,18 @@ class ApiService {
     await authApi.post(`/invoices/${invoiceId}/send/`, data);
   }
 
+  // Watermarked preview: does not issue or save a contract document.
+  async previewContractPDF(id: string): Promise<Blob> {
+    try {
+      const response = await authApi.get(`/contracts/${id}/preview-pdf/`, {
+        responseType: 'blob'
+      });
+      return response.data;
+    } catch (error) {
+      throw await parseContractPdfDownloadError(error);
+    }
+  }
+
   // Download Contract PDF
   async downloadContractPDF(id: string): Promise<Blob> {
     try {

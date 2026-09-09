@@ -13,8 +13,10 @@ Behaviour:
     the product name as the label). The caller is told to review the derived locations.
 """
 from datetime import datetime
+from decimal import Decimal
 
 from django.utils import timezone
+from django.db import transaction
 from dateutil.relativedelta import relativedelta
 
 from crm_app.models import Contract
@@ -64,9 +66,29 @@ def _contract_billing_frequency_from_quote(quote, overrides):
     return display_values.get(normalized, value or 'Annual')
 
 
+@transaction.atomic
 def convert_quote_to_contract(quote, overrides=None):
     """Returns (contract, info). info includes {already_existed, service_locations_derived, message}."""
-    overrides = overrides or {}
+    if overrides is None:
+        overrides = {}
+    if not isinstance(overrides, dict):
+        raise ValueError('Contract overrides must be a JSON object.')
+    allowed = {
+        'start_date', 'end_date', 'contract_duration_months', 'billing_frequency',
+        'property_name', 'notes', 'price_per_zone', 'customer_contact_name',
+        'customer_contact_title', 'customer_contact_email', 'billing_entity',
+        'payment_schedule', 'payment_custom', 'preamble_custom', 'activation_custom',
+        'custom_terms',
+    }
+    unknown = set(overrides) - allowed
+    if unknown:
+        raise ValueError('Unsupported contract override field(s): ' + ', '.join(sorted(unknown)))
+    from crm_app.services.document_context import BILLING_ENTITY_CHOICES
+    if 'billing_entity' in overrides and overrides['billing_entity'] not in {'', *dict(BILLING_ENTITY_CHOICES)}:
+        raise ValueError('billing_entity must be a canonical BMAsia issuer, or blank for the Company default.')
+    for field in ('payment_schedule', 'payment_custom', 'preamble_custom', 'activation_custom', 'custom_terms'):
+        if field in overrides and not isinstance(overrides[field], str):
+            raise ValueError(f'{field} must be text; use an empty string to clear it.')
 
     existing = Contract.objects.filter(quote=quote).exclude(status='Cancelled').first()
     if existing:
@@ -84,6 +106,10 @@ def convert_quote_to_contract(quote, overrides=None):
     line_items = list(quote.line_items.all())
     prices = {li.unit_price for li in line_items if li.unit_price}
     price_per_zone = overrides.get('price_per_zone') or (next(iter(prices)) if len(prices) == 1 else None)
+    quote_base = quote.subtotal or quote.total_value
+    # Preserve the approved quotation's exact tax amount. The header rate is
+    # only a display summary; copied per-line rates may intentionally differ.
+    tax_rate = (quote.tax_amount * Decimal('100') / quote_base).quantize(Decimal('0.01')) if quote_base else Decimal('0')
 
     contract = Contract.objects.create(
         company=quote.company,
@@ -92,10 +118,19 @@ def convert_quote_to_contract(quote, overrides=None):
         status='Draft',                       # save() assigns a deferred DRAFT-xxxx number
         start_date=start,
         end_date=end,
-        value=quote.subtotal or quote.total_value,
+        value=quote_base,
         total_value=quote.total_value,
+        tax_rate=tax_rate,
         tax_amount=quote.tax_amount,
         currency=quote.currency,
+        billing_entity=overrides.get('billing_entity', getattr(quote, 'billing_entity', '')),
+        # The quotation labels terms_conditions as PAYMENT TERMS. Preserve that
+        # exact text, with schedule separate, rather than translating legal text.
+        payment_custom=overrides.get('payment_custom', quote.terms_conditions),
+        payment_schedule=overrides.get('payment_schedule', quote.payment_schedule),
+        preamble_custom=overrides.get('preamble_custom', ''),
+        activation_custom=overrides.get('activation_custom', ''),
+        custom_terms=overrides.get('custom_terms', ''),
         billing_frequency=_contract_billing_frequency_from_quote(quote, overrides),
         property_name=overrides.get('property_name', ''),
         price_per_zone=price_per_zone,

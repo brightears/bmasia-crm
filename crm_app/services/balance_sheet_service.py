@@ -103,6 +103,8 @@ class BalanceSheetService:
             - equity
             - is_balanced check
         """
+        from crm_app.services.document_entity_filters import finance_entity_slug
+        billing_entity = finance_entity_slug(billing_entity)
         quarter_names = {1: 'Q1', 2: 'Q2', 3: 'Q3', 4: 'Q4'}
         quarter_months = {1: (1, 3), 2: (4, 6), 3: (7, 9), 4: (10, 12)}
 
@@ -395,7 +397,12 @@ class BalanceSheetService:
         )
 
         if billing_entity:
-            queryset = queryset.filter(contract__company__billing_entity=billing_entity)
+            from crm_app.services.document_entity_filters import filter_document_entity
+            if billing_entity == 'all':
+                # Preserve legacy combined-selector behavior in this rollout.
+                queryset = queryset.filter(contract__company__billing_entity=billing_entity)
+            else:
+                queryset = filter_document_entity(queryset, billing_entity)
         if currency:
             queryset = queryset.filter(currency=currency)
 

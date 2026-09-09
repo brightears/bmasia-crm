@@ -66,9 +66,26 @@ to recover the raw PDF. On failure returns `{"error": "..."}`.
   request for the renewal pack; marked "not a tax invoice"; creates no Invoice/AR/tax record)
 - `generate_quote_pdf(id)` — generate quote PDF
 - `generate_invoice_pdf(id)` — generate invoice PDF
+- `get_commercial_document_context(collection, id)` — read current issuer,
+  currency, document fields and writable field names before tailoring a draft.
 
 ## Key Concepts
-- **billing_entity**: 'BMAsia (Thailand) Co., Ltd.' (THB) or 'BMAsia Limited' (USD)
+- **billing_entity**: 'BMAsia (Thailand) Co., Ltd.' or 'BMAsia Limited'. On
+  quote/contract/invoice this is an optional document-only issuer override;
+  blank uses company.billing_entity. Currency and customer country are independent
+  choices: a Hong Kong customer may receive a Thailand-issued USD document.
+  Set the document override for a one-off exception; do not change the Company
+  just to tailor one document. Read effective_billing_entity with
+  get_commercial_document_context before and after an authorized change.
+- **Tailoring**: use quote line items, payment_schedule and terms_conditions;
+  contract preamble_custom, payment_custom, activation_custom, custom_terms,
+  payment_schedule, service items/locations and signatories. Saved templates are
+  reusable starting points, not a mandatory catalogue of permitted commercial deals.
+  Corporate full-template edits must use that template's explicit editable slots;
+  if a slot is missing, follow the PDF error's clarification instead of silently
+  dropping a clause or appending a differently styled PDF. Never put customer
+  terms in notes (internal only). Preserve approved legal text and request a
+  clarification for missing issuer, pricing, tax or contractual authority.
 - **Contract status**: Draft → Sent → Active → Renewed/Expired/Cancelled
 - **Invoice status**: Draft → Sent → Paid/Overdue/Void
 - **Quote status**: Draft → Sent → Accepted/Rejected/Expired
@@ -215,9 +232,15 @@ class ContractQuery(ModelQueryToolset):
     fields = [
         'id', 'contract_number', 'company', 'contract_type', 'service_type', 'status',
         'lifecycle_type', 'start_date', 'end_date', 'value', 'currency',
-        'total_value', 'billing_frequency', 'payment_terms', 'auto_renew',
+        'total_value', 'billing_entity', 'billing_frequency', 'payment_terms', 'payment_schedule', 'auto_renew',
         'renewal_period_months', 'renewed_from', 'renewal_notice_sent', 'sent_date',
         'contract_category', 'is_active', 'master_contract', 'notes',
+        'preamble_template', 'preamble_custom', 'payment_template', 'payment_custom',
+        'activation_template', 'activation_custom', 'custom_terms', 'custom_service_items',
+        'property_name', 'show_zone_pricing_detail', 'price_per_zone',
+        'customer_signatory_name', 'customer_signatory_title', 'additional_customer_signatories',
+        'bmasia_signatory_name', 'bmasia_signatory_title',
+        'customer_contact_name', 'customer_contact_title', 'customer_contact_email',
         'created_at', 'updated_at',
     ]
     search_fields = ['contract_number', 'notes', 'payment_terms']
@@ -250,7 +273,8 @@ class InvoiceQuery(ModelQueryToolset):
     fields = [
         'id', 'invoice_number', 'company', 'contract', 'status',
         'invoice_date', 'due_date', 'paid_date', 'amount', 'tax_amount',
-        'total_amount', 'currency', 'notes', 'created_at',
+        'total_amount', 'currency', 'billing_entity', 'payment_terms', 'payment_terms_text',
+        'property_name', 'service_period_start', 'service_period_end', 'notes', 'created_at',
     ]
     search_fields = ['invoice_number', 'notes']
     extra_instructions = "Status: Draft, Sent, Paid, Overdue, Void, Cancelled."
@@ -261,7 +285,8 @@ class QuoteQuery(ModelQueryToolset):
     fields = [
         'id', 'quote_number', 'company', 'opportunity', 'status', 'quote_type',
         'valid_from', 'valid_until', 'subtotal', 'total_value', 'currency',
-        'billing_frequency', 'contract_duration_months', 'notes', 'created_at',
+        'billing_entity', 'billing_frequency', 'contract_duration_months', 'payment_schedule',
+        'terms_conditions', 'notes', 'created_at',
     ]
     search_fields = ['quote_number', 'notes']
     extra_instructions = ("Use convert_quote_to_contract to turn an accepted quote into a Draft contract "
@@ -490,6 +515,9 @@ def create_record(collection: str, data: str) -> str:
                  'ticket_number', 'article_number', 'title', 'email', 'subject']:
         if hasattr(instance, attr) and getattr(instance, attr):
             result[attr] = str(getattr(instance, attr))
+    if collection in {'quote', 'contract', 'invoice'}:
+        result['billing_entity'] = instance.billing_entity
+        result['effective_billing_entity'] = instance.effective_billing_entity
     _, dropped = _dropped_keys(serializer, fields)
     if dropped:
         result['warning_ignored_keys'] = dropped
@@ -552,6 +580,43 @@ def update_record(collection: str, id: str, data: str) -> str:
         result['warning'] = ('These keys were NOT saved (DRF drops non-writable keys silently). '
                              'Fix the key names and re-send if you intended to set them.')
     return _json.dumps(result)
+
+
+@mcp_server.tool()
+def get_commercial_document_context(collection: str, id: str) -> str:
+    """Read a quote/contract/invoice and its precise writable tailoring fields.
+
+    Side-effect-free: does not save, reserve a number, change status, or render.
+    The returned record includes billing_entity (override) and
+    effective_billing_entity (resolved issuer). A blank override follows the
+    Company default; currency and customer country never choose the issuer.
+    Use field names from writable_fields for an explicitly authorized change.
+    Internal notes are CRM-only and are not customer-facing clauses.
+    """
+    if collection not in {'quote', 'contract', 'invoice'}:
+        return _json.dumps({'error': 'collection must be quote, contract or invoice.'})
+    model, serializer_path = _COLLECTION_MAP[collection]
+    from django.core.exceptions import ValidationError
+    try:
+        instance = model.objects.select_related('company').get(id=id)
+        serializer = _get_serializer_class(serializer_path)(instance)
+        result = {
+            'collection': collection,
+            'record': serializer.data,
+            'company_default_billing_entity': instance.company.billing_entity,
+            'customer_country': instance.company.country,
+            'writable_fields': sorted(
+                name for name, field in serializer.fields.items() if not field.read_only
+            ),
+        }
+        if collection == 'contract':
+            from crm_app.services.document_context import contract_tailoring_context
+            result['tailoring'] = contract_tailoring_context(instance)
+        return _json.dumps(result, default=str)
+    except model.DoesNotExist:
+        return _json.dumps({'error': f"{collection} '{id}' not found."})
+    except (TypeError, ValueError, ValidationError) as exc:
+        return _json.dumps({'error': 'clarification_required', 'detail': str(exc)})
 
 
 @mcp_server.tool()
@@ -626,7 +691,11 @@ def convert_quote_to_contract(quote_id: str, overrides_json: str = "") -> str:
         quote_id: the quote's UUID.
         overrides_json: optional JSON object with any of start_date, end_date,
             contract_duration_months, billing_frequency, property_name, notes, price_per_zone,
-            customer_contact_name, customer_contact_title, customer_contact_email.
+            customer_contact_name, customer_contact_title, customer_contact_email,
+            billing_entity, payment_schedule, payment_custom, preamble_custom,
+            activation_custom, custom_terms. Quote terms_conditions copy verbatim to
+            payment_custom; explicit payment_schedule and issuer are preserved.
+            Unsupported fields return a clarification error, never silent success.
 
     Returns: JSON with contract_id, contract_number, status, and a message. NOTE: the derived
     service-location product/zone mapping is best-effort — read them back and correct if needed.
@@ -643,7 +712,10 @@ def convert_quote_to_contract(quote_id: str, overrides_json: str = "") -> str:
             overrides = _json.loads(overrides_json)
         except _json.JSONDecodeError as e:
             return f"Error: invalid overrides_json — {e}"
-    contract, info = _convert(quote, overrides)
+    try:
+        contract, info = _convert(quote, overrides)
+    except (TypeError, ValueError) as exc:
+        return _json.dumps({'error': 'clarification_required', 'detail': str(exc)})
     return _json.dumps({'contract_id': str(contract.id), 'contract_number': contract.contract_number,
                         'status': contract.status, **info})
 
@@ -659,7 +731,16 @@ def _pdf_response_payload(response, default_filename: str) -> str:
     json.loads and base64.b64decode(content_b64) to recover raw PDF bytes.
     """
     if response.status_code != 200:
-        return json.dumps({"error": f"HTTP {response.status_code}"})
+        detail = getattr(response, 'data', None)
+        if not isinstance(detail, dict):
+            try:
+                detail = json.loads(response.content)
+            except (TypeError, ValueError, AttributeError):
+                detail = None
+        payload = dict(detail) if isinstance(detail, dict) else {}
+        payload.setdefault('error', f'HTTP {response.status_code}')
+        payload['status_code'] = response.status_code
+        return json.dumps(payload, default=str)
 
     content_disp = response.get('Content-Disposition', '')
     filename = (
@@ -698,6 +779,7 @@ def generate_contract_pdf(
         factory = RequestFactory()
         request = factory.get(f'/api/v1/contracts/{contract.id}/pdf/')
         request.user = _get_system_user()
+        request._bmasia_suppress_pdf_activity = True
         viewset = ContractViewSet.as_view({'get': 'pdf'})
         return viewset(request, pk=contract.id)
 

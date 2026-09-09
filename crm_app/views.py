@@ -27,6 +27,8 @@ import re
 import uuid
 from decimal import Decimal
 from xml.sax.saxutils import escape as xml_escape
+from crm_app.services.document_context import effective_billing_entity
+from crm_app.services.document_entity_filters import filter_document_entity
 
 logger = logging.getLogger(__name__)
 
@@ -336,6 +338,9 @@ class BaseModelViewSet(viewsets.ModelViewSet):
     def log_action(self, action, instance, changes=None):
         """Create audit log entry"""
         request = self.request
+        raw_request = getattr(request, '_request', request)
+        if action == 'VIEW' and getattr(raw_request, '_bmasia_suppress_pdf_activity', False):
+            return
         if not request.user.is_authenticated:
             return  # Skip for internal/anonymous requests (e.g. PDF via RequestFactory)
         AuditLog.objects.create(
@@ -1396,6 +1401,8 @@ class ContractViewSet(BaseModelViewSet):
         # Create the new contract
         new_contract = Contract.objects.create(
             company=original.company,
+            billing_entity=original.billing_entity,
+            payment_schedule=original.payment_schedule,
             opportunity=None,  # New contract, no opportunity link
             # contract_number omitted on purpose → save() assigns a deferred DRAFT-xxxx; the real
             # CT number is minted only when the draft is advanced to Sent (INC-20260622-e4cd8f).
@@ -1487,6 +1494,11 @@ class ContractViewSet(BaseModelViewSet):
     def pdf(self, request, pk=None):
         """Generate and download PDF for contract based on template's pdf_format or contract_category"""
         contract = self.get_object()
+        from crm_app.services.document_context import effective_billing_entity
+        try:
+            effective_billing_entity(contract)
+        except ValueError as exc:
+            return Response({'error': str(exc), 'code': 'UNSUPPORTED_BILLING_ENTITY'}, status=422)
         from crm_app.services.contract_service_locations import (
             pricing_mismatch_message,
             service_location_pricing_mismatch,
@@ -1523,6 +1535,49 @@ class ContractViewSet(BaseModelViewSet):
         else:  # standard
             return self._generate_principal_terms_pdf(contract)
 
+    @action(detail=True, methods=['get'], url_path='preview-pdf')
+    def preview_pdf(self, request, pk=None):
+        """Watermarked review only: no document, sequence, audit, or status write."""
+        from django.conf import settings
+        if not settings.COMMERCIAL_DOCUMENT_V2_PREVIEW_ENABLED:
+            return Response({'error': 'Document preview is disabled.'}, status=404)
+        raw_request = getattr(request, '_request', request)
+        raw_request._bmasia_suppress_pdf_activity = True
+        raw_request._bmasia_contract_preview = True
+        response = self.pdf(request, pk=pk)
+        if response.status_code == 200:
+            # Native corporate forms retain their geometry; watermark a copy.
+            if response.get('X-BMAsia-Renderer') != 'contract-v2':
+                from crm_app.contract_pdf_v2 import watermark_native_pdf
+                response.content = watermark_native_pdf(response.content)
+            response['Content-Disposition'] = 'inline; filename="PREVIEW_ONLY_Contract.pdf"'
+            response['Cache-Control'] = 'private, no-store, max-age=0'
+            response['Pragma'] = 'no-cache'
+        return response
+
+    def _contract_v2_enabled(self, contract):
+        from django.conf import settings
+        return (settings.COMMERCIAL_DOCUMENT_V2_CONTRACT_LIVE or
+                getattr(getattr(self.request, '_request', self.request), '_bmasia_contract_preview', False)) and not self._is_hilton_full_template(contract)
+
+    def _contract_v2_response(self, contract, body, title):
+        from django.conf import settings
+        from crm_app.contract_pdf_v2 import build_contract_pdf
+        raw_request = getattr(self.request, '_request', self.request)
+        try:
+            data = build_contract_pdf(
+                contract, body, title=title,
+                logo_path=os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png'),
+                preview=getattr(raw_request, '_bmasia_contract_preview', False),
+            )
+        except ValueError as exc:
+            return Response({'error': str(exc), 'code': 'UNSUPPORTED_BILLING_ENTITY'}, status=422)
+        response = HttpResponse(data, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Contract_{contract.contract_number}.pdf"'
+        response['X-BMAsia-Renderer'] = 'contract-v2'
+        self.log_action('VIEW', contract, {'action': 'Contract PDF generated (v2)', 'contract_number': contract.contract_number})
+        return response
+
     @action(detail=True, methods=['get'], url_path='proforma-pdf')
     def proforma_pdf(self, request, pk=None):
         """Generate the PROFORMA INVOICE PDF for this contract.
@@ -1539,7 +1594,7 @@ class ContractViewSet(BaseModelViewSet):
         contract = self.get_object()
 
         # Entity block — same resolution as the quote/contract PDFs
-        billing_entity = contract.company.billing_entity
+        billing_entity = effective_billing_entity(contract)
         if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
             entity = {
                 'name': 'BMAsia (Thailand) Co., Ltd.',
@@ -1593,7 +1648,7 @@ class ContractViewSet(BaseModelViewSet):
         company = contract.company
 
         # Determine which standard terms to use based on billing entity
-        if company.billing_entity == 'BMAsia (Thailand) Co., Ltd.':
+        if effective_billing_entity(contract) == 'BMAsia (Thailand) Co., Ltd.':
             document_type = 'standard_terms_th'
         else:
             document_type = 'standard_terms_intl'
@@ -2072,7 +2127,7 @@ class ContractViewSet(BaseModelViewSet):
                 tcv = _contract_total_contract_value(float(contract.value), dur_months, contract)
                 replacements['{{total_contract_value}}'] = f"{contract.currency} {tcv:,.2f}"
                 replacements['{{total_contract_value_amount}}'] = f"{tcv:,.2f}"
-                effective_tax = float(contract.tax_rate) if contract.tax_rate else (7.0 if company and company.billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 0.0)
+                effective_tax = float(contract.tax_rate) if contract.tax_rate is not None else 0.0
                 vat_suffix = f" + {effective_tax:.0f}% VAT" if effective_tax > 0 else ""
                 if _contract_line_items_cover_full_term(contract, dur_months):
                     replacements['{{billing_note}}'] = f"Total for the full term: {contract.currency} {contract.value:,.2f}{vat_suffix}."
@@ -2594,7 +2649,7 @@ class ContractViewSet(BaseModelViewSet):
             parts.append(company.country)
         return ', '.join(filter(None, parts))
 
-    def _generate_principal_terms_pdf(self, contract):
+    def _generate_principal_terms_pdf(self, contract, *, document_title='Principal terms'):
         """Generate Principal Terms PDF for standard contracts"""
         # This guard belongs in the generator, not only the public API action:
         # Rene and other internal review flows call the renderer directly.
@@ -2617,7 +2672,7 @@ class ContractViewSet(BaseModelViewSet):
         company = contract.company
 
         # Get entity-specific details based on billing_entity
-        billing_entity = company.billing_entity
+        billing_entity = effective_billing_entity(contract)
         if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
             entity_name = 'BMAsia (Thailand) Co., Ltd.'
             entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
@@ -2906,14 +2961,22 @@ class ContractViewSet(BaseModelViewSet):
         elements.append(from_bill_table)
         elements.append(Spacer(1, 0.25*inch))
 
+        body_start = len(elements)
+
         # Check if we have a full template (skip hardcoded clauses)
         if contract.preamble_template:
             # FULL TEMPLATE MODE: Template contains complete contract text
             # Skip all hardcoded clauses and render only template content
+            from crm_app.contract_pdf_v2 import tailored_template_content, ContractTailoringClarification
+            try:
+                template_source = tailored_template_content(
+                    contract, self._substitute_template_variables(contract.preamble_template.content, contract))
+            except ContractTailoringClarification as exc:
+                return Response(exc.payload(), status=422)
             template_content = re.sub(
                 r'\{\{\s*zones_table\s*\}\}',
                 '{{zones_table}}',
-                contract.preamble_template.content,
+                template_source,
             )
             zones = contract.get_active_zones()
             has_locations = contract.service_locations.exists() or zones.exists()
@@ -3076,6 +3139,8 @@ class ContractViewSet(BaseModelViewSet):
                 elements.pop()
 
             # Build PDF and return early
+            if self._contract_v2_enabled(contract):
+                return self._contract_v2_response(contract, elements[body_start:], document_title)
             doc.build(elements, onFirstPage=draw_contract_footer, onLaterPages=draw_contract_footer)
             pdf_data = buffer.getvalue()
             buffer.close()
@@ -3256,9 +3321,9 @@ and<br/><br/>
             clause_num += 1
 
             # Clause 6: Total Cost
-            tax_rate = float(contract.tax_rate) if contract.tax_rate else (7.0 if billing_entity == 'BMAsia (Thailand) Co., Ltd.' else 0.0)
+            tax_rate = float(contract.tax_rate) if contract.tax_rate is not None else 0.0
             total_before_tax = float(contract.value) if contract.value else 0.0
-            tax_amount = total_before_tax * (tax_rate / 100)
+            tax_amount = float(contract.tax_amount) if contract.tax_amount is not None else total_before_tax * (tax_rate / 100)
             total_with_tax = total_before_tax + tax_amount
 
             # Determine if multi-year for "per year" labeling
@@ -3270,6 +3335,8 @@ and<br/><br/>
 
             # Check if contract has line items for detailed breakdown
             contract_line_items = list(contract.line_items.all()) if hasattr(contract, 'line_items') else []
+            tax_label = ('Tax' if len({li.tax_rate for li in contract_line_items}) > 1
+                         else f'{tax_rate:g}% VAT')
             line_items_cover_full_term = _contract_line_items_cover_full_term(
                 contract, contract_duration_months, contract_line_items)
             per_year_label = " per year" if is_multi_year and not line_items_cover_full_term else ""
@@ -3287,7 +3354,7 @@ and<br/><br/>
                         f"&nbsp;&nbsp;&nbsp;&nbsp;• {qty}× {li.product_service} @ {contract.currency} {float(li.unit_price):,.2f} = {contract.currency} {li_total:,.2f}",
                         clause_style
                     ))
-                vat_text = f" + {tax_rate:.0f}% VAT ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}{per_year_label}</b>" if tax_rate > 0 else ""
+                vat_text = f" + {tax_label} ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}{per_year_label}</b>" if tax_amount > 0 else ""
                 elements.append(Paragraph(
                     f"&nbsp;&nbsp;&nbsp;&nbsp;Subtotal: {contract.currency} {total_before_tax:,.2f}{vat_text}",
                     clause_style
@@ -3470,6 +3537,11 @@ and<br/><br/>
             elements.append(Paragraph(additional_terms_text, body_style))
             elements.append(Spacer(1, 0.3*inch))
 
+        if getattr(contract, 'payment_schedule', ''):
+            elements.append(Paragraph('PAYMENT SCHEDULE', heading_style))
+            elements.append(Paragraph(xml_escape(contract.payment_schedule).replace('\n', '<br/>'), body_style))
+            elements.append(Spacer(1, 0.2*inch))
+
         # Contract Status Indicator
         if contract.status == 'Active':
             status_style = ParagraphStyle(
@@ -3623,6 +3695,8 @@ and<br/><br/>
         elements.append(KeepTogether(signature_elements))
 
         # Build PDF
+        if self._contract_v2_enabled(contract):
+            return self._contract_v2_response(contract, elements[body_start:], document_title)
         doc.build(elements, onFirstPage=draw_contract_footer, onLaterPages=draw_contract_footer)
 
         # Get PDF data
@@ -3647,6 +3721,8 @@ and<br/><br/>
         blocked = self._reject_hilton_legacy_renderer(contract)
         if blocked:
             return blocked
+        if contract.preamble_template:
+            return self._generate_principal_terms_pdf(contract, document_title='Master service agreement')
 
         from reportlab.lib.pagesizes import letter
         from reportlab.lib import colors
@@ -3661,7 +3737,7 @@ and<br/><br/>
         company = contract.company
 
         # Get entity-specific details based on billing_entity
-        billing_entity = company.billing_entity
+        billing_entity = effective_billing_entity(contract)
         if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
             entity_name = 'BMAsia (Thailand) Co., Ltd.'
             entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
@@ -3825,6 +3901,8 @@ and<br/><br/>
         elements.append(parties_table)
         elements.append(Spacer(1, 0.2*inch))
 
+        body_start = len(elements)
+
         # Agreement Overview
         elements.append(Paragraph("AGREEMENT OVERVIEW", heading_style))
 
@@ -3838,6 +3916,13 @@ and<br/><br/>
         elements.append(Spacer(1, 0.3*inch))
 
         # Custom Terms (if specified)
+        for label, field in [('Preamble', 'preamble_custom'), ('Payment terms', 'payment_custom'),
+                             ('Activation terms', 'activation_custom'), ('Payment schedule', 'payment_schedule')]:
+            value = getattr(contract, field, '')
+            if value:
+                elements.append(Paragraph(label.upper(), heading_style))
+                elements.append(Paragraph(xml_escape(value).replace('\n', '<br/>'), body_style))
+                elements.append(Spacer(1, 12))
         if contract.custom_terms:
             elements.append(Paragraph("CUSTOM TERMS AND CONDITIONS", heading_style))
             custom_terms_text = contract.custom_terms.replace('\n', '<br/>')
@@ -3907,6 +3992,8 @@ and<br/><br/>
         elements.append(signature_table)
 
         # Build PDF (footer drawn via canvas callback)
+        if self._contract_v2_enabled(contract):
+            return self._contract_v2_response(contract, elements[body_start:], 'Master service agreement')
         doc.build(elements, onFirstPage=draw_contract_footer, onLaterPages=draw_contract_footer)
 
         # Get PDF data
@@ -3946,6 +4033,8 @@ and<br/><br/>
                 pass
 
         # Standard participation agreement format
+        if contract.preamble_template:
+            return self._generate_principal_terms_pdf(contract, document_title='Participation agreement')
         from reportlab.lib.pagesizes import letter
         from reportlab.lib import colors
         from reportlab.lib.units import inch
@@ -3959,7 +4048,7 @@ and<br/><br/>
         master_contract = contract.master_contract
 
         # Get entity-specific details based on billing_entity
-        billing_entity = company.billing_entity
+        billing_entity = effective_billing_entity(contract)
         if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
             entity_name = 'BMAsia (Thailand) Co., Ltd.'
             entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
@@ -4095,6 +4184,7 @@ and<br/><br/>
         elements.append(Spacer(1, 0.2*inch))
 
         # Reference to Master Agreement
+        body_start = len(elements)
         if master_contract:
             elements.append(Paragraph("MASTER AGREEMENT REFERENCE", heading_style))
 
@@ -4108,6 +4198,7 @@ and<br/><br/>
             elements.append(Spacer(1, 0.2*inch))
 
         # Venue Details
+        venue_start = len(elements)
         elements.append(Paragraph("VENUE DETAILS", heading_style))
 
         venue_data = [
@@ -4135,6 +4226,8 @@ and<br/><br/>
         ]))
         elements.append(venue_table)
         elements.append(Spacer(1, 0.2*inch))
+        if self._contract_v2_enabled(contract):
+            del elements[venue_start:]
 
         # Zones Covered — prefer service_locations, fall back to legacy zones
         service_locs = contract.service_locations.all()
@@ -4223,6 +4316,13 @@ and<br/><br/>
         elements.append(Spacer(1, 0.3*inch))
 
         # Additional Terms — customer-facing only.
+        for label, field in [('Preamble', 'preamble_custom'), ('Payment terms', 'payment_custom'),
+                             ('Activation terms', 'activation_custom'), ('Payment schedule', 'payment_schedule')]:
+            value = getattr(contract, field, '')
+            if value:
+                elements.append(Paragraph(label.upper(), heading_style))
+                elements.append(Paragraph(xml_escape(value).replace('\n', '<br/>'), body_style))
+                elements.append(Spacer(1, 12))
         # FIX 2026-06-07 (Vera): was rendering contract.notes (INTERNAL-ONLY — leaks import/CRM-tracking
         # context onto the customer PDF). The participation path missed the 2026-05-05 principal-terms fix;
         # use contract.custom_terms, matching _generate_principal_terms_pdf and _generate_master_agreement_pdf.
@@ -4267,6 +4367,8 @@ and<br/><br/>
         elements.append(signature_table)
 
         # Build PDF (footer drawn via canvas callback)
+        if self._contract_v2_enabled(contract):
+            return self._contract_v2_response(contract, elements[body_start:], 'Participation agreement')
         doc.build(elements, onFirstPage=draw_contract_footer, onLaterPages=draw_contract_footer)
 
         # Get PDF data
@@ -4306,7 +4408,7 @@ and<br/><br/>
         master_contract = contract.master_contract
 
         # Get entity-specific details based on billing_entity
-        billing_entity = company.billing_entity
+        billing_entity = effective_billing_entity(contract)
         if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
             entity_name = 'BMAsia (Thailand) Co., Ltd.'
             entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
@@ -4874,7 +4976,7 @@ and<br/><br/>
         master_contract = contract.master_contract
 
         # Get entity-specific details based on billing_entity
-        billing_entity = company.billing_entity
+        billing_entity = effective_billing_entity(contract)
         if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
             entity_name = 'BMAsia (Thailand) Co., Ltd.'
             entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
@@ -5278,7 +5380,7 @@ and<br/><br/>
         company = contract.company
 
         # Get entity-specific details based on billing_entity
-        billing_entity = company.billing_entity
+        billing_entity = effective_billing_entity(contract)
         if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
             entity_name = 'BMAsia (Thailand) Co., Ltd.'
             entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
@@ -5923,7 +6025,7 @@ class InvoiceViewSet(BaseModelViewSet):
         invoice.paid_date = timezone.now().date()
 
         # Auto-generate receipt number
-        entity = invoice.company.billing_entity or ''
+        entity = effective_billing_entity(invoice)
         prefix = 'REC-TH' if 'Thailand' in entity else 'REC-HK'
         year = timezone.now().year
         pattern = f'{prefix}-{year}-'
@@ -6079,7 +6181,7 @@ class InvoiceViewSet(BaseModelViewSet):
 
         queryset = Invoice.objects.select_related('company').prefetch_related('line_items')
 
-        queryset = queryset.filter(company__billing_entity=billing_entity)
+        queryset = filter_document_entity(queryset, billing_entity)
         if status_filter:
             statuses = [s.strip() for s in status_filter.split(',')]
             queryset = queryset.filter(status__in=statuses)
@@ -6162,7 +6264,7 @@ class InvoiceViewSet(BaseModelViewSet):
         from crm_app.invoice_pdf_v2 import build_invoice_pdf_v2
 
         try:
-            entity = entity_profile_for(invoice.company.billing_entity)
+            entity = entity_profile_for(effective_billing_entity(invoice))
         except ValueError as exc:
             return Response(
                 {'error': str(exc), 'code': 'UNSUPPORTED_BILLING_ENTITY'},
@@ -6220,7 +6322,7 @@ class InvoiceViewSet(BaseModelViewSet):
         company = invoice.company
 
         # Get entity-specific details based on billing_entity
-        billing_entity = company.billing_entity
+        billing_entity = effective_billing_entity(invoice)
         if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
             entity_name = 'BMAsia (Thailand) Co., Ltd.'
             entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
@@ -6989,7 +7091,7 @@ class QuoteViewSet(BaseModelViewSet):
             return response
 
         # Get entity-specific details based on billing_entity
-        billing_entity = quote.company.billing_entity
+        billing_entity = effective_billing_entity(quote)
         if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
             entity_name = 'BMAsia (Thailand) Co., Ltd.'
             entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
@@ -7067,7 +7169,7 @@ class QuoteViewSet(BaseModelViewSet):
         from crm_app.quote_pdf_v2 import build_quote_pdf_v2
 
         try:
-            entity = entity_profile_for(quote.company.billing_entity)
+            entity = entity_profile_for(effective_billing_entity(quote))
         except ValueError as exc:
             return Response(
                 {'error': str(exc), 'code': 'UNSUPPORTED_BILLING_ENTITY'},
@@ -7141,9 +7243,9 @@ class DashboardViewSet(viewsets.ViewSet):
         if billing_entity:
             companies = companies.filter(billing_entity=billing_entity)
             opportunities = opportunities.filter(company__billing_entity=billing_entity)
-            contracts = contracts.filter(company__billing_entity=billing_entity)
+            contracts = filter_document_entity(contracts, billing_entity)
             tasks = tasks.filter(company__billing_entity=billing_entity)
-            invoices = invoices.filter(company__billing_entity=billing_entity)
+            invoices = filter_document_entity(invoices, billing_entity)
 
         # Apply role-based filtering
         if user.role == 'Sales':
@@ -7267,7 +7369,7 @@ class DashboardViewSet(viewsets.ViewSet):
             status__in=['Expired', 'Cancelled']
         ).exclude(id__in=renewed_contract_ids)
         if billing_entity:
-            churned_qs = churned_qs.filter(company__billing_entity=billing_entity)
+            churned_qs = filter_document_entity(churned_qs, billing_entity)
         churned_revenue = sum(float(c.value or 0) for c in churned_qs)
         churned_count = churned_qs.count()
 
@@ -7308,7 +7410,7 @@ class DashboardViewSet(viewsets.ViewSet):
                 status__in=['Expired', 'Cancelled']
             ).exclude(id__in=renewed_contract_ids)
             if billing_entity:
-                ended_qs = ended_qs.filter(company__billing_entity=billing_entity)
+                ended_qs = filter_document_entity(ended_qs, billing_entity)
             m_churn = sum(float(c.value or 0) for c in ended_qs)
 
             revenue_trend.append({
@@ -13415,19 +13517,11 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             ).select_related('contract__company').prefetch_related('line_items')
 
             if year:
-                invoices = invoices.filter(invoice_date__year=int(year))
+                invoices = invoices.filter(issue_date__year=int(year))
 
-            # Filter by entity via contract company
-            if billing_entity == 'bmasia_th':
-                invoices = invoices.filter(
-                    Q(contract__company__billing_entity__icontains='Thailand') |
-                    Q(contract__company__billing_entity__icontains='bmasia_th')
-                )
-            elif billing_entity == 'bmasia_hk':
-                invoices = invoices.filter(
-                    Q(contract__company__billing_entity__icontains='Limited') |
-                    Q(contract__company__billing_entity__icontains='bmasia_hk')
-                )
+            # A one-off document issuer must not be routed by customer country
+            # or the source contract's default entity.
+            invoices = filter_document_entity(invoices, billing_entity)
 
             total_created = 0
             for invoice in invoices:

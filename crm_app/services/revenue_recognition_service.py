@@ -352,12 +352,11 @@ class RevenueRecognitionService:
     def generate_schedule_from_invoice(self, invoice) -> List:
         """Auto-create recognition schedules from an invoice's line items."""
         created = []
-        # Determine billing entity from contract→company or direct company
-        entity_name = ''
-        if invoice.contract and invoice.contract.company:
-            entity_name = invoice.contract.company.billing_entity or ''
-        elif invoice.company:
-            entity_name = invoice.company.billing_entity or ''
+        # A tailored invoice can intentionally have a different issuer from
+        # its customer default or source contract. Keep accounting and PDF
+        # attribution identical, and reject unknown issuers before writes.
+        from crm_app.services.document_context import effective_billing_entity
+        entity_name = effective_billing_entity(invoice)
         entity = self.normalize_billing_entity(entity_name)
 
         for item in invoice.line_items.all():

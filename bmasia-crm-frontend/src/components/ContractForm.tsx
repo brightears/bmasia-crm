@@ -43,6 +43,8 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Contract, Company, ApiResponse, ContractTemplate, ContractLineItem, Quote } from '../types';
 import ApiService from '../services/api';
+import DocumentIssuerField from './DocumentIssuerField';
+import { documentLineTax, documentValidationMessage } from '../utils/documentTailoring';
 
 interface ContractFormProps {
   open: boolean;
@@ -190,10 +192,12 @@ const ContractForm: React.FC<ContractFormProps> = ({
     end_date: null as Date | null,
     value: '',
     currency: 'USD',
+    billing_entity: '',
     auto_renew: false,
     renewal_period_months: 12,
     send_renewal_reminders: true,
     payment_terms: 'Net 30',
+    payment_schedule: '',
     billing_frequency: 'Monthly',
     discount_percentage: '',
     notes: '',
@@ -203,6 +207,10 @@ const ContractForm: React.FC<ContractFormProps> = ({
     bmasia_signatory_name: 'Chris Andrews',
     bmasia_signatory_title: 'Director',
     custom_terms: '',
+    preamble_custom: '',
+    payment_custom: '',
+    activation_custom: '',
+    custom_service_items: [] as Array<{ name: string; description: string }>,
     bmasia_contact_name: '',
     bmasia_contact_email: '',
     bmasia_contact_title: '',
@@ -231,12 +239,14 @@ const ContractForm: React.FC<ContractFormProps> = ({
     line_total: 0,
   };
   const [lineItems, setLineItems] = useState<ContractLineItem[]>([defaultContractLineItem]);
+  const lineItemsEdited = useRef(false);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [selectedQuoteId, setSelectedQuoteId] = useState<string>('');
   const [selectedCompanyCountry, setSelectedCompanyCountry] = useState<string>('');
   const [focusedPriceIndex, setFocusedPriceIndex] = useState<number | null>(null);
   const [durationMonths, setDurationMonths] = useState<number>(12);
   const [isCustomContractDuration, setIsCustomContractDuration] = useState(false);
+  const currencyEdited = useRef(false);
 
   const CONTRACT_DURATION_PRESETS = [
     { label: '6 months', months: 6 },
@@ -303,6 +313,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
   const populateForm = (contract: Contract) => {
     isFormInitialized.current = false;
+    lineItemsEdited.current = false;
     setFormData({
       company: contract.company,
       contract_number: contract.contract_number,
@@ -313,10 +324,12 @@ const ContractForm: React.FC<ContractFormProps> = ({
       end_date: contract.end_date ? new Date(contract.end_date) : null,
       value: contract.value.toString(),
       currency: contract.currency,
+      billing_entity: contract.billing_entity || '',
       auto_renew: contract.auto_renew,
       renewal_period_months: contract.renewal_period_months,
       send_renewal_reminders: contract.send_renewal_reminders ?? true,
       payment_terms: contract.payment_terms || 'Net 30',
+      payment_schedule: contract.payment_schedule || '',
       billing_frequency: contract.billing_frequency,
       discount_percentage: contract.discount_percentage.toString(),
       notes: contract.notes || '',
@@ -326,6 +339,10 @@ const ContractForm: React.FC<ContractFormProps> = ({
       bmasia_signatory_name: contract.bmasia_signatory_name || 'Chris Andrews',
       bmasia_signatory_title: contract.bmasia_signatory_title || 'Director',
       custom_terms: contract.custom_terms || '',
+      preamble_custom: contract.preamble_custom || '',
+      payment_custom: contract.payment_custom || '',
+      activation_custom: contract.activation_custom || '',
+      custom_service_items: (contract.custom_service_items || []).map(item => ({ ...item })),
       bmasia_contact_name: contract.bmasia_contact_name || '',
       bmasia_contact_email: contract.bmasia_contact_email || '',
       bmasia_contact_title: contract.bmasia_contact_title || '',
@@ -333,6 +350,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
       customer_contact_email: contract.customer_contact_email || '',
       customer_contact_title: contract.customer_contact_title || '',
     });
+
+    currencyEdited.current = true;
 
     // Derive duration from existing start/end dates
     if (contract.start_date && contract.end_date) {
@@ -405,6 +424,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
   const resetForm = () => {
     isFormInitialized.current = false;
+    lineItemsEdited.current = false;
     setFormData({
       company: '',
       contract_number: '',
@@ -415,10 +435,12 @@ const ContractForm: React.FC<ContractFormProps> = ({
       end_date: null,
       value: '',
       currency: 'USD',
+      billing_entity: '',
       auto_renew: false,
       renewal_period_months: 12,
       send_renewal_reminders: true,
       payment_terms: 'Net 30',
+      payment_schedule: '',
       billing_frequency: 'Monthly',
       discount_percentage: '',
       notes: '',
@@ -428,6 +450,10 @@ const ContractForm: React.FC<ContractFormProps> = ({
       bmasia_signatory_name: 'Chris Andrews',
       bmasia_signatory_title: 'Director',
       custom_terms: '',
+      preamble_custom: '',
+      payment_custom: '',
+      activation_custom: '',
+      custom_service_items: [],
       bmasia_contact_name: '',
       bmasia_contact_email: '',
       bmasia_contact_title: '',
@@ -435,6 +461,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
       customer_contact_email: '',
       customer_contact_title: '',
     });
+    currencyEdited.current = false;
     setServiceLocations([]);
     setAttachments([]);
     setAdditionalSignatories([]);
@@ -454,10 +481,11 @@ const ContractForm: React.FC<ContractFormProps> = ({
   };
 
   const handleCompanyChange = async (company: Company | null) => {
+    lineItemsEdited.current = true;
     setFormData(prev => ({
       ...prev,
       company: company?.id || '',
-      currency: company?.country === 'Thailand' ? 'THB' : 'USD',
+      currency: currencyEdited.current ? prev.currency : (company?.country === 'Thailand' ? 'THB' : 'USD'),
     }));
 
     // Set company country for product filtering and tax rates
@@ -548,17 +576,20 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
   // Line item handlers
   const addLineItem = () => {
+    lineItemsEdited.current = true;
     const smartTaxRate = formData.currency === 'THB' ? 7 : 0;
     setLineItems(prev => [...prev, { ...defaultContractLineItem, tax_rate: smartTaxRate }]);
   };
 
   const removeLineItem = (index: number) => {
+    lineItemsEdited.current = true;
     if (lineItems.length > 1) {
       setLineItems(prev => prev.filter((_, i) => i !== index));
     }
   };
 
   const updateLineItem = (index: number, field: keyof ContractLineItem | 'product_code', value: any) => {
+    lineItemsEdited.current = true;
     setLineItems(prev => {
       const newItems = [...prev];
 
@@ -697,8 +728,19 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
     if (!quoteId) return;
 
-    const selectedQuote = quotes.find(q => q.id === quoteId);
+    let loadedQuote = quotes.find(q => q.id === quoteId);
+    // URL conversion can arrive before the company-filtered quote state updates.
+    if (!loadedQuote) {
+      try {
+        loadedQuote = await ApiService.getQuote(quoteId);
+      } catch {
+        setError('Unable to load the source quotation. Please select it again.');
+        return;
+      }
+    }
+    const selectedQuote = loadedQuote;
     if (selectedQuote) {
+      lineItemsEdited.current = true;
       // Auto-populate line items from quote
       if (selectedQuote.line_items && selectedQuote.line_items.length > 0) {
         const smartTaxRate = formData.currency === 'THB' ? 7 : 0;
@@ -711,7 +753,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
             quantity: item.quantity,
             unit_price: Math.round(finalUnitPrice * 100) / 100,
             discount_percentage: 0,
-            tax_rate: smartTaxRate,
+            tax_rate: item.tax_rate ?? smartTaxRate,
             line_total: item.quantity * Math.round(finalUnitPrice * 100) / 100,
           };
         }));
@@ -721,7 +763,10 @@ const ContractForm: React.FC<ContractFormProps> = ({
       // Auto-fill currency from quote
       setFormData(prev => ({
         ...prev,
-        currency: selectedQuote.currency,
+        currency: currencyEdited.current ? prev.currency : selectedQuote.currency,
+        billing_entity: prev.billing_entity || selectedQuote.billing_entity || '',
+        payment_custom: prev.payment_custom || selectedQuote.terms_conditions || '',
+        payment_schedule: prev.payment_schedule || selectedQuote.payment_schedule || '',
       }));
 
       // Transfer contract duration from quote
@@ -767,11 +812,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
         return;
       }
 
-      if (!selectedTemplate && mode === 'create') {
-        setError('Please select a contract template');
-        return;
-      }
-
       if (formData.contract_category === 'participation' && !formData.master_contract) {
         setError('Please select a master contract for participation agreements');
         return;
@@ -791,9 +831,9 @@ const ContractForm: React.FC<ContractFormProps> = ({
 
       // Auto-calculate value from line items if they exist
       const validLineItems = lineItems.filter(item => item.product_service || item.description);
-      const calculatedValue = validLineItems.length > 0
-        ? calculateLineItemTotals()
-        : parseFloat(formData.value);
+      const calculatedValue = mode === 'edit' && contract && !lineItemsEdited.current
+        ? Number(contract.value)
+        : validLineItems.length > 0 ? calculateLineItemTotals() : parseFloat(formData.value);
 
       if (!calculatedValue || calculatedValue <= 0) {
         setError('Please add line items with pricing');
@@ -807,16 +847,18 @@ const ContractForm: React.FC<ContractFormProps> = ({
         start_date: formData.start_date.toISOString().split('T')[0],
         end_date: formData.end_date.toISOString().split('T')[0],
         additional_customer_signatories: additionalSignatories.length > 0 ? additionalSignatories : [],
-        preamble_template: selectedTemplate || undefined,
+        preamble_template: selectedTemplate || null,
+        custom_service_items: formData.custom_service_items.filter(item => item.name.trim() || item.description.trim()),
         quote: selectedQuoteId || null,
-        line_items: lineItems.filter(item => item.product_service || item.description).map(item => ({
+        // Wording-only edits must not rewrite historical line prices or tax.
+        ...(mode === 'create' || lineItemsEdited.current ? { line_items: validLineItems.map(item => ({
           product_service: item.product_service,
           description: item.description,
           quantity: item.quantity,
           unit_price: item.unit_price,
           discount_percentage: 0,
           tax_rate: item.tax_rate,
-        })),
+        })) } : {}),
         service_locations: serviceLocations
           .filter(loc => loc.location_name.trim())
           .map((loc, index) => ({
@@ -858,15 +900,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
       onClose();
     } catch (err: any) {
       // Parse DRF field-level errors (e.g., { field_name: ['error'] })
-      const data = err.response?.data;
-      if (data && typeof data === 'object' && !data.detail) {
-        const messages = Object.entries(data)
-          .map(([field, errors]) => `${field}: ${Array.isArray(errors) ? errors.join(', ') : errors}`)
-          .join('; ');
-        setError(messages || 'Failed to save contract');
-      } else {
-        setError(data?.detail || err.message || 'Failed to save contract');
-      }
+      setError(documentValidationMessage(err.response?.data, err.message || 'Failed to save contract'));
     } finally {
       setLoading(false);
     }
@@ -979,8 +1013,10 @@ const ContractForm: React.FC<ContractFormProps> = ({
                 {/* Contract Template Selection */}
                 <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
                   <FormControl fullWidth>
-                    <InputLabel>Contract Template *</InputLabel>
+                    <InputLabel id="contract-starting-point-label" shrink>Contract starting point</InputLabel>
                     <Select
+                      labelId="contract-starting-point-label"
+                      displayEmpty
                       value={selectedTemplate}
                       onChange={(e) => {
                         const templateId = e.target.value;
@@ -993,10 +1029,10 @@ const ContractForm: React.FC<ContractFormProps> = ({
                           setFormData(prev => ({ ...prev, contract_category: 'standard' as any }));
                         }
                       }}
-                      label="Contract Template *"
+                      label="Contract starting point"
                     >
                       <MenuItem value="">
-                        <em>Select a template</em>
+                        <em>BMAsia standard — tailor below</em>
                       </MenuItem>
                       {contractTemplates.map((template) => (
                         <MenuItem key={template.id} value={template.id} disabled={!template.is_active && mode === 'create'}>
@@ -1015,7 +1051,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
                       ))}
                     </Select>
                     <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, ml: 1.5 }}>
-                      Template determines contract structure and PDF format
+                      Use the standard format or a saved corporate template. Tailor this contract without changing the saved template.
                     </Typography>
                   </FormControl>
                 </Box>
@@ -1037,21 +1073,6 @@ const ContractForm: React.FC<ContractFormProps> = ({
                           helperText={showErrors && !formData.master_contract ? 'Required for participation agreements' : ''}
                         />
                       )}
-                    />
-                  </Box>
-                )}
-
-                {formData.contract_category === 'corporate_master' && (
-                  <Box sx={{ mt: 2 }}>
-                    <TextField
-                      fullWidth
-                      label="Custom Terms"
-                      multiline
-                      rows={4}
-                      value={formData.custom_terms}
-                      onChange={(e) => setFormData(prev => ({ ...prev, custom_terms: e.target.value }))}
-                      placeholder="Enter custom contract terms for this master agreement..."
-                      helperText="Specific terms that apply to all participation agreements under this master contract"
                     />
                   </Box>
                 )}
@@ -1359,12 +1380,23 @@ const ContractForm: React.FC<ContractFormProps> = ({
                 Payment &amp; Billing
               </Typography>
 
+              <Box sx={{ mb: 2 }}>
+                <DocumentIssuerField
+                  value={formData.billing_entity}
+                  companyEntity={companies.find(c => c.id === formData.company)?.billing_entity}
+                  onChange={value => setFormData(prev => ({ ...prev, billing_entity: value }))}
+                />
+              </Box>
+
               <Box sx={{ display: 'flex', gap: 2 }}>
                 <FormControl sx={{ minWidth: 120 }}>
                   <InputLabel>Currency</InputLabel>
                   <Select
                     value={formData.currency}
-                    onChange={(e) => setFormData(prev => ({ ...prev, currency: e.target.value }))}
+                    onChange={(e) => {
+                      currencyEdited.current = true;
+                      setFormData(prev => ({ ...prev, currency: e.target.value }));
+                    }}
                     label="Currency"
                   >
                     {currencies.map(currency => (
@@ -1399,6 +1431,16 @@ const ContractForm: React.FC<ContractFormProps> = ({
                   </Select>
                 </FormControl>
               </Box>
+              <TextField
+                fullWidth
+                sx={{ mt: 2 }}
+                label="Agreed payment schedule (optional)"
+                value={formData.payment_schedule}
+                onChange={event => setFormData(prev => ({ ...prev, payment_schedule: event.target.value }))}
+                multiline
+                minRows={2}
+                helperText="Customer-facing schedule for this contract, such as an agreed deposit and balance. Leave blank to use the existing terms."
+              />
             </Box>
 
             <Divider />
@@ -1564,8 +1606,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
               {/* Line Items Summary with VAT */}
               {lineItems.length > 0 && (() => {
                 const subtotal = calculateLineItemTotals();
-                const taxRate = formData.currency === 'THB' ? 7 : 0;
-                const vatAmount = subtotal * (taxRate / 100);
+                const vatAmount = documentLineTax(lineItems);
                 const total = subtotal + vatAmount;
                 const sym = getCurrencySymbol(formData.currency);
                 const fmt = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1577,15 +1618,15 @@ const ContractForm: React.FC<ContractFormProps> = ({
                         <Typography variant="body2" color="text.secondary">Subtotal:</Typography>
                         <Typography variant="body2">{sym}{fmt(subtotal)}</Typography>
                       </Box>
-                      {taxRate > 0 && (
+                      {vatAmount > 0 && (
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                          <Typography variant="body2" color="text.secondary">VAT ({taxRate}%):</Typography>
+                          <Typography variant="body2" color="text.secondary">Tax (from line items):</Typography>
                           <Typography variant="body2">{sym}{fmt(vatAmount)}</Typography>
                         </Box>
                       )}
                       <Divider sx={{ my: 1 }} />
                       <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="body2" fontWeight="bold">Total{taxRate > 0 ? ' (incl. VAT)' : ''}:</Typography>
+                        <Typography variant="body2" fontWeight="bold">Total{vatAmount > 0 ? ' (incl. tax)' : ''}:</Typography>
                         <Typography variant="body2" fontWeight="bold" color="primary">
                           {sym}{fmt(total)}
                         </Typography>
@@ -1768,14 +1809,100 @@ const ContractForm: React.FC<ContractFormProps> = ({
               )}
             </Box>
 
+            <Divider />
+
+            <Box>
+              <Typography variant="h6" gutterBottom>Tailor this contract</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                Optional customer-facing wording uses the same document style. Blank overrides keep the selected template or standard content; saved templates are not changed.
+                For full templates, an override requires its corresponding editable slot. The CRM will identify any clarification needed.
+              </Typography>
+              <Stack spacing={2}>
+                <TextField
+                  fullWidth
+                  label="Preamble override (optional)"
+                  value={formData.preamble_custom}
+                  onChange={event => setFormData(prev => ({ ...prev, preamble_custom: event.target.value }))}
+                  multiline
+                  minRows={3}
+                  helperText="Replaces the preamble, not the standard legal terms."
+                />
+                <TextField
+                  fullWidth
+                  label="Payment wording override (optional)"
+                  value={formData.payment_custom}
+                  onChange={event => setFormData(prev => ({ ...prev, payment_custom: event.target.value }))}
+                  multiline
+                  minRows={3}
+                  helperText="Replaces the payment wording. Blank uses the selected issuer's default or template."
+                />
+                <TextField
+                  fullWidth
+                  label="Activation wording override (optional)"
+                  value={formData.activation_custom}
+                  onChange={event => setFormData(prev => ({ ...prev, activation_custom: event.target.value }))}
+                  multiline
+                  minRows={3}
+                  helperText="Replaces the activation wording. Blank keeps the existing content."
+                />
+                <TextField
+                  fullWidth
+                  label="Additional agreed terms (optional)"
+                  value={formData.custom_terms}
+                  onChange={event => setFormData(prev => ({ ...prev, custom_terms: event.target.value }))}
+                  multiline
+                  minRows={3}
+                  helperText="Printed in the contract before signatures, in the same style. Does not replace the standard terms."
+                />
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom>Additional service provisions (optional)</Typography>
+                  {formData.custom_service_items.map((item, index) => (
+                    <Stack key={index} spacing={1} sx={{ mb: 2 }}>
+                      <Box sx={{ display: 'flex', gap: 1 }}>
+                        <TextField
+                          fullWidth
+                          label={`Service provision ${index + 1} title`}
+                          value={item.name}
+                          onChange={event => setFormData(prev => ({
+                            ...prev,
+                            custom_service_items: prev.custom_service_items.map((existing, i) => i === index ? { ...existing, name: event.target.value } : existing),
+                          }))}
+                        />
+                        <IconButton aria-label={`Remove service provision ${index + 1}`} onClick={() => setFormData(prev => ({
+                          ...prev,
+                          custom_service_items: prev.custom_service_items.filter((_, i) => i !== index),
+                        }))}><Delete /></IconButton>
+                      </Box>
+                      <TextField
+                        fullWidth
+                        label={`Service provision ${index + 1} wording`}
+                        value={item.description}
+                        multiline
+                        minRows={2}
+                        onChange={event => setFormData(prev => ({
+                          ...prev,
+                          custom_service_items: prev.custom_service_items.map((existing, i) => i === index ? { ...existing, description: event.target.value } : existing),
+                        }))}
+                      />
+                    </Stack>
+                  ))}
+                  <Button startIcon={<AddIcon />} onClick={() => setFormData(prev => ({
+                    ...prev,
+                    custom_service_items: [...prev.custom_service_items, { name: '', description: '' }],
+                  }))}>Add service provision</Button>
+                </Box>
+              </Stack>
+            </Box>
+
             {/* Notes */}
             <TextField
-              label="Notes"
+              label="Internal notes (not printed)"
               value={formData.notes}
               onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
               multiline
               rows={3}
-              placeholder="Additional contract terms, conditions, or notes..."
+              placeholder="Internal context for the team..."
+              helperText="For customer-facing wording, use the tailoring fields above."
             />
           </Box>
         </DialogContent>

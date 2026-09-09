@@ -41,6 +41,8 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Invoice, InvoiceLineItem, Company, Contract } from '../types';
 import ApiService from '../services/api';
+import DocumentIssuerField from './DocumentIssuerField';
+import { DOCUMENT_BILLING_ENTITIES, effectiveBillingEntity, issuerPaymentTerms, documentValidationMessage } from '../utils/documentTailoring';
 
 interface InvoiceFormProps {
   open: boolean;
@@ -62,16 +64,6 @@ const paymentTermsOptions = [
   { value: 'Due on Receipt', label: 'Due on Receipt' },
   { value: 'Custom', label: 'Custom' },
 ];
-
-// Entity-specific default payment terms text (same as contract PDFs)
-const PAYMENT_TERMS_DEFAULTS: Record<string, string> = {
-  'Thailand': "by bank transfer on a net received, paid in full basis, with no offset to BMA's TMB-Thanachart Bank, Bangkok, Thailand due immediately on invoicing to activate the music subscription. All outbound and inbound bank transfer fees are borne by the Client in remitting payments as invoiced less Withholding Tax required by Thai Law.",
-  'default': "by bank transfer on a net received, paid in full basis, with no offset to BMA's HSBC Bank, Hong Kong due immediately as invoiced to activate the music subscription. All Bank transfer fees, and all taxes are borne by the Client in remitting payments as invoiced.",
-};
-
-const getDefaultPaymentTermsText = (country: string): string => {
-  return PAYMENT_TERMS_DEFAULTS[country] || PAYMENT_TERMS_DEFAULTS['default'];
-};
 
 const PRODUCT_OPTIONS = [
   {
@@ -145,6 +137,9 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [discountAmount, setDiscountAmount] = useState(0);
   const [sendEmail, setSendEmail] = useState(false);
   const [currency, setCurrency] = useState<string>('USD');
+  const [billingEntity, setBillingEntity] = useState('');
+  const currencyEdited = useRef(false);
+  const paymentTextEdited = useRef(false);
   const [servicePeriodStart, setServicePeriodStart] = useState<Date | null>(null);
   const [servicePeriodEnd, setServicePeriodEnd] = useState<Date | null>(null);
   const [propertyName, setPropertyName] = useState('');
@@ -157,6 +152,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   // Track which unit price field is focused (show raw number when editing)
   const [focusedPriceIndex, setFocusedPriceIndex] = useState<number | null>(null);
+  const effectiveIssuer = effectiveBillingEntity(billingEntity, companies.find(c => c.id === companyId)?.billing_entity);
 
   // Helper function to get currency symbol
   const getCurrencySymbol = (currencyCode: string): string => {
@@ -252,6 +248,9 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     setDiscountAmount(0);
     setSendEmail(false);
     setCurrency('USD');
+    setBillingEntity('');
+    currencyEdited.current = false;
+    paymentTextEdited.current = false;
     setServicePeriodStart(null);
     setServicePeriodEnd(null);
     setPropertyName('');
@@ -279,6 +278,9 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
       : [defaultLineItem]);
     setDiscountAmount(invoice.discount_amount || 0);
     setCurrency(invoice.currency || 'USD');
+    setBillingEntity(invoice.billing_entity || '');
+    currencyEdited.current = true;
+    paymentTextEdited.current = true;
     setServicePeriodStart(invoice.service_period_start ? new Date(invoice.service_period_start) : null);
     setServicePeriodEnd(invoice.service_period_end ? new Date(invoice.service_period_end) : null);
     setPropertyName(invoice.property_name || '');
@@ -318,10 +320,10 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
       // Smart currency default based on country (same as QuoteForm)
       const smartCurrency = country === 'Thailand' ? 'THB' : 'USD';
-      setCurrency(smartCurrency);
+      if (!currencyEdited.current) setCurrency(smartCurrency);
 
-      // Auto-fill payment terms text from entity defaults
-      setPaymentTermsText(getDefaultPaymentTermsText(country));
+      // Blank payment wording resolves from the effective issuer at render time.
+      // Changing a customer must not overwrite explicitly tailored wording.
 
       // Update existing line items' tax rates to match new country
       const smartTaxRate = country === 'Thailand' ? 7 : 0;
@@ -333,8 +335,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
       // Re-generate entity-based invoice number (only in create mode)
       if (mode === 'create') {
-        const billingEntity = selectedCompany.billing_entity || '';
-        generateInvoiceNumber(billingEntity);
+        generateInvoiceNumber(effectiveBillingEntity(billingEntity, selectedCompany.billing_entity));
       }
     }
   };
@@ -345,15 +346,24 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
     if (!newContractId) return;
 
-    const selectedContract = filteredContracts.find(c => c.id === newContractId);
+    // Use the loaded contracts, not a stale filtered state during URL-prefill.
+    const selectedContract = contracts.find(c => c.id === newContractId);
     if (selectedContract) {
       // Auto-fill currency from contract
-      setCurrency(selectedContract.currency);
+      if (!currencyEdited.current) setCurrency(selectedContract.currency);
+      const inheritedIssuer = billingEntity || selectedContract.billing_entity || '';
+      setBillingEntity(inheritedIssuer);
+      if (mode === 'create') {
+        generateInvoiceNumber(effectiveBillingEntity(inheritedIssuer, companies.find(c => c.id === selectedContract.company)?.billing_entity));
+      }
+      const matchedTerms = paymentTermsOptions.find(opt => opt.value === selectedContract.payment_terms);
+      if (!paymentTextEdited.current) {
+        setPaymentTermsText(existing => existing || selectedContract.payment_custom || (!matchedTerms ? selectedContract.payment_terms : '') || '');
+      }
 
       // Auto-fill payment terms from contract
       if (selectedContract.payment_terms) {
-        const matchedTerms = paymentTermsOptions.find(opt => opt.value === selectedContract.payment_terms);
-        setPaymentTerms(matchedTerms ? matchedTerms.value : 'Net 30');
+        setPaymentTerms(matchedTerms ? matchedTerms.value : 'Custom');
       }
 
       // Auto-fill line items from contract
@@ -365,7 +375,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
           const qty = parseFloat(String(item.quantity)) || 1;
           const price = parseFloat(String(item.unit_price)) || 0;
           const discount = parseFloat(String(item.discount_percentage)) || 0;
-          const tax = parseFloat(String(item.tax_rate)) || smartTaxRate;
+          const tax = item.tax_rate == null ? smartTaxRate : parseFloat(String(item.tax_rate));
           const subtotal = qty * price * (1 - discount / 100);
           return {
             product_service: item.product_service || '',
@@ -563,6 +573,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         discount_amount: Math.round(discountAmount * 100) / 100,
         total_amount: Math.round(totals.total * 100) / 100,
         currency: currency,
+        billing_entity: billingEntity,
         status: 'Draft' as const,
       };
 
@@ -588,15 +599,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     } catch (err: any) {
       console.error('Invoice save error:', err.response?.data || err.message);
       // Parse DRF field-level errors (e.g. {"company": ["This field is required."]})
-      const data = err.response?.data;
-      if (data && typeof data === 'object' && !data.message) {
-        const messages = Object.entries(data)
-          .map(([field, errors]) => `${field}: ${Array.isArray(errors) ? errors.join(', ') : errors}`)
-          .join('; ');
-        setError(messages || 'Failed to save invoice');
-      } else {
-        setError(data?.message || data?.detail || 'Failed to save invoice');
-      }
+      setError(documentValidationMessage(err.response?.data, 'Failed to save invoice'));
     } finally {
       setLoading(false);
     }
@@ -699,6 +702,33 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                       ))}
                     </Select>
                   </FormControl>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <TextField
+                    select
+                    fullWidth
+                    label="Currency"
+                    value={currency}
+                    onChange={event => {
+                      currencyEdited.current = true;
+                      setCurrency(event.target.value);
+                    }}
+                    helperText="Independent of issuer and customer country. Confirm the agreed tax treatment separately."
+                  >
+                    {['USD', 'THB'].map(code => <MenuItem key={code} value={code}>{code}</MenuItem>)}
+                  </TextField>
+                </Grid>
+                <Grid item xs={12}>
+                  <DocumentIssuerField
+                    value={billingEntity}
+                    companyEntity={companies.find(c => c.id === companyId)?.billing_entity}
+                    onChange={value => {
+                      setBillingEntity(value);
+                      if (mode === 'create') {
+                        generateInvoiceNumber(effectiveBillingEntity(value, companies.find(c => c.id === companyId)?.billing_entity));
+                      }
+                    }}
+                  />
                 </Grid>
                 <Grid item xs={12} md={6}>
                   <TextField
@@ -1016,17 +1046,33 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                     fullWidth
                     label="Payment Terms (shown on PDF)"
                     value={paymentTermsText}
-                    onChange={(e) => setPaymentTermsText(e.target.value)}
+                    onChange={(e) => {
+                      paymentTextEdited.current = true;
+                      setPaymentTermsText(e.target.value);
+                    }}
                     multiline
                     rows={3}
-                    placeholder="Auto-filled from company defaults. Override with custom terms if needed..."
-                    helperText="Optional — leave blank to use default bank transfer instructions on PDF."
+                    placeholder={issuerPaymentTerms(effectiveIssuer) || 'Select an issuing entity or enter agreed payment wording.'}
+                    helperText="Optional override. Blank uses the selected issuer's bank transfer instructions; changing company or issuer preserves your custom wording."
                   />
+                  {paymentTermsText && DOCUMENT_BILLING_ENTITIES.some(entity => entity !== effectiveIssuer && issuerPaymentTerms(entity) === paymentTermsText) && (
+                    <Alert severity="warning" sx={{ mt: 1 }}>
+                      This wording matches another issuer's default bank instructions. Review it or use the selected issuer's default below.
+                    </Alert>
+                  )}
+                  <Button
+                    size="small"
+                    disabled={!paymentTermsText}
+                    onClick={() => {
+                      paymentTextEdited.current = true;
+                      setPaymentTermsText('');
+                    }}
+                  >Use selected issuer's default wording</Button>
                 </Grid>
                 <Grid item xs={12}>
                   <TextField
                     fullWidth
-                    label="Notes"
+                    label="Internal notes (not printed)"
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     multiline

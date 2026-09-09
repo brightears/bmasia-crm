@@ -1832,11 +1832,11 @@ def _clone_contract(source, contract_number, terms):
 
 
 def _reserve_final_contract_number(source):
-    region = (
-        'TH'
-        if source.company.billing_entity == 'BMAsia (Thailand) Co., Ltd.'
-        else 'HK'
-    )
+    from crm_app.services.document_context import document_region
+    try:
+        region = document_region(source)
+    except ValueError as exc:
+        _fail('NEEDS_CLARIFICATION', str(exc))
     # Legacy/manual imports can sit ahead of DocumentSequence. Never collide
     # and never fall back to a temporary number; advance under the sequence's
     # own row lock until an unused final customer-visible number is reserved.

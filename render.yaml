@@ -17,6 +17,8 @@ services:
         value: "True"
       - key: COMMERCIAL_DOCUMENT_V2_INVOICE_LIVE
         value: "True"
+      - key: COMMERCIAL_DOCUMENT_V2_CONTRACT_LIVE
+        value: "True"
       - key: COMMERCIAL_DOCUMENT_V2_RECEIPT_LIVE
         value: "False"
       - key: RUN_DEPLOY_BOOTSTRAP

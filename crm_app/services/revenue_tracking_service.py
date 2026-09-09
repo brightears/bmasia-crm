@@ -449,13 +449,14 @@ class RevenueTrackingService:
             logger.debug(f"Skipping {category}/{billing_entity}/{currency}: manually overridden")
             return existing
 
-        # Build base query for contracts. Snapshots key on entity slugs but Company.billing_entity
-        # stores the display value — translate first, else this matched zero contracts (self-audit).
+        # Snapshots key on slugs; document overrides take precedence over the
+        # customer's default issuer, matching the customer-facing contract.
+        from crm_app.services.document_entity_filters import filter_document_entity
         contracts = self.Contract.objects.filter(
             currency=currency,
-            company__billing_entity=SLUG_TO_COMPANY_ENTITY.get(billing_entity, billing_entity),
             lifecycle_type=category
         )
+        contracts = filter_document_entity(contracts, billing_entity)
 
         # Filter by date based on category
         if category == 'churn':

@@ -86,7 +86,8 @@ class ARAgingService:
             queryset = queryset.filter(currency=currency)
 
         if billing_entity:
-            queryset = queryset.filter(contract__company__billing_entity=billing_entity)
+            from crm_app.services.document_entity_filters import filter_document_entity
+            queryset = filter_document_entity(queryset, billing_entity)
 
         return queryset.order_by('contract__company__name', 'due_date')
 
@@ -306,7 +307,8 @@ class ARAgingService:
             invoices = invoices.filter(currency=currency)
 
         if billing_entity:
-            invoices = invoices.filter(contract__company__billing_entity=billing_entity)
+            from crm_app.services.document_entity_filters import filter_document_entity
+            invoices = filter_document_entity(invoices, billing_entity)
 
         result = []
         for invoice in invoices.order_by('-due_date'):
