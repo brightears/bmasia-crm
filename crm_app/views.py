@@ -2050,6 +2050,8 @@ class ContractViewSet(BaseModelViewSet):
     def _substitute_template_variables(self, content, contract, *, escape_for_paragraph=False):
         """Replace template variables with actual values"""
         company = contract.company
+        from crm_app.commercial_pdf import entity_profile_for
+        issuer = entity_profile_for(effective_billing_entity(contract))
 
         contact = self._resolve_template_contact(contract)
 
@@ -2066,6 +2068,13 @@ class ContractViewSet(BaseModelViewSet):
         service_labels = self._template_service_labels(contract)
 
         replacements = {
+            '{{issuer_name}}': issuer['name'],
+            '{{issuer_address}}': issuer['address'],
+            '{{issuer_tax_id}}': issuer.get('tax') or '',
+            '{{issuer_registration_number}}': issuer.get('registration_number') or '',
+            '{{issuer_bank}}': issuer['bank'],
+            '{{issuer_account}}': issuer['account'],
+            '{{issuer_swift}}': issuer['swift'],
             # Company & Client Info
             '{{company_name}}': company.name if company else '',
             '{{legal_entity_name}}': company.legal_entity_name or company.name if company else '',

@@ -31,6 +31,10 @@ are not rewritten by a renderer release.
    next action. Create a tailored template copy with the identified clause
    replaced by its slot; do not overwrite shared legal wording or append a
    contradictory paragraph. Template absence alone is not a blocker.
+   Issuer-neutral copies can use `{{issuer_name}}`, `{{issuer_address}}`,
+   `{{issuer_tax_id}}`, `{{issuer_registration_number}}`, `{{issuer_bank}}`,
+   `{{issuer_account}}`, and `{{issuer_swift}}`. Fixed references to the other
+   BMAsia supplier or its remittance details require clause-level tailoring.
 6. Review `GET /api/v1/contracts/{id}/preview-pdf/` (equivalent quote/invoice
    routes already exist). These watermarked responses perform no document,
    audit, sequence or status writes. Normal MCP PDF generation is also
@@ -48,6 +52,9 @@ require a deliberate reissue/reconciliation, not a silent ledger reassignment.
 
 Migration 0098 adds three blank optional issuer columns and an empty contract
 payment-schedule column; it does not alter customer defaults or legal templates.
+Migration 0099 merges this branch with the existing Rene 0098 migration and
+has no database operations. The release tests inspect the real migration graph
+as well as the isolated functional-test schema.
 `COMMERCIAL_DOCUMENT_V2_CONTRACT_LIVE` controls standard/master/generic
 participation rendering; previews remain available via the preview flag.
 Receipt live rendering remains separately disabled.

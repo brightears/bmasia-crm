@@ -215,6 +215,100 @@ def test_existing_template_override_already_present_is_not_duplicated_or_blocked
     assert _text(response.content).count(contract.activation_custom) == 1
 
 
+def test_template_cannot_name_a_different_issuer_than_the_document_header(contract, client):
+    contract.preamble_template = ContractTemplate.objects.create(
+        name='Fixed Hong Kong issuer', template_type='preamble', pdf_format='standard',
+        content='This agreement is between BMAsia Limited and {{company_name}}. {{signature_blocks}}',
+    )
+    contract.save()
+    response = client.get(f'/api/v1/contracts/{contract.pk}/preview-pdf/')
+    assert response.status_code == 422
+    assert response.data['code'] == 'clarification_required'
+    assert response.data['fields'][0]['field'] == 'billing_entity'
+
+
+def test_template_issuer_slots_follow_document_override_without_changing_company(contract, client):
+    contract.company.billing_entity = 'BMAsia Limited'
+    contract.company.save(update_fields=['billing_entity'])
+    contract.billing_entity = 'BMAsia (Thailand) Co., Ltd.'
+    contract.preamble_template = ContractTemplate.objects.create(
+        name='Issuer-independent agreement', template_type='preamble', pdf_format='standard',
+        content='Supplier: {{issuer_name}}.<br/>Bank: {{issuer_bank}}.<br/>{{signature_blocks}}',
+    )
+    contract.save()
+    response = client.get(f'/api/v1/contracts/{contract.pk}/preview-pdf/')
+    _assert_a4(response)
+    text = _text(response.content)
+    assert 'Supplier: BMAsia (Thailand) Co., Ltd.' in text
+    assert 'Bank: TMBThanachart Bank' in text
+    assert 'HSBC' not in text
+    contract.company.refresh_from_db()
+    assert contract.company.billing_entity == 'BMAsia Limited'
+
+
+@pytest.mark.parametrize('fixed_detail', [
+    "Payment is due by bank transfer to BMA's <b>HSBC</b> Bank, Hong Kong.",
+    'Bank: HSBC, HK',
+    'Beneficiary account: 808-021570-838',
+    'SWIFT: HSBCHKHHHKH',
+    'Supplier: <b>BMAsia</b>&nbsp;Limited',
+])
+def test_template_fixed_other_issuer_remittance_requires_clarification(contract, client, fixed_detail):
+    contract.preamble_template = ContractTemplate.objects.create(
+        name='Fixed remittance clause', template_type='preamble', pdf_format='standard',
+        content='Supplier: {{issuer_name}}.<br/>' + fixed_detail + '<br/>{{signature_blocks}}',
+    )
+    contract.save()
+    response = client.get(f'/api/v1/contracts/{contract.pk}/preview-pdf/')
+    assert response.status_code == 422
+    assert response.data['code'] == 'clarification_required'
+    assert response.data['fields'][0]['field'] == 'billing_entity'
+
+
+@pytest.mark.parametrize('payment_clause', [
+    'Payment shall be made to BMAsia Limited.',
+    "Payment is due by bank transfer to BMA's HSBC Bank, Hong Kong.",
+])
+def test_custom_payment_slot_cannot_introduce_other_issuer(contract, client, payment_clause):
+    contract.preamble_template = ContractTemplate.objects.create(
+        name='Tailored payment clause', template_type='preamble', pdf_format='standard',
+        content='Supplier: {{issuer_name}}.<br/>{{payment_clause}}<br/>{{signature_blocks}}',
+    )
+    contract.payment_custom = payment_clause
+    contract.save()
+    response = client.get(f'/api/v1/contracts/{contract.pk}/preview-pdf/')
+    assert response.status_code == 422
+    assert response.data['fields'][0]['field'] == 'billing_entity'
+
+
+def test_hong_kong_issuer_rejects_fixed_thailand_remittance(contract, client):
+    contract.billing_entity = 'BMAsia Limited'
+    contract.preamble_template = ContractTemplate.objects.create(
+        name='Fixed Thailand remittance', template_type='preamble', pdf_format='standard',
+        content="Supplier: {{issuer_name}}.<br/>Payment to BMA's TMB-Thanachart Bank, Bangkok, Thailand.<br/>{{signature_blocks}}",
+    )
+    contract.save()
+    response = client.get(f'/api/v1/contracts/{contract.pk}/preview-pdf/')
+    assert response.status_code == 422
+    assert response.data['fields'][0]['field'] == 'billing_entity'
+
+
+def test_customer_bank_reference_and_unknown_bank_are_not_issuer_evidence(contract, client):
+    contract.preamble_template = ContractTemplate.objects.create(
+        name='Issuer-neutral bank references', template_type='preamble', pdf_format='standard',
+        content=(
+            'Supplier: {{issuer_name}}.<br/>Bank: {{issuer_bank}}.<br/>'
+            'The client uses HSBC Bank, Hong Kong for its outbound transfers.<br/>'
+            "The client's bank: HSBC, HK.<br/>"
+            'Payment may be remitted to Example Escrow Bank when separately agreed.<br/>{{signature_blocks}}'
+        ),
+    )
+    contract.save()
+    response = client.get(f'/api/v1/contracts/{contract.pk}/preview-pdf/')
+    _assert_a4(response)
+    assert 'The client uses HSBC Bank, Hong Kong' in _text(response.content)
+
+
 def test_template_override_without_replaceable_slot_requests_specific_clarification(contract, client):
     contract.preamble_template = ContractTemplate.objects.create(
         name="Fixed Negotiated Payment Agreement", template_type="preamble",

@@ -60,6 +60,42 @@ def watermark_native_pdf(data):
     return output.getvalue()
 
 
+def _template_issuer_conflicts(content, issuer):
+    """Recognize the other configured supplier's fixed remittance details.
+
+    Inspect the tailored source, not substituted customer data. Bank names alone
+    are not conflicts: a client may legitimately mention its own sending bank.
+    """
+    other_issuer = ('BMAsia Limited' if issuer == 'BMAsia (Thailand) Co., Ltd.'
+                    else 'BMAsia (Thailand) Co., Ltd.')
+    other = entity_profile_for(other_issuer)
+    plain = unescape(clean_text(content))
+    plain = re.sub(r'<(?:br\s*/?|/p|/div)>', '\n', plain, flags=re.I)
+    plain = re.sub(r'<[^>]+>', '', plain).casefold()
+    plain = plain.replace('\u2019', "'").replace('\u2013', '-').replace('\u2014', '-')
+    lines = [' '.join(line.split()) for line in plain.splitlines()]
+    normalized = ' '.join(lines)
+    if other_issuer.casefold() in normalized:
+        return True
+    for identifier in (other['account'], other['swift']):
+        if re.search(r'(?<!\w)' + re.escape(identifier.casefold()) + r'(?!\w)', normalized):
+            return True
+
+    bank = (r'hsbc(?:\s+bank)?(?:\s*,?\s*(?:hong\s+kong|hk))?'
+            if other_issuer == 'BMAsia Limited'
+            else r'tmb[\s-]*thanachart(?:\s+bank)?')
+    for line in lines:
+        # Known supplier-bank labels, BMA's bank, and explicit remittance
+        # instructions are distinct from a client's incidental bank reference.
+        if re.search(r'^(?:(?:remittance|beneficiary|supplier)\s+)?bank\s*:\s*' + bank + r'\b', line):
+            return True
+        if re.search(r"\b(?:bma|bmasia|supplier|beneficiary)'s\s+" + bank + r'\b', line):
+            return True
+        if re.search(r'\b(?:pay|payment|payments|remit|remittance|transfer)\b[^.;\n]{0,100}\b(?:to|into)\s+(?:the\s+)?' + bank + r'\b', line):
+            return True
+    return False
+
+
 def tailored_template_content(contract, resolved_content=None):
     """Resolve explicit slots; never drop an edit or append conflicting terms.
 
@@ -129,6 +165,14 @@ def tailored_template_content(contract, resolved_content=None):
             content = content[:marker] + extra + content[marker:]
         else:
             content += '<br/><br/>' + extra
+    # Run after clause insertion so custom wording cannot bypass this check.
+    # Keep issuer variables unresolved here; their values follow the validated
+    # document issuer, while customer names/banks are not supplier evidence.
+    if _template_issuer_conflicts(content, effective_billing_entity(contract)):
+        raise ContractTailoringClarification([{
+            'field': 'billing_entity',
+            'accepted_slots': ['issuer_name', 'issuer_address', 'issuer_bank', 'issuer_account', 'issuer_swift'],
+        }])
     return content
 
 
