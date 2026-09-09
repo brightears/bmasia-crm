@@ -472,8 +472,22 @@ class ApiService {
     return response.data;
   }
 
+  async previewInvoicePDF(id: string): Promise<Blob> {
+    const response = await authApi.get(`/invoices/${id}/preview-pdf/`, {
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+
   async downloadReceiptPDF(id: string): Promise<Blob> {
     const response = await authApi.get(`/invoices/${id}/receipt-pdf/`, {
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+
+  async previewReceiptPDF(id: string): Promise<Blob> {
+    const response = await authApi.get(`/invoices/${id}/preview-receipt-pdf/`, {
       responseType: 'blob'
     });
     return response.data;
@@ -564,6 +578,13 @@ class ApiService {
 
   async downloadQuotePDF(id: string): Promise<Blob> {
     const response = await authApi.get(`/quotes/${id}/pdf/`, {
+      responseType: 'blob'
+    });
+    return response.data;
+  }
+
+  async previewQuotePDF(id: string): Promise<Blob> {
+    const response = await authApi.get(`/quotes/${id}/preview-pdf/`, {
       responseType: 'blob'
     });
     return response.data;

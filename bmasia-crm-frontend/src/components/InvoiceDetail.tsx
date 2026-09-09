@@ -195,7 +195,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
 
     try {
       setLoading(true);
-      const blob = await ApiService.downloadInvoicePDF(invoice.id);
+      const blob = await ApiService.previewInvoicePDF(invoice.id);
       const url = window.URL.createObjectURL(blob);
       window.open(url, '_blank');
     } catch (err) {
@@ -252,7 +252,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
 
     try {
       setLoading(true);
-      const blob = await ApiService.downloadReceiptPDF(invoice.id);
+      const blob = await ApiService.previewReceiptPDF(invoice.id);
       const url = window.URL.createObjectURL(blob);
       window.open(url, '_blank');
     } catch (err) {

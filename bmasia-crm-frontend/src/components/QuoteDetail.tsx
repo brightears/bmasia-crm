@@ -170,7 +170,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
   const handlePreviewPDF = async () => {
     if (!quoteDetail) return;
     try {
-      const blob = await ApiService.downloadQuotePDF(quoteDetail.id);
+      const blob = await ApiService.previewQuotePDF(quoteDetail.id);
       const url = window.URL.createObjectURL(blob);
       window.open(url, '_blank');
     } catch (err) {
