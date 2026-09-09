@@ -128,6 +128,29 @@ def test_invoice_preview_is_inline_watermarked_and_side_effect_free():
 
 
 @override_settings(COMMERCIAL_DOCUMENT_V2_PREVIEW_ENABLED=True)
+def test_hong_kong_preview_routes_show_exact_business_registration_number():
+    user = _user("Admin")
+    company = _company()
+    company.billing_entity = "BMAsia Limited"
+    company.save(update_fields=["billing_entity"])
+    quote = _quote(company, user)
+    invoice = _invoice(company)
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    for path in (
+        f"/api/v1/quotes/{quote.id}/preview-pdf/",
+        f"/api/v1/invoices/{invoice.id}/preview-pdf/",
+    ):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert (
+            "Business Registration Certificate No.: 34683002-000-05-26-3"
+            in _pdf_text(response.content)
+        )
+
+
+@override_settings(COMMERCIAL_DOCUMENT_V2_PREVIEW_ENABLED=True)
 def test_invoice_preview_preserves_existing_authenticated_read_access():
     user = _user("Sales")
     invoice = _invoice(_company())
@@ -170,20 +193,21 @@ def test_preview_flag_off_returns_not_found_without_activity():
     assert QuoteActivity.objects.count() == before
 
 
-@override_settings(
-    COMMERCIAL_DOCUMENT_V2_QUOTE_LIVE=False,
-    COMMERCIAL_DOCUMENT_V2_INVOICE_LIVE=False,
-)
-def test_mcp_pdf_generation_keeps_payload_schema_and_does_not_write_activity():
+@pytest.mark.parametrize("live", [False, True])
+def test_mcp_pdf_generation_keeps_payload_schema_and_does_not_write_activity(live):
     user = _user("Admin")
     company = _company()
     quote = _quote(company, user)
     invoice = _invoice(company)
     counts_before = (QuoteActivity.objects.count(), AuditLog.objects.count(), EmailLog.objects.count())
 
-    with CaptureQueriesContext(connection) as captured:
-        quote_payload = json.loads(generate_quote_pdf(str(quote.id)))
-        invoice_payload = json.loads(generate_invoice_pdf(str(invoice.id)))
+    with override_settings(
+        COMMERCIAL_DOCUMENT_V2_QUOTE_LIVE=live,
+        COMMERCIAL_DOCUMENT_V2_INVOICE_LIVE=live,
+    ):
+        with CaptureQueriesContext(connection) as captured:
+            quote_payload = json.loads(generate_quote_pdf(str(quote.id)))
+            invoice_payload = json.loads(generate_invoice_pdf(str(invoice.id)))
 
     for payload in (quote_payload, invoice_payload):
         assert set(payload) == {"filename", "size", "content_b64"}
@@ -207,6 +231,8 @@ def test_ordinary_quote_download_remains_attachment_and_records_activity(live):
     assert response.status_code == 200
     assert response["Content-Disposition"].startswith('attachment; filename="Quote_')
     assert "DRAFT PREVIEW - NOT FOR CUSTOMER" not in _pdf_text(response.content)
+    page_width = float(PdfReader(BytesIO(response.content)).pages[0].mediabox.width)
+    assert abs(page_width - (595.2756 if live else 612.0)) < 1
     assert QuoteActivity.objects.filter(quote=quote, activity_type="Viewed").count() == 1
 
 
@@ -224,6 +250,8 @@ def test_ordinary_invoice_download_remains_attachment_and_records_audit(live):
     assert response.status_code == 200
     assert response["Content-Disposition"].startswith('attachment; filename="Invoice_')
     assert "DRAFT PREVIEW - NOT FOR CUSTOMER" not in _pdf_text(response.content)
+    page_width = float(PdfReader(BytesIO(response.content)).pages[0].mediabox.width)
+    assert abs(page_width - (595.2756 if live else 612.0)) < 1
     assert AuditLog.objects.count() == before + 1
 
 

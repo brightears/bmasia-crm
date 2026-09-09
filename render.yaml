@@ -11,6 +11,18 @@ services:
         value: "False"
       - key: ALLOWED_HOSTS
         value: "*"
+      - key: COMMERCIAL_DOCUMENT_V2_PREVIEW_ENABLED
+        value: "True"
+      - key: COMMERCIAL_DOCUMENT_V2_QUOTE_LIVE
+        value: "True"
+      - key: COMMERCIAL_DOCUMENT_V2_INVOICE_LIVE
+        value: "True"
+      - key: COMMERCIAL_DOCUMENT_V2_RECEIPT_LIVE
+        value: "False"
+      - key: RUN_DEPLOY_BOOTSTRAP
+        value: "False"
+      - key: RUN_LEGACY_DEPLOY_REPAIRS
+        value: "False"
       - key: SOUNDTRACK_API_TOKEN
         sync: false
       - key: SOUNDTRACK_CLIENT_ID

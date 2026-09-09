@@ -486,13 +486,6 @@ class ApiService {
     return response.data;
   }
 
-  async previewReceiptPDF(id: string): Promise<Blob> {
-    const response = await authApi.get(`/invoices/${id}/preview-receipt-pdf/`, {
-      responseType: 'blob'
-    });
-    return response.data;
-  }
-
   async sendReceiptEmail(invoiceId: string, data: EmailSendData): Promise<void> {
     await authApi.post(`/invoices/${invoiceId}/send-receipt/`, data);
   }

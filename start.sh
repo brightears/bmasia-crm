@@ -12,37 +12,18 @@ echo "======================================================"
 # production database on deploy, with the confirmation auto-piped. DB resets, if ever needed, run
 # manually via the reset_db management command with explicit interactive confirmation.
 
-# Create campaign tables directly via SQL (bypasses migration issues)
-echo "Creating campaign tables via direct SQL..."
-python create_campaign_table_direct.py || echo "Direct table creation failed, continuing anyway..."
-
-# Fix missing SMTP columns and Soundtrack columns directly via SQL
-echo "Fixing missing columns via direct SQL..."
-python fix_smtp_columns.py || echo "SMTP column fix failed, continuing anyway..."
-
-# Fix zone management migrations (0046, 0047)
-echo "Fixing zone management migrations..."
-python fix_zone_migration.py || echo "Zone migration fix failed, continuing anyway..."
-
-# Run database migrations first
-echo "======================================================"
-echo "Running database migrations..."
-echo "======================================================"
-python manage.py migrate --noinput || {
-    echo "!!! MIGRATION FAILED !!!"
-    echo "Showing migration status..."
-    python manage.py showmigrations crm_app 2>&1 | tail -20
-    echo "Trying to continue anyway..."
-}
-
-# Apply migration 0025 manually if needed (fixes production issue)
-echo "Applying migration 0025 if needed..."
-python manage.py apply_migration_0025 || echo "Migration 0025 command not found or already applied"
-
-# Only run force_add_billing_entity if tables already exist (migration 0024 specific fix)
-# This script is only needed for existing databases, not fresh ones
-echo "Checking if billing_entity column fix is needed..."
-python -c "
+# Legacy repair hooks alter database schema and, through column defaults, can
+# affect CRM records. They are reserved for an explicitly authorized one-shot
+# maintenance run. Ordinary deploys are migration-free and fail closed when
+# the production database is not already current.
+if [ "${RUN_LEGACY_DEPLOY_REPAIRS:-False}" = "True" ]; then
+    echo "Running explicitly enabled legacy deployment repairs..."
+    python create_campaign_table_direct.py || echo "Direct table creation failed, continuing anyway..."
+    python fix_smtp_columns.py || echo "SMTP column fix failed, continuing anyway..."
+    python fix_zone_migration.py || echo "Zone migration fix failed, continuing anyway..."
+    python manage.py migrate --noinput
+    python manage.py apply_migration_0025 || echo "Migration 0025 command not found or already applied"
+    python -c "
 import os
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'bmasia_crm.settings')
 import django
@@ -60,6 +41,14 @@ except Exception as e:
     else:
         print(f'Unexpected error: {e}')
 " || echo "Column check skipped (likely fresh database)"
+else
+    echo "Checking that no database migrations are pending..."
+    python manage.py migrate --check || {
+        echo "Deployment stopped: pending migrations require an explicit maintenance run."
+        python manage.py showmigrations crm_app 2>&1 | tail -20
+        exit 1
+    }
+fi
 
 # Collect static files
 echo "Collecting static files..."
