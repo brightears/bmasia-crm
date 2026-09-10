@@ -3,6 +3,7 @@ from io import BytesIO
 
 from pypdf import PdfReader
 from reportlab.lib.pagesizes import A4
+from reportlab.platypus import PageBreak, Paragraph
 
 from crm_app.commercial_pdf import (
     AMOUNT_RIGHT_PADDING,
@@ -12,6 +13,7 @@ from crm_app.commercial_pdf import (
     STANDARD_SERVICE_COPY,
     TOTALS_SECTION_GAP,
     TOTALS_SIDE_PADDING,
+    build_document_pdf,
     compact_line_item_description,
     document_styles,
     entity_profile_for,
@@ -107,6 +109,30 @@ def test_identity_cards_use_one_equal_height_sibling_grid():
         (CONTENT_WIDTH - IDENTITY_CARD_GAP) / 2,
     ]
     assert len(table._rowHeights) == 2
+
+
+def test_every_continuation_page_keeps_the_approved_running_header():
+    styles = document_styles()
+    story = []
+    for page_number in range(1, 5):
+        story.append(Paragraph(f"Body page {page_number}", styles["body"]))
+        if page_number < 4:
+            story.append(PageBreak())
+
+    reader = _reader(build_document_pdf(
+        story,
+        document_title="Continuation header sentinel",
+        document_id="TEST-MULTIPAGE-001",
+        entity=ENTITY,
+        logo_path=str(LOGO),
+    ))
+    texts = _page_texts(reader)
+
+    assert len(texts) == 4
+    assert all("CONTINUATION HEADER SENTINEL" in text for text in texts)
+    assert all("TEST-MULTIPAGE-001" in text for text in texts)
+    assert all(abs(float(page.mediabox.width) - A4[0]) < 1 for page in reader.pages)
+    assert all(abs(float(page.mediabox.height) - A4[1]) < 1 for page in reader.pages)
 
 
 def test_compact_description_removes_only_the_approved_repeated_copy():

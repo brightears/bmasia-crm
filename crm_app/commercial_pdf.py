@@ -582,6 +582,7 @@ class CommercialDocumentTemplate(BaseDocTemplate):
                 id="commercial-continuation",
                 frames=[continuation_frame],
                 onPage=self._draw_page_header,
+                autoNextPageTemplate="commercial-continuation",
             ),
         ])
 

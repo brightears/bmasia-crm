@@ -214,12 +214,13 @@ def test_mcp_pdf_generation_keeps_payload_schema_and_does_not_write_activity(liv
         pdf_bytes = base64.b64decode(payload["content_b64"])
         assert pdf_bytes.startswith(b"%PDF-")
         assert payload["size"] == len(pdf_bytes)
+        assert abs(float(PdfReader(BytesIO(pdf_bytes)).pages[0].mediabox.width) - 595.2756) < 1
     assert _write_queries(captured) == []
     assert (QuoteActivity.objects.count(), AuditLog.objects.count(), EmailLog.objects.count()) == counts_before
 
 
 @pytest.mark.parametrize("live", [False, True])
-def test_ordinary_quote_download_remains_attachment_and_records_activity(live):
+def test_ordinary_quote_download_is_always_new_design_and_records_activity(live):
     user = _user("Sales")
     quote = _quote(_company(), user)
     client = APIClient()
@@ -232,12 +233,12 @@ def test_ordinary_quote_download_remains_attachment_and_records_activity(live):
     assert response["Content-Disposition"].startswith('attachment; filename="Quote_')
     assert "DRAFT PREVIEW - NOT FOR CUSTOMER" not in _pdf_text(response.content)
     page_width = float(PdfReader(BytesIO(response.content)).pages[0].mediabox.width)
-    assert abs(page_width - (595.2756 if live else 612.0)) < 1
+    assert abs(page_width - 595.2756) < 1
     assert QuoteActivity.objects.filter(quote=quote, activity_type="Viewed").count() == 1
 
 
 @pytest.mark.parametrize("live", [False, True])
-def test_ordinary_invoice_download_remains_attachment_and_records_audit(live):
+def test_ordinary_invoice_download_is_always_new_design_and_records_audit(live):
     user = _user("Finance")
     invoice = _invoice(_company())
     client = APIClient()
@@ -251,7 +252,7 @@ def test_ordinary_invoice_download_remains_attachment_and_records_audit(live):
     assert response["Content-Disposition"].startswith('attachment; filename="Invoice_')
     assert "DRAFT PREVIEW - NOT FOR CUSTOMER" not in _pdf_text(response.content)
     page_width = float(PdfReader(BytesIO(response.content)).pages[0].mediabox.width)
-    assert abs(page_width - (595.2756 if live else 612.0)) < 1
+    assert abs(page_width - 595.2756) < 1
     assert AuditLog.objects.count() == before + 1
 
 

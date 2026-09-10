@@ -437,7 +437,8 @@ def test_template_render_has_no_footer_only_page_after_trailing_separator():
     final_page_text = reader.pages[-1].extract_text()
 
     assert 'FINAL-HILTON-BODY' in final_page_text
-    assert 'Page ' in final_page_text
+    assert '1 / 1' in final_page_text
+    assert 'Page ' not in final_page_text
 
 
 def test_separator_immediately_after_zones_starts_a_new_page():

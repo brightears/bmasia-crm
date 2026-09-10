@@ -1,10 +1,11 @@
 # Commercial document design and tailoring
 
-The approved print-light BMAsia A4 design is shared by quotation, invoice,
-standard contract, master service agreement, and generic participation PDFs.
-Maintained Hilton corporate-native forms retain their source format and legal
-integrity gates. Previously stored PDFs and uploaded standard-terms binaries
-are not rewritten by a renderer release.
+The approved print-light BMAsia A4 design is mandatory for every generated
+quotation, invoice, proforma invoice and contract, including Hilton full-text
+agreements, Hilton corporate participation packages, master service agreements
+and generic participation PDFs. The retired BMAsia design is not a selectable
+fallback, including from standalone preview tooling. Previously stored PDFs and
+immutable uploaded source binaries are not rewritten by a renderer release.
 
 ## Vera / Cira workflow
 
@@ -22,6 +23,8 @@ are not rewritten by a renderer release.
    `terms_conditions` (the customer-facing payment prose). Contract fields are
    `preamble_custom`, `payment_custom`, `activation_custom`, `custom_terms`,
    `payment_schedule`, `custom_service_items`, locations and signatories.
+   Supplier signing lines remain blank for manual execution: generated
+   contracts never embed Chris Andrews' signature image or a BMAsia stamp.
 5. Full templates may expose `{{preamble}}`, `{{payment_clause}}` /
    `{{payment_terms}}`, `{{activation_clause}}`, `{{additional_terms}}`,
    `{{payment_schedule}}`, and `{{service_items}}`. Additional terms and a
@@ -55,9 +58,10 @@ payment-schedule column; it does not alter customer defaults or legal templates.
 Migration 0099 merges this branch with the existing Rene 0098 migration and
 has no database operations. The release tests inspect the real migration graph
 as well as the isolated functional-test schema.
-`COMMERCIAL_DOCUMENT_V2_CONTRACT_LIVE` controls standard/master/generic
-participation rendering; previews remain available via the preview flag.
-Receipt live rendering remains separately disabled.
+The former quote, invoice and contract live flags are retained only for
+configuration compatibility and cannot restore the retired renderer. Previews
+remain controlled by the preview flag. Receipt rendering remains separately
+configured because a receipt is not an invoice draft.
 
 Native regression coverage: contract PDF routes, direct renewal renderers,
 long clauses and zone schedules, contract numbering, unchanged legal text,
@@ -66,12 +70,13 @@ conversion, exact tax retention, and frontend form preservation.
 
 ## Mandatory contract layout regression gate
 
-The September 2026 short Jakarta contract exposed two gaps in text-only QA:
-nested `KeepTogether` wrappers forced a small zone schedule to a new page,
-and legacy negative padding left signature artwork floating above misaligned
-signing lines. The V2 adapter now flattens the wrappers and lays out the existing
-signer content/artwork on shared rows. It does not add signatures, alter terms,
-replace stored documents or change corporate-native forms.
+The September 2026 contract reviews exposed gaps in text-only QA: nested
+`KeepTogether` wrappers forced a small zone schedule to a new page, legacy
+negative padding misaligned signing lines, and very long source paragraphs
+could paint continuation text into the running header. The V2 adapter now
+flattens wrappers, splits explicit legal lines before pagination, and lays out
+blank signing areas on shared rows. It does not add signature/stamp artwork,
+alter terms, or replace stored documents.
 
 For every contract renderer/layout change, run:
 
@@ -81,9 +86,10 @@ python -m pytest crm_app/tests/test_contract_layout_regressions.py crm_app/tests
 
 The geometry checks require a short one-zone agreement to use no more than two
 pages, keep the short schedule with the introduction, keep final contract text
-with its signatures, align signing-rule baselines, and keep signature/stamp
-artwork inside the supplier column near its rule. They also exercise long zone
-schedules, additional signatories, long names/POA text and unchanged CRM state.
+with its signing block, align signing-rule baselines, and prove no supplier
+signature/stamp artwork is embedded. They also exercise long zone schedules,
+additional signatories, long names/POA text, every-page running furniture and
+unchanged CRM state.
 
 Export raster-review fixtures with `CONTRACT_LAYOUT_REVIEW_DIR=<private-dir>`
 when running the regression file. Vera must inspect every page of the affected

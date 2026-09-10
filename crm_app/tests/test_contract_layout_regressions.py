@@ -215,7 +215,7 @@ def test_unrecognized_nested_signing_content_falls_back_without_losing_text(jaka
     assert _signature_table(source, CONTENT_WIDTH, styles) is None
 
 
-def test_signature_rules_share_a_baseline_and_both_marks_stay_close_to_bmasia_rule(jakarta_contract):
+def test_signature_rules_share_a_baseline_and_supplier_artwork_is_never_embedded(jakarta_contract):
     page = _render(jakarta_contract).pages[-1]
     rules = sorted(_signature_lines(page), key=lambda item: item["x"])
     assert len(rules) == 2
@@ -224,14 +224,10 @@ def test_signature_rules_share_a_baseline_and_both_marks_stay_close_to_bmasia_ru
     assert left["x"] < middle < right["x"]
     assert left["y"] == pytest.approx(right["y"], abs=1), "Supplier and customer signing lines drifted"
 
-    # The repeated page-header logo sits above this region; only the signature
-    # and entity stamp belong to the signing area directly above the left rule.
+    # The repeated page-header logo sits above this region. The supplier line
+    # itself must remain blank for manual signature and stamping.
     marks = [box for box in _image_boxes(page) if box[1] < left["y"] + 100]
-    assert len(marks) == 2, "The supplier signature and correct entity stamp must both remain present"
-    for x0, y0, x1, y1 in marks:
-        assert 50 <= x0 < x1 <= middle - 8, "Supplier artwork escaped its own signature column"
-        assert -1 <= y0 - left["y"] <= 14, "Signature/stamp floats too far above its signing line"
-        assert 0 < y1 - y0 <= 85
+    assert marks == [], "Supplier signature or stamp artwork must be added manually"
 
 
 def test_compact_layout_preserves_every_principal_clause_and_has_no_business_writes(jakarta_contract):

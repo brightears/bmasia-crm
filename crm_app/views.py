@@ -1556,14 +1556,16 @@ class ContractViewSet(BaseModelViewSet):
         return response
 
     def _contract_v2_enabled(self, contract):
-        from django.conf import settings
-        return (settings.COMMERCIAL_DOCUMENT_V2_CONTRACT_LIVE or
-                getattr(getattr(self.request, '_request', self.request), '_bmasia_contract_preview', False)) and not self._is_hilton_full_template(contract)
+        # Permanent owner-approved product rule: legal/template identity may
+        # select content, never the retired BMAsia renderer. The former live
+        # flag remains configuration-compatible but cannot restore old output.
+        return True
 
     def _contract_v2_response(self, contract, body, title):
         from django.conf import settings
         from crm_app.contract_pdf_v2 import build_contract_pdf
-        raw_request = getattr(self.request, '_request', self.request)
+        request = getattr(self, 'request', None)
+        raw_request = getattr(request, '_request', request)
         try:
             data = build_contract_pdf(
                 contract, body, title=title,
@@ -1582,7 +1584,7 @@ class ContractViewSet(BaseModelViewSet):
     def proforma_pdf(self, request, pk=None):
         """Generate the PROFORMA INVOICE PDF for this contract.
 
-        Standalone advance-payment document (Pom's design, 09.06.2026): sent
+        Standalone advance-payment document in the approved commercial design: sent
         with the renewal pack so the customer can raise a PO / pay before the
         service period starts. Creates NO Invoice row and touches no
         AR/revenue-recognition/receipt logic — the official tax invoice still
@@ -1630,6 +1632,7 @@ class ContractViewSet(BaseModelViewSet):
         ref = contract.contract_number or str(contract.id)[:8]
         response = HttpResponse(pdf_data, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="Proforma_PF-{ref}.pdf"'
+        response['X-BMAsia-Renderer'] = 'proforma-v2'
         return response
 
     @action(detail=True, methods=['get'])
@@ -2568,29 +2571,10 @@ class ContractViewSet(BaseModelViewSet):
             )):
                 customer_signatories.append(normalize_customer_signatory(signatory))
 
-        # Load signature and stamp images
+        # Supplier execution artwork is always added manually. Never embed
+        # Chris Andrews' signature image or a BMAsia stamp in any contract.
         signature_img = None
         stamp_img = None
-        try:
-            sig_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'Chris Signature.png')
-            if os.path.exists(sig_path):
-                signature_img = Image(sig_path, width=2.8*inch, height=1.1*inch)
-
-            # Select stamp based on billing entity
-            if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
-                stamp_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'BMAsia Thai Stamp.png')
-            else:
-                stamp_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'BMAsia Stamp.png')
-
-            if os.path.exists(stamp_path):
-                stamp_img = Image(stamp_path, width=1.6*inch, height=1.6*inch)
-                # Preserve aspect ratio for non-square stamp images
-                iw, ih = stamp_img.imageWidth, stamp_img.imageHeight
-                if iw and ih and iw != ih:
-                    ratio = ih / iw
-                    stamp_img = Image(stamp_path, width=1.6*inch, height=1.6*inch * ratio)
-        except Exception:
-            pass
 
         # === BMAsia signature block (left column) ===
         bmasia_sig_content = []
@@ -2650,7 +2634,7 @@ class ContractViewSet(BaseModelViewSet):
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ]))
 
-        if self._is_hilton_full_template(contract):
+        if self._is_hilton_full_template(contract) and not self._contract_v2_enabled(contract):
             # Corporate-native documents bypass the v2 page renderer, but must
             # still use its shared, geometry-tested signing area. Preserve the
             # source artwork and every signer/authority/date field verbatim.
@@ -2689,6 +2673,8 @@ class ContractViewSet(BaseModelViewSet):
             blockers = self._hilton_template_pdf_blockers(contract)
             if blockers:
                 return self._hilton_template_blocked_response(contract, blockers)
+            if document_title == 'Principal terms':
+                document_title = 'Hotel participation agreement'
 
         from reportlab.lib.pagesizes import letter, A4
         from reportlab.lib import colors
@@ -3625,31 +3611,10 @@ and<br/><br/>
         customer_signatory = contract.customer_signatory_name or 'Authorized Representative'
         customer_title = contract.customer_signatory_title or 'Authorized Representative'
 
-        # Load signature and stamp images
+        # Supplier execution artwork is always added manually. Keep the
+        # signing line and signer text, but never load a signature or stamp.
         signature_img = None
         stamp_img = None
-        try:
-            sig_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'Chris Signature.png')
-            if os.path.exists(sig_path):
-                # Larger signature
-                signature_img = Image(sig_path, width=2.8*inch, height=1.1*inch)
-
-            # Select stamp based on billing entity
-            if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
-                stamp_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'BMAsia Thai Stamp.png')
-            else:
-                stamp_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'signatures', 'BMAsia Stamp.png')
-
-            if os.path.exists(stamp_path):
-                stamp_img = Image(stamp_path, width=1.6*inch, height=1.6*inch)
-                # Preserve aspect ratio for non-square stamp images
-                iw, ih = stamp_img.imageWidth, stamp_img.imageHeight
-                if iw and ih and iw != ih:
-                    ratio = ih / iw
-                    stamp_img = Image(stamp_path, width=1.6*inch, height=1.6*inch * ratio)
-        except Exception as e:
-            # If images fail to load, continue without them
-            pass
 
         # Auto-fill date for BMAsia side (already signed)
         from datetime import datetime
@@ -4425,7 +4390,7 @@ and<br/><br/>
         return response
 
     def _generate_hilton_combined_pdf(self, contract):
-        """Generate combined Hilton HPA PDF: Attachment A (Scope of Work) + Exhibit D (Legal Terms) with full signature blocks"""
+        """Generate Hilton Attachment A + Exhibit D with blank signing blocks."""
         blocked = self._reject_hilton_legacy_renderer(contract)
         if blocked:
             return blocked
@@ -4966,15 +4931,21 @@ and<br/><br/>
                 elements.append(Spacer(1, 0.08*inch))
 
         # ========================================
-        # SIGNATURE SECTION (Full signature blocks with images/stamps)
+        # SIGNATURE SECTION (blank signing blocks for manual execution)
         # ========================================
         elements.append(Spacer(1, 0.3*inch))
         elements.append(Paragraph("IN WITNESS WHEREOF, the Parties have executed this Agreement as of the Effective Date.", exd_body_style))
         elements.append(Spacer(1, 0.3*inch))
 
-        # Use the full signature blocks with signature image and stamp
+        # Keep signer identity and authority text; execution artwork stays blank.
         signature_table = self._build_signature_blocks_table(contract, billing_entity, entity_name)
         elements.append(signature_table)
+
+        # Corporate content may differ, but the generated document shell may
+        # not. Route Hilton's legacy combined Attachment A / Exhibit D story
+        # through the permanent owner-approved A4 design as well.
+        if self._contract_v2_enabled(contract):
+            return self._contract_v2_response(contract, elements, 'Hotel participation agreement')
 
         # Build PDF
         doc.build(elements)
@@ -6246,11 +6217,10 @@ class InvoiceViewSet(BaseModelViewSet):
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
         """Generate and download PDF for invoice"""
-        from django.conf import settings
         invoice = self.get_object()
-        if settings.COMMERCIAL_DOCUMENT_V2_INVOICE_LIVE:
-            return self._build_invoice_pdf_v2_response(invoice, is_receipt=False, preview=False)
-        return self._build_invoice_pdf(invoice, is_receipt=False)
+        # Invoices always use the owner-approved commercial design. The old
+        # live flag is intentionally ignored so configuration cannot regress.
+        return self._build_invoice_pdf_v2_response(invoice, is_receipt=False, preview=False)
 
     @action(detail=True, methods=['get'], url_path='receipt-pdf')
     def receipt_pdf(self, request, pk=None):
@@ -7105,83 +7075,21 @@ class QuoteViewSet(BaseModelViewSet):
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
         """Generate and download PDF for quote"""
-        from django.conf import settings
-        import os
-
         quote = self.get_object()
-
-        if settings.COMMERCIAL_DOCUMENT_V2_QUOTE_LIVE:
-            response = self._build_quote_pdf_v2_response(quote, preview=False)
-            raw_request = getattr(request, '_request', request)
-            if (
-                response.status_code == status.HTTP_200_OK
-                and not getattr(raw_request, '_bmasia_suppress_pdf_activity', False)
-            ):
-                QuoteActivity.objects.create(
-                    quote=quote,
-                    user=request.user if request.user.is_authenticated else None,
-                    activity_type='Viewed',
-                    description=f'Quote {quote.quote_number} PDF generated and downloaded (commercial v2)'
-                )
-            return response
-
-        # Get entity-specific details based on billing_entity
-        billing_entity = effective_billing_entity(quote)
-        if billing_entity == 'BMAsia (Thailand) Co., Ltd.':
-            entity_name = 'BMAsia (Thailand) Co., Ltd.'
-            entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
-            entity_phone = '+66 2153 3520'
-            entity_tax = '0105548025073'
-            entity_bank = 'TMBThanachart Bank, Thonglor Soi 17 Branch'
-            entity_swift = 'TMBKTHBK'
-            entity_account = '916-1-00579-9'
-            payment_terms_default = 'by bank transfer on a net received, paid in full basis, with no offset to BMA\'s TMB-Thanachart Bank, Bangkok, Thailand due immediately on invoicing to activate the music subscription. All outbound and inbound bank transfer fees are borne by the Client in remitting payments as invoiced less Withholding Tax required by Thai Law.'
-        else:  # BMAsia Limited (Hong Kong)
-            entity_name = 'BMAsia Limited'
-            entity_address = '22nd Floor, Tai Yau Building, 181 Johnston Road, Wanchai, Hong Kong'
-            entity_phone = '+66 2153 3520'
-            entity_tax = None
-            entity_bank = 'HSBC, HK'
-            entity_swift = 'HSBCHKHHHKH'
-            entity_account = '808-021570-838'
-            payment_terms_default = 'by bank transfer on a net received, paid in full basis, with no offset to BMA\'s HSBC Bank, Hong Kong due immediately as invoiced to activate the music subscription. All Bank transfer fees, and all taxes are borne by the Client in remitting payments as invoiced.'
-
-        # Build the PDF via the shared reportlab renderer (single source of
-        # truth; see crm_app/quote_pdf.py). Kept request-free so the exact
-        # output is preview-testable without the Django stack.
-        from crm_app.quote_pdf import build_quote_pdf
-        logo_path = os.path.join(settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
-        entity = {
-            'name': entity_name,
-            'address': entity_address,
-            'phone': entity_phone,
-            'tax': entity_tax,
-            'bank': entity_bank,
-            'swift': entity_swift,
-            'account': entity_account,
-            'payment_terms_default': payment_terms_default,
-            'billing_entity': billing_entity,
-        }
-        pdf_data = build_quote_pdf(
-            quote, entity, logo_path,
-            format_address_multiline=format_address_multiline,
-            format_duration=_format_duration_from_months,
-        )
-
-        # Create response
-        response = HttpResponse(pdf_data, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="Quote_{quote.quote_number}.pdf"'
-
-        # MCP generation is read-only; normal UI downloads still record Viewed.
+        # Quotations always use the owner-approved commercial design. The old
+        # live flag is intentionally ignored so configuration cannot regress.
+        response = self._build_quote_pdf_v2_response(quote, preview=False)
         raw_request = getattr(request, '_request', request)
-        if not getattr(raw_request, '_bmasia_suppress_pdf_activity', False):
+        if (
+            response.status_code == status.HTTP_200_OK
+            and not getattr(raw_request, '_bmasia_suppress_pdf_activity', False)
+        ):
             QuoteActivity.objects.create(
                 quote=quote,
                 user=request.user if request.user.is_authenticated else None,
                 activity_type='Viewed',
-                description=f'Quote {quote.quote_number} PDF generated and downloaded'
+                description=f'Quote {quote.quote_number} PDF generated and downloaded (commercial v2)'
             )
-
         return response
 
     @action(

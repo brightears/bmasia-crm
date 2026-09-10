@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Preview the quote PDF renderer (crm_app/quote_pdf.py) WITHOUT the Django stack.
+Preview the approved quote PDF renderer WITHOUT the Django stack.
 
-Builds a duck-typed sample quote and renders it via the real build_quote_pdf, so
+Builds a duck-typed sample quote and renders it via build_quote_pdf_v2, so
 the output is byte-for-byte what QuoteViewSet.pdf will produce in production. Only
 needs `reportlab` + `Pillow`.
 
@@ -28,7 +28,7 @@ for name, fname in [('DejaVuSans', 'DejaVuSans.ttf'), ('DejaVuSans-Bold', 'DejaV
     except Exception:
         pdfmetrics.registerFont(TTFont(name, f'/usr/share/fonts/truetype/dejavu/{fname}'))
 
-from crm_app.quote_pdf import build_quote_pdf
+from crm_app.quote_pdf_v2 import build_quote_pdf_v2
 
 
 def _format_duration_from_months(months):
@@ -104,6 +104,7 @@ def main():
         'address': '22nd Floor, Tai Yau Building, 181 Johnston Road, Wanchai, Hong Kong',
         'phone': '+66 2153 3520',
         'tax': None,
+        'registration_number': '34683002-000-05-26-3',
         'bank': 'HSBC, HK',
         'swift': 'HSBCHKHHHKH',
         'account': '808-021570-838',
@@ -115,9 +116,9 @@ def main():
     }
     logo = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png')
-    pdf = build_quote_pdf(sample_quote(), entity, logo,
-                          format_address_multiline=format_address_multiline,
-                          format_duration=_format_duration_from_months)
+    pdf = build_quote_pdf_v2(sample_quote(), entity, logo,
+                             format_address_multiline=format_address_multiline,
+                             format_duration=_format_duration_from_months)
     with open(out, 'wb') as f:
         f.write(pdf)
     print(f"wrote {out} ({len(pdf):,} bytes)")

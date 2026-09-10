@@ -387,6 +387,7 @@ def test_mcp_nonreserving_contract_pdf_has_no_business_or_audit_writes(contract,
     content = base64.b64decode(payload["content_b64"])
     assert content.startswith(b"%PDF-")
     assert len(content) == payload["size"]
+    assert abs(float(PdfReader(BytesIO(content)).pages[0].mediabox.width) - 595.2756) < 1
     assert "DRAFT PREVIEW - NOT FOR CUSTOMER" not in _text(content)
     assert _writes(captured) == []
     assert _snapshot(contract) == before
@@ -405,6 +406,25 @@ def test_direct_renewal_style_generator_uses_v2_without_audit_mutation(contract,
     with CaptureQueriesContext(connection) as captured:
         response = getattr(view, method)(contract)
     _assert_a4(response)
+    assert _writes(captured) == []
+    assert _snapshot(contract) == before
+
+
+def test_proforma_invoice_route_uses_approved_design_without_business_writes(contract, client):
+    before = _snapshot(contract)
+    with CaptureQueriesContext(connection) as captured:
+        response = client.get(f"/api/v1/contracts/{contract.pk}/proforma-pdf/")
+
+    _assert_a4(response)
+    assert response["X-BMAsia-Renderer"] == "proforma-v2"
+    assert response["Content-Disposition"].startswith('attachment; filename="Proforma_')
+    text = _text(response.content)
+    assert "PROFORMA INVOICE" in text
+    assert "ISSUED BY" in text and "PREPARED FOR" in text
+    assert "PF-TH-CT-V2-FIXTURE" in text
+    assert text.casefold().count("not a tax invoice") == 1
+    assert "INTERNAL-ONLY-CRM-TRACKING-SENTINEL" not in text
+    assert "CUSTOMER REMARKS" not in text
     assert _writes(captured) == []
     assert _snapshot(contract) == before
 

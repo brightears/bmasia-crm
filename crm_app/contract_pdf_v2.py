@@ -2,7 +2,8 @@
 
 The legacy generators remain the content source. This adapter replaces only
 their page furniture and layout, recursively fitting their variable tables to
-the same A4 grid as quotations and invoices. Corporate-native PDFs bypass it.
+the same A4 grid as quotations and invoices. Only immutable format-native PDFs
+bypass it; full legal templates such as Hilton use this approved design.
 """
 from copy import copy
 from io import BytesIO
@@ -419,17 +420,31 @@ def _flowables(source, width, styles, *, cell=False):
     output = []
     for item in source:
         if isinstance(item, Paragraph):
-            # Split explicit paragraph boundaries so long tailored content flows
-            # naturally and headings cannot strand at the bottom of a page.
-            parts = re.split(r'(?:<br\s*/?>\s*){2,}', item.text, flags=re.I)
+            # Split every explicit source line before ReportLab paginates it.
+            # When a single very long Paragraph containing many <br/> tags is
+            # split across pages, ReportLab can retain the fragment's original
+            # line offsets and paint continuation text into the running header.
+            # One source line per Paragraph also gives the layout engine real
+            # semantic break points instead of cutting a numbered clause/list
+            # at an arbitrary visual line.
+            tokens = re.split(r'((?:<br\s*/?>\s*)+)', item.text, flags=re.I)
+            parts = []
+            for position in range(0, len(tokens), 2):
+                part = tokens[position]
+                following = tokens[position + 1] if position + 1 < len(tokens) else ''
+                parts.append((part, len(re.findall(r'<br\s*/?>', following, flags=re.I))))
             # Inline emphasis may span a paragraph boundary. Keep that one
             # balanced paragraph intact rather than feed malformed fragments.
             if any(len(re.findall(r'<(?:b|i|u)>', part, re.I)) !=
-                   len(re.findall(r'</(?:b|i|u)>', part, re.I)) for part in parts):
-                parts = [item.text]
-            for part in parts:
+                   len(re.findall(r'</(?:b|i|u)>', part, re.I)) for part, _ in parts):
+                parts = [(item.text, 0)]
+            explicit_group = object()
+            for part, break_count in parts:
                 if part.strip():
                     p = _paragraph(Paragraph(_markup(part), item.style), styles, cell=cell)
+                    p._bmasia_explicit_group = explicit_group
+                    if not cell and break_count == 1:
+                        p.style.spaceAfter = 0
                     if re.fullmatch(r'\s*<b>[^<]+</b>\s*', part):
                         p.style.keepWithNext = True
                     output.append(p)
@@ -456,19 +471,55 @@ def _flowables(source, width, styles, *, cell=False):
             output.append(Spacer(1, min(item.height, 14)))
         else:
             output.append(item)
-    # A short service-package list should not leave its final price bullet alone
-    # on the next page. Large/custom lists must still be able to flow normally.
+    # A short service-package or deliverables list should stay together instead
+    # of leaving its final items alone on the next page. Large/custom lists must
+    # still be able to flow normally.
     grouped, index = [], 0
     while index < len(output):
         item = output[index]
         end = index + 1
-        if isinstance(item, Paragraph) and 'Service Packages' in item.getPlainText():
-            while end < len(output) and getattr(output[end], '_bmasia_source_style', '') == 'bulletstyle':
+        plain_text = item.getPlainText().strip() if isinstance(item, Paragraph) else ''
+        is_service_packages = 'Service Packages' in plain_text
+        is_deliverables = bool(re.fullmatch(
+            r'\d+\.\s*Deliverables and timelines:', plain_text, flags=re.I,
+        ))
+        if isinstance(item, Paragraph) and (is_service_packages or is_deliverables):
+            explicit_group = getattr(item, '_bmasia_explicit_group', None)
+            while end < len(output):
+                candidate = output[end]
+                same_explicit_group = (
+                    explicit_group is not None and
+                    getattr(candidate, '_bmasia_explicit_group', None) is explicit_group
+                )
+                if is_service_packages:
+                    belongs = (
+                        getattr(candidate, '_bmasia_source_style', '') == 'bulletstyle' or
+                        same_explicit_group
+                    )
+                else:
+                    candidate_text = (
+                        candidate.getPlainText().strip()
+                        if isinstance(candidate, Paragraph) else ''
+                    )
+                    belongs = same_explicit_group and not re.match(
+                        r'\d+\.\s+', candidate_text,
+                    )
+                if not belongs:
+                    break
                 end += 1
         if end > index + 1:
             group = output[index:end]
             height = sum(p.wrap(width, 10000)[1] + p.getSpaceBefore() + p.getSpaceAfter() for p in group)
-            if height <= 200:
+            deliverable_count = len(group) - 1 if is_deliverables else 0
+            if is_deliverables and deliverable_count >= 6:
+                # Preserve useful space on the current page while preventing a
+                # short tail of deliverables on the next one. Two balanced,
+                # indivisible halves avoid both the 5/3 orphan and a mostly
+                # empty extra final page caused by moving the entire list.
+                split_at = 1 + (deliverable_count // 2)
+                grouped.append(KeepTogether(group[:split_at]))
+                grouped.append(KeepTogether(group[split_at:]))
+            elif height <= 200:
                 grouped.append(KeepTogether(group))
             else:
                 item.style.keepWithNext = True
@@ -476,8 +527,9 @@ def _flowables(source, width, styles, *, cell=False):
         else:
             grouped.append(item)
         index = end
-    # If a signing pair has to move, bring the short closing contacts section
-    # with it. A signature-only continuation page has no contractual context.
+    # If a signing pair has to move, bring its short closing context with it.
+    # A signature-only continuation page has no contractual context. Standard
+    # templates end with numbered Contacts; Hilton uses an execution sentence.
     # Do not bind arbitrary long legal prose or multiple signer pairs together.
     for position, item in enumerate(grouped):
         if not getattr(item, '_bmasia_signature_pairs', False) or len(item._cellvalues) != 1:
@@ -486,7 +538,11 @@ def _flowables(source, width, styles, *, cell=False):
             previous = grouped[start]
             if not isinstance(previous, (Paragraph, Spacer)):
                 break
-            if isinstance(previous, Paragraph) and re.fullmatch(r'\d+\.\s*Contacts:', previous.getPlainText().strip()):
+            previous_text = previous.getPlainText().strip() if isinstance(previous, Paragraph) else ''
+            if isinstance(previous, Paragraph) and (
+                re.fullmatch(r'\d+\.\s*Contacts:', previous_text) or
+                previous_text.casefold().startswith('in witness whereof')
+            ):
                 closing = grouped[start:position + 1]
                 height = sum(p.wrap(width, 10000)[1] + p.getSpaceBefore() + p.getSpaceAfter() for p in closing)
                 if height < 300:
