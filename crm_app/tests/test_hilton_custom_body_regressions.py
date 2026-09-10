@@ -3,6 +3,7 @@ import json
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
 from pypdf import PdfReader
@@ -66,6 +67,18 @@ def test_stream_only_template_remains_hilton_after_cosmetic_rename():
     contract.preamble_template.pk = 19
     contract.preamble_template.name = 'Renamed by CRM'
     assert ContractViewSet._is_hilton_full_template(contract)
+
+
+def test_hilton_long_section_keeps_its_final_line_on_the_same_page():
+    lines = '<br/>'.join(f'PAGE-FIT-LINE-{number:02d}' for number in range(1, 51))
+    contract = _contract('{{service_product_managed_name}} {{zones_table}}<br/>---<br/>' + lines)
+    view = ContractViewSet()
+    view.request = SimpleNamespace(user=SimpleNamespace(is_authenticated=False))
+    response = view._generate_principal_terms_pdf(contract)
+    assert response.status_code == 200
+    final_page = PdfReader(BytesIO(response.content)).pages[-1].extract_text()
+    assert 'PAGE-FIT-LINE-01' in final_page
+    assert 'PAGE-FIT-LINE-50' in final_page
 
 
 @pytest.mark.django_db

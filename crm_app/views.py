@@ -2760,7 +2760,10 @@ class ContractViewSet(BaseModelViewSet):
             parent=styles['Normal'],
             fontSize=10,
             textColor=colors.HexColor('#3A3A3A'),
-            leading=14
+            # The full Hilton legal body has long explicit-break sections.
+            # A half-point tighter baseline keeps its final support line off
+            # an otherwise empty page without shrinking the text or clauses.
+            leading=13.5 if self._is_hilton_full_template(contract) else 14
         )
 
         small_style = ParagraphStyle(
