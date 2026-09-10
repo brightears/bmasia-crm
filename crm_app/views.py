@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # Production ContractTemplate primary key for the maintained Hilton HPA. Keep
 # the exact-name aliases for fixtures and newly seeded environments, but do not
 # let a cosmetic CRM rename turn off the Hilton signing-copy safety policy.
-HILTON_FULL_TEMPLATE_IDS = frozenset({'12'})
+HILTON_FULL_TEMPLATE_IDS = frozenset({'12', '19'})
 HILTON_FULL_TEMPLATE_NAMES = frozenset({
     'hilton international',
     'hilton international — stream-only',
@@ -1818,8 +1818,12 @@ class ContractViewSet(BaseModelViewSet):
 
     def _hilton_template_pdf_blockers(self, contract):
         """Return actionable reasons a fresh Hilton HPA signing copy is unsafe."""
+        from crm_app.contract_pdf_v2 import full_template_source, ContractTailoringClarification
         template = contract.preamble_template
-        content = getattr(template, 'content', '') or ''
+        try:
+            content, _ = full_template_source(contract)
+        except ContractTailoringClarification as exc:
+            return [{'code': 'clarification_required', 'detail': str(exc), 'evidence': exc.payload()}]
         rendered = self._substitute_template_variables(content, contract)
         blockers = []
 
@@ -2660,6 +2664,11 @@ class ContractViewSet(BaseModelViewSet):
 
     def _generate_principal_terms_pdf(self, contract, *, document_title='Principal terms'):
         """Generate Principal Terms PDF for standard contracts"""
+        from crm_app.contract_pdf_v2 import full_template_source, ContractTailoringClarification
+        try:
+            full_template_source(contract)
+        except ContractTailoringClarification as exc:
+            return Response(exc.payload(), status=422)
         # This guard belongs in the generator, not only the public API action:
         # Rene and other internal review flows call the renderer directly.
         # Stored/previously issued ContractDocument files are never modified.
@@ -2978,8 +2987,9 @@ class ContractViewSet(BaseModelViewSet):
             # Skip all hardcoded clauses and render only template content
             from crm_app.contract_pdf_v2 import tailored_template_content, ContractTailoringClarification
             try:
+                source_content, _ = full_template_source(contract)
                 template_source = tailored_template_content(
-                    contract, self._substitute_template_variables(contract.preamble_template.content, contract))
+                    contract, self._substitute_template_variables(source_content, contract))
             except ContractTailoringClarification as exc:
                 return Response(exc.payload(), status=422)
             template_content = re.sub(

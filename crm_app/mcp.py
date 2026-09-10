@@ -505,6 +505,13 @@ def create_record(collection: str, data: str) -> str:
     SerializerClass = _get_serializer_class(serializer_path)
 
     serializer = SerializerClass(data=fields)
+    _, dropped = _dropped_keys(serializer, fields)
+    if collection == 'contract' and dropped:
+        return _json.dumps({
+            'created': False,
+            'error': 'Contract fields were not writable; nothing was saved.',
+            'ignored_keys': dropped,
+        })
     if not serializer.is_valid():
         return f"Validation errors: {_json.dumps(serializer.errors)}"
 
@@ -555,6 +562,13 @@ def update_record(collection: str, id: str, data: str) -> str:
 
     SerializerClass = _get_serializer_class(serializer_path)
     serializer = SerializerClass(instance, data=fields, partial=True)
+    _, dropped = _dropped_keys(serializer, fields)
+    if collection == 'contract' and dropped:
+        return _json.dumps({
+            'updated': False, 'id': str(id),
+            'error': 'Contract fields were not writable; nothing was saved.',
+            'ignored_keys': dropped,
+        })
     if not serializer.is_valid():
         return f"Validation errors: {_json.dumps(serializer.errors)}"
 

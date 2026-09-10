@@ -96,6 +96,30 @@ def _template_issuer_conflicts(content, issuer):
     return False
 
 
+def full_template_source(contract):
+    """Select an explicit full-body override without mutating its shared template.
+
+    Structural table/signature slots distinguish a complete template body from
+    an ordinary preamble clause. A full override must retain the selected
+    template's structural slots; incomplete copies are rejected, never guessed.
+    """
+    template = getattr(contract, 'preamble_template', None)
+    content = getattr(template, 'content', '') or ''
+    custom = getattr(contract, 'preamble_custom', '') or ''
+    structural = lambda text: set(re.findall(
+        r'\{\{\s*(zones_table|signature_blocks)\s*\}\}', text))
+    custom_slots = structural(custom)
+    if custom_slots:
+        required = structural(content)
+        if not template or 'zones_table' not in custom_slots or custom_slots != required:
+            raise ContractTailoringClarification([{
+                'field': 'preamble_custom',
+                'accepted_slots': sorted(required) or ['preamble_template'],
+            }])
+        return custom, True
+    return content, False
+
+
 def tailored_template_content(contract, resolved_content=None):
     """Resolve explicit slots; never drop an edit or append conflicting terms.
 
@@ -103,7 +127,7 @@ def tailored_template_content(contract, resolved_content=None):
     signatures. Replacing existing legal prose needs a named replacement slot.
     Dynamic values stay plain text; template markup remains the template's.
     """
-    content = contract.preamble_template.content
+    content, full_body_override = full_template_source(contract)
     content = re.sub(r'\{\{\s*(\w+)\s*\}\}', r'{{\1}}', content)
     def already_present(value):
         def normalized(text):
@@ -116,6 +140,8 @@ def tailored_template_content(contract, resolved_content=None):
         ('payment_custom', ('payment_clause', 'payment_terms'), 'payment_template'),
         ('activation_custom', ('activation_clause', 'activation_terms'), 'activation_template'),
     ):
+        if field == 'preamble_custom' and full_body_override:
+            continue
         value = getattr(contract, field, '')
         selected = getattr(contract, template_field, None) if template_field else None
         if not value and selected:
