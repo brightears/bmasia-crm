@@ -10,7 +10,7 @@ import re
 from html import unescape
 
 from reportlab.lib.enums import TA_CENTER
-from reportlab.platypus import CondPageBreak, Image, KeepTogether, PageBreak, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import CondPageBreak, HRFlowable, Image, KeepTogether, PageBreak, Paragraph, Spacer, Table, TableStyle
 
 from crm_app.commercial_pdf import (
     ALT_SURFACE, BOLD_FONT, BODY_FONT, CONTENT_WIDTH, INK, LINE, MUTED,
@@ -215,10 +215,121 @@ def _paragraph(item, styles, *, cell=False, bold=False, alignment=None):
     style.allowWidows = style.allowOrphans = 0
     # Keep product name on one line; table width is independently constrained.
     text = text.replace('Beat Breeze', 'Beat&#160;Breeze')
-    return Paragraph(text, style)
+    text = text.replace('Soundtrack Your Brand', 'Soundtrack Your&#160;Brand')
+    paragraph = Paragraph(text, style)
+    paragraph._bmasia_source_style = name
+    return paragraph
+
+
+def _signature_table(source, width, styles):
+    """Lay out legacy signing content on shared rows, not offset nested columns.
+
+    This is a layout-only adapter: use the exact existing names, dates, entities,
+    authority text and image resources. Never add a signature or change a signer.
+    Equal signing areas and real rules replace oversized images/negative padding.
+    Each signer pair is atomic; additional pairs may continue onto another page.
+    """
+    if len(source._cellvalues) != 1 or len(source._cellvalues[0]) != 2:
+        return None
+    columns = source._cellvalues[0]
+    if not all(isinstance(c, Table) and all(len(row) == 1 for row in c._cellvalues)
+               for c in columns):
+        return None
+
+    def segments(column):
+        result, current, pictures = [], None, []
+        for row in column._cellvalues:
+            item = row[0]
+            if isinstance(item, Table):
+                if any(not isinstance(v, Image) and v not in ('', None)
+                       for cells in item._cellvalues for v in cells):
+                    return []  # Unknown nested wording must never be discarded.
+                pictures.extend(v for cells in item._cellvalues for v in cells if isinstance(v, Image))
+            elif isinstance(item, Paragraph):
+                if re.fullmatch(r'_+', item.getPlainText().strip()):
+                    current = {'images': pictures, 'fields': []}
+                    pictures = []
+                    result.append(current)
+                elif current is not None:
+                    current['fields'].append(item)
+                else:
+                    return []  # Not a recognized signing block: retain generic layout.
+            elif not isinstance(item, Spacer) and item not in ('', None):
+                return []
+        return result
+
+    left, right = [segments(c) for c in columns]
+    if not left or not right:
+        return None
+    gutter = 28
+    column_width = (width - gutter) / 2
+
+    def pictures(items):
+        images = []
+        for index, item in enumerate(items):
+            img = copy(item)
+            max_width = min(124 if index == 0 else 58, column_width / max(len(items), 1))
+            # Preserve the original resource's aspect ratio, not legacy distortion.
+            factor = min(max_width / img.imageWidth, 58 / img.imageHeight)
+            img.drawWidth, img.drawHeight = img.imageWidth * factor, img.imageHeight * factor
+            images.append(img)
+        if not images:
+            return Spacer(1, 62)
+        table = Table([images], colWidths=[column_width / len(images)] * len(images), rowHeights=[62])
+        table.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('VALIGN', (0, 0), (-1, -1), 'BOTTOM'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ]))
+        return table
+
+    pairs = []
+    for index in range(max(len(left), len(right))):
+        pair = [side[index] if index < len(side) else None for side in (left, right)]
+        rows = [[pictures(pair[0]['images']) if pair[0] else '', '',
+                 pictures(pair[1]['images']) if pair[1] else '']]
+        rows.append([HRFlowable(width=column_width, thickness=.5, color=MUTED) if s else '' for s in (pair[0], None, pair[1])])
+        # Field styles carry their semantic role from the content generator. Align
+        # names/titles/entities/dates even when the client has no separate title.
+        roles = ['signame', 'sigtitle', 'sigcompany', 'sigdate']
+        recognized = all(p.style.name.lower() in roles for s in pair if s for p in s['fields'])
+        if recognized:
+            for role in roles:
+                cells = []
+                for signatory in pair:
+                    fields = [p for p in signatory['fields'] if p.style.name.lower() == role] if signatory else []
+                    cells.append([_paragraph(p, styles, cell=True, alignment=TA_CENTER) for p in fields] or '')
+                rows.append([cells[0], '', cells[1]])
+        else:
+            # Preserve unfamiliar text in source order instead of dropping it.
+            count = max(len(s['fields']) if s else 0 for s in pair)
+            for position in range(count):
+                cells = [_paragraph(s['fields'][position], styles, cell=True, alignment=TA_CENTER)
+                         if s and position < len(s['fields']) else '' for s in pair]
+                rows.append([cells[0], '', cells[1]])
+        table = Table(rows, colWidths=[column_width, gutter, column_width], hAlign='LEFT', splitByRow=0)
+        table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'), ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 2), ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+            ('TOPPADDING', (0, 2), (-1, 2), 6),
+            ('TOPPADDING', (0, -1), (-1, -1), 9),
+        ]))
+        pairs.append([table])
+    table = Table(pairs, colWidths=[width], hAlign='LEFT', splitByRow=1)
+    table.setStyle(TableStyle([
+        ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+    ]))
+    table._bmasia_signature_pairs = True
+    return table
 
 
 def _table(source, width, styles, *, nested=False):
+    if not nested:
+        signing = _signature_table(source, width, styles)
+        if signing is not None:
+            return signing
     cols = len(source._cellvalues[0])
     raw_widths = source._argW
     if all(isinstance(w, (float, int)) for w in raw_widths) and sum(raw_widths):
@@ -300,15 +411,62 @@ def _flowables(source, width, styles, *, cell=False):
             output.append(_table(item, width, styles, nested=cell))
         elif isinstance(item, KeepTogether):
             children = _flowables(item._content, width, styles, cell=cell)
+            # ReportLab's KeepTogether.wrap returns a sentinel height. Nesting it
+            # inside another KeepTogether measures a small table as millions of
+            # points and forces a spurious page break (the JLL one-zone case).
+            def flatten(values):
+                for value in values:
+                    if isinstance(value, KeepTogether):
+                        yield from flatten(value._content)
+                    else:
+                        yield value
+            children = list(flatten(children))
             # Legal schedules must flow across pages; signatures stay atomic.
             long_table = any(isinstance(v, Table) and len(v._cellvalues) > 8 for v in children)
-            output.extend(children if long_table and '___' not in _plain(item._content)
+            signature_pairs = any(getattr(v, '_bmasia_signature_pairs', False) for v in children)
+            output.extend(children if signature_pairs or (long_table and '___' not in _plain(item._content))
                           else [KeepTogether(children)])
         elif isinstance(item, Spacer):
             output.append(Spacer(1, min(item.height, 14)))
         else:
             output.append(item)
-    return output
+    # A short service-package list should not leave its final price bullet alone
+    # on the next page. Large/custom lists must still be able to flow normally.
+    grouped, index = [], 0
+    while index < len(output):
+        item = output[index]
+        end = index + 1
+        if isinstance(item, Paragraph) and 'Service Packages' in item.getPlainText():
+            while end < len(output) and getattr(output[end], '_bmasia_source_style', '') == 'bulletstyle':
+                end += 1
+        if end > index + 1:
+            group = output[index:end]
+            height = sum(p.wrap(width, 10000)[1] + p.getSpaceBefore() + p.getSpaceAfter() for p in group)
+            if height <= 200:
+                grouped.append(KeepTogether(group))
+            else:
+                item.style.keepWithNext = True
+                grouped.extend(group)
+        else:
+            grouped.append(item)
+        index = end
+    # If a signing pair has to move, bring the short closing contacts section
+    # with it. A signature-only continuation page has no contractual context.
+    # Do not bind arbitrary long legal prose or multiple signer pairs together.
+    for position, item in enumerate(grouped):
+        if not getattr(item, '_bmasia_signature_pairs', False) or len(item._cellvalues) != 1:
+            continue
+        for start in range(position - 1, max(-1, position - 9), -1):
+            previous = grouped[start]
+            if not isinstance(previous, (Paragraph, Spacer)):
+                break
+            if isinstance(previous, Paragraph) and re.fullmatch(r'\d+\.\s*Contacts:', previous.getPlainText().strip()):
+                closing = grouped[start:position + 1]
+                height = sum(p.wrap(width, 10000)[1] + p.getSpaceBefore() + p.getSpaceAfter() for p in closing)
+                if height < 300:
+                    grouped[start:position + 1] = [KeepTogether(closing)]
+                break
+    return grouped
 
 
 def build_contract_pdf(contract, body, *, title, logo_path=None, preview=False):

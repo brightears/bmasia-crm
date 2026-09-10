@@ -63,3 +63,31 @@ Native regression coverage: contract PDF routes, direct renewal renderers,
 long clauses and zone schedules, contract numbering, unchanged legal text,
 no-write previews/MCP, document issuer and financial attribution, quote
 conversion, exact tax retention, and frontend form preservation.
+
+## Mandatory contract layout regression gate
+
+The September 2026 short Jakarta contract exposed two gaps in text-only QA:
+nested `KeepTogether` wrappers forced a small zone schedule to a new page,
+and legacy negative padding left signature artwork floating above misaligned
+signing lines. The V2 adapter now flattens the wrappers and lays out the existing
+signer content/artwork on shared rows. It does not add signatures, alter terms,
+replace stored documents or change corporate-native forms.
+
+For every contract renderer/layout change, run:
+
+```bash
+python -m pytest crm_app/tests/test_contract_layout_regressions.py crm_app/tests/test_contract_pdf_v2.py crm_app/tests/test_contract_signature_blocks.py
+```
+
+The geometry checks require a short one-zone agreement to use no more than two
+pages, keep the short schedule with the introduction, keep final contract text
+with its signatures, align signing-rule baselines, and keep signature/stamp
+artwork inside the supplier column near its rule. They also exercise long zone
+schedules, additional signatories, long names/POA text and unchanged CRM state.
+
+Export raster-review fixtures with `CONTRACT_LAYOUT_REVIEW_DIR=<private-dir>`
+when running the regression file. Vera must inspect every page of the affected
+document and representative long/multi-signer cases before calling a release
+verified. Cira must check the newly generated PDF, not an earlier attachment,
+before the separately authorized document-save/send step. Test success or a
+PDF-generation receipt alone is not a visual acceptance or a customer-send receipt.
