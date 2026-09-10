@@ -2650,6 +2650,19 @@ class ContractViewSet(BaseModelViewSet):
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ]))
 
+        if self._is_hilton_full_template(contract):
+            # Corporate-native documents bypass the v2 page renderer, but must
+            # still use its shared, geometry-tested signing area. Preserve the
+            # source artwork and every signer/authority/date field verbatim.
+            from reportlab.lib.pagesizes import letter
+            from crm_app.commercial_pdf import document_styles
+            from crm_app.contract_pdf_v2 import _signature_table
+            # Native principal terms use one-inch side margins and the default
+            # six-point frame padding on either side.
+            signing_width = letter[0] - 2 * inch - 12
+            aligned = _signature_table(signature_table, signing_width, document_styles())
+            if aligned is not None:
+                return aligned
         return signature_table
 
     def _format_company_address(self, company):
