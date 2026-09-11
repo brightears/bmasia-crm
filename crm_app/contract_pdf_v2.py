@@ -175,12 +175,12 @@ def tailored_template_content(contract, resolved_content=None):
         ('custom_terms', ('additional_terms', 'custom_terms'), 'Additional terms and conditions'),
         ('payment_schedule', ('payment_schedule',), 'Payment schedule'),
     ):
-        value = getattr(contract, field, '')
+        value = getattr(contract, field, '') or ''
         found = [f'{{{{{slot}}}}}' for slot in slots if f'{{{{{slot}}}}}' in content]
         for slot in found:
-            content = content.replace(slot, html_text(value))
-        if value and not found and not already_present(value):
-            inserts.append(f'<b>{heading}</b><br/>{html_text(value)}')
+            content = content.replace(slot, html_text(value) if value.strip() else '')
+        if value.strip() and not found and not already_present(value):
+            inserts.append(optional_clause_markup(heading, value))
     if inserts:
         extra = '<br/><br/>'.join(inserts) + '<br/><br/>'
         # Place the additions before the complete signature segment, including
@@ -209,6 +209,25 @@ def _markup(text):
     text = clean_text(text)
     text = re.sub(r'</?(?:font|span)\b[^>]*>', '', text, flags=re.I)
     return text
+
+
+def optional_clause_markup(label, value, *, allow_markup=False):
+    """Render supplied optional wording as part of the agreement body.
+
+    These fields are not a source of new terms or approval authority. Their
+    caller supplies the wording; blank fields produce no label. Keep the label
+    inline so it cannot become an oversized or orphaned section heading.
+    """
+    if not clean_text(value).strip():
+        return ''
+    text = (_markup(value).replace('\n', '<br/>')
+            if allow_markup else html_text(value))
+    return f'<b>{html_text(label)}:</b> {text}'
+
+
+def optional_clause_paragraph(label, value, style, *, allow_markup=False):
+    text = optional_clause_markup(label, value, allow_markup=allow_markup)
+    return Paragraph(text, style) if text else None
 
 
 def _plain(value):

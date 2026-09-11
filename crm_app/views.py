@@ -29,6 +29,7 @@ from decimal import Decimal
 from xml.sax.saxutils import escape as xml_escape
 from crm_app.services.document_context import effective_billing_entity
 from crm_app.services.document_entity_filters import filter_document_entity
+from crm_app.contract_pdf_v2 import optional_clause_paragraph
 
 logger = logging.getLogger(__name__)
 
@@ -3414,6 +3415,11 @@ and<br/><br/>
                 f"<b>{clause_num}.</b> Terms of payment: {payment_text}",
                 clause_style
             ))
+            payment_schedule = optional_clause_paragraph(
+                'Payment schedule', getattr(contract, 'payment_schedule', ''), clause_style,
+            )
+            if payment_schedule is not None:
+                elements.append(payment_schedule)
             clause_num += 1
 
             # Bank Details (sub-section under payment) - styled card
@@ -3505,6 +3511,15 @@ and<br/><br/>
             ))
             clause_num += 1
 
+            # Explicit customer-facing additions remain normal agreement prose;
+            # internal notes are never a source of contractual wording.
+            additional_terms = optional_clause_paragraph(
+                'Additional terms and conditions', contract.custom_terms,
+                body_style, allow_markup=True,
+            )
+            if additional_terms is not None:
+                elements.append(additional_terms)
+
             # Clause 9: Contacts
             elements.append(Paragraph(
                 f"<b>{clause_num}.</b> Contacts:",
@@ -3547,21 +3562,6 @@ and<br/><br/>
             elements.append(Spacer(1, 0.3*inch))
 
         # END OF ELSE BLOCK - Hardcoded clauses only run when no template
-
-        # Additional Terms and Conditions — customer-facing only
-        # FIX 2026-05-05 (Lyra): contract.notes is INTERNAL ONLY (CRM tracking, sent_date pointers, internal context).
-        # NEVER print contract.notes on customer-facing PDF — it leaks internal info (e.g., "Word-doc-rendered, file ID...").
-        # If additional terms need to appear on the customer PDF, use contract.custom_terms (matches master-agreement codepath).
-        if contract.custom_terms:
-            elements.append(Paragraph("ADDITIONAL TERMS AND CONDITIONS", heading_style))
-            additional_terms_text = contract.custom_terms.replace('\n', '<br/>')
-            elements.append(Paragraph(additional_terms_text, body_style))
-            elements.append(Spacer(1, 0.3*inch))
-
-        if getattr(contract, 'payment_schedule', ''):
-            elements.append(Paragraph('PAYMENT SCHEDULE', heading_style))
-            elements.append(Paragraph(xml_escape(contract.payment_schedule).replace('\n', '<br/>'), body_style))
-            elements.append(Spacer(1, 0.2*inch))
 
         # Contract Status Indicator
         if contract.status == 'Active':
@@ -3918,16 +3918,17 @@ and<br/><br/>
         # Custom Terms (if specified)
         for label, field in [('Preamble', 'preamble_custom'), ('Payment terms', 'payment_custom'),
                              ('Activation terms', 'activation_custom'), ('Payment schedule', 'payment_schedule')]:
-            value = getattr(contract, field, '')
-            if value:
-                elements.append(Paragraph(label.upper(), heading_style))
-                elements.append(Paragraph(xml_escape(value).replace('\n', '<br/>'), body_style))
-                elements.append(Spacer(1, 12))
-        if contract.custom_terms:
-            elements.append(Paragraph("CUSTOM TERMS AND CONDITIONS", heading_style))
-            custom_terms_text = contract.custom_terms.replace('\n', '<br/>')
-            elements.append(Paragraph(custom_terms_text, body_style))
-            elements.append(Spacer(1, 0.3*inch))
+            optional_clause = optional_clause_paragraph(
+                label, getattr(contract, field, ''), body_style,
+            )
+            if optional_clause is not None:
+                elements.append(optional_clause)
+        additional_terms = optional_clause_paragraph(
+            'Additional terms and conditions', contract.custom_terms,
+            body_style, allow_markup=True,
+        )
+        if additional_terms is not None:
+            elements.append(additional_terms)
 
         # List of Participation Agreements
         participation_agreements = contract.participation_agreements.all()
@@ -4318,19 +4319,20 @@ and<br/><br/>
         # Additional Terms — customer-facing only.
         for label, field in [('Preamble', 'preamble_custom'), ('Payment terms', 'payment_custom'),
                              ('Activation terms', 'activation_custom'), ('Payment schedule', 'payment_schedule')]:
-            value = getattr(contract, field, '')
-            if value:
-                elements.append(Paragraph(label.upper(), heading_style))
-                elements.append(Paragraph(xml_escape(value).replace('\n', '<br/>'), body_style))
-                elements.append(Spacer(1, 12))
+            optional_clause = optional_clause_paragraph(
+                label, getattr(contract, field, ''), body_style,
+            )
+            if optional_clause is not None:
+                elements.append(optional_clause)
         # FIX 2026-06-07 (Vera): was rendering contract.notes (INTERNAL-ONLY — leaks import/CRM-tracking
         # context onto the customer PDF). The participation path missed the 2026-05-05 principal-terms fix;
         # use contract.custom_terms, matching _generate_principal_terms_pdf and _generate_master_agreement_pdf.
-        if contract.custom_terms:
-            elements.append(Paragraph("ADDITIONAL TERMS", heading_style))
-            terms_text = contract.custom_terms.replace('\n', '<br/>')
-            elements.append(Paragraph(terms_text, body_style))
-            elements.append(Spacer(1, 0.3*inch))
+        additional_terms = optional_clause_paragraph(
+            'Additional terms and conditions', contract.custom_terms,
+            body_style, allow_markup=True,
+        )
+        if additional_terms is not None:
+            elements.append(additional_terms)
 
         # Signatures Section
         elements.append(Paragraph("SIGNATURES", heading_style))

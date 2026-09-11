@@ -25,6 +25,12 @@ immutable uploaded source binaries are not rewritten by a renderer release.
    `payment_schedule`, `custom_service_items`, locations and signatories.
    Supplier signing lines remain blank for manual execution: generated
    contracts never embed Chris Andrews' signature image or a BMAsia stamp.
+   Optional customer-facing clauses and schedules require explicit supplied
+   wording or a specific instruction to add that content. Do not promote
+   internal review cautions, assumptions, missing-data questions or draft/HOLD
+   notes into `custom_terms` or `payment_schedule`. Keep them in internal notes
+   and the review handoff; ask for clarification before final issue when needed.
+   Do not add a redundant schedule merely because billing frequency is known.
 5. Full templates may expose `{{preamble}}`, `{{payment_clause}}` /
    `{{payment_terms}}`, `{{activation_clause}}`, `{{additional_terms}}`,
    `{{payment_schedule}}`, and `{{service_items}}`. Additional terms and a
@@ -97,3 +103,18 @@ document and representative long/multi-signer cases before calling a release
 verified. Cira must check the newly generated PDF, not an earlier attachment,
 before the separately authorized document-save/send step. Test success or a
 PDF-generation receipt alone is not a visual acceptance or a customer-send receipt.
+
+Optional additions use sentence-case inline labels and the agreement's body
+font, size and spacing, never detached oversized addenda. Standard agreements
+place an explicitly requested schedule within payment terms and additional
+terms before Contacts. Template slots retain their intended placement; fallback
+insertions precede signatures. Empty or whitespace-only values print nothing.
+The renderer preserves supplied wording; it cannot infer who authorized a field.
+Cira must enforce that source boundary before writing it.
+
+Run `crm_app/tests/test_contract_optional_layout.py` as part of this gate. It
+checks blank fields, explicit additions, template slots, typography, long text,
+blank execution areas and no-write rendering. Export synthetic review PDFs with
+`CONTRACT_OPTIONAL_REVIEW_DIR=<private-dir>`. For a content correction, compare
+the replacement with the source: remove only the unrequested additions, retain
+approved principal/standard terms and commercial facts, and inspect every page.
