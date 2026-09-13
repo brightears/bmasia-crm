@@ -1,0 +1,6 @@
+{
+  "company": {"bmasia_id": "synthetic-company-001", "name": "Example Hospitality Thailand Co., Ltd.", "website": "https://example-hospitality.invalid", "country": "Thailand", "city": "Bangkok", "phone": "+66 2 000 0000", "email": "sales@example-hospitality.invalid", "industry": "Hospitality"},
+  "contact": {"bmasia_id": "synthetic-contact-001", "first_name": "Asha", "last_name": "Example", "email": "asha.example@example-hospitality.invalid", "phone": "+66 2 000 0001", "title": "Events Director", "company_bmasia_id": "synthetic-company-001"},
+  "activity": {"bmasia_id": "synthetic-activity-001", "kind": "email", "subject": "Synthetic venue music enquiry", "body": "Synthetic activity only. No customer data.", "occurred_at": "2026-09-13T09:00:00Z", "company_bmasia_id": "synthetic-company-001", "contact_bmasia_id": "synthetic-contact-001"},
+  "unsupported_records": {"contract": {"bmasia_id": "synthetic-contract-001", "status": "draft", "document_number": "SYN-CON-001"}, "invoice": {"bmasia_id": "synthetic-invoice-001", "status": "draft", "invoice_number": "SYN-INV-001", "total": 1000, "currency": "THB"}}
+}
