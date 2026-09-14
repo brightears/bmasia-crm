@@ -1,0 +1,8 @@
+{
+  "schema": "bmasia.agent-channel-config.v1",
+  "environment": "synthetic",
+  "socket_path": "/run/bmasia-agent-shadow/collector.sock",
+  "state_directory": "/opt/vera-hermes/data/runtime/agent-shadow-channel",
+  "fixture_registry": "/opt/vera-hermes/deploy/agent-shadow/registry.json",
+  "core_path": "/opt/vera-hermes/deploy/agent-shadow/current/agent_shadow.py"
+}

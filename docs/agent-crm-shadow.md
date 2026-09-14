@@ -9,10 +9,11 @@ The existing BMAsia CRM remains the sole customer system of record. A separate,
 private SQLite ledger records source-bound proposals, comparisons, exceptions
 and follow-ups. It has no CRM write, mail, HTTP or model client. Its only writes
 are to its own explicitly selected shadow database. No production database
-migration, new API, credential, scheduler, service or agent policy is introduced.
+migration, new API, credential, scheduler or agent policy is introduced by the
+ledger itself. The separately approved synthetic transport is described below.
 
 The command-line review is an operator review artifact, not a new CRM UI or an
-automatically monitored dashboard. No agent is connected by this release.
+automatically monitored dashboard. No live customer reporting is connected.
 `ready_for_cira_review` means reviewable proposal, never applied or approved.
 Even matched evidence bytes establish provenance, not the truth of a claim.
 
@@ -30,6 +31,8 @@ This feature cannot add contract clauses, customer remarks or payment terms.
   projection from the current CRM models. No name-based matching or bulk scan.
 - `tools/agent_shadow_candidate/`: reproducible static compatibility probe
   against pinned Comp AI source. Not running-app integration evidence.
+- `deploy/agent-shadow/`: the separately authorized, Linux UID-authenticated
+  synthetic report-only channel; see [channel operations](agent-report-channel.md).
 
 There is no apply/promote/send/activate operation. Routine ingestion consumes no
 model tokens. This does not measure the cost of producing reports upstream.
@@ -123,15 +126,16 @@ short fact values and immutable evidence references. The ledger is private but
 not encrypted; no indefinite production retention policy has been approved.
 Review access, retention and backup before collecting real customer reports.
 
-## Activation gates (not done by this release)
+## Live-customer activation gates (still closed)
 
 The live Cira inspection found that the existing shared intake accepts an
 asserted sender name; Riff/Nina lack an active report route. Do not reuse that
 channel as authenticated report ingestion and do not widen the CRM write
 allowlist just to carry reports. Current Cira dispatch may invoke a model.
 
-The recommended next step requires Norbert's explicit approval for the new
-authorization/service and producer configuration:
+Norbert authorized the separate synthetic channel on 14 September 2026. Steps
+1, 2 and synthetic acceptance in step 4 are its scope; steps 3 and 5 remain
+separate approvals, and no producer workflow automatically submits live data:
 
 1. A separate Vera-owned local report-only Unix socket, with kernel peer-UID
    identity, bounded payloads and server-constructed context. Revalidate actual
@@ -157,8 +161,9 @@ backend avoids losing contracts, invoices, zones, renewals or the approved desig
 
 ## Recovery and deployment
 
-This release adds files only. No HTTP route, model, migration, renderer, existing
-workflow or service start command changes. Revert the release commit to remove
-the tooling; retain the private ledger for audit if any real pilot was approved.
+The ledger adds files only. No HTTP route, model, migration, renderer or existing
+workflow changes. The optional channel adds one isolated Vera service; use its
+documented stop/disable procedure before removing its tooling. Retain private
+receipts for audit if any real pilot was approved.
 Never point the ledger at a CRM SQLite database. It rejects unrelated database
 tables and separates synthetic/shadow environments.
