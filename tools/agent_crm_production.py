@@ -9,7 +9,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 from contextlib import contextmanager
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 import hashlib
 import json
 import os
@@ -42,6 +42,18 @@ FIELDS = {
     'cara': {'contact': {'title', 'department', 'last_contacted'}},
     'bmasia_sales': {'opportunity': {'stage', 'last_contact_date', 'follow_up_date', 'expected_close_date', 'pain_points', 'decision_criteria'}},
 }
+TEXT_FIELDS = {
+    'contact': {'title': 100, 'department': 100},
+    'opportunity': {'pain_points': 2000, 'decision_criteria': 2000},
+    'zone': {'notes': 2000},
+}
+DATE_FIELDS = {'opportunity': {'last_contact_date', 'follow_up_date', 'expected_close_date'}}
+DATETIME_FIELDS = {'contact': {'last_contacted'}}
+OPPORTUNITY_STAGES = {'Contacted', 'Quotation Sent', 'Contract Sent'}
+OPPORTUNITY_TERMINAL_STAGES = {'Won', 'Lost'}
+TICKET_STATUSES = {'new', 'assigned', 'in_progress', 'pending'}
+TICKET_TERMINAL_STATUSES = {'resolved', 'closed'}
+TICKET_PRIORITIES = {'low', 'medium', 'high', 'urgent'}
 COLLECTIONS = {'company', 'contact', 'opportunity', 'ticket', 'zone'}
 FATAL_HOLDS = {'SOURCE_COLLECTION_FAILED', 'SOURCE_CONFLICT', 'SOURCE_FUTURE', 'SOURCE_INCOMPLETE',
                'SOURCE_INVALID', 'SOURCE_MISSING', 'SOURCE_PATH_REJECTED', 'SOURCE_RESULT_LIMIT', 'SOURCE_SCHEMA_UNSUPPORTED', 'SOURCE_STALE'}
@@ -116,6 +128,71 @@ def scalar(value):
     if isinstance(value, str) and len(value) > 2000:
         raise ValueError('scalar_too_long')
     encode(value)
+
+
+def correction_text(value, maximum, multiline=False):
+    permitted = {'\n', '\r', '\t'} if multiline else set()
+    if not isinstance(value, str) or len(value) > maximum or any(ord(c) < 32 and c not in permitted for c in value):
+        raise ValueError('invalid_correction_text')
+
+
+def correction_date(value):
+    if value is None:
+        return
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
+        raise ValueError('invalid_correction_date')
+    try:
+        date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError('invalid_correction_date') from exc
+
+
+def correction_datetime(value):
+    if value is None:
+        return
+    try:
+        instant(value)
+    except (ValueError, TypeError) as exc:
+        raise ValueError('invalid_correction_datetime') from exc
+
+
+def validate_change(collection, field, before, after):
+    for value in (before, after):
+        scalar(value)
+    maximum = TEXT_FIELDS.get(collection, {}).get(field)
+    if maximum is not None:
+        correction_text(before, maximum, multiline=collection in {'opportunity', 'zone'})
+        correction_text(after, maximum, multiline=collection in {'opportunity', 'zone'})
+        return
+    if field in DATE_FIELDS.get(collection, set()):
+        correction_date(before)
+        correction_date(after)
+        return
+    if field in DATETIME_FIELDS.get(collection, set()):
+        correction_datetime(before)
+        correction_datetime(after)
+        return
+    if collection == 'opportunity' and field == 'stage':
+        if before in OPPORTUNITY_TERMINAL_STAGES:
+            raise ValueError('commercial_reopen_requires_owner_workflow')
+        if after in OPPORTUNITY_TERMINAL_STAGES:
+            raise ValueError('commercial_outcome_requires_owner_workflow')
+        if before not in OPPORTUNITY_STAGES or after not in OPPORTUNITY_STAGES:
+            raise ValueError('invalid_opportunity_stage')
+        return
+    if collection == 'ticket' and field == 'status':
+        if before in TICKET_TERMINAL_STATUSES:
+            raise ValueError('ticket_reopen_requires_owner_workflow')
+        if after in TICKET_TERMINAL_STATUSES:
+            raise ValueError('ticket_closure_requires_owner_workflow')
+        if before not in TICKET_STATUSES or after not in TICKET_STATUSES:
+            raise ValueError('invalid_ticket_status')
+        return
+    if collection == 'ticket' and field == 'priority':
+        if before not in TICKET_PRIORITIES or after not in TICKET_PRIORITIES:
+            raise ValueError('invalid_ticket_priority')
+        return
+    raise ValueError('field_validation_missing')
 
 
 def authorized(source, uid):
@@ -238,12 +315,7 @@ def validate_correction(document, uid, clock):
         raise ValueError('field_outside_source_authority')
     for field, change in changes.items():
         exact(change, {'before', 'after'})
-        scalar(change['before'])
-        scalar(change['after'])
-        if field == 'stage' and change['after'] in {'Closed Won', 'Closed Lost', 'Won', 'Lost'}:
-            raise ValueError('commercial_outcome_requires_owner_workflow')
-        if field == 'status' and str(change['after']).lower() in {'closed', 'resolved'}:
-            raise ValueError('ticket_closure_requires_owner_workflow')
+        validate_change(document['record']['collection'], field, change['before'], change['after'])
     text_value(document['reason'], 500)
     evidence = document['evidence']
     if not isinstance(evidence, list) or not 1 <= len(evidence) <= 10:

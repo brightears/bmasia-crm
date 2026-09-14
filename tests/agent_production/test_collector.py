@@ -64,6 +64,13 @@ def make_correction(*, source="theo", event_id=None, record_id=RECORD, after="Di
     }
 
 
+def make_field_correction(source, collection, field, before, after):
+    document = make_correction(source=source)
+    document["record"]["collection"] = collection
+    document["changes"] = {field: {"before": before, "after": after}}
+    return document
+
+
 class CollectorTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -201,6 +208,57 @@ class CollectorTests(unittest.TestCase):
         self.assertTrue(all(row["state"] == "HOLD" and row["reason"] == "concurrent_source_conflict" and row["peer_uid"] == 1008 for row in rows))
         with self.assertRaisesRegex(ValueError, "source_uid_mismatch"):
             self.ledger.submit(make_correction(source="lyra"), 1008, NOW)
+
+    def test_correction_fields_match_live_model_shapes(self):
+        valid = [
+            ("lyra", 1000, "contact", "title", "", "General Manager"),
+            ("lyra", 1000, "contact", "last_contacted", None, "2026-09-14T05:59:00+00:00"),
+            ("theo", 1008, "opportunity", "last_contact_date", None, "2026-09-14"),
+            ("theo", 1008, "opportunity", "stage", "Contacted", "Quotation Sent"),
+            ("riff", 1007, "ticket", "status", "new", "in_progress"),
+            ("riff", 1007, "ticket", "priority", "medium", "urgent"),
+            ("nina", 1004, "zone", "notes", "Old note", ""),
+            ("nina", 1004, "zone", "notes", "First line\nSecond line", "Revised\nTwo lines"),
+            ("theo", 1008, "opportunity", "pain_points", "", "First point\nSecond point"),
+        ]
+        for source, uid, collection, field, before, after in valid:
+            with self.subTest(source=source, collection=collection, field=field):
+                production.validate_correction(
+                    make_field_correction(source, collection, field, before, after), uid, NOW
+                )
+
+        invalid = [
+            (make_field_correction("lyra", "contact", "title", "Manager", True), "invalid_correction_text"),
+            (make_field_correction("lyra", "contact", "title", "Manager", "General\nManager"), "invalid_correction_text"),
+            (make_field_correction("nina", "zone", "notes", "Note", "Hidden\u0000control"), "invalid_correction_text"),
+            (make_field_correction("lyra", "contact", "department", "Sales", "x" * 101), "invalid_correction_text"),
+            (make_field_correction("lyra", "contact", "last_contacted", None, "2026-09-14T06:00:00"), "invalid_correction_datetime"),
+            (make_field_correction("theo", "opportunity", "follow_up_date", None, "2026-09-14T00:00:00Z"), "invalid_correction_date"),
+            (make_field_correction("theo", "opportunity", "stage", "Contacted", "contacted"), "invalid_opportunity_stage"),
+            (make_field_correction("riff", "ticket", "priority", "medium", "Medium"), "invalid_ticket_priority"),
+            (make_field_correction("nina", "zone", "notes", "Old note", None), "invalid_correction_text"),
+        ]
+        for document, reason in invalid:
+            uid = {"lyra": 1000, "theo": 1008, "riff": 1007, "nina": 1004}[document["source"]]
+            with self.subTest(reason=reason, field=next(iter(document["changes"]))):
+                with self.assertRaisesRegex(ValueError, reason):
+                    production.validate_correction(document, uid, NOW)
+
+    def test_terminal_sales_and_ticket_records_cannot_be_closed_or_reopened(self):
+        cases = [
+            (make_field_correction("theo", "opportunity", "stage", "Contacted", "Won"), 1008,
+             "commercial_outcome_requires_owner_workflow"),
+            (make_field_correction("theo", "opportunity", "stage", "Lost", "Contacted"), 1008,
+             "commercial_reopen_requires_owner_workflow"),
+            (make_field_correction("riff", "ticket", "status", "pending", "resolved"), 1007,
+             "ticket_closure_requires_owner_workflow"),
+            (make_field_correction("riff", "ticket", "status", "closed", "in_progress"), 1007,
+             "ticket_reopen_requires_owner_workflow"),
+        ]
+        for document, uid, reason in cases:
+            with self.subTest(reason=reason):
+                with self.assertRaisesRegex(ValueError, reason):
+                    production.validate_correction(document, uid, NOW)
 
 
 if __name__ == "__main__":
