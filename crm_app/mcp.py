@@ -91,6 +91,12 @@ to recover the raw PDF. On failure returns `{"error": "..."}`.
 - **Quote status**: Draft → Sent → Accepted/Rejected/Expired
 - **Service locations** on contracts are separate from line items — they control
   what appears in the PDF "Locations for Provision of Services" table.
+  A normal contract update is an ID-aware partial upsert and preserves omitted
+  rows. To replace the complete list atomically, call `update_record` once for
+  the contract with `replace_service_locations: true`, the complete intended
+  `service_locations` array, and any matching pricing fields such as `value`.
+  Existing rows omitted from that complete list are deleted only in this explicit
+  mode, and the whole update rolls back if pricing validation fails.
 - Contract numbers are auto-generated (read-only).
 """)
 
@@ -542,7 +548,11 @@ def update_record(collection: str, id: str, data: str) -> str:
         collection: Collection name (same options as create_record)
         id: UUID of the record to update
         data: JSON string with fields to update (partial update — only include
-              fields you want to change)
+              fields you want to change). For an atomic full replacement of a
+              contract's service locations, include replace_service_locations=true,
+              the complete intended service_locations array, and matching pricing
+              fields in this one update. Without that flag, omitted locations are
+              preserved.
 
     Returns: JSON with updated fields, or validation errors.
     """
@@ -586,6 +596,19 @@ def update_record(collection: str, id: str, data: str) -> str:
     # Read-back so the caller can verify what was actually persisted.
     persisted = {}
     for key in applied:
+        if collection == 'contract' and key == 'service_locations':
+            from crm_app.serializers import ContractServiceLocationSerializer
+            locations = instance.service_locations.order_by('sort_order', 'id')
+            persisted[key] = ContractServiceLocationSerializer(
+                locations,
+                many=True,
+            ).data
+            continue
+        if collection == 'contract' and key == 'replace_service_locations':
+            # This is a write-only operation mode, not a model attribute. Echo the
+            # accepted value so the caller can verify which semantics were applied.
+            persisted[key] = bool(fields[key])
+            continue
         src = serializer.fields[key].source or key
         val = getattr(instance, src, None)
         persisted[key] = str(val) if val is not None else None
@@ -594,7 +617,7 @@ def update_record(collection: str, id: str, data: str) -> str:
         result['warning_ignored_keys'] = dropped
         result['warning'] = ('These keys were NOT saved (DRF drops non-writable keys silently). '
                              'Fix the key names and re-send if you intended to set them.')
-    return _json.dumps(result)
+    return _json.dumps(result, default=str)
 
 
 @mcp_server.tool()

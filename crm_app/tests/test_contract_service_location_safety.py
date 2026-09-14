@@ -1,12 +1,13 @@
 """Regression coverage for contract product rows and PDF pricing safety."""
 
+import json
 from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
 from rest_framework import serializers
 
-from crm_app.mcp import _COLLECTION_MAP, delete_record
+from crm_app.mcp import _COLLECTION_MAP, delete_record, update_record
 from crm_app.models import ContractServiceLocation
 from crm_app.serializers import (
     ContractSerializer,
@@ -250,3 +251,62 @@ def test_direct_service_location_update_is_discoverable_and_safe():
         "servicelocation",
         str(locations[0].id),
     )
+
+
+def test_mcp_contract_update_documents_explicit_replacement_mode():
+    assert "replace_service_locations=true" in update_record.__doc__
+
+
+@pytest.mark.django_db
+def test_mcp_contract_update_atomically_replaces_ten_locations_with_six():
+    contract, original_locations = _flat_contract(
+        tuple(f"Area {index} - to be confirmed" for index in range(1, 11))
+    )
+    contract.value = Decimal("2000.00")
+    contract.price_per_zone = Decimal("200.00")
+    contract.save(update_fields=["value", "price_per_zone"])
+    intended_names = [
+        "Lobby",
+        "Aqua Pool",
+        "Olive",
+        "Grandeur",
+        "Executive Lounge",
+        "Convention Center",
+    ]
+
+    result = json.loads(
+        update_record(
+            "contract",
+            str(contract.id),
+            json.dumps(
+                {
+                    "value": "1200.00",
+                    "replace_service_locations": True,
+                    "service_locations": [
+                        {
+                            "location_name": name,
+                            "platform": "beatbreeze",
+                            "sort_order": index,
+                            "price": "200.00",
+                        }
+                        for index, name in enumerate(intended_names, start=1)
+                    ],
+                }
+            ),
+        )
+    )
+
+    contract.refresh_from_db()
+    persisted_locations = list(contract.service_locations.order_by("sort_order"))
+    assert result["updated"] is True
+    assert result["applied"]["replace_service_locations"] is True
+    assert [
+        row["location_name"]
+        for row in result["applied"]["service_locations"]
+    ] == intended_names
+    assert [location.location_name for location in persisted_locations] == intended_names
+    assert contract.value == Decimal("1200.00")
+    assert contract.total_value == Decimal("1200.00")
+    assert not ContractServiceLocation.objects.filter(
+        id__in=[location.id for location in original_locations]
+    ).exists()
