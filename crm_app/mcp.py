@@ -221,7 +221,7 @@ class ContactQuery(ModelQueryToolset):
     model = Contact
     fields = [
         'id', 'name', 'email', 'phone', 'company', 'contact_type',
-        'is_primary', 'title', 'notes', 'created_at',
+        'is_primary', 'title', 'department', 'last_contacted', 'notes', 'created_at', 'updated_at',
     ]
     search_fields = ['name', 'email', 'phone', 'title', 'notes']
     extra_instructions = "Contacts belong to companies. contact_type: Primary, Billing, Technical, Decision Maker, Other."
@@ -298,10 +298,11 @@ class OpportunityQuery(ModelQueryToolset):
     fields = [
         'id', 'name', 'company', 'contact', 'stage', 'value', 'currency',
         'probability', 'expected_close_date', 'lead_source', 'contact_method',
-        'notes', 'created_at',
+        'last_contact_date', 'follow_up_date', 'pain_points', 'decision_criteria',
+        'notes', 'created_at', 'updated_at',
     ]
     search_fields = ['name', 'notes']
-    extra_instructions = "Stages: Lead, Qualified, Proposal, Negotiation, Closed Won, Closed Lost."
+    extra_instructions = "Stages: Contacted, Quotation Sent, Contract Sent, Won, Lost."
 
 
 class TaskQuery(ModelQueryToolset):
@@ -318,7 +319,7 @@ class ZoneQuery(ModelQueryToolset):
     model = Zone
     fields = [
         'id', 'name', 'company', 'soundtrack_zone_id', 'soundtrack_account_id',
-        'is_active', 'platform_type', 'created_at',
+        'is_active', 'platform_type', 'notes', 'created_at', 'updated_at',
     ]
     search_fields = ['name', 'soundtrack_zone_id']
     extra_instructions = "Zones represent physical music playback areas in hotel properties."

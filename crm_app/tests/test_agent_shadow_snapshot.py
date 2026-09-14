@@ -64,3 +64,12 @@ def test_shadow_projection_policy_matches_current_models():
                 assert _field_value_valid(collection, name, value), (collection, name, value)
     for collection, name in (("opportunities", "stage"), ("tickets", "status"), ("tickets", "priority")):
         assert not _field_value_valid(collection, name, "not-a-real-choice")
+
+
+def test_readonly_mcp_exposes_versioned_shadow_projection_fields():
+    from crm_app.mcp import ContactQuery, OpportunityQuery, TicketQuery, ZoneQuery
+    queries = {'contacts': ContactQuery, 'opportunities': OpportunityQuery,
+               'tickets': TicketQuery, 'zones': ZoneQuery}
+    for collection, fields in FIELD_OWNERS.items():
+        assert set(fields).issubset(set(queries[collection].fields))
+        assert {'id', 'company', 'updated_at'}.issubset(set(queries[collection].fields))
