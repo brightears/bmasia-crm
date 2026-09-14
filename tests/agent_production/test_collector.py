@@ -139,6 +139,17 @@ class CollectorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "coverage_not_row_partition"):
             production.validate_export(wrong_partition, 1008, NOW)
 
+    def test_complete_enumeration_with_held_rows_replaces_previous_snapshot(self):
+        self.ledger.submit(make_export("theo", complete=True), 1008, NOW)
+        held = make_row(key="work:held", facts={"state": "OPEN"}, holds=["SOURCE_STALE"])
+        snapshot = make_export("theo", rows=[held], exported=NOW + timedelta(minutes=1), complete=True)
+        self.ledger.submit(snapshot, 1008, NOW + timedelta(minutes=1))
+        status = self.ledger.status("theo", NOW + timedelta(minutes=2))["sources"]["theo"]
+        self.assertEqual(status["stored_observations"], 1)
+        self.assertEqual(status["observation_hold_counts"], {"SOURCE_STALE": 1})
+        self.assertTrue(status["coverage"]["complete"])
+        self.assertEqual(status["coverage"]["failed"], 1)
+
     def test_bound_record_requires_company_and_wrong_company_shape_fails_closed(self):
         missing = make_export("theo", rows=[make_row(companies=[], record={"collection": "contacts", "id": RECORD}, facts={"state": "OPEN"})])
         with self.assertRaisesRegex(ValueError, "bound_record_requires_company"):

@@ -38,8 +38,11 @@ def once():
 
 
 def child(source):
-    if core.UIDS.get(os.geteuid()) != source:
+    if core.UIDS.get(os.geteuid()) != source or os.getuid() != os.geteuid():
         raise ValueError('source_uid_mismatch')
+    status = dict(line.split(':', 1) for line in Path('/proc/self/status').read_text().splitlines() if ':' in line)
+    if any(int(status.get(key, '1').strip(), 16) for key in ('CapEff', 'CapPrm', 'CapAmb')):
+        raise ValueError('source_child_must_have_no_capabilities')
     spec = importlib.util.spec_from_file_location('native_export', ROOT / 'agent_crm_native_export.py')
     exporter = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(exporter)
@@ -67,8 +70,9 @@ def main():
     while running:
         try:
             print(json.dumps(once()), flush=True)
-        except Exception:
-            print('{"source_supervisor":"failed"}', flush=True)
+        except Exception as exc:
+            print(json.dumps({'source_supervisor': 'failed', 'error_type': type(exc).__name__,
+                              'errno': getattr(exc, 'errno', None)}), flush=True)
         if args.once:
             return 0
         for _ in range(300):

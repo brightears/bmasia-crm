@@ -170,6 +170,37 @@ class NativeExportTests(unittest.TestCase):
         future = native.export("riff", now=NOW, path=root)
         self.assertIn("SOURCE_FUTURE", future["records"][0]["holds"])
 
+    def test_riff_root_owned_nonwritable_parent_is_audited_layout(self):
+        root = self.riff_root()
+        real_lstat = Path.lstat
+
+        def audited_lstat(path):
+            info = real_lstat(path)
+            if path == root:
+                values = list(info)
+                values[stat.ST_UID] = 0
+                values[stat.ST_MODE] = stat.S_IFDIR | 0o755
+                return os.stat_result(values)
+            return info
+
+        with patch.object(Path, "lstat", audited_lstat):
+            accepted = native.export("riff", now=NOW, path=root)
+        self.assertTrue(accepted["coverage"]["complete"])
+        self.assertEqual(accepted["records"], [])
+
+        def writable_lstat(path):
+            info = real_lstat(path)
+            if path == root:
+                values = list(info)
+                values[stat.ST_UID] = 0
+                values[stat.ST_MODE] = stat.S_IFDIR | 0o775
+                return os.stat_result(values)
+            return info
+
+        with patch.object(Path, "lstat", writable_lstat):
+            rejected = native.export("riff", now=NOW, path=root)
+        self.assertEqual(rejected["records"][0]["holds"], ["SOURCE_PATH_REJECTED"])
+
     def test_export_size_and_private_output_are_enforced(self):
         path = self.activity_db([self.work()])
         with patch.object(native, "MAX_BYTES", 100):

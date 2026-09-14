@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sqlite3
+import stat
 import sys
 import tempfile
 import uuid
@@ -254,7 +255,11 @@ def _safe_queue_files(path: Path) -> list[tuple[str, Path]]:
         root_info = path.lstat()
     except OSError as exc:
         raise ExportError("SOURCE_MISSING") from exc
-    if path.is_symlink() or not path.is_dir() or root_info.st_uid != os.geteuid():
+    parent_owner_ok = root_info.st_uid == os.geteuid() or (
+        root_info.st_uid == 0
+        and not stat.S_IMODE(root_info.st_mode) & (stat.S_IWGRP | stat.S_IWOTH)
+    )
+    if path.is_symlink() or not path.is_dir() or not parent_owner_ok:
         raise ExportError("SOURCE_PATH_REJECTED")
     files: list[tuple[str, Path]] = []
     for state in ("pending", "processing", "completed", "failed"):

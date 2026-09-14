@@ -173,6 +173,22 @@ class LocalExportTests(unittest.TestCase):
         missing = subject.export_bmasia_sales(now=NOW, sales_root=empty)
         self.assertEqual(missing["records"][0]["holds"], ["SOURCE_MISSING"])
 
+    def test_four_tab_hash_receipt_is_not_a_record_manifest(self):
+        # A verified aggregate proves the scan happened, but contains neither
+        # exact company/record identities nor per-record facts.  It must never
+        # promote coverage to complete or invent ledger rows.
+        (self.sales / "daily-latest.json").write_text(json.dumps({
+            "completed_at": NOW.isoformat(),
+            "payload": {"active_pipeline_mirror_verification": {
+                "outcome": "VERIFIED", "tabs": 4, "retained_rows": 115,
+                "source_active_rows_sha256": "a" * 64,
+            }},
+        }))
+        result = subject.export_bmasia_sales(now=NOW, sales_root=self.sales)
+        self.assertFalse(result["coverage"]["complete"])
+        self.assertEqual(result["coverage"]["exported"], 0)
+        self.assertEqual(result["records"][0]["holds"], ["SOURCE_MISSING"])
+
     def test_sales_equal_timestamp_conflict_and_absent_facts(self):
         company = {"record_type": "company", "record_id": COMPANY_2}
         one = {"record_type": "contact", "record_id": CONTACT_2, "company_id": COMPANY_2, "is_active": True}

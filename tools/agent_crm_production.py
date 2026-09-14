@@ -7,6 +7,7 @@ authenticate an account, not factual truth. Exports are observations only.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 import hashlib
@@ -309,7 +310,7 @@ class Ledger:
                 db.execute('INSERT OR REPLACE INTO sources VALUES (?,?,?,?,?,?)',
                            (source, clock.isoformat(), uid, 'operator_import' if uid == OPERATOR_UID else 'kernel_peer_uid', document['export_sha256'], encode(metadata).decode()))
                 # Replace complete snapshots, retain historical rows on an incomplete read.
-                if document['coverage']['complete'] and document['coverage']['failed'] == 0:
+                if document['coverage']['complete']:
                     db.execute('DELETE FROM observations WHERE source=?', (source,))
                 for row in document['records']:
                     db.execute('INSERT OR REPLACE INTO observations VALUES (?,?,?,?)',
@@ -347,11 +348,15 @@ class Ledger:
                     sources[name] = {'transport': 'missing'}
                     continue
                 metadata = json.loads(row['metadata'])
+                hold_counts = Counter()
+                for observation in db.execute('SELECT row_json FROM observations WHERE source=?', (name,)):
+                    hold_counts.update(json.loads(observation['row_json'])['holds'])
                 age = (clock - instant(row['received_at'])).total_seconds()
                 max_age = 10800 if name in {'cara', 'bmasia_sales'} else 900
                 sources[name] = {'transport': 'fresh' if age <= max_age else 'stale',
                                  'received_at': row['received_at'], 'authentication': row['auth'],
                                  'source_observed_at': metadata['source_observed_at'], 'coverage': metadata['coverage'],
+                                 'observation_hold_counts': dict(sorted(hold_counts.items())),
                                  'evidence_freshness': ('unknown' if not metadata['source_observed_at'] else
                                     'stale' if clock - instant(metadata['source_observed_at']) > timedelta(hours=24) else 'recent'),
                                  'stored_observations': db.execute('SELECT count(*) FROM observations WHERE source=?', (name,)).fetchone()[0]}
