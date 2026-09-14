@@ -7,6 +7,9 @@ Endpoint: /mcp/ with Token authentication.
 import base64
 import json
 import logging
+from datetime import datetime, timezone
+
+from django.db import transaction
 
 from mcp_server import mcp_server
 from mcp_server.djangomcp import MCPToolset
@@ -486,6 +489,61 @@ def _dropped_keys(serializer, requested_fields):
     return applied, dropped
 
 
+_GUARDED_UPDATE_FIELDS = {
+    'contact': {'title', 'department', 'last_contacted'},
+    'opportunity': {
+        'stage', 'last_contact_date', 'follow_up_date', 'expected_close_date',
+        'pain_points', 'decision_criteria',
+    },
+    'ticket': {'priority', 'status'},
+    'zone': {'notes'},
+}
+
+
+def _guarded_scalar(value):
+    """Return whether an optimistic-lock value is JSON scalar and finite."""
+    if value is None or isinstance(value, (str, bool, int)):
+        return True
+    return isinstance(value, float) and value == value and value not in (float('inf'), float('-inf'))
+
+
+def _strict_scalar_equal(left, right):
+    """Avoid Python's bool/int equality and never coerce expected CRM values."""
+    return type(left) is type(right) and left == right
+
+
+def _guarded_json_object(raw):
+    """Parse a guarded payload without accepting duplicate keys or non-finite values."""
+    def reject_constant(value):
+        raise ValueError(f'non-finite JSON value: {value}')
+
+    def reject_duplicates(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate JSON key')
+            result[key] = value
+        return result
+
+    value = _json.loads(raw, parse_constant=reject_constant, object_pairs_hook=reject_duplicates)
+    if not isinstance(value, dict):
+        raise ValueError('JSON object required')
+    return value
+
+
+def _guarded_version(value):
+    """Normalize an RFC3339 timestamp, rejecting naive or malformed values."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + '+00:00' if value.endswith('Z') else value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
 @mcp_server.tool()
 def create_record(collection: str, data: str) -> str:
     """Create a new record in a CRM collection.
@@ -541,7 +599,13 @@ def create_record(collection: str, data: str) -> str:
 
 
 @mcp_server.tool()
-def update_record(collection: str, id: str, data: str) -> str:
+def update_record(
+    collection: str,
+    id: str,
+    data: str,
+    expected_version: str = '',
+    expected_values: str = '{}',
+) -> str:
     """Update an existing record in a CRM collection.
 
     Args:
@@ -553,18 +617,95 @@ def update_record(collection: str, id: str, data: str) -> str:
               the complete intended service_locations array, and matching pricing
               fields in this one update. Without that flag, omitted locations are
               preserved.
+        expected_version: Optional exact current serializer `updated_at` value for
+              guarded low-risk corrections. Supplying it requires expected_values.
+        expected_values: JSON object containing the currently observed scalar
+              values for exactly the fields in data. Guarded updates are limited
+              to contact title/department/last_contacted, opportunity stage/date
+              and qualification fields, ticket priority/status, and zone notes.
 
     Returns: JSON with updated fields, or validation errors.
     """
     if collection not in _COLLECTION_MAP:
         return f"Error: Unknown collection '{collection}'. Valid: {', '.join(sorted(_COLLECTION_MAP))}"
 
-    try:
-        fields = _json.loads(data)
-    except _json.JSONDecodeError as e:
-        return f"Error: Invalid JSON — {e}"
+    # The original three-argument API remains deliberately unchanged.  The
+    # optimistic path is opt-in and only permits the small correction surface
+    # that a reviewer can re-read immediately after saving.
+    guarded = bool(expected_version) or expected_values != '{}'
+    if guarded:
+        try:
+            fields = _guarded_json_object(data)
+        except (TypeError, ValueError, _json.JSONDecodeError):
+            return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch must be a non-empty JSON object.'})
+        if not fields:
+            return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch must be a non-empty JSON object.'})
+        if not isinstance(expected_version, str) or not expected_version:
+            return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded update requires a non-empty expected_version.'})
+        try:
+            before = _guarded_json_object(expected_values)
+        except (TypeError, ValueError, _json.JSONDecodeError):
+            return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded expected_values must be a JSON object.'})
+        if set(before) != set(fields):
+            return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded expected_values keys must exactly match patch keys.'})
+        if any(not _guarded_scalar(value) for value in fields.values()) or any(
+            not _guarded_scalar(value) for value in before.values()
+        ):
+            return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded values must be finite JSON scalars or null.'})
+        allowed = _GUARDED_UPDATE_FIELDS.get(collection)
+        if allowed is None or not set(fields).issubset(allowed):
+            return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch contains fields outside the approved correction scope.'})
+    else:
+        try:
+            fields = _json.loads(data)
+        except _json.JSONDecodeError as e:
+            return f"Error: Invalid JSON — {e}"
 
     model, serializer_path = _COLLECTION_MAP[collection]
+
+    if guarded:
+        SerializerClass = _get_serializer_class(serializer_path)
+        with transaction.atomic():
+            try:
+                instance = model.objects.select_for_update().get(id=id)
+            except model.DoesNotExist:
+                return f"Error: {collection} with ID '{id}' not found."
+
+            current = SerializerClass(instance).data
+            expected_instant = _guarded_version(expected_version)
+            current_instant = _guarded_version(current.get('updated_at'))
+            if expected_instant is None or current_instant is None or current_instant != expected_instant:
+                return _json.dumps({
+                    'updated': False, 'id': str(id), 'error': 'Stale expected_version; nothing was saved.',
+                })
+            if any(
+                key not in current or not _strict_scalar_equal(current[key], value)
+                for key, value in before.items()
+            ):
+                return _json.dumps({
+                    'updated': False, 'id': str(id), 'error': 'Expected values no longer match; nothing was saved.',
+                })
+
+            serializer = SerializerClass(instance, data=fields, partial=True)
+            applied, dropped = _dropped_keys(serializer, fields)
+            # An allowlist is not a substitute for checking the actual current
+            # serializer: a renamed/read-only field must fail closed, never drop.
+            if dropped or set(applied) != set(fields):
+                return _json.dumps({
+                    'updated': False, 'id': str(id),
+                    'error': 'Guarded patch contains non-writable fields; nothing was saved.',
+                    'ignored_keys': dropped,
+                })
+            if not serializer.is_valid():
+                return f"Validation errors: {_json.dumps(serializer.errors)}"
+
+            instance = serializer.save()
+            persisted = {}
+            for key in applied:
+                src = serializer.fields[key].source or key
+                val = getattr(instance, src, None)
+                persisted[key] = str(val) if val is not None else None
+            return _json.dumps({'updated': True, 'id': str(id), 'applied': persisted}, default=str)
 
     try:
         instance = model.objects.get(id=id)

@@ -1,0 +1,33 @@
+[Unit]
+Description=Vera guarded Cira correction outbox and CRM readback
+After=network-online.target vera-agent-production-collector.service
+Wants=network-online.target
+Requires=vera-agent-production-collector.service
+
+[Service]
+Type=simple
+User=vera_ai
+Group=bmasia-shared
+UMask=0077
+EnvironmentFile=/etc/bmasia-agents/vera-crm.env
+ExecStart=/home/vera_ai/.venvs/bmasia-crm-test/bin/python -I -B /usr/local/lib/bmasia-agent-production/current/agent_crm_production_worker.py
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=650
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/opt/vera-hermes/data/runtime/agent-production /home/bmasia/agent-comms/to-cira
+MemoryMax=256M
+TasksMax=12
+CPUQuota=20%
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,32 @@
+[Unit]
+Description=Fixed account-bound BMAsia activity exporters
+After=vera-agent-production-collector.service
+Requires=vera-agent-production-collector.service
+
+[Service]
+Type=simple
+User=root
+Group=bmasia-shared
+UMask=0077
+ExecStart=/usr/bin/python3 -I -B /usr/local/lib/bmasia-agent-production/current/agent_crm_production_sources.py
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_SETUID CAP_SETGID
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ReadWritePaths=/run/bmasia-agent-production
+MemoryMax=256M
+TasksMax=12
+CPUQuota=10%
+
+[Install]
+WantedBy=multi-user.target

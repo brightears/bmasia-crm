@@ -1,0 +1,32 @@
+[Unit]
+Description=Vera private live agent activity and correction intake
+After=local-fs.target
+
+[Service]
+Type=simple
+User=vera_ai
+Group=bmasia-shared
+UMask=0077
+ExecStart=/usr/bin/python3 -I -B /usr/local/lib/bmasia-agent-production/current/agent_crm_production.py serve
+RuntimeDirectory=bmasia-agent-production
+RuntimeDirectoryMode=0750
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+ReadWritePaths=/opt/vera-hermes/data/runtime/agent-production /run/bmasia-agent-production
+MemoryMax=256M
+TasksMax=8
+CPUQuota=20%
+
+[Install]
+WantedBy=multi-user.target
