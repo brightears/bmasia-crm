@@ -490,6 +490,18 @@ def _flowables(source, width, styles, *, cell=False):
             output.append(Spacer(1, min(item.height, 14)))
         else:
             output.append(item)
+    # Legacy clause/status/signature builders each add their own separator.
+    # After flattening, adjacent separators describe the same visual gap;
+    # accumulating them can push an otherwise fitting closing block to a
+    # separate page. Preserve the largest gap and all signing space inside
+    # the signature table, without shrinking text or page margins.
+    spaced = []
+    for item in output:
+        if isinstance(item, Spacer) and spaced and isinstance(spaced[-1], Spacer):
+            spaced[-1] = Spacer(1, max(spaced[-1].height, item.height))
+        else:
+            spaced.append(item)
+    output = spaced
     # A short service-package or deliverables list should stay together instead
     # of leaving its final items alone on the next page. Large/custom lists must
     # still be able to flow normally.
