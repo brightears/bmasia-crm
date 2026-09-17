@@ -493,7 +493,7 @@ _GUARDED_UPDATE_FIELDS = {
     'contact': {'title', 'department', 'last_contacted'},
     'opportunity': {
         'stage', 'last_contact_date', 'follow_up_date', 'expected_close_date',
-        'pain_points', 'decision_criteria',
+        'pain_points', 'decision_criteria', 'expected_value', 'probability',
     },
     'ticket': {'priority', 'status'},
     'zone': {'notes'},
@@ -542,6 +542,39 @@ def _guarded_version(value):
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         return None
     return parsed.astimezone(timezone.utc)
+
+
+def _guarded_commercial_authorization(collection, record_id, fields, raw):
+    """Require an exact user-authorization binding for commercial closures."""
+    sensitive = collection == 'opportunity' and (
+        bool({'expected_value', 'probability'} & set(fields))
+        or fields.get('stage') in {'Won', 'Lost'}
+    )
+    if not sensitive:
+        return None
+
+    try:
+        context = _guarded_json_object(raw)
+    except (TypeError, ValueError, _json.JSONDecodeError):
+        return 'Commercial opportunity update requires explicit authorization context.'
+    if not context:
+        return 'Commercial opportunity update requires explicit authorization context.'
+
+    required = {'kind', 'source_thread_id', 'record_id', 'authorized_changes'}
+    if set(context) != required:
+        return 'Commercial authorization context must contain exactly the required fields.'
+    if context.get('kind') != 'explicit_user_commercial':
+        return 'Commercial authorization kind is invalid.'
+    if not isinstance(context.get('source_thread_id'), str) or not context['source_thread_id'].strip():
+        return 'Commercial authorization requires a source thread ID.'
+    if context.get('record_id') != str(record_id):
+        return 'Commercial authorization is bound to a different record.'
+    authorized_changes = context.get('authorized_changes')
+    if not isinstance(authorized_changes, dict) or authorized_changes != fields:
+        return 'Commercial authorization does not exactly match the requested patch.'
+    if any(not _guarded_scalar(value) for value in authorized_changes.values()):
+        return 'Commercial authorization values must be finite JSON scalars or null.'
+    return None
 
 
 @mcp_server.tool()
@@ -605,6 +638,7 @@ def update_record(
     data: str,
     expected_version: str = '',
     expected_values: str = '{}',
+    authorization_context: str = '{}',
 ) -> str:
     """Update an existing record in a CRM collection.
 
@@ -622,7 +656,13 @@ def update_record(
         expected_values: JSON object containing the currently observed scalar
               values for exactly the fields in data. Guarded updates are limited
               to contact title/department/last_contacted, opportunity stage/date
-              and qualification fields, ticket priority/status, and zone notes.
+              and qualification/value fields, ticket priority/status, and zone
+              notes.
+        authorization_context: Exact explicit-user authorization binding required
+              for opportunity value/probability changes and terminal Won/Lost
+              transitions. The JSON object must identify the source thread and
+              record and repeat the complete authorized patch. Routine metadata
+              corrections leave this as the default empty object.
 
     Returns: JSON with updated fields, or validation errors.
     """
@@ -655,6 +695,11 @@ def update_record(
         allowed = _GUARDED_UPDATE_FIELDS.get(collection)
         if allowed is None or not set(fields).issubset(allowed):
             return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch contains fields outside the approved correction scope.'})
+        authorization_error = _guarded_commercial_authorization(
+            collection, id, fields, authorization_context,
+        )
+        if authorization_error:
+            return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
     else:
         try:
             fields = _json.loads(data)
