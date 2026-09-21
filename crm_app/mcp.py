@@ -499,6 +499,19 @@ _GUARDED_UPDATE_FIELDS = {
     'zone': {'notes'},
 }
 
+_ONE_TIME_CONTRACT_CANCELLATION = {
+    'kind': 'explicit_user_one_time_contract_cancellation',
+    'source_thread_id': '01a03892-ee6f-71d1-b590-bd53606fe2a0',
+    'record_id': '42678604-f01f-4ef2-a8c3-0c90efef0a41',
+    'authorized_changes': {'status': 'Cancelled'},
+    'expected_values': {'status': 'Draft'},
+    'expected_version': '2026-09-21T04:03:20.253356Z',
+}
+
+_ONE_TIME_CONTRACT_CANCELLATION_ERROR = (
+    'Contract cancellation is limited to the exact authorized one-time operation.'
+)
+
 
 def _guarded_scalar(value):
     """Return whether an optimistic-lock value is JSON scalar and finite."""
@@ -574,6 +587,28 @@ def _guarded_commercial_authorization(collection, record_id, fields, raw):
         return 'Commercial authorization does not exactly match the requested patch.'
     if any(not _guarded_scalar(value) for value in authorized_changes.values()):
         return 'Commercial authorization values must be finite JSON scalars or null.'
+    return None
+
+
+def _guarded_contract_cancellation_authorization(
+    collection, record_id, fields, before, expected_version, raw,
+):
+    """Bind the approved DRAFT-0180 cancellation to its exact stale-once state."""
+    if collection != 'contract':
+        return None
+    try:
+        context = _guarded_json_object(raw)
+    except (TypeError, ValueError, _json.JSONDecodeError):
+        return _ONE_TIME_CONTRACT_CANCELLATION_ERROR
+    if context != _ONE_TIME_CONTRACT_CANCELLATION:
+        return _ONE_TIME_CONTRACT_CANCELLATION_ERROR
+    if (
+        str(record_id) != _ONE_TIME_CONTRACT_CANCELLATION['record_id']
+        or fields != _ONE_TIME_CONTRACT_CANCELLATION['authorized_changes']
+        or before != _ONE_TIME_CONTRACT_CANCELLATION['expected_values']
+        or expected_version != _ONE_TIME_CONTRACT_CANCELLATION['expected_version']
+    ):
+        return _ONE_TIME_CONTRACT_CANCELLATION_ERROR
     return None
 
 
@@ -660,9 +695,12 @@ def update_record(
               notes.
         authorization_context: Exact explicit-user authorization binding required
               for opportunity value/probability changes and terminal Won/Lost
-              transitions. The JSON object must identify the source thread and
-              record and repeat the complete authorized patch. Routine metadata
-              corrections leave this as the default empty object.
+              transitions, and for the single approved DRAFT-0180 cancellation.
+              The JSON object must identify the source thread and record and
+              repeat the complete authorized patch. The one-time contract
+              cancellation also binds the exact before-value and version.
+              Routine metadata corrections leave this as the default empty
+              object.
 
     Returns: JSON with updated fields, or validation errors.
     """
@@ -692,14 +730,22 @@ def update_record(
             not _guarded_scalar(value) for value in before.values()
         ):
             return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded values must be finite JSON scalars or null.'})
-        allowed = _GUARDED_UPDATE_FIELDS.get(collection)
-        if allowed is None or not set(fields).issubset(allowed):
-            return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch contains fields outside the approved correction scope.'})
-        authorization_error = _guarded_commercial_authorization(
-            collection, id, fields, authorization_context,
-        )
-        if authorization_error:
-            return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
+        if collection == 'contract':
+            authorization_error = _guarded_contract_cancellation_authorization(
+                collection, id, fields, before, expected_version,
+                authorization_context,
+            )
+            if authorization_error:
+                return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
+        else:
+            allowed = _GUARDED_UPDATE_FIELDS.get(collection)
+            if allowed is None or not set(fields).issubset(allowed):
+                return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch contains fields outside the approved correction scope.'})
+            authorization_error = _guarded_commercial_authorization(
+                collection, id, fields, authorization_context,
+            )
+            if authorization_error:
+                return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
     else:
         try:
             fields = _json.loads(data)
