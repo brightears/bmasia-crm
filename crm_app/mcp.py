@@ -500,13 +500,14 @@ _GUARDED_UPDATE_FIELDS = {
 }
 
 _ONE_TIME_CONTRACT_CANCELLATION = {
-    'kind': 'explicit_user_one_time_contract_cancellation',
     'source_thread_id': '01a03892-ee6f-71d1-b590-bd53606fe2a0',
+    'record_type': 'contract',
     'record_id': '42678604-f01f-4ef2-a8c3-0c90efef0a41',
+    'authorized_by': 'Norbert',
     'authorized_changes': {'status': 'Cancelled'},
-    'expected_values': {'status': 'Draft'},
-    'expected_version': '2026-09-21T04:03:20.253356Z',
 }
+_ONE_TIME_CONTRACT_CANCELLATION_EXPECTED_VALUES = {'status': 'Draft'}
+_ONE_TIME_CONTRACT_CANCELLATION_EXPECTED_VERSION = '2026-09-21T04:03:20.253356Z'
 
 _ONE_TIME_CONTRACT_CANCELLATION_ERROR = (
     'Contract cancellation is limited to the exact authorized one-time operation.'
@@ -603,10 +604,11 @@ def _guarded_contract_cancellation_authorization(
     if context != _ONE_TIME_CONTRACT_CANCELLATION:
         return _ONE_TIME_CONTRACT_CANCELLATION_ERROR
     if (
-        str(record_id) != _ONE_TIME_CONTRACT_CANCELLATION['record_id']
+        collection != _ONE_TIME_CONTRACT_CANCELLATION['record_type']
+        or str(record_id) != _ONE_TIME_CONTRACT_CANCELLATION['record_id']
         or fields != _ONE_TIME_CONTRACT_CANCELLATION['authorized_changes']
-        or before != _ONE_TIME_CONTRACT_CANCELLATION['expected_values']
-        or expected_version != _ONE_TIME_CONTRACT_CANCELLATION['expected_version']
+        or before != _ONE_TIME_CONTRACT_CANCELLATION_EXPECTED_VALUES
+        or expected_version != _ONE_TIME_CONTRACT_CANCELLATION_EXPECTED_VERSION
     ):
         return _ONE_TIME_CONTRACT_CANCELLATION_ERROR
     return None

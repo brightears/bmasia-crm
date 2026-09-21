@@ -76,12 +76,11 @@ def _one_time_contract(company):
 
 def _one_time_contract_authorization(**overrides):
     context = {
-        'kind': 'explicit_user_one_time_contract_cancellation',
         'source_thread_id': ONE_TIME_SOURCE_THREAD,
+        'record_type': 'contract',
         'record_id': ONE_TIME_CONTRACT_ID,
+        'authorized_by': 'Norbert',
         'authorized_changes': {'status': 'Cancelled'},
-        'expected_values': {'status': 'Draft'},
-        'expected_version': ONE_TIME_EXPECTED_VERSION,
     }
     context.update(overrides)
     return json.dumps(context)
@@ -257,9 +256,11 @@ def test_exact_one_time_contract_cancellation_succeeds_then_goes_stale():
 @pytest.mark.parametrize('authorization_context', [
     '{}',
     _one_time_contract_authorization(source_thread_id='wrong-thread'),
+    _one_time_contract_authorization(record_type='opportunity'),
     _one_time_contract_authorization(record_id='00000000-0000-4000-8000-000000000000'),
-    _one_time_contract_authorization(expected_version='2026-09-21T04:03:20.253357Z'),
-    _one_time_contract_authorization(expected_values={'status': 'Sent'}),
+    _one_time_contract_authorization(authorized_by='Someone Else'),
+    _one_time_contract_authorization(authorized_changes={'status': 'Sent'}),
+    _one_time_contract_authorization(extra_field='drift'),
 ])
 def test_one_time_contract_cancellation_rejects_nonexact_authorization(
     authorization_context,
@@ -276,6 +277,37 @@ def test_one_time_contract_cancellation_rejects_nonexact_authorization(
         expected_version=ONE_TIME_EXPECTED_VERSION,
         expected_values=json.dumps({'status': record['status']}),
         authorization_context=authorization_context,
+    ))
+
+    contract.refresh_from_db()
+    assert result == {
+        'updated': False,
+        'id': str(contract.pk),
+        'error': 'Contract cancellation is limited to the exact authorized one-time operation.',
+    }
+    assert contract.status == 'Draft'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('expected_version, expected_values', [
+    ('2026-09-21T04:03:20.253357Z', {'status': 'Draft'}),
+    (ONE_TIME_EXPECTED_VERSION, {'status': 'Sent'}),
+])
+def test_one_time_contract_cancellation_rejects_nonexact_guard_inputs(
+    expected_version, expected_values,
+):
+    company = Company.objects.create(
+        name='Rejected guard fixture', billing_entity='BMAsia Limited',
+    )
+    contract, _ = _one_time_contract(company)
+
+    result = json.loads(update_record(
+        'contract',
+        str(contract.pk),
+        json.dumps({'status': 'Cancelled'}),
+        expected_version=expected_version,
+        expected_values=json.dumps(expected_values),
+        authorization_context=_one_time_contract_authorization(),
     ))
 
     contract.refresh_from_db()
