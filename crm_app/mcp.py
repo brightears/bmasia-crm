@@ -491,6 +491,7 @@ def _dropped_keys(serializer, requested_fields):
 
 _GUARDED_UPDATE_FIELDS = {
     'contact': {'title', 'department', 'last_contacted'},
+    'contract': {'additional_customer_signatories'},
     'opportunity': {
         'stage', 'last_contact_date', 'follow_up_date', 'expected_close_date',
         'pain_points', 'decision_criteria', 'expected_value', 'probability',
@@ -510,6 +511,36 @@ def _guarded_scalar(value):
 def _strict_scalar_equal(left, right):
     """Avoid Python's bool/int equality and never coerce expected CRM values."""
     return type(left) is type(right) and left == right
+
+
+def _guarded_json_value(value):
+    """Accept only recursively finite JSON values for optimistic locks."""
+    if _guarded_scalar(value):
+        return True
+    if isinstance(value, list):
+        return all(_guarded_json_value(item) for item in value)
+    if isinstance(value, dict):
+        return all(
+            isinstance(key, str) and _guarded_json_value(item)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _strict_json_equal(left, right):
+    """Compare nested JSON without bool/int coercion or list reordering."""
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _strict_json_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right)
+        )
+    if isinstance(left, dict):
+        return set(left) == set(right) and all(
+            _strict_json_equal(left[key], right[key]) for key in left
+        )
+    return _strict_scalar_equal(left, right)
 
 
 def _guarded_json_object(raw):
@@ -653,11 +684,12 @@ def update_record(
               preserved.
         expected_version: Optional exact current serializer `updated_at` value for
               guarded low-risk corrections. Supplying it requires expected_values.
-        expected_values: JSON object containing the currently observed scalar
-              values for exactly the fields in data. Guarded updates are limited
-              to contact title/department/last_contacted, opportunity stage/date
-              and qualification/value fields, ticket priority/status, and zone
-              notes.
+        expected_values: JSON object containing the currently observed values
+              for exactly the fields in data. Values may be finite JSON
+              scalars/null or nested arrays/objects. Guarded updates are limited
+              to contact title/department/last_contacted, contract additional
+              customer signatories, opportunity stage/date and qualification/value
+              fields, ticket priority/status, and zone notes.
         authorization_context: Exact explicit-user authorization binding required
               for opportunity value/probability changes and terminal Won/Lost
               transitions. The JSON object must identify the source thread and
@@ -688,10 +720,10 @@ def update_record(
             return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded expected_values must be a JSON object.'})
         if set(before) != set(fields):
             return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded expected_values keys must exactly match patch keys.'})
-        if any(not _guarded_scalar(value) for value in fields.values()) or any(
-            not _guarded_scalar(value) for value in before.values()
+        if any(not _guarded_json_value(value) for value in fields.values()) or any(
+            not _guarded_json_value(value) for value in before.values()
         ):
-            return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded values must be finite JSON scalars or null.'})
+            return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded values must be finite JSON values.'})
         allowed = _GUARDED_UPDATE_FIELDS.get(collection)
         if allowed is None or not set(fields).issubset(allowed):
             return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch contains fields outside the approved correction scope.'})
@@ -724,7 +756,7 @@ def update_record(
                     'updated': False, 'id': str(id), 'error': 'Stale expected_version; nothing was saved.',
                 })
             if any(
-                key not in current or not _strict_scalar_equal(current[key], value)
+                key not in current or not _strict_json_equal(current[key], value)
                 for key, value in before.items()
             ):
                 return _json.dumps({
@@ -749,7 +781,9 @@ def update_record(
             for key in applied:
                 src = serializer.fields[key].source or key
                 val = getattr(instance, src, None)
-                persisted[key] = str(val) if val is not None else None
+                persisted[key] = val if isinstance(val, (list, dict)) else (
+                    str(val) if val is not None else None
+                )
             return _json.dumps({'updated': True, 'id': str(id), 'applied': persisted}, default=str)
 
     try:
