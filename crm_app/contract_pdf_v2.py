@@ -273,7 +273,9 @@ def _signature_table(source, width, styles):
     This is a layout-only adapter: use the exact existing names, dates, entities,
     authority text and image resources. Never add a signature or change a signer.
     Equal signing areas and real rules replace oversized images/negative padding.
-    Each signer pair is atomic; additional pairs may continue onto another page.
+    Each signer pair is atomic. A short execution section containing at most
+    two pairs is also atomic so the primary and additional customer signer do
+    not straddle pages. Larger signer sets may continue onto another page.
     """
     if len(source._cellvalues) != 1 or len(source._cellvalues[0]) != 2:
         return None
@@ -362,7 +364,15 @@ def _signature_table(source, width, styles):
             ('TOPPADDING', (0, -1), (-1, -1), 9),
         ]))
         pairs.append([table])
-    table = Table(pairs, colWidths=[width], hAlign='LEFT', splitByRow=1)
+    # A supplier/customer pair followed by one additional customer signer is
+    # short enough to fit in the document frame. Keep that complete execution
+    # section together so pagination cannot leave the first customer signer on
+    # the preceding page. Larger sets remain row-splittable to avoid a layout
+    # error when the full section is taller than one page.
+    table = Table(
+        pairs, colWidths=[width], hAlign='LEFT',
+        splitByRow=0 if len(pairs) <= 2 else 1,
+    )
     table.setStyle(TableStyle([
         ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
         ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 12),

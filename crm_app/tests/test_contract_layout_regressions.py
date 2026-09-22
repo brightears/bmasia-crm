@@ -328,3 +328,46 @@ def test_template_signature_pairs_allow_long_names_and_preserve_poa_on_same_page
         assert f"POA: {signatory['poa_reference']}" in matching[0]
         assert "Date: _________________" in matching[0]
     assert _snapshot(jakarta_contract) == before
+
+
+def test_two_customer_signers_move_as_one_execution_section(jakarta_contract):
+    """A short two-pair signing section must not straddle pages."""
+    primary = "Mr. Yeo Choon Guan"
+    additional = "Mr. Nopparat Piyarattanayotin"
+    jakarta_contract.customer_signatory_name = primary
+    jakarta_contract.customer_signatory_title = "Authorized Director"
+    jakarta_contract.additional_customer_signatories = [{
+        "name": additional,
+        "title": "Authorized Director",
+        "legal_entity_name": jakarta_contract.company.legal_entity_name,
+    }]
+    clauses = "<br/><br/>".join(
+        f"<b>{index}. Synthetic principal term</b><br/>"
+        "This verified layout fixture preserves the supplied agreement wording while "
+        "exercising a natural page break immediately before the execution section."
+        for index in range(1, 25)
+    )
+    jakarta_contract.preamble_template = ContractTemplate.objects.create(
+        name="Synthetic three-page two-signatory agreement",
+        template_type="preamble", pdf_format="standard",
+        content=f"{clauses}<br/><br/>{{{{zones_table}}}}<br/><br/>{{{{signature_blocks}}}}",
+    )
+    jakarta_contract.save()
+    before = _snapshot(jakarta_contract)
+
+    with CaptureQueriesContext(connection) as captured:
+        reader = _render(jakarta_contract)
+
+    assert len(reader.pages) == 3, "Fixture must exercise the reported three-page layout"
+    pages = [_page_text(page) for page in reader.pages]
+    signing_pages = {
+        index for index, text in enumerate(pages)
+        if primary in text or additional in text or "Chris Andrews" in text
+    }
+    assert signing_pages == {2}, "The complete execution section belongs on page 3"
+    assert pages[2].count(primary) == 1
+    assert pages[2].count(additional) == 1
+    writes = [item["sql"] for item in captured.captured_queries
+              if re.match(r"^\s*(INSERT|UPDATE|DELETE)\b", item["sql"], re.I)]
+    assert writes == []
+    assert _snapshot(jakarta_contract) == before
