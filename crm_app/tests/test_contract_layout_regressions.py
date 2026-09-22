@@ -204,6 +204,89 @@ def test_nested_keep_together_measures_the_actual_small_table():
     assert result[0]._H < 200
 
 
+def test_nine_zone_spanned_table_keeps_locations_heading_with_table():
+    from reportlab.platypus import KeepTogether, Paragraph, Table, TableStyle
+    from crm_app.commercial_pdf import CONTENT_WIDTH, document_styles
+    from crm_app.contract_pdf_v2 import _flowables
+
+    styles = document_styles()
+    rows = [['Property', 'Service', 'Zone', 'Price/Zone']]
+    rows.extend([
+        'Example', 'Beat Breeze', f'Zone {index}: Area {index}', 'USD 260.00'
+    ] if index == 1 else [
+        '', '', f'Zone {index}: Area {index}', 'USD 260.00'
+    ] for index in range(1, 10))
+    table = Table(rows)
+    table.setStyle(TableStyle([
+        ('SPAN', (0, 1), (0, 9)),
+        ('SPAN', (1, 1), (1, 9)),
+    ]))
+    source = KeepTogether([
+        Paragraph('2. Locations for provision of services:', styles['body']),
+        KeepTogether([table]),
+    ])
+
+    result = _flowables([source], CONTENT_WIDTH, styles)
+    assert len(result) == 1
+    assert isinstance(result[0], KeepTogether)
+    assert result[0]._content[0].getPlainText() == '2. Locations for provision of services:'
+    assert isinstance(result[0]._content[1], Table)
+
+
+def test_long_unspanned_table_remains_page_splittable():
+    from reportlab.platypus import KeepTogether, Paragraph, Table
+    from crm_app.commercial_pdf import CONTENT_WIDTH, document_styles
+    from crm_app.contract_pdf_v2 import _flowables
+
+    styles = document_styles()
+    table = Table([['Property', 'Zone']] + [
+        ['Example', f'Zone {index}'] for index in range(1, 37)
+    ])
+    source = KeepTogether([
+        Paragraph('2. Locations for provision of services:', styles['body']),
+        table,
+    ])
+    result = _flowables([source], CONTENT_WIDTH, styles)
+    assert not any(isinstance(item, KeepTogether) for item in result)
+
+
+def test_nine_zone_template_places_locations_heading_on_table_page(jakarta_contract):
+    jakarta_contract.service_locations.all().delete()
+    for index in range(1, 10):
+        jakarta_contract.service_locations.create(
+            location_name=f'Area {index}: hospitality and guest facilities',
+            platform='beatbreeze', price=Decimal('260.00'),
+        )
+    jakarta_contract.property_name = 'Example Coastal Resort and Spa'
+    jakarta_contract.price_per_zone = Decimal('260.00')
+    jakarta_contract.value = jakarta_contract.total_value = Decimal('2340.00')
+    jakarta_contract.preamble_template = ContractTemplate.objects.create(
+        name='Synthetic nine-zone Beat Breeze pagination agreement',
+        template_type='preamble', pdf_format='standard',
+        content=(
+            'This agreement is made on 01 October 2026 between the supplier and client.'
+            '<br/><br/>The supplied music design and management service covers the '
+            'listed hospitality zones for the agreed annual period.'
+            '<br/><br/>1. These principal terms and the standard terms &amp; '
+            'conditions comprise together the entire agreement between the parties.'
+            '<br/><br/><b>2. Locations for provision of services:</b>'
+            '<br/>{{zones_table}}<br/><br/>{{signature_blocks}}'
+        ),
+    )
+    jakarta_contract.save()
+
+    reader = _render(jakarta_contract)
+    pages = [_page_text(page) for page in reader.pages]
+    heading_pages = [index for index, text in enumerate(pages)
+                     if '2. Locations for provision of services:' in text]
+    assert len(heading_pages) == 1
+    table_page = pages[heading_pages[0]]
+    assert 'Property Service Zone Price/Zone' in table_page
+    assert 'Zone 1: Area 1: hospitality and guest facilities' in table_page
+    for index in range(1, 10):
+        assert ' '.join(pages).count(f'Zone {index}: Area {index}:') == 1
+
+
 def test_unrecognized_nested_signing_content_falls_back_without_losing_text(jakarta_contract):
     from reportlab.platypus import Paragraph, Table
     from crm_app.commercial_pdf import CONTENT_WIDTH, document_styles

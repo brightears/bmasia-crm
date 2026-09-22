@@ -491,8 +491,17 @@ def _flowables(source, width, styles, *, cell=False):
                     else:
                         yield value
             children = list(flatten(children))
-            # Legal schedules must flow across pages; signatures stay atomic.
-            long_table = any(isinstance(v, Table) and len(v._cellvalues) > 8 for v in children)
+            # Legal schedules without vertical spans may flow across pages.
+            # A short zones table can have more than eight rows but span its
+            # Property/Service cells down every row, making it indivisible.
+            # Keep its heading with that table instead of stranding the heading
+            # at the foot of the preceding page.
+            long_table = any(
+                isinstance(v, Table) and len(v._cellvalues) > 8 and not any(
+                    start[1] != end[1] for _, start, end in v._spanCmds
+                )
+                for v in children
+            )
             signature_pairs = any(getattr(v, '_bmasia_signature_pairs', False) for v in children)
             output.extend(children if signature_pairs or (long_table and '___' not in _plain(item._content))
                           else [KeepTogether(children)])
