@@ -491,7 +491,11 @@ def _dropped_keys(serializer, requested_fields):
 
 _GUARDED_UPDATE_FIELDS = {
     'contact': {'title', 'department', 'last_contacted'},
-    'contract': {'additional_customer_signatories'},
+    'contract': {
+        'customer_signatory_name',
+        'customer_signatory_title',
+        'additional_customer_signatories',
+    },
     'opportunity': {
         'stage', 'last_contact_date', 'follow_up_date', 'expected_close_date',
         'pain_points', 'decision_criteria', 'expected_value', 'probability',

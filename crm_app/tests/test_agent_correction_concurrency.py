@@ -247,26 +247,40 @@ def test_guarded_contract_array_update_uses_deep_equality_and_returns_json():
 
 
 @pytest.mark.django_db
-def test_guarded_contract_matching_empty_array_succeeds():
+def test_guarded_contract_all_signatory_fields_succeed_together():
     contract = _contract([])
     record = ContractSerializer(contract).data
-    changes = [{
+    additional_signatories = [{
         'name': 'Authorized Signer',
         'title': 'Authorized Director',
         'legal_entity_name': 'Nested Guard Fixture Limited',
     }]
+    changes = {
+        'customer_signatory_name': 'Primary Signer',
+        'customer_signatory_title': 'Managing Director',
+        'additional_customer_signatories': additional_signatories,
+    }
 
     result = json.loads(update_record(
         'contract', str(contract.pk),
-        json.dumps({'additional_customer_signatories': changes}),
+        json.dumps(changes),
         expected_version=record['updated_at'],
-        expected_values=json.dumps({'additional_customer_signatories': []}),
+        expected_values=json.dumps({
+            'customer_signatory_name': record['customer_signatory_name'],
+            'customer_signatory_title': record['customer_signatory_title'],
+            'additional_customer_signatories': [],
+        }),
     ))
 
     contract.refresh_from_db()
-    assert result['updated'] is True
-    assert result['applied']['additional_customer_signatories'] == changes
-    assert contract.additional_customer_signatories == changes
+    assert result == {
+        'updated': True,
+        'id': str(contract.pk),
+        'applied': changes,
+    }
+    assert contract.customer_signatory_name == 'Primary Signer'
+    assert contract.customer_signatory_title == 'Managing Director'
+    assert contract.additional_customer_signatories == additional_signatories
 
 
 @pytest.mark.django_db
@@ -373,15 +387,15 @@ def test_guarded_contract_other_fields_remain_outside_approved_scope():
 
     result = json.loads(update_record(
         'contract', str(contract.pk),
-        json.dumps({'customer_signatory_title': 'Authorized Director'}),
+        json.dumps({'status': 'Sent'}),
         expected_version=record['updated_at'],
-        expected_values=json.dumps({'customer_signatory_title': record['customer_signatory_title']}),
+        expected_values=json.dumps({'status': record['status']}),
     ))
 
     contract.refresh_from_db()
     assert result['updated'] is False
     assert result['error'] == 'Guarded patch contains fields outside the approved correction scope.'
-    assert contract.customer_signatory_title == ''
+    assert contract.status == 'Draft'
 
 
 @pytest.mark.parametrize('value', [
