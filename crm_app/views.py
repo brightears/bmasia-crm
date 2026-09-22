@@ -1495,6 +1495,13 @@ class ContractViewSet(BaseModelViewSet):
     def pdf(self, request, pk=None):
         """Generate and download PDF for contract based on template's pdf_format or contract_category"""
         contract = self.get_object()
+        from crm_app.services.contract_player_boxes import contract_player_box_variant_error
+        player_box_error = contract_player_box_variant_error(contract)
+        if player_box_error:
+            return Response({
+                'error': player_box_error,
+                'code': 'PLAYER_BOX_VARIANT_INVALID',
+            }, status=status.HTTP_409_CONFLICT)
         from crm_app.services.document_context import effective_billing_entity
         try:
             effective_billing_entity(contract)
@@ -2662,6 +2669,13 @@ class ContractViewSet(BaseModelViewSet):
 
     def _generate_principal_terms_pdf(self, contract, *, document_title='Principal terms'):
         """Generate Principal Terms PDF for standard contracts"""
+        from crm_app.services.contract_player_boxes import contract_player_box_variant_error
+        player_box_error = contract_player_box_variant_error(contract)
+        if player_box_error:
+            return Response({
+                'error': player_box_error,
+                'code': 'PLAYER_BOX_VARIANT_INVALID',
+            }, status=status.HTTP_409_CONFLICT)
         from crm_app.contract_pdf_v2 import full_template_source, ContractTailoringClarification
         try:
             full_template_source(contract)
@@ -3305,7 +3319,6 @@ and<br/><br/>
                     custom_label = self._canonical_product_label(first_custom.split('—')[0].split('-')[0].strip()) or 'Beat Breeze'
                     service_items_list = [
                         f"• Curation and content lease for the {custom_label} package",
-                        "• Player provided and managed by BMAsia",
                         "• Monthly refresh of music content",
                         "• Music design tailored to property brief",
                         "• Special event playlists as needed",
@@ -3322,6 +3335,9 @@ and<br/><br/>
                         "• Special event playlists as needed",
                         "• First Line Technical Support",
                     ]
+
+            if contract.service_type == 'beat_breeze_yearly_with_players':
+                service_items_list.append("• Player box equipment — charged as itemized below")
 
             # Add pricing if available
             if contract.show_zone_pricing_detail and contract.price_per_zone:

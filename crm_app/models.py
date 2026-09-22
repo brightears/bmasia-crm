@@ -746,7 +746,8 @@ class Contract(TimestampedModel):
         ('soundtrack_enterprise', 'Soundtrack Enterprise (Custom)'),
         # Beat Breeze
         ('beat_breeze_monthly', 'Beat Breeze (Monthly)'),
-        ('beat_breeze_yearly', 'Beat Breeze (Yearly)'),
+        ('beat_breeze_yearly', 'Beat Breeze (Yearly — no player boxes)'),
+        ('beat_breeze_yearly_with_players', 'Beat Breeze (Yearly — charged player boxes)'),
         # Other Services
         ('custom_package', 'Custom Package'),
         ('one_time_setup', 'One-time Setup'),

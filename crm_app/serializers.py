@@ -848,6 +848,43 @@ class ContractSerializer(serializers.ModelSerializer):
         """Get the effective Soundtrack account ID (contract override or company default)"""
         return obj.soundtrack_account_id or obj.company.soundtrack_account_id
 
+    def validate(self, attrs):
+        from crm_app.services.contract_player_boxes import player_box_variant_error
+
+        service_type = attrs.get(
+            'service_type',
+            self.instance.service_type if self.instance is not None else '',
+        )
+        if 'line_items' in attrs:
+            line_items = attrs['line_items']
+        elif self.instance is not None:
+            line_items = self.instance.line_items.all()
+        else:
+            line_items = []
+
+        if 'custom_service_items' in attrs:
+            custom_items = attrs['custom_service_items']
+        elif self.instance is not None:
+            custom_items = self.instance.custom_service_items or []
+        else:
+            custom_items = []
+
+        if 'service_items' in attrs:
+            service_items = attrs['service_items']
+        elif self.instance is not None:
+            service_items = self.instance.service_items.all()
+        else:
+            service_items = []
+
+        error = player_box_variant_error(
+            service_type,
+            line_items,
+            [*service_items, *custom_items],
+        )
+        if error:
+            raise serializers.ValidationError({'service_type': error})
+        return attrs
+
     def _calculate_tax_fields(self, validated_data):
         """Calculate amounts using the explicitly supplied or stored tax rate.
 

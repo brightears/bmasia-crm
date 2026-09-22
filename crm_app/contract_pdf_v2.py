@@ -552,7 +552,21 @@ def _flowables(source, width, styles, *, cell=False):
             group = output[index:end]
             height = sum(p.wrap(width, 10000)[1] + p.getSpaceBefore() + p.getSpaceAfter() for p in group)
             deliverable_count = len(group) - 1 if is_deliverables else 0
-            if is_deliverables and deliverable_count >= 6:
+            service_item_count = len(group) - 1 if is_service_packages else 0
+            charged_player_package = is_service_packages and any(
+                isinstance(candidate, Paragraph) and
+                'charged as itemized below' in candidate.getPlainText().casefold()
+                for candidate in group
+            )
+            if charged_player_package and service_item_count >= 6:
+                # Keep the heading with the first half, then keep the remaining
+                # bullets together. A six-line player-box package otherwise
+                # moves wholesale to page two and leaves an avoidable half-page
+                # gap after the zone schedule.
+                split_at = 1 + (service_item_count // 2)
+                grouped.append(KeepTogether(group[:split_at]))
+                grouped.append(KeepTogether(group[split_at:]))
+            elif is_deliverables and deliverable_count >= 6:
                 # Preserve useful space on the current page while preventing a
                 # short tail of deliverables on the next one. Two balanced,
                 # indivisible halves avoid both the 5/3 orphan and a mostly
