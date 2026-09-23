@@ -55,6 +55,9 @@ def _contract(additional_signatories=None):
         start_date=date(2026, 9, 22), end_date=date(2027, 9, 21),
         value=Decimal('990.00'), total_value=Decimal('990.00'), status='Draft',
         additional_customer_signatories=additional_signatories,
+        customer_contact_name='Previous Contact',
+        customer_contact_title='Previous Manager',
+        customer_contact_email='previous@example.test',
     )
 
 
@@ -65,6 +68,25 @@ def _commercial_authorization(opportunity, changes):
         'record_id': str(opportunity.pk),
         'authorized_changes': changes,
     })
+
+
+def _contract_contact_authorization(contract, changes, **overrides):
+    context = {
+        'kind': 'explicit_user_contract_contact',
+        'source_reference': 'spaces/test/messages/verified-instruction',
+        'record_id': str(contract.pk),
+        'authorized_changes': changes,
+    }
+    context.update(overrides)
+    return json.dumps(context)
+
+
+def _contract_contact_changes():
+    return {
+        'customer_contact_name': 'Verified Contact',
+        'customer_contact_title': 'Senior IT Manager',
+        'customer_contact_email': 'verified@example.test',
+    }
 
 
 @pytest.mark.django_db
@@ -281,6 +303,135 @@ def test_guarded_contract_all_signatory_fields_succeed_together():
     assert contract.customer_signatory_name == 'Primary Signer'
     assert contract.customer_signatory_title == 'Managing Director'
     assert contract.additional_customer_signatories == additional_signatories
+
+
+@pytest.mark.django_db
+def test_guarded_draft_contract_contact_correction_is_atomic_and_retry_is_stale():
+    contract = _contract([])
+    record = ContractSerializer(contract).data
+    changes = _contract_contact_changes()
+    before = {key: record[key] for key in changes}
+    authorization = _contract_contact_authorization(contract, changes)
+
+    result = json.loads(update_record(
+        'contract', str(contract.pk), json.dumps(changes),
+        expected_version=record['updated_at'], expected_values=json.dumps(before),
+        authorization_context=authorization,
+    ))
+
+    contract.refresh_from_db()
+    assert result == {'updated': True, 'id': str(contract.pk), 'applied': changes}
+    assert {key: getattr(contract, key) for key in changes} == changes
+    assert contract.status == 'Draft'
+    assert str(contract.company_id) == str(record['company'])
+
+    replay = json.loads(update_record(
+        'contract', str(contract.pk), json.dumps(changes),
+        expected_version=record['updated_at'], expected_values=json.dumps(before),
+        authorization_context=authorization,
+    ))
+    assert replay['updated'] is False
+    assert replay['error'] == 'Stale expected_version; nothing was saved.'
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('authorization', [
+    None,
+    'wrong_record',
+    'wrong_patch',
+])
+def test_guarded_contract_contact_rejects_missing_or_mismatched_authorization(authorization):
+    contract = _contract([])
+    record = ContractSerializer(contract).data
+    changes = _contract_contact_changes()
+    before = {key: record[key] for key in changes}
+    contexts = {
+        None: '{}',
+        'wrong_record': _contract_contact_authorization(contract, changes, record_id='other-record'),
+        'wrong_patch': _contract_contact_authorization(
+            contract, {**changes, 'customer_contact_title': 'Different Title'},
+        ),
+    }
+
+    result = json.loads(update_record(
+        'contract', str(contract.pk), json.dumps(changes),
+        expected_version=record['updated_at'], expected_values=json.dumps(before),
+        authorization_context=contexts[authorization],
+    ))
+
+    contract.refresh_from_db()
+    assert result['updated'] is False
+    assert {key: getattr(contract, key) for key in changes} == before
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('status', ['Sent', 'Active'])
+def test_guarded_contract_contact_rejects_non_draft_without_mutation(status):
+    contract = _contract([])
+    contract.status = status
+    contract.save()
+    record = ContractSerializer(contract).data
+    changes = _contract_contact_changes()
+    before = {key: record[key] for key in changes}
+
+    result = json.loads(update_record(
+        'contract', str(contract.pk), json.dumps(changes),
+        expected_version=record['updated_at'], expected_values=json.dumps(before),
+        authorization_context=_contract_contact_authorization(contract, changes),
+    ))
+
+    contract.refresh_from_db()
+    assert result['updated'] is False
+    assert result['error'] == 'Contract contact correction requires Draft status; nothing was saved.'
+    assert {key: getattr(contract, key) for key in changes} == before
+
+
+@pytest.mark.django_db
+def test_guarded_contract_contact_rejects_partial_or_mixed_patch():
+    contract = _contract([])
+    record = ContractSerializer(contract).data
+    changes = _contract_contact_changes()
+    for patch in (
+        {'customer_contact_name': changes['customer_contact_name']},
+        {**changes, 'customer_signatory_name': 'Unrelated Signer'},
+    ):
+        result = json.loads(update_record(
+            'contract', str(contract.pk), json.dumps(patch),
+            expected_version=record['updated_at'],
+            expected_values=json.dumps({key: record[key] for key in patch}),
+            authorization_context=_contract_contact_authorization(contract, patch),
+        ))
+        assert result['updated'] is False
+        assert result['error'] == 'Contract contact correction must include name, title, and email only.'
+    contract.refresh_from_db()
+    assert contract.customer_contact_name == record['customer_contact_name']
+    assert contract.customer_signatory_name == record['customer_signatory_name']
+
+
+@pytest.mark.django_db
+def test_guarded_contract_contact_before_value_and_email_validation_fail_closed():
+    contract = _contract([])
+    record = ContractSerializer(contract).data
+    changes = _contract_contact_changes()
+    before = {key: record[key] for key in changes}
+    mismatched = {**before, 'customer_contact_name': 'Different Previous Contact'}
+    result = json.loads(update_record(
+        'contract', str(contract.pk), json.dumps(changes),
+        expected_version=record['updated_at'], expected_values=json.dumps(mismatched),
+        authorization_context=_contract_contact_authorization(contract, changes),
+    ))
+    assert result['updated'] is False
+    assert result['error'] == 'Expected values no longer match; nothing was saved.'
+
+    invalid = {**changes, 'customer_contact_email': 'not-an-email'}
+    result = update_record(
+        'contract', str(contract.pk), json.dumps(invalid),
+        expected_version=record['updated_at'], expected_values=json.dumps(before),
+        authorization_context=_contract_contact_authorization(contract, invalid),
+    )
+    assert 'customer_contact_email' in result
+    contract.refresh_from_db()
+    assert {key: getattr(contract, key) for key in changes} == before
 
 
 @pytest.mark.django_db

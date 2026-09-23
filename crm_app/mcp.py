@@ -489,12 +489,20 @@ def _dropped_keys(serializer, requested_fields):
     return applied, dropped
 
 
+_GUARDED_CONTRACT_CONTACT_FIELDS = frozenset({
+    'customer_contact_name',
+    'customer_contact_title',
+    'customer_contact_email',
+})
+
+
 _GUARDED_UPDATE_FIELDS = {
     'contact': {'title', 'department', 'last_contacted'},
     'contract': {
         'customer_signatory_name',
         'customer_signatory_title',
         'additional_customer_signatories',
+        *_GUARDED_CONTRACT_CONTACT_FIELDS,
     },
     'opportunity': {
         'stage', 'last_contact_date', 'follow_up_date', 'expected_close_date',
@@ -612,6 +620,26 @@ def _guarded_commercial_authorization(collection, record_id, fields, raw):
     return None
 
 
+def _guarded_contract_contact_authorization(record_id, fields, raw):
+    """Bind a complete Draft-contract contact correction to its user source."""
+    if set(fields) != _GUARDED_CONTRACT_CONTACT_FIELDS:
+        return 'Contract contact correction must include name, title, and email only.'
+    try:
+        context = _guarded_json_object(raw)
+    except (TypeError, ValueError, _json.JSONDecodeError):
+        return 'Contract contact correction requires explicit authorization context.'
+    required = {'kind', 'source_reference', 'record_id', 'authorized_changes'}
+    if set(context) != required or context.get('kind') != 'explicit_user_contract_contact':
+        return 'Contract contact authorization context is invalid.'
+    if not isinstance(context.get('source_reference'), str) or not context['source_reference'].strip():
+        return 'Contract contact authorization requires a source reference.'
+    if context.get('record_id') != str(record_id):
+        return 'Contract contact authorization is bound to a different record.'
+    if not _strict_json_equal(context.get('authorized_changes'), fields):
+        return 'Contract contact authorization does not exactly match the requested patch.'
+    return None
+
+
 @mcp_server.tool()
 def create_record(collection: str, data: str) -> str:
     """Create a new record in a CRM collection.
@@ -691,14 +719,16 @@ def update_record(
         expected_values: JSON object containing the currently observed values
               for exactly the fields in data. Values may be finite JSON
               scalars/null or nested arrays/objects. Guarded updates are limited
-              to contact title/department/last_contacted, contract additional
-              customer signatories, opportunity stage/date and qualification/value
-              fields, ticket priority/status, and zone notes.
+              to contact title/department/last_contacted, Draft contract
+              customer contact details and customer signatories, opportunity
+              stage/date and qualification/value fields, ticket priority/status,
+              and zone notes.
         authorization_context: Exact explicit-user authorization binding required
-              for opportunity value/probability changes and terminal Won/Lost
-              transitions. The JSON object must identify the source thread and
-              record and repeat the complete authorized patch. Routine metadata
-              corrections leave this as the default empty object.
+              for opportunity value/probability changes, terminal Won/Lost
+              transitions, and Draft contract customer contact corrections.
+              Contract contact corrections require kind=explicit_user_contract_contact,
+              a source_reference, record_id, and the complete authorized_changes.
+              Routine metadata corrections leave this as the default empty object.
 
     Returns: JSON with updated fields, or validation errors.
     """
@@ -736,6 +766,12 @@ def update_record(
         )
         if authorization_error:
             return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
+        if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_CONTACT_FIELDS:
+            authorization_error = _guarded_contract_contact_authorization(
+                id, fields, authorization_context,
+            )
+            if authorization_error:
+                return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
     else:
         try:
             fields = _json.loads(data)
@@ -751,6 +787,13 @@ def update_record(
                 instance = model.objects.select_for_update().get(id=id)
             except model.DoesNotExist:
                 return f"Error: {collection} with ID '{id}' not found."
+
+            if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_CONTACT_FIELDS:
+                if instance.status != 'Draft':
+                    return _json.dumps({
+                        'updated': False, 'id': str(id),
+                        'error': 'Contract contact correction requires Draft status; nothing was saved.',
+                    })
 
             current = SerializerClass(instance).data
             expected_instant = _guarded_version(expected_version)
