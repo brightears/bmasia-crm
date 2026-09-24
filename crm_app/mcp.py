@@ -10,7 +10,8 @@ import logging
 import re
 from datetime import date, datetime, timezone
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.db.models import Q
 
 from mcp_server import mcp_server
 from mcp_server.djangomcp import MCPToolset
@@ -20,6 +21,10 @@ from crm_app.models import (
     Company, Contact, Contract, Invoice, Quote, Opportunity,
     Task, Zone, ContractTemplate, ContractLineItem, InvoiceLineItem, QuoteLineItem,
     ContractServiceLocation, ClientTechDetail, Device, Ticket, KBArticle,
+    ContractSendReceiptUse,
+)
+from crm_app.contract_send_receipts import (
+    ReceiptVerificationError, verify_signed_contract_send_context,
 )
 from crm_app.rene_auth import is_exact_rene_phase2_mcp_request
 from crm_app.rene_mcp_server import rene_phase2_mcp_server
@@ -686,60 +691,73 @@ def _guarded_contract_service_item_authorization(record_id, fields, raw):
 
 
 def _guarded_contract_send_authorization(record_id, fields, before, expected_version, raw):
-    """Bind Cira's receipt reference to one exact already-sent bookkeeping patch.
+    """Authorize exact Sent/date bookkeeping with a signed or Premier receipt.
 
-    Receipt ownership, provider evidence and approval must be checked by Cira's
-    deterministic bridge before this tool is called; a digest is not proof.
+    The signed route independently verifies Theo's protected attestation at
+    the CRM boundary. It does not itself query Gmail, Chat, or frozen PDFs.
+    Return (error, verified_signed_receipt_or_none).
     """
     if set(fields) != _GUARDED_CONTRACT_SEND_FIELDS:
-        return 'Contract send bookkeeping must contain status and sent_date only.'
+        return 'Contract send bookkeeping must contain status and sent_date only.', None
     if fields.get('status') != 'Sent':
-        return 'Contract send bookkeeping can only record Sent status.'
+        return 'Contract send bookkeeping can only record Sent status.', None
     sent_date = fields.get('sent_date')
     if not isinstance(sent_date, str):
-        return 'Contract send bookkeeping requires an ISO calendar sent_date.'
+        return 'Contract send bookkeeping requires an ISO calendar sent_date.', None
     try:
         if date.fromisoformat(sent_date).isoformat() != sent_date:
             raise ValueError('non-canonical date')
     except ValueError:
-        return 'Contract send bookkeeping requires an ISO calendar sent_date.'
+        return 'Contract send bookkeeping requires an ISO calendar sent_date.', None
     if not _strict_json_equal(before, {'status': 'Draft', 'sent_date': None}):
-        return 'Contract send bookkeeping requires exact Draft/null before values.'
+        return 'Contract send bookkeeping requires exact Draft/null before values.', None
+    try:
+        context = _guarded_json_object(raw)
+    except (TypeError, ValueError, _json.JSONDecodeError):
+        return 'Contract send bookkeeping requires verified authorization context.', None
+    if context.get('kind') == 'signed_contract_send_bookkeeping':
+        try:
+            verified = verify_signed_contract_send_context(
+                context, record_id=record_id, fields=fields, before=before,
+                expected_version=expected_version,
+            )
+        except ReceiptVerificationError as exc:
+            return str(exc), None
+        return None, verified
+
+    # Historical one-record recovery remains pinned and cannot authorize a new
+    # contract. Its root receipt was independently checked by Cira at the time.
     pinned = _PREMIER_SEND_BOOKKEEPING
     if (str(record_id) != pinned['record_id']
             or _guarded_version(expected_version) != _guarded_version(pinned['expected_version'])
             or not _strict_json_equal(before, pinned['before'])
             or not _strict_json_equal(fields, pinned['patch'])):
-        return 'Contract send bookkeeping is not the approved Premier recovery.'
+        return 'Contract send bookkeeping is not the approved Premier recovery.', None
     if not isinstance(pinned['verified_receipt_sha256'], str) or not re.fullmatch(
         r'[0-9a-f]{64}', pinned['verified_receipt_sha256']
     ):
-        return 'Contract send bookkeeping operator receipt is not configured.'
-    try:
-        context = _guarded_json_object(raw)
-    except (TypeError, ValueError, _json.JSONDecodeError):
-        return 'Contract send bookkeeping requires verified authorization context.'
+        return 'Contract send bookkeeping operator receipt is not configured.', None
     required = {
         'kind', 'source_reference', 'record_id', 'authorized_changes',
         'verified_receipt_sha256', 'contract_number',
     }
     if set(context) != required or context.get('kind') != 'verified_contract_send_bookkeeping':
-        return 'Contract send bookkeeping authorization context is invalid.'
+        return 'Contract send bookkeeping authorization context is invalid.', None
     if not isinstance(context.get('source_reference'), str) or not context['source_reference'].strip():
-        return 'Contract send bookkeeping requires a source reference.'
+        return 'Contract send bookkeeping requires a source reference.', None
     if context.get('record_id') != str(record_id):
-        return 'Contract send bookkeeping is bound to a different record.'
+        return 'Contract send bookkeeping is bound to a different record.', None
     if not _strict_json_equal(context.get('authorized_changes'), fields):
-        return 'Contract send bookkeeping authorization does not match the patch.'
+        return 'Contract send bookkeeping authorization does not match the patch.', None
     if not isinstance(context.get('verified_receipt_sha256'), str) or not re.fullmatch(
         r'[0-9a-f]{64}', context['verified_receipt_sha256']
     ) or context['verified_receipt_sha256'] != pinned['verified_receipt_sha256']:
-        return 'Contract send bookkeeping requires a verified receipt digest.'
+        return 'Contract send bookkeeping requires a verified receipt digest.', None
     if not isinstance(context.get('contract_number'), str) or not re.fullmatch(
         r'(?:HK|TH)-CT[0-9]{5,}', context['contract_number']
     ) or context['contract_number'] != pinned['contract_number']:
-        return 'Contract send bookkeeping requires an existing final contract number.'
-    return None
+        return 'Contract send bookkeeping requires an existing final contract number.', None
+    return None, None
 
 
 @mcp_server.tool()
@@ -834,12 +852,14 @@ def update_record(
               a source_reference, record_id, and the complete authorized_changes.
               Service-item corrections use kind=explicit_user_contract_service_items
               with the same exact source, record and patch binding.
-              The one Premier already-sent recovery uses
-              kind=verified_contract_send_bookkeeping and a Cira-validated
-              root-operator receipt digest. Record, source version, before
-              values, patch, final contract number and receipt digest are
-              pinned in this release. No other contract can use this route.
-              This tool does not verify provider evidence or send email.
+              The historical Premier recovery uses
+              kind=verified_contract_send_bookkeeping and its pinned operator
+              receipt digest. General already-sent bookkeeping requires
+              kind=signed_contract_send_bookkeeping and the complete
+              Theo-root-signed receipt envelope. The CRM verifies its Ed25519
+              signature, exact patch/version/before/number binding and expiry;
+              the protected signer attests provider and approval evidence.
+              This tool never sends email.
               Routine metadata corrections leave this as the default empty object.
 
     Returns: JSON with updated fields, or validation errors.
@@ -851,6 +871,20 @@ def update_record(
     # optimistic path is opt-in and only permits the small correction surface
     # that a reviewer can re-read immediately after saving.
     guarded = bool(expected_version) or expected_values != '{}'
+    # The generic three-argument MCP path must not bypass the signed receipt
+    # boundary for Sent/date bookkeeping. Other contract operations retain
+    # their existing behavior.
+    if collection == 'contract' and not guarded:
+        try:
+            unguarded_fields = _guarded_json_object(data)
+        except (TypeError, ValueError, _json.JSONDecodeError):
+            unguarded_fields = {}
+        if unguarded_fields.get('status') == 'Sent' or 'sent_date' in unguarded_fields:
+            return _json.dumps({
+                'updated': False, 'id': str(id),
+                'error': 'Contract status/date MCP changes require guarded send authorization.',
+            })
+    signed_send_receipt = None
     if guarded:
         try:
             fields = _guarded_json_object(data)
@@ -870,6 +904,11 @@ def update_record(
             not _guarded_json_value(value) for value in before.values()
         ):
             return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded values must be finite JSON values.'})
+        # Status alone remains outside the correction lane. The signed send
+        # route requires the exact status/date pair, so keep the old refusal
+        # for a status-only patch before considering receipt authorization.
+        if collection == 'contract' and set(fields) == {'status'}:
+            return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch contains fields outside the approved correction scope.'})
         allowed = _GUARDED_UPDATE_FIELDS.get(collection)
         if allowed is None or not set(fields).issubset(allowed):
             return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch contains fields outside the approved correction scope.'})
@@ -891,7 +930,7 @@ def update_record(
             if authorization_error:
                 return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
         if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_SEND_FIELDS:
-            authorization_error = _guarded_contract_send_authorization(
+            authorization_error, signed_send_receipt = _guarded_contract_send_authorization(
                 id, fields, before, expected_version, authorization_context,
             )
             if authorization_error:
@@ -927,7 +966,51 @@ def update_record(
                     })
 
             if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_SEND_FIELDS:
-                bound_number = _guarded_json_object(authorization_context)['contract_number']
+                bound_number = (
+                    signed_send_receipt['payload']['contract_number']
+                    if signed_send_receipt else
+                    _guarded_json_object(authorization_context)['contract_number']
+                )
+                if signed_send_receipt:
+                    payload = signed_send_receipt['payload']
+                    receipt_sha = signed_send_receipt['receipt_sha256']
+                    uses = list(ContractSendReceiptUse.objects.select_for_update().filter(
+                        Q(request_key=payload['request_key'])
+                        | Q(nonce=payload['nonce'])
+                        | Q(receipt_sha256=receipt_sha)
+                    )[:3])
+                    if uses:
+                        same_use = len(uses) == 1 and all((
+                            uses[0].contract_id == instance.pk,
+                            uses[0].request_key == payload['request_key'],
+                            str(uses[0].nonce) == payload['nonce'],
+                            uses[0].receipt_sha256 == receipt_sha,
+                            uses[0].key_id == payload['key_id'],
+                            uses[0].contract_number == bound_number,
+                            uses[0].sent_date.isoformat() == fields['sent_date'],
+                            uses[0].before_version == expected_version,
+                        ))
+                        current = SerializerClass(instance).data
+                        if same_use and all((
+                            instance.status == 'Sent',
+                            instance.sent_date is not None,
+                            instance.sent_date is not None
+                            and instance.sent_date.isoformat() == fields['sent_date'],
+                            instance.contract_number == bound_number,
+                            current.get('updated_at') == uses[0].after_version,
+                        )):
+                            return _json.dumps({
+                                'updated': False, 'already_applied': True,
+                                'id': str(id), 'applied': fields,
+                                'contract_number': bound_number,
+                                'receipt_sha256': receipt_sha,
+                                'request_key': payload['request_key'],
+                                'post_version': uses[0].after_version,
+                            })
+                        return _json.dumps({
+                            'updated': False, 'id': str(id),
+                            'error': 'Contract send receipt request, nonce, or state conflicts; nothing was saved.',
+                        })
                 if (instance.status != 'Draft' or instance.sent_date is not None
                         or instance.contract_number != bound_number):
                     return _json.dumps({
@@ -971,6 +1054,43 @@ def update_record(
                         'updated': False, 'id': str(id),
                         'error': 'Contract number changed during send bookkeeping; nothing was saved.',
                     })
+                if signed_send_receipt:
+                    # Read the row back independently from the serializer before
+                    # committing either the contract update or its unique ledger.
+                    instance = model.objects.get(id=id)
+                    readback = SerializerClass(instance).data
+                    if not all((
+                        instance.status == 'Sent',
+                        instance.sent_date is not None,
+                        instance.sent_date is not None
+                        and instance.sent_date.isoformat() == fields['sent_date'],
+                        instance.contract_number == bound_number,
+                        readback.get('updated_at'),
+                    )):
+                        transaction.set_rollback(True)
+                        return _json.dumps({
+                            'updated': False, 'id': str(id),
+                            'error': 'Contract send readback did not match; nothing was saved.',
+                        })
+                    payload = signed_send_receipt['payload']
+                    try:
+                        ContractSendReceiptUse.objects.create(
+                            contract=instance,
+                            request_key=payload['request_key'],
+                            nonce=payload['nonce'],
+                            receipt_sha256=signed_send_receipt['receipt_sha256'],
+                            key_id=payload['key_id'],
+                            contract_number=bound_number,
+                            sent_date=instance.sent_date,
+                            before_version=expected_version,
+                            after_version=readback['updated_at'],
+                        )
+                    except IntegrityError:
+                        transaction.set_rollback(True)
+                        return _json.dumps({
+                            'updated': False, 'id': str(id),
+                            'error': 'Contract send receipt was used concurrently; nothing was saved.',
+                        })
             persisted = {}
             for key in applied:
                 src = serializer.fields[key].source or key
@@ -981,6 +1101,12 @@ def update_record(
             result = {'updated': True, 'id': str(id), 'applied': persisted}
             if collection == 'contract' and set(fields) == _GUARDED_CONTRACT_SEND_FIELDS:
                 result['contract_number'] = instance.contract_number
+                if signed_send_receipt:
+                    result.update({
+                        'receipt_sha256': signed_send_receipt['receipt_sha256'],
+                        'request_key': signed_send_receipt['payload']['request_key'],
+                        'post_version': readback['updated_at'],
+                    })
             return _json.dumps(result, default=str)
 
     try:

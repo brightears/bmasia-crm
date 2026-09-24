@@ -5549,3 +5549,28 @@ class RevenueRecognitionEntry(TimestampedModel):
 
     def __str__(self):
         return f"{self.schedule.invoice_number} | {self.year} Q{self.quarter} | {self.recognized_amount}"
+
+
+class ContractSendReceiptUse(models.Model):
+    """One durable, idempotent use of a Theo-signed send-bookkeeping receipt.
+
+    Unique request, nonce, and receipt digest prevent cross-record replay. The
+    write and this row are committed in the same transaction.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    contract = models.ForeignKey(
+        Contract, on_delete=models.PROTECT, related_name='send_receipt_uses',
+    )
+    request_key = models.CharField(max_length=256, unique=True)
+    nonce = models.UUIDField(unique=True)
+    receipt_sha256 = models.CharField(max_length=64, unique=True)
+    key_id = models.CharField(max_length=64)
+    contract_number = models.CharField(max_length=50)
+    sent_date = models.DateField()
+    before_version = models.CharField(max_length=128)
+    after_version = models.CharField(max_length=128)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
