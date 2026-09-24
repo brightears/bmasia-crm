@@ -16,12 +16,7 @@ from crm_app.serializers import ContractSerializer
 FINAL_NUMBER = 'HK-CT261015'
 PATCH = {'status': 'Sent', 'sent_date': '2026-09-09'}
 PREMIER_ID = UUID('1941a3bc-9d3b-4161-9d9e-7ff07677f34b')
-
-
-@pytest.fixture(autouse=True)
-def synthetic_operator_receipt(monkeypatch):
-    # Production has no digest until the real protected receipt is issued.
-    monkeypatch.setitem(crm_mcp._PREMIER_SEND_BOOKKEEPING, 'verified_receipt_sha256', 'a' * 64)
+RECEIPT_SHA = 'a53e45fad45b0fe841fa0749021ce39aa29eb71ff13e163062350eff7fb733b6'
 
 
 def _contract():
@@ -45,7 +40,7 @@ def _authorization(contract, patch=PATCH, **overrides):
         'source_reference': 'theo:approved-proposal-and-provider-receipt',
         'record_id': str(contract.pk),
         'authorized_changes': patch,
-        'verified_receipt_sha256': 'a' * 64,
+        'verified_receipt_sha256': RECEIPT_SHA,
         'contract_number': FINAL_NUMBER,
     }
     context.update(overrides)
@@ -67,6 +62,7 @@ def _update(contract, record, patch=PATCH, *, before=None, version=None, authori
 def test_bookkeeping_changes_only_status_date_and_preserves_final_number():
     contract = _contract()
     record = ContractSerializer(contract).data
+    assert crm_mcp._PREMIER_SEND_BOOKKEEPING['verified_receipt_sha256'] == RECEIPT_SHA
     with mock.patch.object(DocumentSequence, 'get_next_number', side_effect=AssertionError('new number')), \
          mock.patch('crm_app.services.email_service.EmailService.send_contract_email',
                     side_effect=AssertionError('duplicate email')):

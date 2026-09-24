@@ -499,16 +499,15 @@ _GUARDED_CONTRACT_CONTACT_FIELDS = frozenset({
 _GUARDED_CONTRACT_SERVICE_ITEM_FIELDS = frozenset({'custom_service_items'})
 _GUARDED_CONTRACT_SEND_FIELDS = frozenset({'status', 'sent_date'})
 
-# One historical, operator-verified recovery only. The receipt digest remains
-# unset until the root-owned receipt has been issued and independently checked.
-# With None, this route rejects every request; do not deploy an unset release.
+# One historical, operator-verified recovery only. The root-owned receipt was
+# issued and independently checked for this exact already-sent Premier record.
 _PREMIER_SEND_BOOKKEEPING = {
     'record_id': '1941a3bc-9d3b-4161-9d9e-7ff07677f34b',
     'expected_version': '2026-09-08T05:03:57.672476Z',
     'before': {'status': 'Draft', 'sent_date': None},
     'patch': {'status': 'Sent', 'sent_date': '2026-09-09'},
     'contract_number': 'HK-CT261015',
-    'verified_receipt_sha256': None,
+    'verified_receipt_sha256': 'a53e45fad45b0fe841fa0749021ce39aa29eb71ff13e163062350eff7fb733b6',
 }
 
 _GUARDED_UPDATE_FIELDS = {
