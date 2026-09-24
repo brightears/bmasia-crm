@@ -7,7 +7,8 @@ Endpoint: /mcp/ with Token authentication.
 import base64
 import json
 import logging
-from datetime import datetime, timezone
+import re
+from datetime import date, datetime, timezone
 
 from django.db import transaction
 
@@ -496,6 +497,19 @@ _GUARDED_CONTRACT_CONTACT_FIELDS = frozenset({
 })
 
 _GUARDED_CONTRACT_SERVICE_ITEM_FIELDS = frozenset({'custom_service_items'})
+_GUARDED_CONTRACT_SEND_FIELDS = frozenset({'status', 'sent_date'})
+
+# One historical, operator-verified recovery only. The receipt digest remains
+# unset until the root-owned receipt has been issued and independently checked.
+# With None, this route rejects every request; do not deploy an unset release.
+_PREMIER_SEND_BOOKKEEPING = {
+    'record_id': '1941a3bc-9d3b-4161-9d9e-7ff07677f34b',
+    'expected_version': '2026-09-08T05:03:57.672476Z',
+    'before': {'status': 'Draft', 'sent_date': None},
+    'patch': {'status': 'Sent', 'sent_date': '2026-09-09'},
+    'contract_number': 'HK-CT261015',
+    'verified_receipt_sha256': None,
+}
 
 _GUARDED_UPDATE_FIELDS = {
     'contact': {'title', 'department', 'last_contacted'},
@@ -505,6 +519,7 @@ _GUARDED_UPDATE_FIELDS = {
         'additional_customer_signatories',
         *_GUARDED_CONTRACT_CONTACT_FIELDS,
         *_GUARDED_CONTRACT_SERVICE_ITEM_FIELDS,
+        *_GUARDED_CONTRACT_SEND_FIELDS,
     },
     'opportunity': {
         'stage', 'last_contact_date', 'follow_up_date', 'expected_close_date',
@@ -671,6 +686,63 @@ def _guarded_contract_service_item_authorization(record_id, fields, raw):
     return None
 
 
+def _guarded_contract_send_authorization(record_id, fields, before, expected_version, raw):
+    """Bind Cira's receipt reference to one exact already-sent bookkeeping patch.
+
+    Receipt ownership, provider evidence and approval must be checked by Cira's
+    deterministic bridge before this tool is called; a digest is not proof.
+    """
+    if set(fields) != _GUARDED_CONTRACT_SEND_FIELDS:
+        return 'Contract send bookkeeping must contain status and sent_date only.'
+    if fields.get('status') != 'Sent':
+        return 'Contract send bookkeeping can only record Sent status.'
+    sent_date = fields.get('sent_date')
+    if not isinstance(sent_date, str):
+        return 'Contract send bookkeeping requires an ISO calendar sent_date.'
+    try:
+        if date.fromisoformat(sent_date).isoformat() != sent_date:
+            raise ValueError('non-canonical date')
+    except ValueError:
+        return 'Contract send bookkeeping requires an ISO calendar sent_date.'
+    if not _strict_json_equal(before, {'status': 'Draft', 'sent_date': None}):
+        return 'Contract send bookkeeping requires exact Draft/null before values.'
+    pinned = _PREMIER_SEND_BOOKKEEPING
+    if (str(record_id) != pinned['record_id']
+            or _guarded_version(expected_version) != _guarded_version(pinned['expected_version'])
+            or not _strict_json_equal(before, pinned['before'])
+            or not _strict_json_equal(fields, pinned['patch'])):
+        return 'Contract send bookkeeping is not the approved Premier recovery.'
+    if not isinstance(pinned['verified_receipt_sha256'], str) or not re.fullmatch(
+        r'[0-9a-f]{64}', pinned['verified_receipt_sha256']
+    ):
+        return 'Contract send bookkeeping operator receipt is not configured.'
+    try:
+        context = _guarded_json_object(raw)
+    except (TypeError, ValueError, _json.JSONDecodeError):
+        return 'Contract send bookkeeping requires verified authorization context.'
+    required = {
+        'kind', 'source_reference', 'record_id', 'authorized_changes',
+        'verified_receipt_sha256', 'contract_number',
+    }
+    if set(context) != required or context.get('kind') != 'verified_contract_send_bookkeeping':
+        return 'Contract send bookkeeping authorization context is invalid.'
+    if not isinstance(context.get('source_reference'), str) or not context['source_reference'].strip():
+        return 'Contract send bookkeeping requires a source reference.'
+    if context.get('record_id') != str(record_id):
+        return 'Contract send bookkeeping is bound to a different record.'
+    if not _strict_json_equal(context.get('authorized_changes'), fields):
+        return 'Contract send bookkeeping authorization does not match the patch.'
+    if not isinstance(context.get('verified_receipt_sha256'), str) or not re.fullmatch(
+        r'[0-9a-f]{64}', context['verified_receipt_sha256']
+    ) or context['verified_receipt_sha256'] != pinned['verified_receipt_sha256']:
+        return 'Contract send bookkeeping requires a verified receipt digest.'
+    if not isinstance(context.get('contract_number'), str) or not re.fullmatch(
+        r'(?:HK|TH)-CT[0-9]{5,}', context['contract_number']
+    ) or context['contract_number'] != pinned['contract_number']:
+        return 'Contract send bookkeeping requires an existing final contract number.'
+    return None
+
+
 @mcp_server.tool()
 def create_record(collection: str, data: str) -> str:
     """Create a new record in a CRM collection.
@@ -751,8 +823,9 @@ def update_record(
               for exactly the fields in data. Values may be finite JSON
               scalars/null or nested arrays/objects. Guarded updates are limited
               to contact title/department/last_contacted, Draft contract
-              customer contact details, customer signatories and custom service
-              items, opportunity stage/date and qualification/value fields,
+              customer contact details, customer signatories, custom service
+              items, and verified already-sent status/date bookkeeping;
+              opportunity stage/date and qualification/value fields,
               ticket priority/status, and zone notes.
         authorization_context: Exact explicit-user authorization binding required
               for opportunity value/probability changes, terminal Won/Lost
@@ -762,6 +835,12 @@ def update_record(
               a source_reference, record_id, and the complete authorized_changes.
               Service-item corrections use kind=explicit_user_contract_service_items
               with the same exact source, record and patch binding.
+              The one Premier already-sent recovery uses
+              kind=verified_contract_send_bookkeeping and a Cira-validated
+              root-operator receipt digest. Record, source version, before
+              values, patch, final contract number and receipt digest are
+              pinned in this release. No other contract can use this route.
+              This tool does not verify provider evidence or send email.
               Routine metadata corrections leave this as the default empty object.
 
     Returns: JSON with updated fields, or validation errors.
@@ -812,6 +891,12 @@ def update_record(
             )
             if authorization_error:
                 return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
+        if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_SEND_FIELDS:
+            authorization_error = _guarded_contract_send_authorization(
+                id, fields, before, expected_version, authorization_context,
+            )
+            if authorization_error:
+                return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
     else:
         try:
             fields = _json.loads(data)
@@ -840,6 +925,15 @@ def update_record(
                     return _json.dumps({
                         'updated': False, 'id': str(id),
                         'error': 'Contract service-item correction requires Draft status; nothing was saved.',
+                    })
+
+            if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_SEND_FIELDS:
+                bound_number = _guarded_json_object(authorization_context)['contract_number']
+                if (instance.status != 'Draft' or instance.sent_date is not None
+                        or instance.contract_number != bound_number):
+                    return _json.dumps({
+                        'updated': False, 'id': str(id),
+                        'error': 'Contract send bookkeeping requires the same Draft/null record and final number; nothing was saved.',
                     })
 
             current = SerializerClass(instance).data
@@ -871,6 +965,13 @@ def update_record(
                 return f"Validation errors: {_json.dumps(serializer.errors)}"
 
             instance = serializer.save()
+            if collection == 'contract' and set(fields) == _GUARDED_CONTRACT_SEND_FIELDS:
+                if instance.contract_number != bound_number:
+                    transaction.set_rollback(True)
+                    return _json.dumps({
+                        'updated': False, 'id': str(id),
+                        'error': 'Contract number changed during send bookkeeping; nothing was saved.',
+                    })
             persisted = {}
             for key in applied:
                 src = serializer.fields[key].source or key
@@ -878,7 +979,10 @@ def update_record(
                 persisted[key] = val if isinstance(val, (list, dict)) else (
                     str(val) if val is not None else None
                 )
-            return _json.dumps({'updated': True, 'id': str(id), 'applied': persisted}, default=str)
+            result = {'updated': True, 'id': str(id), 'applied': persisted}
+            if collection == 'contract' and set(fields) == _GUARDED_CONTRACT_SEND_FIELDS:
+                result['contract_number'] = instance.contract_number
+            return _json.dumps(result, default=str)
 
     try:
         instance = model.objects.get(id=id)
