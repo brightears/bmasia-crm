@@ -18,7 +18,7 @@ from mcp_server.djangomcp import MCPToolset
 from mcp_server.query_tool import ModelQueryToolset
 
 from crm_app.models import (
-    Company, Contact, Contract, Invoice, Quote, Opportunity,
+    Company, Contact, Contract, Invoice, Quote, Opportunity, AuditLog,
     Task, Zone, ContractTemplate, ContractLineItem, InvoiceLineItem, QuoteLineItem,
     ContractServiceLocation, ClientTechDetail, Device, Ticket, KBArticle,
     ContractSendReceiptUse,
@@ -503,6 +503,7 @@ _GUARDED_CONTRACT_CONTACT_FIELDS = frozenset({
 
 _GUARDED_CONTRACT_SERVICE_ITEM_FIELDS = frozenset({'custom_service_items'})
 _GUARDED_CONTRACT_SEND_FIELDS = frozenset({'status', 'sent_date'})
+_GUARDED_CONTRACT_DATE_FIELDS = frozenset({'start_date', 'end_date'})
 
 # One historical, operator-verified recovery only. The root-owned receipt was
 # issued and independently checked for this exact already-sent Premier record.
@@ -524,6 +525,7 @@ _GUARDED_UPDATE_FIELDS = {
         *_GUARDED_CONTRACT_CONTACT_FIELDS,
         *_GUARDED_CONTRACT_SERVICE_ITEM_FIELDS,
         *_GUARDED_CONTRACT_SEND_FIELDS,
+        *_GUARDED_CONTRACT_DATE_FIELDS,
     },
     'opportunity': {
         'stage', 'last_contact_date', 'follow_up_date', 'expected_close_date',
@@ -760,6 +762,41 @@ def _guarded_contract_send_authorization(record_id, fields, before, expected_ver
     return None, None
 
 
+def _guarded_contract_date_authorization(fields, raw):
+    """Accept provenance for a bounded Sent-but-unsigned date correction.
+
+    Cira authenticates the writer and verifies the sender before forwarding;
+    this context records that source, not a new owner-approval requirement.
+    """
+    if not set(fields) or not set(fields).issubset(_GUARDED_CONTRACT_DATE_FIELDS):
+        return 'Contract date correction may change start_date or end_date only.', None
+    try:
+        context = _guarded_json_object(raw)
+    except (TypeError, ValueError, _json.JSONDecodeError):
+        return 'Contract date correction requires structured source context.', None
+    if set(context) != {'kind', 'requested_by', 'source_reference', 'reason'}:
+        return 'Contract date correction source context has unexpected fields.', None
+    if context.get('kind') != 'routine_contract_date_correction':
+        return 'Contract date correction source kind is invalid.', None
+    if (not isinstance(context.get('requested_by'), str)
+            or context['requested_by'] not in {'norbert', 'lyra', 'theo'}):
+        return 'Contract date correction requester is invalid.', None
+    for name, limit in (('source_reference', 512), ('reason', 1000)):
+        value = context.get(name)
+        if (not isinstance(value, str) or not 1 <= len(value) <= limit
+                or value.strip() != value or not value.isprintable()):
+            return f'Contract date correction {name} is invalid.', None
+    for value in fields.values():
+        if not isinstance(value, str):
+            return 'Contract date correction requires ISO calendar dates.', None
+        try:
+            if date.fromisoformat(value).isoformat() != value:
+                raise ValueError('non-canonical date')
+        except ValueError:
+            return 'Contract date correction requires ISO calendar dates.', None
+    return None, context
+
+
 @mcp_server.tool()
 def create_record(collection: str, data: str) -> str:
     """Create a new record in a CRM collection.
@@ -841,7 +878,8 @@ def update_record(
               scalars/null or nested arrays/objects. Guarded updates are limited
               to contact title/department/last_contacted, Draft contract
               customer contact details, customer signatories, custom service
-              items, and verified already-sent status/date bookkeeping;
+              items, verified already-sent status/date bookkeeping, and
+              source-verified dates on an unsigned Sent contract;
               opportunity stage/date and qualification/value fields,
               ticket priority/status, and zone notes.
         authorization_context: Exact explicit-user authorization binding required
@@ -859,6 +897,9 @@ def update_record(
               Theo-root-signed receipt envelope. The CRM verifies its Ed25519
               signature, exact patch/version/before/number binding and expiry;
               the protected signer attests provider and approval evidence.
+              Sent-contract term corrections use
+              kind=routine_contract_date_correction with requested_by,
+              source_reference, and reason.
               This tool never sends email.
               Routine metadata corrections leave this as the default empty object.
 
@@ -885,6 +926,7 @@ def update_record(
                 'error': 'Contract status/date MCP changes require guarded send authorization.',
             })
     signed_send_receipt = None
+    contract_date_context = None
     if guarded:
         try:
             fields = _guarded_json_object(data)
@@ -935,6 +977,12 @@ def update_record(
             )
             if authorization_error:
                 return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
+        if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_DATE_FIELDS:
+            authorization_error, contract_date_context = _guarded_contract_date_authorization(
+                fields, authorization_context,
+            )
+            if authorization_error:
+                return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
     else:
         try:
             fields = _json.loads(data)
@@ -950,6 +998,28 @@ def update_record(
                 instance = model.objects.select_for_update().get(id=id)
             except model.DoesNotExist:
                 return f"Error: {collection} with ID '{id}' not found."
+
+            if contract_date_context:
+                if instance.status != 'Sent':
+                    return _json.dumps({
+                        'updated': False, 'id': str(id),
+                        'error': 'Contract date correction requires Sent status; nothing was saved.',
+                    })
+                if instance.contract_documents.filter(
+                    Q(is_signed=True) | Q(signed_date__isnull=False)
+                ).exists():
+                    return _json.dumps({
+                        'updated': False, 'id': str(id),
+                        'error': 'Signed contract document blocks routine date correction; nothing was saved.',
+                    })
+                start_date = date.fromisoformat(fields['start_date']) if 'start_date' in fields else instance.start_date
+                end_date = date.fromisoformat(fields['end_date']) if 'end_date' in fields else instance.end_date
+                if start_date is None or end_date is None or start_date > end_date:
+                    return _json.dumps({
+                        'updated': False, 'id': str(id),
+                        'error': 'Contract date correction requires a complete ordered interval; nothing was saved.',
+                    })
+                original_identity = (instance.company_id, instance.contract_number, instance.status, instance.sent_date)
 
             if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_CONTACT_FIELDS:
                 if instance.status != 'Draft':
@@ -1047,6 +1117,42 @@ def update_record(
                 return f"Validation errors: {_json.dumps(serializer.errors)}"
 
             instance = serializer.save()
+            if contract_date_context:
+                # Read the persisted row independently before committing the
+                # date change and its audit entry. No number, status, company,
+                # or send bookkeeping may change as a side effect.
+                instance = model.objects.get(id=id)
+                readback = SerializerClass(instance).data
+                if (original_identity != (
+                    instance.company_id, instance.contract_number,
+                    instance.status, instance.sent_date,
+                ) or not readback.get('updated_at') or any(
+                    readback.get(key) != value for key, value in fields.items()
+                ) or instance.contract_documents.filter(
+                    Q(is_signed=True) | Q(signed_date__isnull=False)
+                ).exists()):
+                    transaction.set_rollback(True)
+                    return _json.dumps({
+                        'updated': False, 'id': str(id),
+                        'error': 'Contract date correction readback or signed state changed; nothing was saved.',
+                    })
+                audit = AuditLog.objects.create(
+                    action='UPDATE', model_name='Contract', record_id=str(id),
+                    changes={
+                        key: {'before': before[key], 'after': fields[key]}
+                        for key in fields
+                    },
+                    additional_data={
+                        'kind': contract_date_context['kind'],
+                        'requested_by': contract_date_context['requested_by'],
+                        'source_reference': contract_date_context['source_reference'],
+                        'reason': contract_date_context['reason'],
+                        'company_id': str(instance.company_id),
+                        'contract_number': instance.contract_number,
+                        'expected_version': expected_version,
+                        'post_version': readback['updated_at'],
+                    },
+                )
             if collection == 'contract' and set(fields) == _GUARDED_CONTRACT_SEND_FIELDS:
                 if instance.contract_number != bound_number:
                     transaction.set_rollback(True)
@@ -1107,12 +1213,26 @@ def update_record(
                         'request_key': signed_send_receipt['payload']['request_key'],
                         'post_version': readback['updated_at'],
                     })
+            if contract_date_context:
+                result.update({
+                    'company_id': str(instance.company_id),
+                    'contract_number': instance.contract_number,
+                    'post_version': readback['updated_at'],
+                    'audit_log_id': str(audit.pk),
+                })
             return _json.dumps(result, default=str)
 
     try:
         instance = model.objects.get(id=id)
     except model.DoesNotExist:
         return f"Error: {collection} with ID '{id}' not found."
+
+    if (collection == 'contract' and instance.status == 'Sent'
+            and {'start_date', 'end_date'} & set(fields)):
+        return _json.dumps({
+            'updated': False, 'id': str(id),
+            'error': 'Sent-contract dates require guarded correction authorization; nothing was saved.',
+        })
 
     SerializerClass = _get_serializer_class(serializer_path)
     serializer = SerializerClass(instance, data=fields, partial=True)
