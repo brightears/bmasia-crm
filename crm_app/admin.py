@@ -15,7 +15,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 from .models import (
-    User, Company, Contact, Note, Task, TaskComment, AuditLog,
+    User, Company, Contact, Note, Task, TaskComment, AuditLog, AgentRequest,
     Opportunity, OpportunityActivity, Contract, ContractLineItem, Invoice, InvoiceLineItem, Zone, ContractZone,
     EmailTemplate, EmailLog, EmailCampaign, CampaignRecipient, DocumentAttachment,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
@@ -1412,6 +1412,24 @@ class InvoiceAdmin(admin.ModelAdmin):
     export_invoices_excel.short_description = 'Export selected invoices to Excel'
 
     # list_select_related handles the optimization
+
+
+@admin.register(AgentRequest)
+class AgentRequestAdmin(admin.ModelAdmin):
+    """Read-only view of the Phase 1 agent-gate ledger (append-only)."""
+    list_display = ['created_at', 'principal', 'username', 'tool', 'verb', 'collection', 'decision']
+    list_filter = ['decision', 'principal', 'verb', 'collection', 'mode']
+    search_fields = ['username', 'principal', 'record_id', 'request_key']
+    readonly_fields = [f.name for f in AgentRequest._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(AuditLog)

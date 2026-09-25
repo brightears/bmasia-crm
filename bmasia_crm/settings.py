@@ -81,6 +81,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'crm_app.agent_gate_middleware.AgentGateRestObserverMiddleware',  # Phase 1 Stage A (observe only)
 ]
 
 ROOT_URLCONF = 'bmasia_crm.urls'
@@ -295,6 +296,11 @@ PROSPECT_IMAP_HOST = config('PROSPECT_IMAP_HOST', default='imap.gmail.com')
 CARA_CUSTOMER_CARE_TOKEN_SHA256 = config('CARA_CUSTOMER_CARE_TOKEN_SHA256', default='')
 CARA_CUSTOMER_CARE_TOKEN_EXPIRES_AT = config('CARA_CUSTOMER_CARE_TOKEN_EXPIRES_AT', default='')
 CARA_QUARTERLY_OWNER = config('CARA_QUARTERLY_OWNER', default='legacy')
+
+# Phase 1 agent gate (docs/agent-gate-phase1-design.md). 'observe' records what
+# crm_app/agent_policy.py would refuse without changing any write; 'off' disables
+# recording entirely (kill switch). Enforcement arrives per principal in Stage C.
+AGENT_GATE_MODE = config('AGENT_GATE_MODE', default='observe')
 
 # Dedicated opaque read credential for Rene. Store only its SHA-256 digest;
 # this token is accepted solely by the capability and renewal-book views.

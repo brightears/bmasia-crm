@@ -9,5 +9,5 @@ def test_commercial_release_has_one_migration_head():
         loader = MigrationLoader(None, ignore_no_migrations=True)
     assert loader.detect_conflicts() == {}
     assert loader.graph.leaf_nodes('crm_app') == [
-        ('crm_app', '0101_contract_send_receipt_use')
+        ('crm_app', '0102_agent_request')
     ]
