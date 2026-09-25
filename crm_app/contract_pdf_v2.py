@@ -20,6 +20,11 @@ from crm_app.commercial_pdf import (
     metadata_table,
 )
 from crm_app.services.document_context import effective_billing_entity
+from crm_app.contract_signature_layouts import (
+    SIGNATURE_LAYOUT_SLOTS,
+    SIGNATURE_LAYOUT_TOKEN_PATTERN,
+    canonical_signature_slot,
+)
 
 
 class ContractTailoringClarification(ValueError):
@@ -107,8 +112,13 @@ def full_template_source(contract):
     template = getattr(contract, 'preamble_template', None)
     content = getattr(template, 'content', '') or ''
     custom = getattr(contract, 'preamble_custom', '') or ''
-    structural = lambda text: set(re.findall(
-        r'\{\{\s*(zones_table|signature_blocks)\s*\}\}', text))
+    structural_pattern = r'\{\{\s*(zones_table|' + '|'.join(
+        re.escape(slot) for slot in SIGNATURE_LAYOUT_SLOTS
+    ) + r')\s*\}\}'
+    structural = lambda text: {
+        canonical_signature_slot(slot)
+        for slot in re.findall(structural_pattern, text)
+    }
     custom_slots = structural(custom)
     if custom_slots:
         required = structural(content)
@@ -185,8 +195,9 @@ def tailored_template_content(contract, resolved_content=None):
         extra = '<br/><br/>'.join(inserts) + '<br/><br/>'
         # Place the additions before the complete signature segment, including
         # its heading if separated from the body by a paragraph break.
-        marker = content.find('{{signature_blocks}}')
-        if marker >= 0:
+        signature_marker = re.search(SIGNATURE_LAYOUT_TOKEN_PATTERN, content)
+        if signature_marker:
+            marker = signature_marker.start()
             boundary = content.rfind('<br/><br/>', 0, marker)
             marker = boundary + len('<br/><br/>') if boundary >= 0 else marker
             content = content[:marker] + extra + content[marker:]

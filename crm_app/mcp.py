@@ -5,6 +5,7 @@ Exposes core CRM ViewSets as MCP tools via django-mcp-server.
 Endpoint: /mcp/ with Token authentication.
 """
 import base64
+import hashlib
 import json
 import logging
 import re
@@ -801,6 +802,61 @@ def _guarded_quote_send_authorization(record_id, fields, before, expected_versio
         return str(exc), None
     return None, verified
 
+# Exact one-record recovery manifest. This is not a general preamble correction lane.
+_CONTRACT_LAYOUT_CORRECTION_MANIFEST = {
+    'record_id': '274ed1cd-68c5-4704-b19a-4f5b447e414f',
+    'contract_number': 'DRAFT-0181',
+    'company_id': '4de3d344-b9c3-44be-a09a-246d4ed2b2c8',
+    'template_id': 11,
+    'template_sha256': 'b3cbe50d9cdec601c07cf28223abf4464495dc75941700fa5701a2ceac02799d',
+    'prior_pdf_sha256': '4d6ac2db54809301b4c584a3eb9d11aa5d8f678a3a59bb642dddda2668fc5315',
+    'source_reference': 'codex:01a03892-f87f-7020-bd03-8126cfa6df4b:01a0d798-3c6d-7fd1-b6a4-89b779bea0fa',
+}
+_CONTRACT_LAYOUT_CORRECTION_TRANSFORMS = (
+    ('{{signature_blocks}}', '{{signature_blocks_hotel_2_witness_4}}'),
+    ('{{client_signatory_title}}', '{{contact_title}}'),
+    ("[Enter Workman's Comp #]", 'Not applicable (remote service)'),
+)
+def _contract_layout_correction_body(template_content):
+    """Return the only permitted body for the pinned one-record recovery."""
+    if not isinstance(template_content, str):
+        return None
+    manifest = _CONTRACT_LAYOUT_CORRECTION_MANIFEST
+    if hashlib.sha256(template_content.encode('utf-8')).hexdigest() != manifest['template_sha256']:
+        return None
+    corrected = template_content
+    for source, replacement in _CONTRACT_LAYOUT_CORRECTION_TRANSFORMS:
+        if corrected.count(source) != 1:
+            return None
+        corrected = corrected.replace(source, replacement, 1)
+    return corrected
+def _guarded_contract_layout_correction_authorization(record_id, fields, before, raw):
+    """Authorize only the pinned, Cira-originated layout recovery envelope."""
+    manifest = _CONTRACT_LAYOUT_CORRECTION_MANIFEST
+    if str(record_id) != manifest['record_id']:
+        return 'Contract layout correction is not the approved recovery.'
+    if not _strict_json_equal(before, {'preamble_custom': ''}):
+        return 'Contract layout correction requires an empty preamble before value.'
+    if set(fields) != {'preamble_custom'} or not isinstance(fields.get('preamble_custom'), str):
+        return 'Contract layout correction may replace preamble_custom only.'
+    user = _agent_gate._current_user()
+    if user is None or str(getattr(user, 'username', '')).casefold() != 'cira':
+        return 'Contract layout correction requires an authenticated Cira writer.'
+    try:
+        context = _guarded_json_object(raw)
+    except (TypeError, ValueError, _json.JSONDecodeError):
+        return 'Contract layout correction requires explicit authorization context.'
+    required = {'kind', 'source_reference', 'record_id', 'authorized_changes'}
+    if set(context) != required or context.get('kind') != 'contract_layout_correction':
+        return 'Contract layout correction authorization context is invalid.'
+    if context.get('source_reference') != manifest['source_reference']:
+        return 'Contract layout correction source reference is not the approved recovery.'
+    if context.get('record_id') != manifest['record_id']:
+        return 'Contract layout correction authorization is bound to a different record.'
+    if not _strict_json_equal(context.get('authorized_changes'), fields):
+        return 'Contract layout correction authorization does not exactly match the requested patch.'
+    return None
+
 
 def _guarded_contract_date_authorization(fields, raw):
     """Accept provenance for a bounded Sent-but-unsigned date correction.
@@ -990,6 +1046,7 @@ def update_record(
     signed_send_receipt = None
     signed_quote_receipt = None
     contract_date_context = None
+    contract_layout_correction = False
     if guarded:
         try:
             fields = _guarded_json_object(data)
@@ -1014,9 +1071,19 @@ def update_record(
         # for a status-only patch before considering receipt authorization.
         if collection in ('contract', 'quote') and set(fields) == {'status'}:
             return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch contains fields outside the approved correction scope.'})
-        allowed = _GUARDED_UPDATE_FIELDS.get(collection)
-        if allowed is None or not set(fields).issubset(allowed):
-            return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch contains fields outside the approved correction scope.'})
+        contract_layout_correction = (
+            collection == 'contract' and set(fields) == {'preamble_custom'}
+        )
+        if contract_layout_correction:
+            authorization_error = _guarded_contract_layout_correction_authorization(
+                id, fields, before, authorization_context,
+            )
+            if authorization_error:
+                return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
+        else:
+            allowed = _GUARDED_UPDATE_FIELDS.get(collection)
+            if allowed is None or not set(fields).issubset(allowed):
+                return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch contains fields outside the approved correction scope.'})
         authorization_error = _guarded_commercial_authorization(
             collection, id, fields, authorization_context,
         )
@@ -1067,6 +1134,32 @@ def update_record(
                 instance = model.objects.select_for_update().get(id=id)
             except model.DoesNotExist:
                 return f"Error: {collection} with ID '{id}' not found."
+
+            contract_layout_identity = None
+            if contract_layout_correction:
+                manifest = _CONTRACT_LAYOUT_CORRECTION_MANIFEST
+                if (str(instance.company_id) != manifest['company_id']
+                        or instance.contract_number != manifest['contract_number']
+                        or instance.status != 'Draft'
+                        or instance.sent_date is not None
+                        or instance.preamble_custom != ''
+                        or instance.preamble_template_id != manifest['template_id']
+                        or (instance.customer_signatory_name or '').strip()
+                        or (instance.customer_signatory_title or '').strip()
+                        or bool(instance.additional_customer_signatories)):
+                    return _json.dumps({'updated': False, 'id': str(id), 'error': 'Contract layout correction preconditions no longer match; nothing was saved.'})
+                if instance.contract_documents.filter(Q(is_signed=True) | Q(signed_date__isnull=False)).exists():
+                    return _json.dumps({'updated': False, 'id': str(id), 'error': 'Signed contract document blocks layout correction; nothing was saved.'})
+                try:
+                    template = ContractTemplate.objects.select_for_update().get(
+                        pk=manifest['template_id'], template_type='preamble',
+                    )
+                except ContractTemplate.DoesNotExist:
+                    return _json.dumps({'updated': False, 'id': str(id), 'error': 'Pinned contract template is unavailable; nothing was saved.'})
+                expected_layout_body = _contract_layout_correction_body(template.content)
+                if expected_layout_body is None or fields['preamble_custom'] != expected_layout_body:
+                    return _json.dumps({'updated': False, 'id': str(id), 'error': 'Contract layout correction body does not match the pinned source transform; nothing was saved.'})
+                contract_layout_identity = None
 
             if contract_date_context:
                 if instance.status != 'Sent':
@@ -1220,7 +1313,17 @@ def update_record(
                     'updated': False, 'id': str(id), 'error': 'Expected values no longer match; nothing was saved.',
                 })
 
+            if contract_layout_correction:
+                contract_layout_identity = {
+                    key: value for key, value in current.items()
+                    if key not in {'preamble_custom', 'updated_at'}
+                }
+
             serializer = SerializerClass(instance, data=fields, partial=True)
+            if contract_layout_correction:
+                # The pinned body is an exact legal-source transform; do not let
+                # the generic DRF CharField strip a deliberate terminal newline.
+                serializer.fields['preamble_custom'].trim_whitespace = False
             applied, dropped = _dropped_keys(serializer, fields)
             # An allowlist is not a substitute for checking the actual current
             # serializer: a renamed/read-only field must fail closed, never drop.
@@ -1232,8 +1335,47 @@ def update_record(
                 })
             if not serializer.is_valid():
                 return f"Validation errors: {_json.dumps(serializer.errors)}"
+            if (contract_layout_correction
+                    and serializer.validated_data.get('preamble_custom') != fields['preamble_custom']):
+                return _json.dumps({
+                    'updated': False, 'id': str(id),
+                    'error': 'Contract layout correction body normalization is not permitted; nothing was saved.',
+                })
 
             instance = serializer.save()
+            contract_layout_audit = None
+            contract_layout_readback = None
+            if contract_layout_correction:
+                instance = model.objects.get(id=id)
+                contract_layout_readback = SerializerClass(instance).data
+                if (any(
+                        key not in contract_layout_readback
+                        or not _strict_json_equal(contract_layout_readback[key], value)
+                        for key, value in contract_layout_identity.items()
+                    ) or instance.preamble_custom != fields['preamble_custom']
+                    or not contract_layout_readback.get('updated_at')
+                    or instance.contract_documents.filter(
+                        Q(is_signed=True) | Q(signed_date__isnull=False)
+                    ).exists()):
+                    transaction.set_rollback(True)
+                    return _json.dumps({'updated': False, 'id': str(id), 'error': 'Contract layout correction readback changed protected state; nothing was saved.'})
+                contract_layout_audit = AuditLog.objects.create(
+                    action='UPDATE', model_name='Contract', record_id=str(id),
+                    user=_agent_gate._current_user(),
+                    changes={'preamble_custom': {
+                        'before_sha256': hashlib.sha256(b'').hexdigest(),
+                        'after_sha256': hashlib.sha256(fields['preamble_custom'].encode('utf-8')).hexdigest(),
+                    }},
+                    additional_data={
+                        'kind': 'contract_layout_correction',
+                        'source_reference': _CONTRACT_LAYOUT_CORRECTION_MANIFEST['source_reference'],
+                        'template_id': _CONTRACT_LAYOUT_CORRECTION_MANIFEST['template_id'],
+                        'template_sha256': _CONTRACT_LAYOUT_CORRECTION_MANIFEST['template_sha256'],
+                        'prior_pdf_sha256': _CONTRACT_LAYOUT_CORRECTION_MANIFEST['prior_pdf_sha256'],
+                        'expected_version': expected_version,
+                        'post_version': contract_layout_readback['updated_at'],
+                    },
+                )
             if contract_date_context:
                 # Read the persisted row independently before committing the
                 # date change and its audit entry. No number, status, company,
@@ -1373,6 +1515,12 @@ def update_record(
                     'contract_number': instance.contract_number,
                     'post_version': readback['updated_at'],
                     'audit_log_id': str(audit.pk),
+                })
+            if contract_layout_correction:
+                result.update({
+                    'contract_number': instance.contract_number,
+                    'post_version': contract_layout_readback['updated_at'],
+                    'audit_log_id': str(contract_layout_audit.pk),
                 })
             return _json.dumps(result, default=str)
 

@@ -202,3 +202,90 @@ def test_short_hilton_deliverables_list_stays_on_one_page():
     assert first_half == ['3. Deliverables and timelines:', *deliverables[:4]]
     assert second_half == deliverables[4:]
     assert flowables[2].getPlainText() == '4. Fees and Payments:'
+
+
+@override_settings(COMMERCIAL_DOCUMENT_V2_CONTRACT_LIVE=True)
+def test_hilton_per_contract_execution_token_renders_two_blank_hotel_signers_and_four_witnesses():
+    contract = signing_contract()
+    source = contract.preamble_template.content
+    contract.preamble_custom = source.replace(
+        '{{signature_blocks}}',
+        '{{signature_blocks_hotel_2_witness_4}}',
+    )
+    view = ContractViewSet()
+    view.request = SimpleNamespace(user=SimpleNamespace(is_authenticated=False))
+
+    response = view._generate_principal_terms_pdf(contract)
+
+    assert response.status_code == 200
+    text = '\n'.join(page.extract_text() or '' for page in PdfReader(BytesIO(response.content)).pages)
+    assert text.count('Authorized Signatory') == 2
+    assert text.count('Witness') == 4
+    assert text.count('Chris Andrews') == 1
+    assert '{{' not in text
+
+
+@override_settings(COMMERCIAL_DOCUMENT_V2_CONTRACT_LIVE=True)
+def test_hilton_per_contract_execution_body_retains_contact_title_when_source_alias_is_replaced():
+    contract = signing_contract()
+    contract.customer_contact_title = 'Operations Administrator, Food & Beverage Department'
+    contract.preamble_template.id = 11
+    contract.preamble_template.name = 'Hilton Thailand'
+    source = (
+        'Primary contact: {{client_signatory_title}}<br/>'
+        '{{service_product_managed_name}}<br/>{{zones_table}}<br/>{{signature_blocks}}'
+    )
+    contract.preamble_template.content = source
+    contract.preamble_custom = source.replace(
+        '{{client_signatory_title}}', '{{contact_title}}'
+    ).replace(
+        '{{signature_blocks}}', '{{signature_blocks_hotel_2_witness_4}}'
+    )
+    view = ContractViewSet()
+    view.request = SimpleNamespace(user=SimpleNamespace(is_authenticated=False))
+
+    rendered = view._substitute_template_variables(contract.preamble_custom, contract)
+    response = view._generate_principal_terms_pdf(contract)
+
+    assert 'Operations Administrator, Food & Beverage Department' in rendered
+    assert response.status_code == 200
+    text = '\n'.join(page.extract_text() or '' for page in PdfReader(BytesIO(response.content)).pages)
+    assert text.count('Authorized Signatory') == 2
+    assert text.count('Witness') == 4
+
+
+@override_settings(COMMERCIAL_DOCUMENT_V2_CONTRACT_LIVE=True)
+def test_hilton_witness_layout_rejects_stored_customer_signer_authority():
+    contract = signing_contract()
+    contract.preamble_template.id = 11
+    contract.preamble_template.name = 'Hilton Thailand'
+    contract.customer_signatory_name = 'Stored Signer'
+    contract.customer_signatory_title = 'General Manager'
+    contract.preamble_custom = contract.preamble_template.content.replace(
+        '{{signature_blocks}}',
+        '{{signature_blocks_hotel_2_witness_4}}',
+    )
+    view = ContractViewSet()
+    view.request = SimpleNamespace(user=SimpleNamespace(is_authenticated=False))
+
+    response = view._generate_principal_terms_pdf(contract)
+
+    assert response.status_code == 409
+    assert response.data['code'] == 'HILTON_WITNESS_LAYOUT_SIGNER_DATA_CONFLICT'
+
+
+def test_hilton_execution_layout_token_is_rejected_for_non_hilton_template():
+    contract = signing_contract()
+    contract.preamble_template.name = 'Independent corporate format'
+    contract.preamble_template.id = 998
+    contract.preamble_custom = contract.preamble_template.content.replace(
+        '{{signature_blocks}}',
+        '{{signature_blocks_hotel_2_witness_4}}',
+    )
+    view = ContractViewSet()
+    view.request = SimpleNamespace(user=SimpleNamespace(is_authenticated=False))
+
+    response = view._generate_principal_terms_pdf(contract)
+
+    assert response.status_code == 422
+    assert response.data['code'] == 'UNSUPPORTED_SIGNATURE_LAYOUT'

@@ -1905,7 +1905,17 @@ class ContractViewSet(BaseModelViewSet):
                     },
                 )
 
-        allowed_special = {'zones_table', 'signature_blocks'}
+        allowed_special = {
+            'zones_table', 'signature_blocks', 'signature_blocks_hotel_2_witness_4',
+        }
+        if (
+            re.search(r'\{\{\s*signature_blocks_hotel_2_witness_4\s*\}\}', content)
+            and self._hilton_witness_layout_has_stored_signer_data(contract)
+        ):
+            add(
+                'hilton_witness_layout_has_stored_signer_data',
+                'Clear the stored customer signatory fields before using the blank Hilton witness layout; named authority must not be suppressed.',
+            )
         unresolved = sorted({
             payload.strip() or '<empty>'
             for payload in re.findall(r'\{\{(.*?)\}\}', rendered, flags=re.DOTALL)
@@ -2512,8 +2522,40 @@ class ContractViewSet(BaseModelViewSet):
             return KeepTogether([zone_table])
         return zone_table
 
-    def _build_signature_blocks_table(self, contract, billing_entity, entity_name):
-        """Build a styled two-column signature blocks Table flowable for template insertion"""
+    @staticmethod
+    def _is_hilton_witness_layout_eligible(contract):
+        """Limit the opt-in execution layout to maintained Hilton sources and template 11."""
+        template = getattr(contract, 'preamble_template', None)
+        if not template:
+            return False
+        template_id = getattr(template, 'pk', None)
+        if template_id is None:
+            template_id = getattr(template, 'id', None)
+        template_name = (getattr(template, 'name', '') or '').strip().casefold()
+        return (
+            ContractViewSet._is_hilton_full_template(contract)
+            or str(template_id) == '11'
+            or template_name == 'hilton thailand'
+        )
+
+    @staticmethod
+    def _hilton_witness_layout_has_stored_signer_data(contract):
+        direct = (
+            getattr(contract, 'customer_signatory_name', '') or '',
+            getattr(contract, 'customer_signatory_title', '') or '',
+        )
+        if any(str(value).strip() for value in direct):
+            return True
+        for signatory in getattr(contract, 'additional_customer_signatories', None) or []:
+            if isinstance(signatory, dict) and any(
+                str(value).strip() for value in signatory.values() if value is not None
+            ):
+                return True
+        return False
+
+    def _build_signature_blocks_table(self, contract, billing_entity, entity_name,
+                                      *, layout='signature_blocks'):
+        """Build an explicit template-selected signature layout."""
         from reportlab.lib import colors
         from reportlab.lib.units import inch
         from reportlab.platypus import Table, TableStyle, Paragraph, Spacer, Image
@@ -2542,6 +2584,68 @@ class ContractViewSet(BaseModelViewSet):
         def clean_text(value, fallback=''):
             value = fallback if value in (None, '') else value
             return escape(str(value))
+
+        if layout == 'signature_blocks_hotel_2_witness_4':
+            if not self._is_hilton_witness_layout_eligible(contract):
+                raise ValueError(
+                    'The Hilton two-signer witness layout is only available to an approved Hilton HPA source.'
+                )
+            if self._hilton_witness_layout_has_stored_signer_data(contract):
+                raise ValueError(
+                    'The Hilton two-signer witness layout cannot replace stored customer signatory authority.'
+                )
+
+            # The explicit token chooses this layout.  All hotel signer and
+            # witness fields remain blank; the renderer never invents authority
+            # or execution data.
+            def execution_block(label, lines):
+                content = [Paragraph(f'<b>{clean_text(label)}</b>', sig_company_style)]
+                content.append(Spacer(1, 0.18 * inch))
+                content.append(Paragraph('_' * 35, sig_line_style))
+                for text, style in lines:
+                    content.append(Paragraph(clean_text(text), style))
+                return Table([[item] for item in content], colWidths=[3.25 * inch],
+                             hAlign='LEFT', splitByRow=0)
+
+            supplier = execution_block(entity_name, [
+                (bmasia_signatory, sig_name_style),
+                (bmasia_title, sig_title_style),
+                ('Date: _________________', sig_date_style),
+            ])
+            hotel_entity = default_customer_entity
+            hotel_one = execution_block(hotel_entity, [
+                ('Authorized Signatory', sig_name_style),
+                ('Name: ____________________________', sig_title_style),
+                ('Title: _____________________________', sig_title_style),
+                ('Date: _________________', sig_date_style),
+            ])
+            hotel_two = execution_block(hotel_entity, [
+                ('Authorized Signatory', sig_name_style),
+                ('Name: ____________________________', sig_title_style),
+                ('Title: _____________________________', sig_title_style),
+                ('Date: _________________', sig_date_style),
+            ])
+            witnesses = [execution_block('Witness', [
+                ('Name: ____________________________', sig_name_style),
+                ('Date: _________________', sig_date_style),
+            ]) for _ in range(4)]
+            signature_table = Table(
+                [[supplier, ''], [hotel_one, hotel_two],
+                 [witnesses[0], witnesses[1]], [witnesses[2], witnesses[3]]],
+                colWidths=[3.4 * inch, 3.4 * inch], hAlign='LEFT', splitByRow=0,
+            )
+            signature_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 5),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ]))
+            signature_table._bmasia_signature_pairs = True
+            return signature_table
+        if layout != 'signature_blocks':
+            raise ValueError('Unsupported contract signature layout.')
 
         def normalize_customer_signatory(signatory):
             signatory = signatory or {}
@@ -3014,6 +3118,24 @@ class ContractViewSet(BaseModelViewSet):
                 '{{zones_table}}',
                 template_source,
             )
+            from crm_app.contract_signature_layouts import (
+                HILTON_TWO_SIGNERS_FOUR_WITNESSES,
+                SIGNATURE_LAYOUT_TOKEN_PATTERN,
+            )
+            uses_hilton_witness_layout = bool(re.search(
+                r'\{\{\s*' + HILTON_TWO_SIGNERS_FOUR_WITNESSES + r'\s*\}\}',
+                template_content,
+            ))
+            if uses_hilton_witness_layout and not self._is_hilton_witness_layout_eligible(contract):
+                return Response({
+                    'error': 'The requested signature layout is reserved for an approved Hilton HPA source.',
+                    'code': 'UNSUPPORTED_SIGNATURE_LAYOUT',
+                }, status=422)
+            if uses_hilton_witness_layout and self._hilton_witness_layout_has_stored_signer_data(contract):
+                return Response({
+                    'error': 'The blank Hilton witness layout cannot replace stored customer signatory authority.',
+                    'code': 'HILTON_WITNESS_LAYOUT_SIGNER_DATA_CONFLICT',
+                }, status=409)
             zones = contract.get_active_zones()
             has_locations = contract.service_locations.exists() or zones.exists()
             escape_template_values = self._is_hilton_full_template(contract)
@@ -3043,10 +3165,11 @@ class ContractViewSet(BaseModelViewSet):
                 """Recursively render template segment, handling special variables.
                 Finds whichever special variable appears FIRST and processes up to that point."""
                 import re as _re
+                from crm_app.contract_signature_layouts import SIGNATURE_LAYOUT_TOKEN_PATTERN
 
                 # Find positions of all special variables
                 zones_pos = segment.find('{{zones_table}}')
-                sig_match = _re.search(r'\{\{\s*signature_blocks\s*\}\}', segment)
+                sig_match = _re.search(SIGNATURE_LAYOUT_TOKEN_PATTERN, segment)
                 sig_pos = sig_match.start() if sig_match else -1
 
                 # If both exist, process whichever comes FIRST
@@ -3063,7 +3186,9 @@ class ContractViewSet(BaseModelViewSet):
                     before = before.rstrip()
                     while before.endswith('<br/>') or before.endswith('<br />'):
                         before = before[:-5].rstrip() if before.endswith('<br/>') else before[:-6].rstrip()
-                    sig_table = self._build_signature_blocks_table(contract, billing_entity, entity_name)
+                    sig_table = self._build_signature_blocks_table(
+                        contract, billing_entity, entity_name, layout=sig_match.group(1),
+                    )
                     keep_items = []
                     if before.strip():
                         keep_items.append(Paragraph(before, body_style))
@@ -3118,9 +3243,10 @@ class ContractViewSet(BaseModelViewSet):
                         render_segment(parts[1])
                     return
 
-                # Check for {{signature_blocks}} — also handle variations with spaces
+                # Check for an approved signature layout token.
                 import re as _re
-                sig_match = _re.search(r'\{\{\s*signature_blocks\s*\}\}', segment)
+                from crm_app.contract_signature_layouts import SIGNATURE_LAYOUT_TOKEN_PATTERN
+                sig_match = _re.search(SIGNATURE_LAYOUT_TOKEN_PATTERN, segment)
                 if sig_match:
                     before_sig = segment[:sig_match.start()]
                     after_sig = segment[sig_match.end():]
@@ -3134,7 +3260,9 @@ class ContractViewSet(BaseModelViewSet):
                     while before.endswith('<br/>') or before.endswith('<br />'):
                         before = before[:-5].rstrip() if before.endswith('<br/>') else before[:-6].rstrip()
                     # Build signature table — keep heading with signature block
-                    sig_table = self._build_signature_blocks_table(contract, billing_entity, entity_name)
+                    sig_table = self._build_signature_blocks_table(
+                        contract, billing_entity, entity_name, layout=sig_match.group(1),
+                    )
                     if before.strip():
                         keep_style = body_style.clone('keep_sig_heading', keepWithNext=True, spaceAfter=6)
                         elements.append(Paragraph(before, keep_style))
