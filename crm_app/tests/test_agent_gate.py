@@ -428,3 +428,18 @@ def test_stored_state_lookup_failure_is_uncertain_not_allow(monkeypatch):
     assert [r.decision for r in rows] == ['uncertain', 'uncertain']
     assert rows[0].reasons == ["verdict uncertain: could not read the company's contracts"]
     assert rows[1].reasons == ['verdict uncertain: could not read stored ticket.status']
+
+
+
+@pytest.mark.django_db
+def test_update_without_record_id_is_uncertain_but_create_is_not():
+    from crm_app.services import agent_gate
+    company = _company()
+    with as_caller(_user('riff')):
+        missing = agent_gate.observe(tool='update_record', verb='update', collection='ticket',
+                                     record_id='', data={'status': 'in_progress'})
+        created = agent_gate.observe(tool='create_record', verb='create', collection='ticket',
+                                     data={'company': str(company.id), 'subject': 'x', 'status': 'new'})
+    assert missing.decision == 'uncertain'
+    assert missing.reasons == ['verdict uncertain: record id is missing']
+    assert created.decision == 'allow'

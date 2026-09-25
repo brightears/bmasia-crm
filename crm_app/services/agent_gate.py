@@ -225,6 +225,8 @@ def observe(*, tool, verb, collection='', record_id='', data=None, expected_vers
                 try:
                     if record_id == '<invalid>':
                         raise _Uncertain('record id is not a valid id')
+                    if verb != policy.CREATE and not record_id:
+                        raise _Uncertain('record id is missing')
                     reasons = _condition_reasons(condition, collection, record_id, values,
                                                  authorization_context=authorization_context)
                 except _Uncertain as exc:
