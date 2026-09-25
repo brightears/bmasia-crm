@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 
 from django.conf import settings
 from django.db import transaction
@@ -58,41 +59,102 @@ def _digest(data) -> str:
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
 
 
-def _company_id_for(collection, record_id, values):
-    from crm_app.models import Contact
-    if collection == 'company':
-        return record_id or None
-    if values.get('company'):
-        return values.get('company')
-    if collection == 'contact' and record_id:
-        return Contact.objects.filter(pk=record_id).values_list('company_id', flat=True).first()
-    return None
+_RECORD_ID_RE = re.compile(r'[0-9A-Za-z-]{1,64}')
+_REQUEST_KEY_RE = re.compile(r'[A-Za-z0-9:._/-]{1,200}')
+# update_record control keys that are not model/serializer fields.
+_CONTROL_KEYS = {'contract': {'replace_service_locations'}}
+_FIELD_CACHE = {}
+
+
+def _known_fields(collection):
+    """Model + serializer field names for a collection (the only names ever recorded)."""
+    if collection not in _FIELD_CACHE:
+        from crm_app.mcp import _COLLECTION_MAP, _get_serializer_class
+        names = set(_CONTROL_KEYS.get(collection, ()))
+        if collection in _COLLECTION_MAP:
+            model, serializer_path = _COLLECTION_MAP[collection]
+            for model_field in model._meta.get_fields():
+                names.add(model_field.name)
+                if getattr(model_field, 'attname', None):
+                    names.add(model_field.attname)
+            try:
+                names |= set(_get_serializer_class(serializer_path)().fields)
+            except Exception:  # pragma: no cover - serializer needs context
+                pass
+        _FIELD_CACHE[collection] = frozenset(names)
+    return _FIELD_CACHE[collection]
+
+
+def _current_value(collection, record_id, field_name):
+    """Persisted value of one field, or None (unknown record/collection/bad id)."""
+    if not record_id:
+        return None
+    try:
+        from crm_app.mcp import _COLLECTION_MAP
+        model = _COLLECTION_MAP[collection][0]
+        return model.objects.filter(pk=record_id).values_list(field_name, flat=True).first()
+    except Exception:
+        return None
+
+
+def _is_live_customer(company_id):
+    from crm_app.models import Contract
+    if not company_id:
+        return False
+    try:
+        return Contract.objects.filter(
+            company_id=company_id, status__in=policy.LIVE_CONTRACT_STATUSES,
+        ).exists()
+    except Exception:
+        return False
+
+
+def _terminal_reasons(label, field_name, terminal, collection, record_id, values):
+    """Refuse moving into a terminal state and reopening a record that is already terminal."""
+    if field_name not in values:
+        return []
+    proposed = values.get(field_name)
+    normalise = (lambda v: str(v or '').lower()) if label == 'ticket' else (lambda v: v)
+    if normalise(proposed) in terminal:
+        return [f'{label} {field_name} {proposed} is terminal (Cira-only for this agent)']
+    current = _current_value(collection, record_id, field_name)
+    if normalise(current) in terminal:
+        return [f'reopening a {current} {label} is Cira-only']
+    return []
 
 
 def _condition_reasons(condition, collection, record_id, values, authorization_context=''):
     if condition == 'opportunity_non_terminal':
-        if values.get('stage') in policy.OPPORTUNITY_TERMINAL:
-            return [f"opportunity stage {values['stage']} is terminal (Cira-only for this agent)"]
-        return []
-    if condition == 'terminal_needs_explicit_authorization':
-        if values.get('stage') not in policy.OPPORTUNITY_TERMINAL:
-            return []
-        # Reuse the CRM's own guard so observe verdicts match what enforcement will do
-        # (exact kind, source thread, record and patch binding).
-        from crm_app.mcp import _guarded_commercial_authorization
-        error = _guarded_commercial_authorization(collection, record_id, values, authorization_context or '{}')
-        return [f'Won/Lost without valid explicit-user authorization: {error}'] if error else []
+        return _terminal_reasons('opportunity', 'stage', policy.OPPORTUNITY_TERMINAL,
+                                 collection, record_id, values)
     if condition == 'ticket_non_terminal':
-        status = str(values.get('status') or '').lower()
-        if status in policy.TICKET_TERMINAL:
-            return [f'ticket status {status} is terminal (Cira-only)']
+        return _terminal_reasons('ticket', 'status', policy.TICKET_TERMINAL,
+                                 collection, record_id, values)
+    if condition == 'terminal_needs_explicit_authorization':
+        if 'stage' not in values:
+            return []
+        if values.get('stage') in policy.OPPORTUNITY_TERMINAL:
+            # Reuse the CRM's own guard so observe verdicts match enforcement
+            # (exact kind, source thread, record and patch binding).
+            from crm_app.mcp import _guarded_commercial_authorization
+            error = _guarded_commercial_authorization(
+                collection, record_id, values, authorization_context or '{}')
+            return [f'Won/Lost without valid explicit-user authorization: {error}'] if error else []
+        current = _current_value(collection, record_id, 'stage')
+        if current in policy.OPPORTUNITY_TERMINAL:
+            return [f'reopening a {current} opportunity is Cira-only']
         return []
     if condition == 'lead_company_only':
-        from crm_app.models import Contract
-        company_id = _company_id_for(collection, record_id, values)
-        if company_id and Contract.objects.filter(
-            company_id=company_id, status__in=policy.LIVE_CONTRACT_STATUSES,
-        ).exists():
+        if collection == 'company':
+            candidates = {record_id}
+        else:
+            existing = _current_value('contact', record_id, 'company_id') if collection == 'contact' else None
+            proposed = values.get('company') or values.get('company_id')
+            candidates = {str(c) for c in (existing, proposed) if c}
+            if existing and proposed and str(existing) != str(proposed) and any(
+                    _is_live_customer(c) for c in candidates):
+                return ['moving a contact to or from an existing customer is Cira-only']
+        if any(_is_live_customer(c) for c in candidates):
             return ['existing customer (Active/Sent contract): company/contact changes are Cira-only']
         return []
     return []
@@ -115,7 +177,19 @@ def observe(*, tool, verb, collection='', record_id='', data=None, expected_vers
         from crm_app.models import AgentRequest
 
         values = _as_dict(data)
-        fields = sorted(str(name)[:100] for name in values)[:_MAX_FIELDS]
+        unknown_keys = 0
+        if verb in (policy.CREATE, policy.UPDATE):
+            known = _known_fields(collection)
+            fields = sorted(name for name in values if isinstance(name, str) and name in known)[:_MAX_FIELDS]
+            unknown_keys = len(values) - len(fields)
+        else:
+            fields = []  # convert/rene payloads are not field patches; only their digest is kept
+        record_id = str(record_id or '')
+        if record_id and not _RECORD_ID_RE.fullmatch(record_id):
+            record_id = '<invalid>'
+        request_key = str(request_key or '')
+        if request_key and not _REQUEST_KEY_RE.fullmatch(request_key):
+            request_key = '<invalid>'
         if user is None or not getattr(user, 'is_authenticated', False):
             user = _current_user()
         username = getattr(user, 'username', '') if user else ''
@@ -130,8 +204,11 @@ def observe(*, tool, verb, collection='', record_id='', data=None, expected_vers
         else:
             reasons, condition = policy.evaluate(principal, verb, collection, fields)
             if not reasons and condition:
-                reasons = _condition_reasons(condition, collection, str(record_id or ''), values,
+                lookup_id = '' if record_id == '<invalid>' else record_id
+                reasons = _condition_reasons(condition, collection, lookup_id, values,
                                              authorization_context=authorization_context)
+            if unknown_keys:
+                reasons.append(f'{unknown_keys} unrecognised field key(s) (not recorded)')
             if tool.startswith('rest:'):
                 reasons.append('agent writes via REST will be refused; use the MCP write tools')
             decision = 'would_deny' if reasons else 'allow'
@@ -150,12 +227,12 @@ def observe(*, tool, verb, collection='', record_id='', data=None, expected_vers
                 tool=tool[:60],
                 verb=verb[:20],
                 collection=(collection or '')[:50],
-                record_id=str(record_id or '')[:64],
+                record_id=record_id[:64],
                 fields=fields,
                 decision=decision,
                 reasons=reasons,
                 protocol_gaps=gaps,
-                request_key=(request_key or '')[:200],
+                request_key=request_key[:200],
                 has_expected_version=bool(expected_version),
                 payload_sha256=_digest(values) if values else '',
             )

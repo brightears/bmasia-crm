@@ -303,3 +303,78 @@ def test_purge_is_dry_run_by_default_and_respects_minimum():
     assert AgentRequest.objects.count() == 1
     with pytest.raises(CommandError):
         call_command('agent_gate_purge', '--days', '7')
+
+
+# ---------------------------------------------------------------- Vera review (9ccf881) fixes
+
+def _verdicts():
+    return list(AgentRequest.objects.order_by('created_at').values_list('decision', 'reasons'))
+
+
+@pytest.mark.django_db
+def test_theo_cannot_reopen_a_won_or_lost_opportunity():
+    opp = Opportunity.objects.create(company=_company(), name='Closed deal', stage='Lost')
+    with as_caller(_user('theo')):
+        update_record('opportunity', str(opp.id), json.dumps({'stage': 'Contacted'}))
+        update_record('opportunity', str(opp.id), json.dumps({'pain_points': 'noted after loss'}))
+    (first, first_reasons), (second, _) = _verdicts()
+    assert first == 'would_deny' and 'reopening a Lost opportunity' in first_reasons[0]
+    assert second == 'allow'  # non-stage notes on a closed deal are fine
+
+
+@pytest.mark.django_db
+def test_riff_cannot_reopen_or_create_closed_tickets():
+    company = _company()
+    closed = Ticket.objects.create(company=company, subject='Done', description='x', status='closed')
+    with as_caller(_user('riff')):
+        update_record('ticket', str(closed.id), json.dumps({'status': 'in_progress'}))
+        create_record('ticket', json.dumps({'company': str(company.id), 'subject': 'Old job',
+                                            'description': 'x', 'status': 'closed'}))
+        create_record('ticket', json.dumps({'company': str(company.id), 'subject': 'New job',
+                                            'description': 'x', 'status': 'new'}))
+    decisions = [d for d, _ in _verdicts()]
+    assert decisions == ['would_deny', 'would_deny', 'allow']
+
+
+@pytest.mark.django_db
+def test_sales_cannot_create_a_won_opportunity_or_reopen_one_without_cira():
+    company = _company()
+    lost = Opportunity.objects.create(company=company, name='Lost lead', stage='Lost')
+    with as_caller(_user('sales')):
+        create_record('opportunity', json.dumps({'company': str(company.id), 'name': 'Instant win',
+                                                 'stage': 'Won'}))
+        update_record('opportunity', str(lost.id), json.dumps({'stage': 'Contacted'}))
+    (created, created_reasons), (reopened, reopened_reasons) = _verdicts()
+    assert created == 'would_deny' and 'explicit-user authorization' in created_reasons[0]
+    assert reopened == 'would_deny' and 'reopening a Lost opportunity' in reopened_reasons[0]
+
+
+@pytest.mark.django_db
+def test_sales_cannot_rebind_a_customer_contact_to_a_lead_company():
+    customer, lead = _company('Customer Hotel'), _company('Lead Cafe')
+    _live_contract(customer)
+    contact = _contact(customer)
+    with as_caller(_user('sales')):
+        update_record('contact', str(contact.id), json.dumps({'company': str(lead.id)}))
+    ((decision, reasons),) = _verdicts()
+    assert decision == 'would_deny'
+    assert reasons == ['moving a contact to or from an existing customer is Cira-only']
+
+
+@pytest.mark.django_db
+def test_ledger_never_records_unknown_keys_or_prose_ids():
+    contact = _contact()
+    prose_key = 'Dear Anna, the lobby music was too loud yesterday'
+    with as_caller(_user('theo')):
+        update_record('contact', str(contact.id), json.dumps({'title': 'GM', prose_key: 'x'}))
+    from crm_app.services import agent_gate
+    with as_caller(get_user_model().objects.get(username='theo')):
+        agent_gate.observe(tool='update_record', verb='update', collection='contact',
+                           record_id='please call the GM about the complaint', data={'title': 'x'},
+                           request_key='customer said: cancel everything')
+    rows = list(AgentRequest.objects.order_by('created_at'))
+    stored = json.dumps([[r.fields, r.reasons, r.record_id, r.request_key] for r in rows])
+    assert 'Anna' not in stored and 'complaint' not in stored and 'cancel' not in stored
+    assert rows[0].fields == ['title']
+    assert '1 unrecognised field key(s) (not recorded)' in rows[0].reasons
+    assert rows[1].record_id == '<invalid>' and rows[1].request_key == '<invalid>'

@@ -94,7 +94,7 @@ PRINCIPALS = {
     'riff': Principal(
         name='riff',
         create={
-            'ticket': Rule(exclude=_IDENTITY - {'company', 'company_id'}),
+            'ticket': Rule(exclude=_IDENTITY - {'company', 'company_id'}, condition='ticket_non_terminal'),
             'device': Rule(exclude=_IDENTITY - {'company', 'company_id'}),
             'clienttechdetail': Rule(exclude=_IDENTITY - {'company', 'company_id'}),
         },
@@ -117,7 +117,7 @@ PRINCIPALS = {
     'sales': Principal(
         name='sales',
         create={'company': Rule(), 'contact': Rule(condition='lead_company_only'),
-                'opportunity': Rule()},  # upsells to existing customers are sales work
+                'opportunity': Rule(condition='terminal_needs_explicit_authorization')},  # upsells OK
         update={
             # Won/Lost only with the existing explicit-user commercial authorization
             # (crm_app/mcp.py guarded path: who decided + source); that guard is unchanged.
