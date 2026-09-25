@@ -6,8 +6,7 @@ verifies the actual Gmail Sent message (sending mailbox, external recipient,
 attached quote PDF, provider date) and signs a short-lived receipt with its own
 Ed25519 key. This module validates that attestation, not Gmail itself.
 
-Until the attestor's public key is pinned below (reviewed code change), every
-receipt is refused: quote Sent bookkeeping fails closed.
+Only receipts signed by the pinned attestor key below are accepted.
 """
 
 import base64
@@ -28,10 +27,11 @@ SIGNING_PREFIX = b'BMASIA-QUOTE-SEND-RECEIPT-v1\n'
 DOMAIN = 'bmasia.quote-send.v1'
 ISSUER = 'bmasia-quote-attestor'
 AUDIENCE = 'bmasia-crm-guarded-update'
-# Nonsecret Ed25519 public DER of the quote attestor. Empty until the attestor
-# key is generated on the VPS and pinned here by a reviewed code change.
-PRODUCTION_PUBLIC_DER_B64 = ''
-PRODUCTION_KEY_ID = ''
+# Nonsecret Ed25519 public DER of the quote attestor, generated 2026-09-25 on the
+# core VPS (/etc/bmasia/quote-send-receipts/public.der; private key root 0400).
+# Rotation requires a reviewed code change and redeploy.
+PRODUCTION_PUBLIC_DER_B64 = 'MCowBQYDK2VwAyEAOiNa//JM3ylcEBygX7pGWNvr/N3jCJfT0X54t9INHNA='
+PRODUCTION_KEY_ID = '294dc821286fdfaddb23ccdaf072e7c223c7b49ccf78e5f12f5656c9e92ea4eb'
 MAX_PAYLOAD_BYTES = 8192
 # Sending identities the attestor may vouch for, and which agent asked.
 MAILBOX_REQUESTERS = {

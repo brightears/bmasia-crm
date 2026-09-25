@@ -1,0 +1,23 @@
+[Unit]
+Description=Protected BMAsia quote send receipt attestor (Lyra/norbert@, Theo/nikki@)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+RuntimeDirectory=bmasia-quote-send-receipt
+RuntimeDirectoryMode=0755
+ExecStart=/usr/bin/python3 -I -B /usr/local/lib/bmasia/quote-send-receipts/attestor.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/run/bmasia-quote-send-receipt
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

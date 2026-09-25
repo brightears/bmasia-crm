@@ -113,11 +113,21 @@ def test_guarded_status_only_patch_is_refused():
     assert 'outside the approved correction scope' in result['error']
 
 
-def test_unconfigured_production_key_fails_closed():
+def test_unconfigured_production_key_fails_closed(monkeypatch):
+    quote = _quote()
+    record, patch, context, _ = _signed(quote, _NoPatch(), pin=False)
+    monkeypatch.setattr(receipt_verifier, 'PRODUCTION_PUBLIC_DER_B64', '')
+    result = _update(quote, record, patch, context)
+    assert result['updated'] is False and 'not configured' in result['error']
+    assert QuoteSendReceiptUse.objects.count() == 0
+
+
+def test_pinned_production_key_rejects_a_receipt_from_any_other_key():
     quote = _quote()
     record, patch, context, _ = _signed(quote, _NoPatch(), pin=False)
     result = _update(quote, record, patch, context)
-    assert result['updated'] is False and 'not configured' in result['error']
+    assert result['updated'] is False
+    assert 'key' in result['error'] or 'signature' in result['error']
     assert QuoteSendReceiptUse.objects.count() == 0
 
 
