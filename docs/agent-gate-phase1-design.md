@@ -1,6 +1,6 @@
 # Phase 1 — Agent gate in the CRM (design note)
 
-Status: **DESIGN FOR REVIEW** · 2026-09-25 · Author: CRM desk (Claude Code) · Reviewer: Vera ·
+Status: **DESIGN FOR REVIEW — rev 2 (addresses Vera's CHANGES_REQUESTED, INC-20260925-02b84f)** · 2026-09-25 · Author: CRM desk (Claude Code) · Reviewer: Vera ·
 Approver: Norbert. Implementation starts only after Vera's review and Norbert's go.
 
 ## In one paragraph (for Norbert)
@@ -53,17 +53,19 @@ copies). Default is **deny**. Draft:
 
 | Principal | Read | Create | Update (fields) | Notes |
 |---|---|---|---|---|
-| **cira** | all | company, contact, opportunity, quote, contract, invoice, service location | as today, incl. all existing guarded paths | status/money/document changes stay guarded exactly as now |
+| **cira** | all | **every collection in `_COLLECTION_MAP`** (company, contact, contract, contracttemplate, invoice, quote, opportunity, task, zone, clienttechdetail, device, ticket, kbarticle, quotelineitem, contractlineitem, servicelocation, invoicelineitem) | every field of those collections | plus `convert_quote_to_contract`, renewal-number reservation and the Rene phase-2 tool; all existing guarded rules (signed Sent receipts, explicit-user commercial authorization, date contexts, service-item/contact guards, template guards) run unchanged |
 | **riff** (new) | all | ticket, device, clienttechdetail | zone: notes, platform (status comes from the Soundtrack sync, not agents); clienttechdetail: hardware/remote-access fields; device: all non-identity fields; ticket: status (non-terminal), priority, comments | every write carries `basis`: `keith_approved` + Google Chat message ref, or `riff_confident` (Norbert 2026-09-25: act alone only when very confident; otherwise ask Keith in their Chat) |
-| **sales** | all | company, contact, opportunity, activity (new leads) | opportunity: **any field incl. Won/Lost**; lead companies/contacts: any field | Norbert 2026-09-25: full lead/pipeline authority. Bound: companies with an Active/Sent contract (existing customers) stay Cira-only; no deletes |
-| **cara** | customer-care view | activity (care feedback) | contact: last_contacted | first step toward Phase 4 feedback capture |
-| **theo, lyra** | all | activity | contact: title, department, last_contacted | anything else → request to Cira (unchanged) |
+| **sales** | all | company; contact and opportunity (incl. upsells) | opportunity: any field; **Won/Lost only through the existing guarded `explicit_user_commercial` path** (who decided + source thread, bound to record and patch — guard unchanged); lead companies/contacts: any field | Norbert 2026-09-25: full lead/pipeline authority. **Existing-customer boundary:** a company with any `Contract.status in ('Active','Sent')` — its company and contact records (update, and contact create) stay Cira-only. No deletes |
+| **cara** | customer-care view (separate Cara bearer) | activity (care feedback) | contact: title, department, last_contacted | Django-token writes, if any, attributed to user `cara` |
+| **theo** | all | activity | contact: title, department, last_contacted; opportunity: stage (non-terminal), last_contact_date, follow_up_date, expected_close_date, pain_points, decision_criteria | = the approved production-lane scope (`tools/agent_crm_production.py` FIELDS['theo']); anything else → Cira |
+| **lyra** | all | activity | contact: title, department, last_contacted | anything else → request to Cira (unchanged) |
 | **nina** | companies, zones, contracts (read) | activity | zone: programme notes | |
 | **vera** | all | — | — | code owner; data fixes still routed via Cira |
 
 **Nobody in the table may delete.** `delete_record` becomes human-only (website/admin);
 agents cancel or deactivate instead. Terminal transitions (Won/Lost, Cancelled/Expired,
-Resolved/Closed) stay Cira-only and guarded.
+Resolved/Closed) stay Cira-only and guarded, **with one exception**: Sales may set Won/Lost, but
+only through the existing guarded explicit-user commercial path (the guard is not relaxed).
 
 "Activity" = the existing `Note`/`OpportunityActivity` models exposed as an **append-only**
 MCP tool `log_activity(company_id, kind, summary, evidence_ref, occurred_at)` — agents can add
@@ -74,13 +76,18 @@ replace free-text Sheet remarks and follow-up columns.
 
 A new service `crm_app/services/agent_gate.py` called by **every** MCP write tool
 (`create_record`, `update_record`, `delete_record`, `convert_quote_to_contract`,
-`generate_contract_pdf` number reservation, `log_activity`). The generic write tools move into
-an `MCPToolset` class so they can see `self.request` (same technique as Rene). For agent
+`generate_contract_pdf` number reservation, `log_activity`, and — observed only — the Rene
+phase-2 tool, whose frozen boundary stays outside the generic gate). The caller is read from
+django-mcp-server's `django_request_ctx` (the same context variable it uses to give toolsets
+`self.request`), so the generic tools stay registered as they are. In Stage A, DRF-token callers
+are attributed by an **explicit username → principal map**, not by token type. For agent
 principals the gate:
 
 1. checks the policy (collection, verb, exact field names) — unknown field ⇒ refuse, with the
    reason in the reply;
-2. **requires** `request_key` and, for updates, `expected_version` (today optional);
+2. **requires** `request_key` and, for updates, **both** `expected_version` and
+   `expected_values` — i.e. the existing guarded mode becomes mandatory for agents; neither the
+   version nor the before-value checks are weakened;
 3. looks up the idempotency ledger (below) — an identical retry returns the original result;
 4. applies the write inside a transaction with `select_for_update` and re-reads it;
 5. writes the audit record.
@@ -92,13 +99,27 @@ unchanged *inside* the gate.
 
 ### 2.4 Idempotency ledger = audit trail = safe retries
 
-New append-only model **`AgentRequest`**: `principal`, `request_key` (unique per principal),
-`payload_sha256`, `tool`, `collection`, `record_id`, `on_behalf_of`, `evidence` (references
-only, never email bodies), `before`/`after` for changed fields, `outcome`
-(applied / already_current / refused / conflict / error), `reason`, `response`, timestamps.
-Plus an `AuditLog` row with the principal's user so it shows in the existing CRM audit screen.
+New append-only model **`AgentRequest`** (Stage A ships the observe subset). **It never stores
+values**: `principal`, `username`, `tool`, `verb`, `collection`, `record_id`, changed **field
+names** (≤200), `request_key`, `payload_sha256`, `response_sha256`, `outcome` code
+(applied / already_current / refused / conflict / error), reason codes (≤20 × 300 chars),
+`on_behalf_of`, evidence **references** (ids/hashes only), timestamps. No before/after values,
+no response bodies, and never PDF bytes (a number reservation records only the contract id,
+number and artifact SHA-256/size). Before/after values stay where they already live: the
+existing `AuditLog` row (written with the principal's user) and Cira's audit.
 
-- Same key + same payload ⇒ the stored response is returned, nothing is written twice. This
+**Retention and access:** 180 days (`agent_gate_purge`, dry-run default, 30-day minimum);
+read-only Django admin for staff users only (agent users are not staff), no agent-facing read
+endpoint except `get_request_status` for the caller's own keys.
+
+**Signed Sent receipts:** for `theo:renewal-sent:*` writes the outer `request_key` must equal
+the key embedded in the signed receipt. `ContractSendReceiptUse` remains the authority for
+receipt replay/conflict (nonce, digest, record, version, before-values, patch); the ledger is an
+outer layer: an identical replay returns the stored outcome without re-running the write, and a
+changed payload under the same key is a conflict — it never bypasses or re-consumes a receipt.
+
+- Same key + same payload ⇒ the stored outcome (ok, id, updated_at, error code) is returned,
+  nothing is written twice. This
   makes **retrying always safe**, which removes the "held forever, no automatic replay" failure
   (Theo's 4 stuck contracts).
 - Same key + different payload ⇒ `conflict`, nothing written.
