@@ -860,6 +860,14 @@ def create_record(collection: str, data: str) -> str:
     except _json.JSONDecodeError as e:
         return f"Error: Invalid JSON — {e}"
 
+    if collection == 'quote' and isinstance(fields, dict) and (
+        fields.get('status') == 'Sent' or 'sent_date' in fields
+    ):
+        return _json.dumps({
+            'created': False,
+            'error': 'Quotes are created as Draft; record Sent through the signed quote-send receipt path.',
+        })
+
     model, serializer_path = _COLLECTION_MAP[collection]
     SerializerClass = _get_serializer_class(serializer_path)
 

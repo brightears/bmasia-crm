@@ -2730,7 +2730,12 @@ class Quote(TimestampedModel):
     def save(self, *args, **kwargs):
         """Auto-update status dates. Auto-generate quote_number if blank or old format."""
         if self.status == 'Sent' and not self.sent_date:
-            self.sent_date = timezone.now().date()
+            # Stamp the send date only on the transition INTO Sent (e.g. the website's
+            # send action). A later unrelated save of an already-Sent quote must never
+            # invent a sent_date: that is receipt-guarded bookkeeping (quote_send_receipts).
+            previous_status = type(self).objects.filter(pk=self.pk).values_list('status', flat=True).first()
+            if previous_status != 'Sent':
+                self.sent_date = timezone.now().date()
         elif self.status == 'Accepted' and not self.accepted_date:
             self.accepted_date = timezone.now().date()
         elif self.status == 'Rejected' and not self.rejected_date:

@@ -15,7 +15,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import crm_app.quote_send_receipts as receipt_verifier
-from crm_app.mcp import update_record
+from crm_app.mcp import create_record, update_record
 from crm_app.models import Company, Quote, QuoteSendReceiptUse
 from crm_app.quote_send_receipts import SIGNING_PREFIX
 from crm_app.serializers import QuoteSerializer
@@ -205,3 +205,43 @@ class _NoPatch:
 
     def setattr(self, *args, **kwargs):  # pragma: no cover - never pins
         raise AssertionError('must not pin a key in this test')
+
+
+
+# ---------------------------------------------------------------- Vera review (cf0eb22) fixes
+
+@pytest.mark.parametrize('extra', [{'status': 'Sent'}, {'sent_date': '2026-09-25'},
+                                   {'status': 'Sent', 'sent_date': '2026-09-25'}])
+def test_quote_cannot_be_created_as_sent_via_mcp(extra):
+    company = Company.objects.create(name=f'Create-as-sent {sorted(extra)}')
+    data = {'company': str(company.pk), 'valid_from': '2026-09-25', 'valid_until': '2026-10-25', **extra}
+    result = json.loads(create_record('quote', json.dumps(data)))
+    assert result['created'] is False and 'signed quote-send receipt' in result['error']
+    assert not Quote.objects.filter(company=company).exists()
+    assert QuoteSendReceiptUse.objects.count() == 0
+
+
+def test_draft_quote_can_still_be_created_via_mcp():
+    company = Company.objects.create(name='Create draft quote')
+    result = json.loads(create_record('quote', json.dumps(
+        {'company': str(company.pk), 'quote_number': 'HK-QT269990',
+         'valid_from': '2026-09-25', 'valid_until': '2026-10-25'})))
+    assert 'id' in result
+    assert Quote.objects.get(pk=result['id']).status == 'Draft'
+
+
+def test_unrelated_update_never_invents_a_sent_date():
+    quote = _quote()
+    Quote.objects.filter(pk=quote.pk).update(status='Sent', sent_date=None)
+    result = json.loads(update_record('quote', str(quote.pk), json.dumps({'notes': 'follow up next week'})))
+    assert 'error' not in result
+    quote.refresh_from_db()
+    assert quote.status == 'Sent' and quote.sent_date is None
+
+
+def test_transition_into_sent_still_stamps_the_date_for_the_website_flow():
+    quote = _quote()
+    quote.status = 'Sent'
+    quote.save()
+    quote.refresh_from_db()
+    assert quote.sent_date is not None
