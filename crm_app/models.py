@@ -578,6 +578,45 @@ class AuditLog(models.Model):
         return f"{self.user} {self.action} {self.model_name} at {self.timestamp}"
 
 
+class AgentRequest(models.Model):
+    """Append-only record of every MCP write attempt, evaluated by the agent gate.
+
+    Stage A (observe): records what the per-agent policy (crm_app/agent_policy.py)
+    *would* refuse without changing any behaviour. Stores field NAMES, record ids
+    and a payload digest only - never customer values or email text.
+    """
+    DECISION_CHOICES = [
+        ('allow', 'Allowed by policy'),
+        ('would_deny', 'Would be refused by policy'),
+        ('not_agent', 'Human / unlisted user (not gated)'),
+        ('unauthenticated', 'No authenticated caller'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    mode = models.CharField(max_length=10, default='observe')
+    username = models.CharField(max_length=150, blank=True)
+    principal = models.CharField(max_length=40, blank=True, db_index=True)
+    tool = models.CharField(max_length=60)
+    verb = models.CharField(max_length=20)
+    collection = models.CharField(max_length=50, blank=True)
+    record_id = models.CharField(max_length=64, blank=True)
+    fields = models.JSONField(default=list, blank=True)
+    decision = models.CharField(max_length=20, choices=DECISION_CHOICES, db_index=True)
+    reasons = models.JSONField(default=list, blank=True)
+    protocol_gaps = models.JSONField(default=list, blank=True)
+    request_key = models.CharField(max_length=200, blank=True)
+    has_expected_version = models.BooleanField(default=False)
+    payload_sha256 = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['principal', 'decision', '-created_at'])]
+
+    def __str__(self):
+        return f"{self.principal or self.username or '?'} {self.verb} {self.collection} {self.decision}"
+
+
 # Sales Funnel Models
 class Opportunity(TimestampedModel):
     """Enhanced Opportunity model with better tracking and analytics"""

@@ -27,6 +27,7 @@ from crm_app.contract_send_receipts import (
     ReceiptVerificationError, verify_signed_contract_send_context,
 )
 from crm_app.rene_auth import is_exact_rene_phase2_mcp_request
+from crm_app.services import agent_gate as _agent_gate
 from crm_app.rene_mcp_server import rene_phase2_mcp_server
 from crm_app.views import ContractViewSet, QuoteViewSet, InvoiceViewSet  # Only for PDF tools
 
@@ -813,6 +814,7 @@ def create_record(collection: str, data: str) -> str:
     """
     if collection not in _COLLECTION_MAP:
         return f"Error: Unknown collection '{collection}'. Valid: {', '.join(sorted(_COLLECTION_MAP))}"
+    _agent_gate.observe(tool='create_record', verb='create', collection=collection, data=data)
 
     try:
         fields = _json.loads(data)
@@ -907,6 +909,8 @@ def update_record(
     """
     if collection not in _COLLECTION_MAP:
         return f"Error: Unknown collection '{collection}'. Valid: {', '.join(sorted(_COLLECTION_MAP))}"
+    _agent_gate.observe(tool='update_record', verb='update', collection=collection, record_id=id,
+                        data=data, expected_version=expected_version)
 
     # The original three-argument API remains deliberately unchanged.  The
     # optimistic path is opt-in and only permits the small correction surface
@@ -1332,6 +1336,7 @@ def delete_record(collection: str, id: str) -> str:
     """
     if collection not in _COLLECTION_MAP:
         return f"Error: Unknown collection '{collection}'. Valid: {', '.join(sorted(_COLLECTION_MAP))}"
+    _agent_gate.observe(tool='delete_record', verb='delete', collection=collection, record_id=id)
     if collection == 'contracttemplate':
         return (
             "Error: Generic contract-template deletion is blocked. "
@@ -1403,6 +1408,8 @@ def convert_quote_to_contract(quote_id: str, overrides_json: str = "") -> str:
     """
     from crm_app.models import Quote
     from crm_app.services.quote_conversion import convert_quote_to_contract as _convert
+    _agent_gate.observe(tool='convert_quote_to_contract', verb='convert_quote', collection='quote',
+                        record_id=quote_id, data=overrides_json)
     try:
         quote = Quote.objects.get(id=quote_id)
     except Quote.DoesNotExist:
@@ -1492,6 +1499,9 @@ def generate_contract_pdf(
 
     if type(reserve_renewal_number) is not bool:
         return json.dumps({"error": "reserve_renewal_number must be a boolean."})
+    if reserve_renewal_number:
+        _agent_gate.observe(tool='generate_contract_pdf', verb='reserve_number', collection='contract',
+                            record_id=id, expected_version=expected_version)
     try:
         if reserve_renewal_number:
             response, metadata = generate_numbered_renewal_review(id, expected_version, render)
