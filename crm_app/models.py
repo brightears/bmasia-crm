@@ -588,6 +588,7 @@ class AgentRequest(models.Model):
     DECISION_CHOICES = [
         ('allow', 'Allowed by policy'),
         ('would_deny', 'Would be refused by policy'),
+        ('uncertain', 'Verdict depends on state that could not be read'),
         ('not_agent', 'Human / unlisted user (not gated)'),
         ('unauthenticated', 'No authenticated caller'),
     ]

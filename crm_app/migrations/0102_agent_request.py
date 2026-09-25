@@ -28,6 +28,7 @@ class Migration(migrations.Migration):
                 ('decision', models.CharField(choices=[
                     ('allow', 'Allowed by policy'),
                     ('would_deny', 'Would be refused by policy'),
+                    ('uncertain', 'Verdict depends on state that could not be read'),
                     ('not_agent', 'Human / unlisted user (not gated)'),
                     ('unauthenticated', 'No authenticated caller'),
                 ], db_index=True, max_length=20)),

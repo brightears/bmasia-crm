@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import re
+import uuid
 
 from django.conf import settings
 from django.db import transaction
@@ -59,8 +60,25 @@ def _digest(data) -> str:
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
 
 
-_RECORD_ID_RE = re.compile(r'[0-9A-Za-z-]{1,64}')
-_REQUEST_KEY_RE = re.compile(r'[A-Za-z0-9:._/-]{1,200}')
+_UNKNOWN = object()  # a stored-state lookup failed; never read as permission
+
+
+class _Uncertain(Exception):
+    """Raised when a verdict depends on stored state that could not be read."""
+
+
+def _canonical_uuid(value):
+    """Only canonical UUIDs are stored as record ids; anything else is not an id."""
+    try:
+        parsed = uuid.UUID(str(value))
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return str(parsed) if str(parsed) == str(value).lower() else None
+
+
+def _key_digest(request_key):
+    """Request keys are stored only as a SHA-256 digest (never as caller text)."""
+    return 'sha256:' + hashlib.sha256(str(request_key).encode('utf-8')).hexdigest()
 # update_record control keys that are not model/serializer fields.
 _CONTROL_KEYS = {'contract': {'replace_service_locations'}}
 _FIELD_CACHE = {}
@@ -86,27 +104,30 @@ def _known_fields(collection):
 
 
 def _current_value(collection, record_id, field_name):
-    """Persisted value of one field, or None (unknown record/collection/bad id)."""
+    """Persisted value of one field; None if there is no such record; raises _Uncertain on failure."""
     if not record_id:
         return None
     try:
         from crm_app.mcp import _COLLECTION_MAP
         model = _COLLECTION_MAP[collection][0]
         return model.objects.filter(pk=record_id).values_list(field_name, flat=True).first()
-    except Exception:
-        return None
+    except Exception as exc:
+        raise _Uncertain(f'could not read stored {collection}.{field_name}') from exc
 
 
 def _is_live_customer(company_id):
+    """True/False from the database; raises _Uncertain if it cannot be determined."""
     from crm_app.models import Contract
     if not company_id:
         return False
+    if _canonical_uuid(company_id) is None:
+        raise _Uncertain('company reference is not a valid id')
     try:
         return Contract.objects.filter(
             company_id=company_id, status__in=policy.LIVE_CONTRACT_STATUSES,
         ).exists()
-    except Exception:
-        return False
+    except Exception as exc:
+        raise _Uncertain('could not read the company\'s contracts') from exc
 
 
 def _terminal_reasons(label, field_name, terminal, collection, record_id, values):
@@ -184,19 +205,16 @@ def observe(*, tool, verb, collection='', record_id='', data=None, expected_vers
             unknown_keys = len(values) - len(fields)
         else:
             fields = []  # convert/rene payloads are not field patches; only their digest is kept
-        record_id = str(record_id or '')
-        if record_id and not _RECORD_ID_RE.fullmatch(record_id):
-            record_id = '<invalid>'
-        request_key = str(request_key or '')
-        if request_key and not _REQUEST_KEY_RE.fullmatch(request_key):
-            request_key = '<invalid>'
+        raw_record_id = str(record_id or '')
+        record_id = _canonical_uuid(raw_record_id) or ('<invalid>' if raw_record_id else '')
+        request_key = _key_digest(request_key) if request_key else ''
         if user is None or not getattr(user, 'is_authenticated', False):
             user = _current_user()
         username = getattr(user, 'username', '') if user else ''
         principal = policy.principal_for_username(username) if user else None
         if tool.startswith('rest:') and principal is None:
             return None  # humans using the CRM website are out of scope
-        reasons, gaps = [], []
+        reasons, gaps, uncertain = [], [], ''
         if user is None:
             decision = 'unauthenticated'
         elif principal is None:
@@ -204,14 +222,20 @@ def observe(*, tool, verb, collection='', record_id='', data=None, expected_vers
         else:
             reasons, condition = policy.evaluate(principal, verb, collection, fields)
             if not reasons and condition:
-                lookup_id = '' if record_id == '<invalid>' else record_id
-                reasons = _condition_reasons(condition, collection, lookup_id, values,
-                                             authorization_context=authorization_context)
+                try:
+                    if record_id == '<invalid>':
+                        raise _Uncertain('record id is not a valid id')
+                    reasons = _condition_reasons(condition, collection, record_id, values,
+                                                 authorization_context=authorization_context)
+                except _Uncertain as exc:
+                    uncertain = str(exc)
             if unknown_keys:
                 reasons.append(f'{unknown_keys} unrecognised field key(s) (not recorded)')
             if tool.startswith('rest:'):
                 reasons.append('agent writes via REST will be refused; use the MCP write tools')
-            decision = 'would_deny' if reasons else 'allow'
+            decision = 'would_deny' if reasons else ('uncertain' if uncertain else 'allow')
+            if uncertain:
+                reasons.append(f'verdict uncertain: {uncertain}')
             if not request_key:
                 gaps.append('request_key_missing')
             if verb == policy.UPDATE and not expected_version:

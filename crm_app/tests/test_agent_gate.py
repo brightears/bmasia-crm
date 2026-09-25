@@ -377,4 +377,54 @@ def test_ledger_never_records_unknown_keys_or_prose_ids():
     assert 'Anna' not in stored and 'complaint' not in stored and 'cancel' not in stored
     assert rows[0].fields == ['title']
     assert '1 unrecognised field key(s) (not recorded)' in rows[0].reasons
-    assert rows[1].record_id == '<invalid>' and rows[1].request_key == '<invalid>'
+    assert rows[1].record_id == '<invalid>'
+    assert rows[1].request_key.startswith('sha256:') and len(rows[1].request_key) == 71
+
+
+
+# ---------------------------------------------------------------- Vera review (6640186) fixes
+
+@pytest.mark.django_db
+def test_plain_words_are_never_stored_as_ids_or_keys():
+    from crm_app.services import agent_gate
+    contact = _contact()
+    with as_caller(_user('theo')):
+        word = agent_gate.observe(tool='update_record', verb='update', collection='contact',
+                                  record_id='CustomerComplaint', data={'title': 'x'},
+                                  request_key='CustomerComplaint')
+        upper = agent_gate.observe(tool='update_record', verb='update', collection='contact',
+                                   record_id=str(contact.id).upper(), data={'title': 'x'})
+    assert word.record_id == '<invalid>' and 'CustomerComplaint' not in word.request_key
+    assert word.decision == 'allow'  # contact metadata needs no stored-state lookup
+    assert upper.record_id == str(contact.id)  # canonical lowercase UUID
+
+
+@pytest.mark.django_db
+def test_invalid_id_makes_state_dependent_verdicts_uncertain():
+    from crm_app.services import agent_gate
+    with as_caller(_user('riff')):
+        row = agent_gate.observe(tool='update_record', verb='update', collection='ticket',
+                                 record_id='CustomerComplaint', data={'status': 'in_progress'})
+    assert row.decision == 'uncertain'
+    assert row.reasons == ['verdict uncertain: record id is not a valid id']
+
+
+@pytest.mark.django_db
+def test_stored_state_lookup_failure_is_uncertain_not_allow(monkeypatch):
+    customer = _company('Customer Resort')
+    _live_contract(customer)
+    closed = Ticket.objects.create(company=customer, subject='Done', description='x', status='closed')
+
+    def broken(*args, **kwargs):
+        raise RuntimeError('database unavailable')
+
+    monkeypatch.setattr(Contract.objects, 'filter', broken)
+    monkeypatch.setattr(Ticket.objects, 'filter', broken)
+    with as_caller(_user('sales')):
+        update_record('company', str(customer.id), json.dumps({'notes': 'touch'}))
+    with as_caller(_user('riff')):
+        update_record('ticket', str(closed.id), json.dumps({'status': 'in_progress'}))
+    rows = list(AgentRequest.objects.order_by('created_at'))
+    assert [r.decision for r in rows] == ['uncertain', 'uncertain']
+    assert rows[0].reasons == ["verdict uncertain: could not read the company's contracts"]
+    assert rows[1].reasons == ['verdict uncertain: could not read stored ticket.status']
