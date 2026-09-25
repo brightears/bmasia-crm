@@ -54,8 +54,8 @@ copies). Default is **deny**. Draft:
 | Principal | Read | Create | Update (fields) | Notes |
 |---|---|---|---|---|
 | **cira** | all | company, contact, opportunity, quote, contract, invoice, service location | as today, incl. all existing guarded paths | status/money/document changes stay guarded exactly as now |
-| **riff** (new) | all | ticket, device, clienttechdetail | zone: notes, platform (status comes from the Soundtrack sync, not agents); clienttechdetail: hardware/remote-access fields; device: all non-identity fields; ticket: status (non-terminal), priority, comments | `on_behalf_of: keith` required |
-| **sales** | all | opportunity, activity | opportunity: stage (non-terminal), expected_close_date, follow_up_date, probability, notes; contact: title, department, last_contacted | replaces today's unrestricted direct writes |
+| **riff** (new) | all | ticket, device, clienttechdetail | zone: notes, platform (status comes from the Soundtrack sync, not agents); clienttechdetail: hardware/remote-access fields; device: all non-identity fields; ticket: status (non-terminal), priority, comments | every write carries `basis`: `keith_approved` + Google Chat message ref, or `riff_confident` (Norbert 2026-09-25: act alone only when very confident; otherwise ask Keith in their Chat) |
+| **sales** | all | company, contact, opportunity, activity (new leads) | opportunity: **any field incl. Won/Lost**; lead companies/contacts: any field | Norbert 2026-09-25: full lead/pipeline authority. Bound: companies with an Active/Sent contract (existing customers) stay Cira-only; no deletes |
 | **cara** | customer-care view | activity (care feedback) | contact: last_contacted | first step toward Phase 4 feedback capture |
 | **theo, lyra** | all | activity | contact: title, department, last_contacted | anything else → request to Cira (unchanged) |
 | **nina** | companies, zones, contracts (read) | activity | zone: programme notes | |
@@ -141,17 +141,21 @@ contracts); Renewal Book page and Sheet parity (Phase 3); evidence-scored field 
 email intake (Phase 4). The existing off-server shadow/production correction lanes are left
 running; after Stage D they become redundant and Vera decides whether to retire them.
 
-## 6. Decisions needed
+## 6. Decisions (Norbert, 2026-09-25)
 
-1. **Invoice numbers** — the CRM holds 8 invoices in three number formats
-   (`INV-TH-2026-0003`, `HK260134`, `INV-20260212-264`), while real invoices are numbered in
-   QuickBooks (e.g. HK260181). Which system is the numbering authority? (Kent/Pom.) Until
-   decided, the CRM will not mint invoice numbers.
-2. **Riff scope** — confirm the field list in §2.2, and whether every Riff write needs Keith's
-   explicit approval or only non-routine ones.
-3. **Sales agent** — direct scoped writes to opportunities (recommended; it's what it does
-   today, now bounded) vs routing through Cira.
-4. **Cara** — may log care feedback and `last_contacted` directly (recommended), or via Cira?
+1. **Invoices stay in QuickBooks for now.** Pom keeps invoicing in QuickBooks Pro 2016; the CRM
+   does not mint invoice numbers in Phase 1. The existing `qbmcp` bridge (Render
+   `srv-d7c6lh7lk1mc7391ac40`, QuickBooks Web Connector, built April 2026) is deployed but has
+   had no Web Connector traffic in the last 30 days, i.e. Pom's PC was likely never connected.
+   Proposed later phase: connect it and **read** invoices + payments into the CRM nightly
+   (Paid/Unpaid without the Sheet's INV tabs), CRM-created invoices pushed to QuickBooks after that.
+2. **Riff** may write alone when very confident; otherwise asks Keith in their Google Chat and
+   records the approval reference. The gate stores the `basis` of every Riff write.
+3. **Sales agent**: full authority over leads and pipeline (create/edit leads, any opportunity
+   stage incl. Won/Lost), bounded away from existing customers' records and deletes. The current
+   explicit-user binding required for Won/Lost in guarded mode (`mcp.py:613-643`) will accept the
+   Sales principal as its own authority — Vera to confirm.
+4. **Cara** writes care feedback (activity) and `contact.last_contacted` directly.
 
 ## 7. Review checklist for Vera
 
