@@ -22,10 +22,14 @@ from crm_app.models import (
     Company, Contact, Contract, Invoice, Quote, Opportunity, AuditLog,
     Task, Zone, ContractTemplate, ContractLineItem, InvoiceLineItem, QuoteLineItem,
     ContractServiceLocation, ClientTechDetail, Device, Ticket, KBArticle,
-    ContractSendReceiptUse,
+    ContractSendReceiptUse, QuoteSendReceiptUse,
 )
 from crm_app.contract_send_receipts import (
     ReceiptVerificationError, verify_signed_contract_send_context,
+)
+from crm_app.quote_send_receipts import (
+    ReceiptVerificationError as QuoteReceiptVerificationError,
+    verify_signed_quote_send_context,
 )
 from crm_app.rene_auth import is_exact_rene_phase2_mcp_request
 from crm_app.services import agent_gate as _agent_gate
@@ -511,6 +515,8 @@ _GUARDED_CONTRACT_CONTACT_FIELDS = frozenset({
 
 _GUARDED_CONTRACT_SERVICE_ITEM_FIELDS = frozenset({'custom_service_items'})
 _GUARDED_CONTRACT_SEND_FIELDS = frozenset({'status', 'sent_date'})
+# Quote Draft->Sent bookkeeping: same shape and safeguards as contracts (signed receipt).
+_GUARDED_QUOTE_SEND_FIELDS = frozenset({'status', 'sent_date'})
 _GUARDED_CONTRACT_DATE_FIELDS = frozenset({'start_date', 'end_date'})
 
 # One historical, operator-verified recovery only. The root-owned receipt was
@@ -541,6 +547,7 @@ _GUARDED_UPDATE_FIELDS = {
     },
     'ticket': {'priority', 'status'},
     'zone': {'notes'},
+    'quote': set(_GUARDED_QUOTE_SEND_FIELDS),
 }
 
 
@@ -770,6 +777,31 @@ def _guarded_contract_send_authorization(record_id, fields, before, expected_ver
     return None, None
 
 
+def _guarded_quote_send_authorization(record_id, fields, before, expected_version, raw):
+    """Authorize exact quote Sent/date bookkeeping with a quote-attestor signed receipt.
+
+    Return (error, verified_signed_receipt_or_none). There is no unsigned or
+    pinned-recovery route for quotes.
+    """
+    if set(fields) != _GUARDED_QUOTE_SEND_FIELDS:
+        return 'Quote send bookkeeping must contain status and sent_date only.', None
+    if fields.get('status') != 'Sent':
+        return 'Quote send bookkeeping can only record Sent status.', None
+    if not _strict_json_equal(before, {'status': 'Draft', 'sent_date': None}):
+        return 'Quote send bookkeeping requires exact Draft/null before values.', None
+    try:
+        context = _guarded_json_object(raw)
+    except (TypeError, ValueError, _json.JSONDecodeError):
+        return 'Quote send bookkeeping requires a signed send receipt.', None
+    try:
+        verified = verify_signed_quote_send_context(
+            context, record_id=record_id, fields=fields, before=before,
+            expected_version=expected_version,
+        )
+    except QuoteReceiptVerificationError as exc:
+        return str(exc), None
+    return None, verified
+
 # Exact one-record recovery manifest. This is not a general preamble correction lane.
 _CONTRACT_LAYOUT_CORRECTION_MANIFEST = {
     'record_id': '274ed1cd-68c5-4704-b19a-4f5b447e414f',
@@ -824,6 +856,7 @@ def _guarded_contract_layout_correction_authorization(record_id, fields, before,
     if not _strict_json_equal(context.get('authorized_changes'), fields):
         return 'Contract layout correction authorization does not exactly match the requested patch.'
     return None
+
 
 def _guarded_contract_date_authorization(fields, raw):
     """Accept provenance for a bounded Sent-but-unsigned date correction.
@@ -882,6 +915,14 @@ def create_record(collection: str, data: str) -> str:
         fields = _json.loads(data)
     except _json.JSONDecodeError as e:
         return f"Error: Invalid JSON — {e}"
+
+    if collection == 'quote' and isinstance(fields, dict) and (
+        fields.get('status') == 'Sent' or 'sent_date' in fields
+    ):
+        return _json.dumps({
+            'created': False,
+            'error': 'Quotes are created as Draft; record Sent through the signed quote-send receipt path.',
+        })
 
     model, serializer_path = _COLLECTION_MAP[collection]
     SerializerClass = _get_serializer_class(serializer_path)
@@ -992,7 +1033,18 @@ def update_record(
                 'updated': False, 'id': str(id),
                 'error': 'Contract status/date MCP changes require guarded send authorization.',
             })
+    if collection == 'quote' and not guarded:
+        try:
+            unguarded_fields = _guarded_json_object(data)
+        except (TypeError, ValueError, _json.JSONDecodeError):
+            unguarded_fields = {}
+        if unguarded_fields.get('status') == 'Sent' or 'sent_date' in unguarded_fields:
+            return _json.dumps({
+                'updated': False, 'id': str(id),
+                'error': 'Quote status/date MCP changes require guarded send authorization.',
+            })
     signed_send_receipt = None
+    signed_quote_receipt = None
     contract_date_context = None
     contract_layout_correction = False
     if guarded:
@@ -1017,7 +1069,7 @@ def update_record(
         # Status alone remains outside the correction lane. The signed send
         # route requires the exact status/date pair, so keep the old refusal
         # for a status-only patch before considering receipt authorization.
-        if collection == 'contract' and set(fields) == {'status'}:
+        if collection in ('contract', 'quote') and set(fields) == {'status'}:
             return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch contains fields outside the approved correction scope.'})
         contract_layout_correction = (
             collection == 'contract' and set(fields) == {'preamble_custom'}
@@ -1051,6 +1103,12 @@ def update_record(
                 return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
         if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_SEND_FIELDS:
             authorization_error, signed_send_receipt = _guarded_contract_send_authorization(
+                id, fields, before, expected_version, authorization_context,
+            )
+            if authorization_error:
+                return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
+        if collection == 'quote' and set(fields) & _GUARDED_QUOTE_SEND_FIELDS:
+            authorization_error, signed_quote_receipt = _guarded_quote_send_authorization(
                 id, fields, before, expected_version, authorization_context,
             )
             if authorization_error:
@@ -1190,6 +1248,54 @@ def update_record(
                     return _json.dumps({
                         'updated': False, 'id': str(id),
                         'error': 'Contract send bookkeeping requires the same Draft/null record and final number; nothing was saved.',
+                    })
+
+            if signed_quote_receipt:
+                quote_payload = signed_quote_receipt['payload']
+                quote_receipt_sha = signed_quote_receipt['receipt_sha256']
+                quote_number = quote_payload['quote_number']
+                uses = list(QuoteSendReceiptUse.objects.select_for_update().filter(
+                    Q(request_key=quote_payload['request_key'])
+                    | Q(nonce=quote_payload['nonce'])
+                    | Q(receipt_sha256=quote_receipt_sha)
+                )[:3])
+                if uses:
+                    same_use = len(uses) == 1 and all((
+                        uses[0].quote_id == instance.pk,
+                        uses[0].request_key == quote_payload['request_key'],
+                        str(uses[0].nonce) == quote_payload['nonce'],
+                        uses[0].receipt_sha256 == quote_receipt_sha,
+                        uses[0].key_id == quote_payload['key_id'],
+                        uses[0].quote_number == quote_number,
+                        uses[0].mailbox == quote_payload['mailbox'],
+                        uses[0].sent_date.isoformat() == fields['sent_date'],
+                        uses[0].before_version == expected_version,
+                    ))
+                    current = SerializerClass(instance).data
+                    if same_use and all((
+                        instance.status == 'Sent',
+                        instance.sent_date is not None
+                        and instance.sent_date.isoformat() == fields['sent_date'],
+                        instance.quote_number == quote_number,
+                        current.get('updated_at') == uses[0].after_version,
+                    )):
+                        return _json.dumps({
+                            'updated': False, 'already_applied': True,
+                            'id': str(id), 'applied': fields,
+                            'quote_number': quote_number,
+                            'receipt_sha256': quote_receipt_sha,
+                            'request_key': quote_payload['request_key'],
+                            'post_version': uses[0].after_version,
+                        })
+                    return _json.dumps({
+                        'updated': False, 'id': str(id),
+                        'error': 'Quote send receipt request, nonce, or state conflicts; nothing was saved.',
+                    })
+                if (instance.status != 'Draft' or instance.sent_date is not None
+                        or instance.quote_number != quote_number):
+                    return _json.dumps({
+                        'updated': False, 'id': str(id),
+                        'error': 'Quote send bookkeeping requires the same Draft/null record and number; nothing was saved.',
                     })
 
             current = SerializerClass(instance).data
@@ -1350,6 +1456,43 @@ def update_record(
                             'updated': False, 'id': str(id),
                             'error': 'Contract send receipt was used concurrently; nothing was saved.',
                         })
+            if signed_quote_receipt:
+                # Independent readback before committing the quote update and its
+                # unique receipt ledger row (same transaction).
+                instance = model.objects.get(id=id)
+                readback = SerializerClass(instance).data
+                if not all((
+                    instance.status == 'Sent',
+                    instance.sent_date is not None
+                    and instance.sent_date.isoformat() == fields['sent_date'],
+                    instance.quote_number == signed_quote_receipt['payload']['quote_number'],
+                    readback.get('updated_at'),
+                )):
+                    transaction.set_rollback(True)
+                    return _json.dumps({
+                        'updated': False, 'id': str(id),
+                        'error': 'Quote send readback did not match; nothing was saved.',
+                    })
+                quote_payload = signed_quote_receipt['payload']
+                try:
+                    QuoteSendReceiptUse.objects.create(
+                        quote=instance,
+                        request_key=quote_payload['request_key'],
+                        nonce=quote_payload['nonce'],
+                        receipt_sha256=signed_quote_receipt['receipt_sha256'],
+                        key_id=quote_payload['key_id'],
+                        quote_number=quote_payload['quote_number'],
+                        mailbox=quote_payload['mailbox'],
+                        sent_date=instance.sent_date,
+                        before_version=expected_version,
+                        after_version=readback['updated_at'],
+                    )
+                except IntegrityError:
+                    transaction.set_rollback(True)
+                    return _json.dumps({
+                        'updated': False, 'id': str(id),
+                        'error': 'Quote send receipt was used concurrently; nothing was saved.',
+                    })
             persisted = {}
             for key in applied:
                 src = serializer.fields[key].source or key
