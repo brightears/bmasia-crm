@@ -19,13 +19,14 @@ ANY = '*'
 
 # Verbs recorded by the gate.
 CREATE, UPDATE, DELETE = 'create', 'update', 'delete'
-CONVERT, RESERVE_NUMBER = 'convert_quote', 'reserve_number'
+CONVERT, RESERVE_NUMBER, RENE = 'convert_quote', 'reserve_number', 'rene_request'
 
 # Fields an agent may never set on the tech collections it maintains: they bind
 # the row to a customer/identity and must stay stable.
 _IDENTITY = frozenset({'id', 'company', 'company_id', 'created_at', 'updated_at'})
 
 TICKET_TERMINAL = frozenset({'resolved', 'closed'})
+OPPORTUNITY_TERMINAL = frozenset({'Won', 'Lost'})
 LIVE_CONTRACT_STATUSES = ('Active', 'Sent')
 
 
@@ -53,6 +54,11 @@ class Principal:
 
 
 _CONTACT_METADATA = Rule(frozenset({'title', 'department', 'last_contacted'}))
+_OPPORTUNITY_QUALIFICATION = Rule(
+    frozenset({'stage', 'last_contact_date', 'follow_up_date', 'expected_close_date',
+               'pain_points', 'decision_criteria'}),
+    condition='opportunity_non_terminal',
+)
 
 PRINCIPALS = {
     # Cira: the gatekeeper and sole commercial writer. Everything except delete;
@@ -61,13 +67,18 @@ PRINCIPALS = {
         name='cira',
         create={ANY: Rule()},
         update={ANY: Rule()},
-        verbs=frozenset({CONVERT, RESERVE_NUMBER}),
+        verbs=frozenset({CONVERT, RESERVE_NUMBER, RENE}),
         note='sole creator/changer of quotes, contracts, invoices, statuses and money',
     ),
     # Vera: code owner. Data fixes are routed through Cira.
     'vera': Principal(name='vera', note='read-only; data fixes via Cira'),
-    'theo': Principal(name='theo', update={'contact': _CONTACT_METADATA},
-                      note='renewals; everything else via Cira'),
+    # Theo: same scope as the approved production correction lane
+    # (tools/agent_crm_production.py FIELDS['theo']).
+    'theo': Principal(
+        name='theo',
+        update={'contact': _CONTACT_METADATA, 'opportunity': _OPPORTUNITY_QUALIFICATION},
+        note='renewals; everything else via Cira',
+    ),
     'lyra': Principal(name='lyra', update={'contact': _CONTACT_METADATA},
                       note="Norbert's PA; everything else via Cira"),
     # Riff: tech data. Every write must carry a basis (keith_approved + Chat ref,
@@ -89,6 +100,10 @@ PRINCIPALS = {
     ),
     'nina': Principal(name='nina', update={'zone': Rule(frozenset({'notes'}))},
                       note='music design; zone programme notes only'),
+    # Cara: client care. Reads use her separate Cara bearer; any Django-token
+    # writes are limited to contact metadata (care feedback activity arrives later).
+    'cara': Principal(name='cara', update={'contact': _CONTACT_METADATA},
+                      note='client care; care-feedback activities in a later stage'),
     # BMAsia Sales agent: full lead/pipeline authority, never existing customers.
     # Its CRM username is not yet confirmed; Stage A observe data will show it.
     'sales': Principal(
@@ -96,7 +111,9 @@ PRINCIPALS = {
         create={'company': Rule(), 'contact': Rule(condition='lead_company_only'),
                 'opportunity': Rule()},  # upsells to existing customers are sales work
         update={
-            'opportunity': Rule(),
+            # Won/Lost only with the existing explicit-user commercial authorization
+            # (crm_app/mcp.py guarded path: who decided + source); that guard is unchanged.
+            'opportunity': Rule(condition='terminal_needs_explicit_authorization'),
             'company': Rule(condition='lead_company_only'),
             'contact': Rule(condition='lead_company_only'),
         },
@@ -106,7 +123,7 @@ PRINCIPALS = {
     'ruby': Principal(name='ruby', retired=True, note='retired agent; token to be revoked'),
 }
 
-# CRM username -> principal. Cara is not a Django user (separate read bearer).
+# CRM username -> principal (explicit: DRF-token users are attributed by username).
 USERNAME_TO_PRINCIPAL = {name: name for name in PRINCIPALS}
 
 
@@ -138,7 +155,7 @@ def evaluate(principal: Principal, verb: str, collection: str, fields) -> tuple[
         return [f'principal {principal.name} is retired'], ''
     if verb == DELETE:
         return ['agents may not delete records'], ''
-    if verb in (CONVERT, RESERVE_NUMBER):
+    if verb in (CONVERT, RESERVE_NUMBER, RENE):
         if verb in principal.verbs:
             return [], ''
         return [f'{verb} is Cira-only'], ''

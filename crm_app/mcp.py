@@ -139,6 +139,12 @@ class RenePhase2MCPToolset(MCPToolset):
         )
         from crm_app.services.rene_phase2_common import canonical_json
 
+        # Phase 1 Stage A: record every call, including refused ones (observe only).
+        # The frozen Rene boundary, its journal and receipts are unchanged; the
+        # payload itself is not parsed here.
+        _agent_gate.observe(tool='rene_phase2_request', verb='rene_request', collection='contract',
+                            user=getattr(self.request, 'user', None))
+
         if not is_exact_rene_phase2_mcp_request(self.request):
             return canonical_json(
                 unbound_error(
@@ -910,7 +916,8 @@ def update_record(
     if collection not in _COLLECTION_MAP:
         return f"Error: Unknown collection '{collection}'. Valid: {', '.join(sorted(_COLLECTION_MAP))}"
     _agent_gate.observe(tool='update_record', verb='update', collection=collection, record_id=id,
-                        data=data, expected_version=expected_version)
+                        data=data, expected_version=expected_version, expected_values=expected_values,
+                        authorization_context=authorization_context)
 
     # The original three-argument API remains deliberately unchanged.  The
     # optimistic path is opt-in and only permits the small correction surface

@@ -13,7 +13,7 @@ from rest_framework.test import APIClient
 
 from crm_app import agent_policy as policy
 from crm_app.mcp import create_record, delete_record, update_record
-from crm_app.models import AgentRequest, Company, Contact, Contract, Ticket, Zone
+from crm_app.models import AgentRequest, Company, Contact, Contract, Opportunity, Ticket, Zone
 
 
 @contextmanager
@@ -96,7 +96,7 @@ def test_observe_records_would_deny_but_write_still_happens():
         'theo', 'update_record', 'update', 'contact', 'would_deny')
     assert row.fields == ['email']
     assert row.reasons == ['theo may not set contact.email']
-    assert row.protocol_gaps == ['request_key_missing', 'expected_version_missing']
+    assert row.protocol_gaps == ['request_key_missing', 'expected_version_missing', 'expected_values_missing']
     assert row.record_id == str(contact.id)
     assert len(row.payload_sha256) == 64
     assert 'new@example.test' not in json.dumps([row.fields, row.reasons, row.protocol_gaps])
@@ -111,7 +111,7 @@ def test_allowed_agent_write_and_expected_version_flag():
     row = AgentRequest.objects.get()
     assert row.decision == 'allow' and row.reasons == []
     assert row.has_expected_version is True
-    assert row.protocol_gaps == ['request_key_missing']
+    assert row.protocol_gaps == ['request_key_missing', 'expected_values_missing']
 
 
 @pytest.mark.django_db
@@ -218,3 +218,73 @@ def test_report_summarises_without_customer_values():
     assert {'who': 'theo', 'decision': 'would_deny', 'n': 1} in report['by_decision']
     assert {'username': 'mystery-sales-bot', 'n': 1} in report['unlisted_mcp_writers']
     assert 'secret@example.test' not in out.getvalue()
+
+
+# ---------------------------------------------------------------- Vera review (PR #7) fixes
+
+@pytest.mark.django_db
+def test_theo_keeps_his_approved_opportunity_scope_but_not_terminal_stages():
+    opp = Opportunity.objects.create(company=_company(), name='Renewal 2027', stage='Quotation Sent')
+    with as_caller(_user('theo')):
+        update_record('opportunity', str(opp.id), json.dumps(
+            {'follow_up_date': '2026-10-01', 'pain_points': 'budget freeze'}))
+        update_record('opportunity', str(opp.id), json.dumps({'stage': 'Lost'}))
+    rows = list(AgentRequest.objects.order_by('created_at'))
+    assert rows[0].decision == 'allow'
+    assert rows[1].decision == 'would_deny' and 'terminal' in rows[1].reasons[0]
+
+
+@pytest.mark.django_db
+def test_sales_won_lost_needs_the_existing_explicit_user_authorization():
+    opp = Opportunity.objects.create(company=_company(), name='New lead', stage='Contract Sent')
+    with as_caller(_user('sales')):
+        update_record('opportunity', str(opp.id), json.dumps({'stage': 'Won'}))
+    first = AgentRequest.objects.get()
+    assert first.decision == 'would_deny'
+    assert 'explicit-user authorization' in first.reasons[0]
+    from crm_app.services import agent_gate
+    with as_caller(get_user_model().objects.get(username='sales')):
+        second = agent_gate.observe(tool='update_record', verb='update', collection='opportunity',
+                                    record_id=str(opp.id), data={'stage': 'Won'},
+                                    authorization_context='{"kind": "explicit_user_commercial"}')
+    assert second.decision == 'allow'
+
+
+@pytest.mark.django_db
+def test_cara_rest_write_is_observed():
+    contact = _contact()
+    client = APIClient()
+    client.force_authenticate(_user('cara'))
+    client.patch(f'/api/v1/contacts/{contact.id}/', {'last_contacted': '2026-09-25T10:00:00Z'}, format='json')
+    row = AgentRequest.objects.get()
+    assert (row.principal, row.verb, row.collection) == ('cara', 'update', 'contact')
+
+
+@pytest.mark.django_db
+def test_rene_tool_calls_are_observed_even_when_refused():
+    from crm_app.mcp import RenePhase2MCPToolset
+    toolset = RenePhase2MCPToolset(request=SimpleNamespace(user=_user('cira')))
+    reply = toolset.rene_phase2_request('{}')
+    assert 'FORBIDDEN' in reply  # boundary unchanged: not the configured exact principal
+    row = AgentRequest.objects.get()
+    assert (row.principal, row.tool, row.verb, row.decision) == (
+        'cira', 'rene_phase2_request', 'rene_request', 'allow')
+
+
+@pytest.mark.django_db
+def test_purge_is_dry_run_by_default_and_respects_minimum():
+    from datetime import timedelta
+    from io import StringIO
+    from django.core.management import CommandError, call_command
+    from django.utils import timezone
+
+    old = AgentRequest.objects.create(tool='t', verb='update', decision='allow')
+    AgentRequest.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=400))
+    AgentRequest.objects.create(tool='t', verb='update', decision='allow')
+    out = StringIO()
+    call_command('agent_gate_purge', stdout=out)
+    assert '[DRY-RUN] 1' in out.getvalue() and AgentRequest.objects.count() == 2
+    call_command('agent_gate_purge', '--execute', stdout=StringIO())
+    assert AgentRequest.objects.count() == 1
+    with pytest.raises(CommandError):
+        call_command('agent_gate_purge', '--days', '7')

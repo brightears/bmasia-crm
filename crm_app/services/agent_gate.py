@@ -69,7 +69,15 @@ def _company_id_for(collection, record_id, values):
     return None
 
 
-def _condition_reasons(condition, collection, record_id, values):
+def _condition_reasons(condition, collection, record_id, values, authorized=False):
+    if condition == 'opportunity_non_terminal':
+        if values.get('stage') in policy.OPPORTUNITY_TERMINAL:
+            return [f"opportunity stage {values['stage']} is terminal (Cira-only for this agent)"]
+        return []
+    if condition == 'terminal_needs_explicit_authorization':
+        if values.get('stage') in policy.OPPORTUNITY_TERMINAL and not authorized:
+            return [f"opportunity stage {values['stage']} needs the explicit-user authorization context"]
+        return []
     if condition == 'ticket_non_terminal':
         status = str(values.get('status') or '').lower()
         if status in policy.TICKET_TERMINAL:
@@ -86,8 +94,15 @@ def _condition_reasons(condition, collection, record_id, values):
     return []
 
 
-def observe(*, tool, verb, collection='', record_id='', data=None,
-            expected_version='', request_key='', user=None):
+_MAX_FIELDS, _MAX_REASONS, _MAX_REASON_CHARS = 200, 20, 300
+
+
+def _present(raw) -> bool:
+    return bool(raw) and str(raw).strip() not in ('', '{}')
+
+
+def observe(*, tool, verb, collection='', record_id='', data=None, expected_version='',
+            expected_values='', authorization_context='', request_key='', user=None):
     """Record the policy verdict for one write attempt. Never raises."""
     mode = str(getattr(settings, 'AGENT_GATE_MODE', OBSERVE) or '').lower()
     if mode != OBSERVE:
@@ -96,7 +111,7 @@ def observe(*, tool, verb, collection='', record_id='', data=None,
         from crm_app.models import AgentRequest
 
         values = _as_dict(data)
-        fields = sorted(str(name) for name in values)
+        fields = sorted(str(name)[:100] for name in values)[:_MAX_FIELDS]
         if user is None or not getattr(user, 'is_authenticated', False):
             user = _current_user()
         username = getattr(user, 'username', '') if user else ''
@@ -111,7 +126,8 @@ def observe(*, tool, verb, collection='', record_id='', data=None,
         else:
             reasons, condition = policy.evaluate(principal, verb, collection, fields)
             if not reasons and condition:
-                reasons = _condition_reasons(condition, collection, str(record_id or ''), values)
+                reasons = _condition_reasons(condition, collection, str(record_id or ''), values,
+                                             authorized=_present(authorization_context))
             if tool.startswith('rest:'):
                 reasons.append('agent writes via REST will be refused; use the MCP write tools')
             decision = 'would_deny' if reasons else 'allow'
@@ -119,6 +135,9 @@ def observe(*, tool, verb, collection='', record_id='', data=None,
                 gaps.append('request_key_missing')
             if verb == policy.UPDATE and not expected_version:
                 gaps.append('expected_version_missing')
+            if verb == policy.UPDATE and not _present(expected_values):
+                gaps.append('expected_values_missing')
+            reasons = [r[:_MAX_REASON_CHARS] for r in reasons[:_MAX_REASONS]]
         with transaction.atomic():  # savepoint: a failed insert never poisons the caller's transaction
             row = AgentRequest.objects.create(
                 mode=mode,
