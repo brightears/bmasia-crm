@@ -243,11 +243,26 @@ def test_sales_won_lost_needs_the_existing_explicit_user_authorization():
     assert first.decision == 'would_deny'
     assert 'explicit-user authorization' in first.reasons[0]
     from crm_app.services import agent_gate
-    with as_caller(get_user_model().objects.get(username='sales')):
-        second = agent_gate.observe(tool='update_record', verb='update', collection='opportunity',
-                                    record_id=str(opp.id), data={'stage': 'Won'},
-                                    authorization_context='{"kind": "explicit_user_commercial"}')
-    assert second.decision == 'allow'
+    sales = get_user_model().objects.get(username='sales')
+    bogus = json.dumps({'kind': 'explicit_user_commercial'})
+    valid = json.dumps({'kind': 'explicit_user_commercial', 'source_thread_id': 'chat-123',
+                        'record_id': str(opp.id), 'authorized_changes': {'stage': 'Won'}})
+    wrong_record = json.dumps({'kind': 'explicit_user_commercial', 'source_thread_id': 'chat-123',
+                               'record_id': str(_company('Other Co').id), 'authorized_changes': {'stage': 'Won'}})
+    with as_caller(sales):
+        results = [agent_gate.observe(tool='update_record', verb='update', collection='opportunity',
+                                      record_id=str(opp.id), data={'stage': 'Won'},
+                                      authorization_context=ctx) for ctx in (bogus, wrong_record, valid)]
+    assert [r.decision for r in results] == ['would_deny', 'would_deny', 'allow']
+
+
+def test_cira_policy_is_exhaustive_and_denies_unknown_collections():
+    from crm_app.mcp import _COLLECTION_MAP
+    cira = policy.PRINCIPALS['cira']
+    assert set(_COLLECTION_MAP) == set(policy.CIRA_COLLECTIONS)  # drift guard: review both together
+    assert policy.evaluate(cira, policy.CREATE, 'future_sensitive_collection', ['x'])[0] == [
+        'cira may not create future_sensitive_collection']
+    assert policy.evaluate(cira, policy.UPDATE, 'contract', ['status']) == ([], '')
 
 
 @pytest.mark.django_db

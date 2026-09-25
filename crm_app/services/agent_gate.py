@@ -69,15 +69,19 @@ def _company_id_for(collection, record_id, values):
     return None
 
 
-def _condition_reasons(condition, collection, record_id, values, authorized=False):
+def _condition_reasons(condition, collection, record_id, values, authorization_context=''):
     if condition == 'opportunity_non_terminal':
         if values.get('stage') in policy.OPPORTUNITY_TERMINAL:
             return [f"opportunity stage {values['stage']} is terminal (Cira-only for this agent)"]
         return []
     if condition == 'terminal_needs_explicit_authorization':
-        if values.get('stage') in policy.OPPORTUNITY_TERMINAL and not authorized:
-            return [f"opportunity stage {values['stage']} needs the explicit-user authorization context"]
-        return []
+        if values.get('stage') not in policy.OPPORTUNITY_TERMINAL:
+            return []
+        # Reuse the CRM's own guard so observe verdicts match what enforcement will do
+        # (exact kind, source thread, record and patch binding).
+        from crm_app.mcp import _guarded_commercial_authorization
+        error = _guarded_commercial_authorization(collection, record_id, values, authorization_context or '{}')
+        return [f'Won/Lost without valid explicit-user authorization: {error}'] if error else []
     if condition == 'ticket_non_terminal':
         status = str(values.get('status') or '').lower()
         if status in policy.TICKET_TERMINAL:
@@ -127,7 +131,7 @@ def observe(*, tool, verb, collection='', record_id='', data=None, expected_vers
             reasons, condition = policy.evaluate(principal, verb, collection, fields)
             if not reasons and condition:
                 reasons = _condition_reasons(condition, collection, str(record_id or ''), values,
-                                             authorized=_present(authorization_context))
+                                             authorization_context=authorization_context)
             if tool.startswith('rest:'):
                 reasons.append('agent writes via REST will be refused; use the MCP write tools')
             decision = 'would_deny' if reasons else 'allow'

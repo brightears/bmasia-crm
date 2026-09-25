@@ -53,6 +53,14 @@ class Principal:
     note: str = ''
 
 
+# Exhaustive: the collections crm_app.mcp._COLLECTION_MAP exposes today. A new
+# collection is denied to every agent (Cira included) until it is added here on review.
+CIRA_COLLECTIONS = frozenset({
+    'company', 'contact', 'contract', 'contracttemplate', 'invoice', 'invoicelineitem',
+    'quote', 'quotelineitem', 'opportunity', 'task', 'zone', 'clienttechdetail', 'device',
+    'ticket', 'kbarticle', 'contractlineitem', 'servicelocation',
+})
+
 _CONTACT_METADATA = Rule(frozenset({'title', 'department', 'last_contacted'}))
 _OPPORTUNITY_QUALIFICATION = Rule(
     frozenset({'stage', 'last_contact_date', 'follow_up_date', 'expected_close_date',
@@ -65,8 +73,8 @@ PRINCIPALS = {
     # existing guarded rules in crm_app/mcp.py still apply on top.
     'cira': Principal(
         name='cira',
-        create={ANY: Rule()},
-        update={ANY: Rule()},
+        create={name: Rule() for name in CIRA_COLLECTIONS},
+        update={name: Rule() for name in CIRA_COLLECTIONS},
         verbs=frozenset({CONVERT, RESERVE_NUMBER, RENE}),
         note='sole creator/changer of quotes, contracts, invoices, statuses and money',
     ),
