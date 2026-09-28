@@ -518,6 +518,12 @@ _GUARDED_CONTRACT_SEND_FIELDS = frozenset({'status', 'sent_date'})
 # Quote Draft->Sent bookkeeping: same shape and safeguards as contracts (signed receipt).
 _GUARDED_QUOTE_SEND_FIELDS = frozenset({'status', 'sent_date'})
 _GUARDED_CONTRACT_DATE_FIELDS = frozenset({'start_date', 'end_date'})
+_GUARDED_COMPANY_CORRECTION_FIELDS = frozenset({
+    'name', 'legal_entity_name', 'address_line1', 'address_line2',
+    'city', 'state', 'postal_code', 'country', 'tax_id', 'branch',
+    'phone', 'email',
+})
+_GUARDED_CONTACT_IDENTITY_FIELDS = frozenset({'name', 'email', 'phone'})
 
 # One historical, operator-verified recovery only. The root-owned receipt was
 # issued and independently checked for this exact already-sent Premier record.
@@ -531,7 +537,11 @@ _PREMIER_SEND_BOOKKEEPING = {
 }
 
 _GUARDED_UPDATE_FIELDS = {
-    'contact': {'title', 'department', 'last_contacted'},
+    'company': set(_GUARDED_COMPANY_CORRECTION_FIELDS),
+    'contact': {
+        'title', 'department', 'last_contacted',
+        *_GUARDED_CONTACT_IDENTITY_FIELDS,
+    },
     'contract': {
         'customer_signatory_name',
         'customer_signatory_title',
@@ -656,6 +666,43 @@ def _guarded_commercial_authorization(collection, record_id, fields, raw):
     if any(not _guarded_scalar(value) for value in authorized_changes.values()):
         return 'Commercial authorization values must be finite JSON scalars or null.'
     return None
+
+
+def _guarded_identity_correction_authorization(collection, record_id, fields, raw):
+    """Bind a company or contact identity correction to Cira and its source."""
+    user = _agent_gate._current_user()
+    if user is None or str(getattr(user, 'username', '')).casefold() != 'cira':
+        return 'Company/contact correction requires an authenticated Cira writer.', None
+    try:
+        context = _guarded_json_object(raw)
+    except (TypeError, ValueError, _json.JSONDecodeError):
+        return 'Company/contact correction requires explicit source context.', None
+    if not context:
+        return 'Company/contact correction requires explicit source context.', None
+    required = {'kind', 'requested_by', 'source_reference', 'record_id', 'authorized_changes'}
+    expected_kind = {
+        'company': 'explicit_source_company_correction',
+        'contact': 'explicit_source_contact_correction',
+    }[collection]
+    if collection == 'contact':
+        required.add('company_id')
+    if set(context) != required or context.get('kind') != expected_kind:
+        return 'Company/contact correction source context is invalid.', None
+    if context.get('requested_by') not in {'norbert', 'nikki', 'theo'}:
+        return 'Company/contact correction requester is invalid.', None
+    source = context.get('source_reference')
+    if (not isinstance(source, str) or not 1 <= len(source) <= 512
+            or source.strip() != source or not source.isprintable()):
+        return 'Company/contact correction requires a valid source reference.', None
+    if context.get('record_id') != str(record_id):
+        return 'Company/contact correction is bound to a different record.', None
+    if not _strict_json_equal(context.get('authorized_changes'), fields):
+        return 'Company/contact correction does not exactly match the requested patch.', None
+    if collection == 'contact' and (
+            not isinstance(context.get('company_id'), str)
+            or not context['company_id'].strip()):
+        return 'Contact correction requires a company binding.', None
+    return None, context
 
 
 def _guarded_contract_contact_authorization(record_id, fields, raw):
@@ -981,14 +1028,20 @@ def update_record(
         expected_values: JSON object containing the currently observed values
               for exactly the fields in data. Values may be finite JSON
               scalars/null or nested arrays/objects. Guarded updates are limited
-              to contact title/department/last_contacted, Draft contract
+              to Cira-only source-bound company identity/address and contact
+              name/email/phone corrections; contact title/department/last_contacted,
+              Draft contract
               customer contact details, customer signatories, custom service
               items, verified already-sent status/date bookkeeping, and
               source-verified dates on an unsigned Sent contract;
               opportunity stage/date and qualification/value fields,
               ticket priority/status, and zone notes.
         authorization_context: Exact explicit-user authorization binding required
-              for opportunity value/probability changes, terminal Won/Lost
+              for source-bound company/contact identity corrections (kind
+              explicit_source_company_correction or explicit_source_contact_correction,
+              requested_by, source_reference, record_id, authorized_changes,
+              and company_id for a contact),
+              opportunity value/probability changes, terminal Won/Lost
               transitions, and Draft contract customer contact or service-item
               corrections.
               Contract contact corrections require kind=explicit_user_contract_contact,
@@ -1047,6 +1100,7 @@ def update_record(
     signed_quote_receipt = None
     contract_date_context = None
     contract_layout_correction = False
+    identity_correction_context = None
     if guarded:
         try:
             fields = _guarded_json_object(data)
@@ -1084,6 +1138,21 @@ def update_record(
             allowed = _GUARDED_UPDATE_FIELDS.get(collection)
             if allowed is None or not set(fields).issubset(allowed):
                 return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch contains fields outside the approved correction scope.'})
+        if collection == 'company' or (
+                collection == 'contact' and set(fields) & _GUARDED_CONTACT_IDENTITY_FIELDS):
+            if (collection == 'contact'
+                    and not set(fields).issubset(_GUARDED_CONTACT_IDENTITY_FIELDS)):
+                return _json.dumps({
+                    'updated': False, 'id': str(id),
+                    'error': 'Contact identity correction cannot include other fields.',
+                })
+            authorization_error, identity_correction_context = (
+                _guarded_identity_correction_authorization(
+                    collection, id, fields, authorization_context,
+                )
+            )
+            if authorization_error:
+                return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
         authorization_error = _guarded_commercial_authorization(
             collection, id, fields, authorization_context,
         )
@@ -1134,6 +1203,22 @@ def update_record(
                 instance = model.objects.select_for_update().get(id=id)
             except model.DoesNotExist:
                 return f"Error: {collection} with ID '{id}' not found."
+
+            if (identity_correction_context and collection == 'contact'
+                    and identity_correction_context['company_id'] != str(instance.company_id)):
+                return _json.dumps({
+                    'updated': False, 'id': str(id),
+                    'error': 'Contact correction is bound to a different company; nothing was saved.',
+                })
+            protected_before = None
+            if identity_correction_context:
+                # Keep every non-patch column fixed, including notification
+                # preferences, company binding, commercial flags, and status.
+                protected_before = {
+                    field.attname: getattr(instance, field.attname)
+                    for field in model._meta.concrete_fields
+                    if field.name not in fields and field.name != 'updated_at'
+                }
 
             contract_layout_identity = None
             if contract_layout_correction:
@@ -1343,6 +1428,43 @@ def update_record(
                 })
 
             instance = serializer.save()
+            identity_correction_audit = None
+            identity_correction_readback = None
+            if identity_correction_context:
+                # A fresh DB row, not serializer.save()'s in-memory instance,
+                # decides whether the exact patch and protected state persisted.
+                instance = model.objects.get(id=id)
+                identity_correction_readback = SerializerClass(instance).data
+                if (not identity_correction_readback.get('updated_at')
+                        or any(
+                            key not in identity_correction_readback
+                            or not _strict_json_equal(identity_correction_readback[key], value)
+                            for key, value in fields.items()
+                        )
+                        or any(
+                            getattr(instance, key) != value
+                            for key, value in protected_before.items()
+                        )):
+                    transaction.set_rollback(True)
+                    return _json.dumps({
+                        'updated': False, 'id': str(id),
+                        'error': 'Company/contact correction readback changed protected state; nothing was saved.',
+                    })
+                identity_correction_audit = AuditLog.objects.create(
+                    action='UPDATE', model_name=model.__name__,
+                    record_id=str(id), user=_agent_gate._current_user(),
+                    changes={
+                        key: {'before': before[key], 'after': identity_correction_readback[key]}
+                        for key in fields
+                    },
+                    additional_data={
+                        'kind': identity_correction_context['kind'],
+                        'requested_by': identity_correction_context['requested_by'],
+                        'source_reference': identity_correction_context['source_reference'],
+                        'expected_version': expected_version,
+                        'post_version': identity_correction_readback['updated_at'],
+                    },
+                )
             contract_layout_audit = None
             contract_layout_readback = None
             if contract_layout_correction:
@@ -1521,6 +1643,11 @@ def update_record(
                     'contract_number': instance.contract_number,
                     'post_version': contract_layout_readback['updated_at'],
                     'audit_log_id': str(contract_layout_audit.pk),
+                })
+            if identity_correction_context:
+                result.update({
+                    'post_version': identity_correction_readback['updated_at'],
+                    'audit_log_id': str(identity_correction_audit.pk),
                 })
             return _json.dumps(result, default=str)
 
