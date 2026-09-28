@@ -1,3 +1,5 @@
+import re
+
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.utils import timezone
@@ -89,6 +91,8 @@ class UserSerializer(serializers.ModelSerializer):
 class ContactSerializer(serializers.ModelSerializer):
     """Serializer for Contact model with enhanced validation"""
     company_name = serializers.CharField(source='company.name', read_only=True)
+    # Preserve the supplied display format; validate its digits separately.
+    phone = serializers.CharField(required=False, allow_blank=True, max_length=20)
     
     class Meta:
         model = Contact
@@ -107,6 +111,18 @@ class ContactSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
     
+    def validate_phone(self, value):
+        if not value:
+            return value
+        compact = re.sub(r"[ ()-]", "", value)
+        if (not re.fullmatch(r"\+?[0-9 ()-]+", value)
+                or not re.fullmatch(r"\+?[0-9]{9,15}", compact)):
+            raise serializers.ValidationError(
+                "Enter 9 to 15 digits, optionally starting with +. "
+                "Spaces, hyphens and parentheses are allowed."
+            )
+        return value
+
     def validate_email(self, value):
         """Ensure email is unique within the company"""
         company = self.initial_data.get('company')

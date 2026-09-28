@@ -100,6 +100,7 @@ const COUNTRIES = [
   'China',
   'Hong Kong',
   'India',
+  'Maldives',
   'Other',
 ];
 
@@ -108,6 +109,16 @@ const BILLING_ENTITIES = [
   { value: 'BMAsia Limited', label: 'BMAsia Limited (Hong Kong)' },
   { value: 'BMAsia (Thailand) Co., Ltd.', label: 'BMAsia (Thailand) Co., Ltd.' },
 ];
+
+const UNEXPECTED_SERVER_RESPONSE = 'Unable to save company. The server returned an unexpected response.';
+
+function readableResponseError(responseData: string): string {
+  const message = responseData.trim();
+  if (!message || /<\/?(?:!doctype|html|head|body)\b/i.test(message)) {
+    return UNEXPECTED_SERVER_RESPONSE;
+  }
+  return message;
+}
 
 const CompanyForm: React.FC<CompanyFormProps> = ({
   open,
@@ -145,6 +156,12 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
   const [error, setError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [corporateParents, setCorporateParents] = useState<Company[]>([]);
+
+  // The API accepts countries outside the curated list. Keep an existing
+  // value selectable so an edit never renders a valid saved country as blank.
+  const countryOptions = formData.country && !COUNTRIES.includes(formData.country)
+    ? [formData.country, ...COUNTRIES]
+    : COUNTRIES;
 
   useEffect(() => {
     if (open) {
@@ -293,20 +310,33 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
       onSave();
     } catch (err: any) {
       console.error('Company save error:', err);
-      if (err.response?.data) {
-        if (typeof err.response.data === 'object') {
-          const fieldErrors: Record<string, string> = {};
-          Object.keys(err.response.data).forEach(field => {
-            if (Array.isArray(err.response.data[field])) {
-              fieldErrors[field] = err.response.data[field][0];
-            } else {
-              fieldErrors[field] = err.response.data[field];
-            }
-          });
+      const responseData = err?.response?.data;
+      if (responseData && typeof responseData === 'object' && !Array.isArray(responseData)) {
+        const { detail, error: apiError, message, non_field_errors, ...fieldData } = responseData;
+        const fieldErrors: Record<string, string> = {};
+
+        Object.entries(fieldData).forEach(([field, value]) => {
+          if (Array.isArray(value)) {
+            fieldErrors[field] = String(value[0] || 'Invalid value');
+          } else if (typeof value === 'string') {
+            fieldErrors[field] = value;
+          }
+        });
+
+        if (Object.keys(fieldErrors).length) {
           setErrors(fieldErrors);
-        } else {
-          setError(err.response.data.message || 'Failed to save company');
         }
+
+        const nonFieldMessage = Array.isArray(non_field_errors)
+          ? non_field_errors[0]
+          : non_field_errors;
+        const messageValue = [detail, apiError, message, nonFieldMessage]
+          .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+        setError(messageValue || (Object.keys(fieldErrors).length ? '' : 'Failed to save company. Please try again.'));
+      } else if (typeof responseData === 'string' && responseData.trim()) {
+        setError(readableResponseError(responseData));
+      } else if (err instanceof Error && err.message) {
+        setError(err.message);
       } else {
         setError('Failed to save company. Please try again.');
       }
@@ -460,7 +490,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
                 label="Country *"
                 required
               >
-                {COUNTRIES.map((country) => (
+                {countryOptions.map((country) => (
                   <MenuItem key={country} value={country}>
                     {country}
                   </MenuItem>
@@ -543,7 +573,8 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
                     {...params}
                     label="Parent Company"
                     placeholder="Select parent company (optional)"
-                    helperText="Link this subsidiary to its corporate headquarters"
+                    error={!!errors.parent_company}
+                    helperText={errors.parent_company || "Link this subsidiary to its corporate headquarters"}
                   />
                 )}
               />
