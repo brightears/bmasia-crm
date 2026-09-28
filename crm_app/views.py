@@ -22,6 +22,7 @@ from django.core.management import call_command
 import csv
 import json
 import logging
+from django.core.serializers.json import DjangoJSONEncoder
 import os
 import re
 import uuid
@@ -116,18 +117,9 @@ from .rene_auth import (
 )
 
 
-def convert_uuids_to_strings(obj):
-    """
-    Recursively convert UUID objects to strings in a dict/list structure.
-    This is needed for JSONField serialization since json.dumps() can't handle UUID.
-    """
-    if isinstance(obj, uuid.UUID):
-        return str(obj)
-    elif isinstance(obj, dict):
-        return {k: convert_uuids_to_strings(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_uuids_to_strings(item) for item in obj]
-    return obj
+def serialize_audit_changes(obj):
+    """Make nested audit values safe for JSONField, including dates and UUIDs."""
+    return json.loads(json.dumps(obj, cls=DjangoJSONEncoder))
 
 
 def _format_duration(start_date, end_date):
@@ -313,6 +305,7 @@ class BaseModelViewSet(viewsets.ModelViewSet):
         instance = serializer.save()
         self.log_action('CREATE', instance)
     
+    @transaction.atomic
     def perform_update(self, serializer):
         """Add audit logging on update"""
         old_instance = self.get_object()
@@ -327,8 +320,8 @@ class BaseModelViewSet(viewsets.ModelViewSet):
             if old_value != new_value:
                 changes[key] = {'old': old_value, 'new': new_value}
 
-        # Convert any UUID objects to strings before saving to JSONField
-        changes = convert_uuids_to_strings(changes)
+        # The snapshot can contain date/Decimal values as well as UUIDs.
+        changes = serialize_audit_changes(changes)
         self.log_action('UPDATE', instance, changes)
     
     def perform_destroy(self, instance):
