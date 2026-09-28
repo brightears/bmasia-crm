@@ -244,11 +244,15 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
       newErrors.name = 'Company name is required';
     }
 
-    if (!formData.industry) {
+    // Older company records can have blank industry/country (both are optional
+    // in the API). Preserve those values on edit instead of blocking unrelated
+    // corrections, while still requiring them for new records and preventing
+    // an existing populated value from being cleared in this form.
+    if (!formData.industry && (!company || !!company.industry)) {
       newErrors.industry = 'Industry is required';
     }
 
-    if (!formData.country) {
+    if (!formData.country && (!company || !!company.country)) {
       newErrors.country = 'Country is required';
     }
 

@@ -62,6 +62,31 @@ test('keeps an existing country that is outside the curated menu visible', async
   expect(screen.getByText('Réunion')).toBeTruthy();
 });
 
+test('allows unrelated edits to preserve legacy blank country and industry', async () => {
+  const legacyCompany = { ...joali, country: '', industry: '' };
+  (ApiService.updateCompany as jest.Mock).mockResolvedValue(legacyCompany);
+  render(<CompanyForm open company={legacyCompany} onClose={jest.fn()} onSave={jest.fn()} />);
+
+  await waitFor(() => expect(ApiService.getCompanies).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole('button', { name: /update company/i }));
+
+  await waitFor(() => expect(ApiService.updateCompany).toHaveBeenCalledWith(
+    'company-joali',
+    expect.objectContaining({ country: '', industry: '' }),
+  ));
+});
+
+test('still requires country and industry for a new company', async () => {
+  render(<CompanyForm open company={null} onClose={jest.fn()} onSave={jest.fn()} />);
+
+  await waitFor(() => expect(ApiService.getCompanies).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole('button', { name: /create company/i }));
+
+  expect(await screen.findByText('Country is required')).toBeTruthy();
+  expect(screen.getByText('Industry is required')).toBeTruthy();
+  expect(ApiService.createCompany).not.toHaveBeenCalled();
+});
+
 test('shows server-wide and parent-company validation errors instead of a generic failure', async () => {
   (ApiService.updateCompany as jest.Mock).mockRejectedValue({
     response: {
