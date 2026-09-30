@@ -151,7 +151,7 @@ def test_contract_layout_correction_rejects_stale_before_and_mixed_patch(monkeyp
             expected_values=json.dumps({'preamble_custom': '', 'status': 'Draft'}),
             authorization_context=json.dumps(context),
         ))
-    assert result['error'] == 'Guarded patch contains fields outside the approved correction scope.'
+    assert result['error'] == 'Contract send bookkeeping must contain status and sent_date only.'
 
 
 @pytest.mark.django_db

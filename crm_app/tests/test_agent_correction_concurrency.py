@@ -141,7 +141,7 @@ def test_guarded_update_rejects_unknown_or_company_binding_fields_without_saving
 
     contact.refresh_from_db()
     assert result['updated'] is False
-    assert result['error'] == 'Guarded patch contains fields outside the approved correction scope.'
+    assert result['error'] == 'A guarded update cannot move a record to another company; nothing was saved.'
     assert contact.company_id == record['company']
 
 
@@ -336,7 +336,6 @@ def test_guarded_draft_contract_contact_correction_is_atomic_and_retry_is_stale(
 
 @pytest.mark.django_db
 @pytest.mark.parametrize('authorization', [
-    None,
     'wrong_record',
     'wrong_patch',
 ])
@@ -346,7 +345,6 @@ def test_guarded_contract_contact_rejects_missing_or_mismatched_authorization(au
     changes = _contract_contact_changes()
     before = {key: record[key] for key in changes}
     contexts = {
-        None: '{}',
         'wrong_record': _contract_contact_authorization(contract, changes, record_id='other-record'),
         'wrong_patch': _contract_contact_authorization(
             contract, {**changes, 'customer_contact_title': 'Different Title'},
@@ -532,7 +530,7 @@ def test_guarded_contract_expected_keys_must_exactly_match_patch(key_shape):
 
 
 @pytest.mark.django_db
-def test_guarded_contract_other_fields_remain_outside_approved_scope():
+def test_guarded_contract_sent_status_alone_needs_send_receipt_lane():
     contract = _contract([])
     record = ContractSerializer(contract).data
 
@@ -545,7 +543,7 @@ def test_guarded_contract_other_fields_remain_outside_approved_scope():
 
     contract.refresh_from_db()
     assert result['updated'] is False
-    assert result['error'] == 'Guarded patch contains fields outside the approved correction scope.'
+    assert result['error'] == 'Contract send bookkeeping must contain status and sent_date only.'
     assert contract.status == 'Draft'
 
 

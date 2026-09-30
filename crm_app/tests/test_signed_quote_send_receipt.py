@@ -110,7 +110,7 @@ def test_guarded_status_only_patch_is_refused():
     result = json.loads(update_record('quote', str(quote.pk), json.dumps({'status': 'Sent'}),
                                       expected_version=record['updated_at'],
                                       expected_values=json.dumps({'status': 'Draft'})))
-    assert 'outside the approved correction scope' in result['error']
+    assert result['error'] == 'Quote send bookkeeping must contain status and sent_date only.'
 
 
 def test_unconfigured_production_key_fails_closed(monkeypatch):
@@ -188,7 +188,8 @@ def test_contract_receipt_cannot_authorize_a_quote(monkeypatch):
     record, patch, context, _ = _signed(quote, monkeypatch)
     context['kind'] = 'signed_contract_send_bookkeeping'
     result = _update(quote, record, patch, context)
-    assert 'context kind is invalid' in result['error']
+    assert result['updated'] is False
+    assert 'does not apply to quote' in result['error']
 
 
 def test_stale_version_is_refused(monkeypatch):

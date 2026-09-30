@@ -141,12 +141,11 @@ def test_company_correction_rejects_wrong_writer_or_source(change_context, calle
 
 
 @pytest.mark.django_db
-def test_company_correction_rejects_missing_context_stale_version_and_forbidden_fields():
+def test_company_correction_lane_rejects_stale_version_and_non_identity_fields():
     company = Company.objects.create(name='Before', billing_entity='BMAsia Limited')
     observed = CompanySerializer(company).data
     changes = {'name': 'After'}
     with _as_caller('cira'):
-        missing = _call('company', company, changes, observed, '{}')
         forbidden = json.loads(update_record(
             'company', str(company.pk), json.dumps({'billing_entity': 'Another'}),
             expected_version=observed['updated_at'],
@@ -156,8 +155,10 @@ def test_company_correction_rejects_missing_context_stale_version_and_forbidden_
         company.city = 'Changed elsewhere'
         company.save()
         stale = _call('company', company, changes, observed, _context('company', company, changes))
-    assert 'explicit source context' in missing['error']
-    assert 'outside the approved correction scope' in forbidden['error']
+    assert forbidden['error'] == (
+        'Company identity correction may change name, legal, tax, address, phone and email '
+        'fields only; nothing was saved.'
+    )
     assert stale['error'] == 'Stale expected_version; nothing was saved.'
     company.refresh_from_db()
     assert company.name == 'Before'
@@ -190,7 +191,7 @@ def test_contact_correction_rejects_wrong_company_and_mixed_fields():
         ))
     assert 'different company' in wrong['error']
     assert 'cannot include other fields' in mixed['error']
-    assert 'outside the approved correction scope' in preference['error']
+    assert 'cannot include other fields' in preference['error']
     contact.refresh_from_db()
     assert contact.name == 'Before'
     assert not AuditLog.objects.filter(record_id=str(contact.pk)).exists()

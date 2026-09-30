@@ -88,14 +88,13 @@ def test_guarded_service_items_replayed_lock_does_not_write_twice():
 
 @pytest.mark.django_db
 @pytest.mark.parametrize('case', [
-    'missing', 'wrong_kind', 'wrong_record', 'wrong_patch', 'blank_source',
+    'wrong_kind', 'wrong_record', 'wrong_patch', 'blank_source',
 ])
 def test_guarded_service_items_require_exact_source_record_and_patch(case):
     contract = _contract()
     record = ContractSerializer(contract).data
     patch = _patch()
     contexts = {
-        'missing': '{}',
         'wrong_kind': _authorization(contract, patch, kind='unrelated'),
         'wrong_record': _authorization(contract, patch, record_id='other-record'),
         'wrong_patch': _authorization(contract, {'custom_service_items': []}),

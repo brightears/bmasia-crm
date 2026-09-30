@@ -507,6 +507,23 @@ def _dropped_keys(serializer, requested_fields):
     return applied, dropped
 
 
+def _persisted_field(collection, instance, serializer, key, fields, keep_json=True):
+    """Read one saved field back from the model for the caller to verify."""
+    if collection == 'contract' and key == 'service_locations':
+        from crm_app.serializers import ContractServiceLocationSerializer
+        locations = instance.service_locations.order_by('sort_order', 'id')
+        return ContractServiceLocationSerializer(locations, many=True).data
+    if collection == 'contract' and key == 'replace_service_locations':
+        # This is a write-only operation mode, not a model attribute. Echo the
+        # accepted value so the caller can verify which semantics were applied.
+        return bool(fields[key])
+    src = serializer.fields[key].source or key
+    val = getattr(instance, src, None)
+    if keep_json and isinstance(val, (list, dict)):
+        return val
+    return str(val) if val is not None else None
+
+
 _GUARDED_CONTRACT_CONTACT_FIELDS = frozenset({
     'customer_contact_name',
     'customer_contact_title',
@@ -536,29 +553,45 @@ _PREMIER_SEND_BOOKKEEPING = {
     'verified_receipt_sha256': 'a53e45fad45b0fe841fa0749021ce39aa29eb71ff13e163062350eff7fb733b6',
 }
 
-_GUARDED_UPDATE_FIELDS = {
-    'company': set(_GUARDED_COMPANY_CORRECTION_FIELDS),
-    'contact': {
-        'title', 'department', 'last_contacted',
-        *_GUARDED_CONTACT_IDENTITY_FIELDS,
-    },
-    'contract': {
-        'customer_signatory_name',
-        'customer_signatory_title',
-        'additional_customer_signatories',
-        *_GUARDED_CONTRACT_CONTACT_FIELDS,
-        *_GUARDED_CONTRACT_SERVICE_ITEM_FIELDS,
-        *_GUARDED_CONTRACT_SEND_FIELDS,
-        *_GUARDED_CONTRACT_DATE_FIELDS,
-    },
-    'opportunity': {
-        'stage', 'last_contact_date', 'follow_up_date', 'expected_close_date',
-        'pain_points', 'decision_criteria', 'expected_value', 'probability',
-    },
-    'ticket': {'priority', 'status'},
-    'zone': {'notes'},
-    'quote': set(_GUARDED_QUOTE_SEND_FIELDS),
+# A guarded update is the unguarded update plus optimistic concurrency. It may
+# change any writable field the three-argument path accepts; the version and
+# before-value checks must never make an update narrower than the path without
+# them. The exceptions below keep a dedicated lane or need an explicit user
+# instruction bound to the exact record and patch.
+_GUARDED_DOCUMENT_NUMBER_FIELDS = frozenset({'contract_number', 'quote_number', 'invoice_number'})
+_GUARDED_TERMINAL_STATUSES = {
+    'contract': frozenset({'Renewed', 'Expired', 'Cancelled'}),
+    'quote': frozenset({'Accepted', 'Rejected', 'Expired'}),
+    'invoice': frozenset({'Paid', 'Cancelled', 'Refunded'}),
 }
+# Price and issuer fields of a contract the customer has already received.
+_GUARDED_CONTRACT_PRICING_FIELDS = frozenset({
+    'value', 'tax_rate', 'tax_amount', 'total_value', 'currency',
+    'billing_entity', 'discount_percentage', 'price_per_zone',
+    'billing_frequency', 'line_items', 'service_locations',
+    'replace_service_locations',
+})
+_GUARDED_PRICED_CONTRACT_STATUSES = frozenset({'Sent', 'Active'})
+_GUARDED_INSTRUCTION_REQUESTERS = frozenset({'norbert', 'nikki', 'lyra', 'theo'})
+# Every accepted authorization_context kind and the collections it applies to.
+_GUARDED_CONTEXT_COLLECTIONS = {
+    'explicit_user_instruction': None,
+    'explicit_user_commercial': {'opportunity'},
+    'explicit_source_company_correction': {'company'},
+    'explicit_source_contact_correction': {'contact'},
+    'explicit_user_contract_contact': {'contract'},
+    'explicit_user_contract_service_items': {'contract'},
+    'contract_layout_correction': {'contract'},
+    'routine_contract_date_correction': {'contract'},
+    'verified_contract_send_bookkeeping': {'contract'},
+    'signed_contract_send_bookkeeping': {'contract'},
+    'signed_quote_send_bookkeeping': {'quote'},
+}
+_GUARDED_SEND_CONTEXT_KINDS = frozenset({
+    'verified_contract_send_bookkeeping',
+    'signed_contract_send_bookkeeping',
+    'signed_quote_send_bookkeeping',
+})
 
 
 def _guarded_scalar(value):
@@ -650,6 +683,8 @@ def _guarded_commercial_authorization(collection, record_id, fields, raw):
         return 'Commercial opportunity update requires explicit authorization context.'
     if not context:
         return 'Commercial opportunity update requires explicit authorization context.'
+    if context.get('kind') == 'explicit_user_instruction':
+        return _guarded_instruction_authorization(record_id, fields, context)
 
     required = {'kind', 'source_thread_id', 'record_id', 'authorized_changes'}
     if set(context) != required:
@@ -665,6 +700,23 @@ def _guarded_commercial_authorization(collection, record_id, fields, raw):
         return 'Commercial authorization does not exactly match the requested patch.'
     if any(not _guarded_scalar(value) for value in authorized_changes.values()):
         return 'Commercial authorization values must be finite JSON scalars or null.'
+    return None
+
+
+def _guarded_instruction_authorization(record_id, fields, context):
+    """Bind a final-status or issued-price change to a named person's instruction."""
+    if set(context) != {'kind', 'requested_by', 'source_reference', 'record_id', 'authorized_changes'}:
+        return 'Instruction context must contain exactly kind, requested_by, source_reference, record_id and authorized_changes.'
+    if context.get('requested_by') not in _GUARDED_INSTRUCTION_REQUESTERS:
+        return 'Instruction requested_by must be norbert, nikki, lyra or theo.'
+    source = context.get('source_reference')
+    if (not isinstance(source, str) or not 1 <= len(source) <= 512
+            or source.strip() != source or not source.isprintable()):
+        return 'Instruction requires a valid source_reference.'
+    if context.get('record_id') != str(record_id):
+        return 'Instruction is bound to a different record.'
+    if not _strict_json_equal(context.get('authorized_changes'), fields):
+        return 'Instruction authorized_changes does not exactly match the requested patch.'
     return None
 
 
@@ -688,7 +740,7 @@ def _guarded_identity_correction_authorization(collection, record_id, fields, ra
         required.add('company_id')
     if set(context) != required or context.get('kind') != expected_kind:
         return 'Company/contact correction source context is invalid.', None
-    if context.get('requested_by') not in {'norbert', 'nikki', 'theo'}:
+    if context.get('requested_by') not in _GUARDED_INSTRUCTION_REQUESTERS:
         return 'Company/contact correction requester is invalid.', None
     source = context.get('source_reference')
     if (not isinstance(source, str) or not 1 <= len(source) <= 512
@@ -1023,43 +1075,38 @@ def update_record(
               the complete intended service_locations array, and matching pricing
               fields in this one update. Without that flag, omitted locations are
               preserved.
-        expected_version: Optional exact current serializer `updated_at` value for
-              guarded low-risk corrections. Supplying it requires expected_values.
-        expected_values: JSON object containing the currently observed values
-              for exactly the fields in data. Values may be finite JSON
-              scalars/null or nested arrays/objects. Guarded updates are limited
-              to Cira-only source-bound company identity/address and contact
-              name/email/phone corrections; contact title/department/last_contacted,
-              Draft contract
-              customer contact details, customer signatories, custom service
-              items, verified already-sent status/date bookkeeping, and
-              source-verified dates on an unsigned Sent contract;
-              opportunity stage/date and qualification/value fields,
-              ticket priority/status, and zone notes.
-        authorization_context: Exact explicit-user authorization binding required
-              for source-bound company/contact identity corrections (kind
-              explicit_source_company_correction or explicit_source_contact_correction,
-              requested_by, source_reference, record_id, authorized_changes,
-              and company_id for a contact),
-              opportunity value/probability changes, terminal Won/Lost
-              transitions, and Draft contract customer contact or service-item
-              corrections.
-              Contract contact corrections require kind=explicit_user_contract_contact,
-              a source_reference, record_id, and the complete authorized_changes.
-              Service-item corrections use kind=explicit_user_contract_service_items
-              with the same exact source, record and patch binding.
-              The historical Premier recovery uses
-              kind=verified_contract_send_bookkeeping and its pinned operator
-              receipt digest. General already-sent bookkeeping requires
-              kind=signed_contract_send_bookkeeping and the complete
-              Theo-root-signed receipt envelope. The CRM verifies its Ed25519
-              signature, exact patch/version/before/number binding and expiry;
-              the protected signer attests provider and approval evidence.
-              Sent-contract term corrections use
-              kind=routine_contract_date_correction with requested_by,
-              source_reference, and reason.
+        expected_version: Exact current serializer `updated_at` for an
+              optimistic-concurrency (guarded) update. Supplying it requires
+              expected_values. A guarded update may change any writable field
+              the plain update accepts; a stale version or changed before-value
+              saves nothing. Guarded updates never move a record to another
+              company or patch a document number.
+        expected_values: JSON object with the currently observed values for
+              exactly the fields in data (finite JSON; nested arrays/objects
+              compared exactly; null for a write-only switch such as
+              replace_service_locations).
+        authorization_context: JSON object, '{}' for an ordinary update. Needed
+              only for these cases, each bound to record_id and an
+              authorized_changes object exactly equal to data:
+              - kind=explicit_user_instruction (requested_by norbert, nikki,
+                lyra or theo; source_reference) for a final status (contract
+                Renewed/Expired/Cancelled, quote Accepted/Rejected/Expired,
+                invoice Paid/Cancelled/Refunded) and for price or issuer fields
+                on a Sent or Active contract. It also satisfies opportunity
+                value/probability and Won/Lost, which otherwise use
+                kind=explicit_user_commercial with source_thread_id.
+              - Recording Sent (status=Sent plus sent_date only, Draft/null
+                before): kind=signed_contract_send_bookkeeping or
+                signed_quote_send_bookkeeping with the root-signed receipt, or
+                the pinned Premier kind=verified_contract_send_bookkeeping.
+              - start_date/end_date on a Sent unsigned contract:
+                kind=routine_contract_date_correction with requested_by,
+                source_reference and reason.
+              Optional named lanes that add their own checks and audit:
+              explicit_source_company_correction / explicit_source_contact_correction,
+              explicit_user_contract_contact, explicit_user_contract_service_items,
+              and the pinned contract_layout_correction.
               This tool never sends email.
-              Routine metadata corrections leave this as the default empty object.
 
     Returns: JSON with updated fields, or validation errors.
     """
@@ -1069,9 +1116,9 @@ def update_record(
                         data=data, expected_version=expected_version, expected_values=expected_values,
                         authorization_context=authorization_context)
 
-    # The original three-argument API remains deliberately unchanged.  The
-    # optimistic path is opt-in and only permits the small correction surface
-    # that a reviewer can re-read immediately after saving.
+    # The original three-argument API remains deliberately unchanged. The
+    # optimistic path is opt-in: the same writes plus a version and
+    # before-value check, with the exceptions described in the docstring.
     guarded = bool(expected_version) or expected_values != '{}'
     # The generic three-argument MCP path must not bypass the signed receipt
     # boundary for Sent/date bookkeeping. Other contract operations retain
@@ -1120,74 +1167,105 @@ def update_record(
             not _guarded_json_value(value) for value in before.values()
         ):
             return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded values must be finite JSON values.'})
-        # Status alone remains outside the correction lane. The signed send
-        # route requires the exact status/date pair, so keep the old refusal
-        # for a status-only patch before considering receipt authorization.
-        if collection in ('contract', 'quote') and set(fields) == {'status'}:
-            return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch contains fields outside the approved correction scope.'})
-        contract_layout_correction = (
-            collection == 'contract' and set(fields) == {'preamble_custom'}
+        def refuse(message):
+            return _json.dumps({'updated': False, 'id': str(id), 'error': message})
+
+        try:
+            context = _guarded_json_object(authorization_context)
+        except (TypeError, ValueError, _json.JSONDecodeError):
+            return refuse('Guarded authorization_context must be a JSON object; nothing was saved.')
+        context_kind = context.get('kind') if context else None
+        if context:
+            if context_kind not in _GUARDED_CONTEXT_COLLECTIONS:
+                return refuse('Unknown authorization_context kind; nothing was saved.')
+            allowed_collections = _GUARDED_CONTEXT_COLLECTIONS[context_kind]
+            if allowed_collections is not None and collection not in allowed_collections:
+                return refuse(f'authorization_context kind {context_kind} does not apply to {collection}; nothing was saved.')
+
+        if collection != 'company' and 'company' in fields:
+            return refuse('A guarded update cannot move a record to another company; nothing was saved.')
+        if set(fields) & _GUARDED_DOCUMENT_NUMBER_FIELDS:
+            return refuse('Document numbers are issued by the CRM and cannot be patched; nothing was saved.')
+
+        # Recording Sent keeps its receipt-verified bookkeeping lanes.
+        send_bookkeeping = collection in ('contract', 'quote') and (
+            fields.get('status') == 'Sent' or 'sent_date' in fields
         )
+        if context_kind in _GUARDED_SEND_CONTEXT_KINDS and not send_bookkeeping:
+            return refuse('Send bookkeeping context requires a status Sent and sent_date patch; nothing was saved.')
+        if collection == 'contract' and send_bookkeeping:
+            authorization_error, signed_send_receipt = _guarded_contract_send_authorization(
+                id, fields, before, expected_version, authorization_context,
+            )
+            if authorization_error:
+                return refuse(authorization_error)
+        if collection == 'quote' and send_bookkeeping:
+            authorization_error, signed_quote_receipt = _guarded_quote_send_authorization(
+                id, fields, before, expected_version, authorization_context,
+            )
+            if authorization_error:
+                return refuse(authorization_error)
+
+        # Dedicated correction lanes apply only when the caller names them.
+        contract_layout_correction = context_kind == 'contract_layout_correction'
         if contract_layout_correction:
             authorization_error = _guarded_contract_layout_correction_authorization(
                 id, fields, before, authorization_context,
             )
             if authorization_error:
-                return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
-        else:
-            allowed = _GUARDED_UPDATE_FIELDS.get(collection)
-            if allowed is None or not set(fields).issubset(allowed):
-                return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded patch contains fields outside the approved correction scope.'})
-        if collection == 'company' or (
-                collection == 'contact' and set(fields) & _GUARDED_CONTACT_IDENTITY_FIELDS):
-            if (collection == 'contact'
-                    and not set(fields).issubset(_GUARDED_CONTACT_IDENTITY_FIELDS)):
-                return _json.dumps({
-                    'updated': False, 'id': str(id),
-                    'error': 'Contact identity correction cannot include other fields.',
-                })
+                return refuse(authorization_error)
+        if context_kind in ('explicit_source_company_correction', 'explicit_source_contact_correction'):
+            if collection == 'company' and not set(fields).issubset(_GUARDED_COMPANY_CORRECTION_FIELDS):
+                return refuse('Company identity correction may change name, legal, tax, address, phone and email fields only; nothing was saved.')
+            if collection == 'contact' and not set(fields).issubset(_GUARDED_CONTACT_IDENTITY_FIELDS):
+                return refuse('Contact identity correction cannot include other fields.')
             authorization_error, identity_correction_context = (
                 _guarded_identity_correction_authorization(
                     collection, id, fields, authorization_context,
                 )
             )
             if authorization_error:
-                return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
-        authorization_error = _guarded_commercial_authorization(
-            collection, id, fields, authorization_context,
-        )
-        if authorization_error:
-            return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
-        if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_CONTACT_FIELDS:
+                return refuse(authorization_error)
+        contract_contact_correction = context_kind == 'explicit_user_contract_contact'
+        if contract_contact_correction:
             authorization_error = _guarded_contract_contact_authorization(
                 id, fields, authorization_context,
             )
             if authorization_error:
-                return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
-        if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_SERVICE_ITEM_FIELDS:
+                return refuse(authorization_error)
+        service_item_correction = context_kind == 'explicit_user_contract_service_items'
+        if service_item_correction:
             authorization_error = _guarded_contract_service_item_authorization(
                 id, fields, authorization_context,
             )
             if authorization_error:
-                return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
-        if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_SEND_FIELDS:
-            authorization_error, signed_send_receipt = _guarded_contract_send_authorization(
-                id, fields, before, expected_version, authorization_context,
-            )
-            if authorization_error:
-                return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
-        if collection == 'quote' and set(fields) & _GUARDED_QUOTE_SEND_FIELDS:
-            authorization_error, signed_quote_receipt = _guarded_quote_send_authorization(
-                id, fields, before, expected_version, authorization_context,
-            )
-            if authorization_error:
-                return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
-        if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_DATE_FIELDS:
+                return refuse(authorization_error)
+        if context_kind == 'routine_contract_date_correction':
             authorization_error, contract_date_context = _guarded_contract_date_authorization(
                 fields, authorization_context,
             )
             if authorization_error:
-                return _json.dumps({'updated': False, 'id': str(id), 'error': authorization_error})
+                return refuse(authorization_error)
+
+        # Won/Lost and opportunity value keep their commercial binding.
+        authorization_error = _guarded_commercial_authorization(
+            collection, id, fields, authorization_context,
+        )
+        if authorization_error:
+            return refuse(authorization_error)
+
+        # A final status needs a named person's instruction for this exact patch.
+        instruction_context = context if context_kind == 'explicit_user_instruction' else None
+        if instruction_context:
+            authorization_error = _guarded_instruction_authorization(id, fields, instruction_context)
+            if authorization_error:
+                return refuse(authorization_error)
+        if (fields.get('status') in _GUARDED_TERMINAL_STATUSES.get(collection, ())
+                and not instruction_context):
+            return refuse(
+                f"Changing a {collection} to {fields['status']} requires an explicit_user_instruction "
+                'authorization_context; nothing was saved.'
+            )
     else:
         try:
             fields = _json.loads(data)
@@ -1268,21 +1346,37 @@ def update_record(
                     })
                 original_identity = (instance.company_id, instance.contract_number, instance.status, instance.sent_date)
 
-            if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_CONTACT_FIELDS:
+            if (collection == 'contract' and not contract_date_context
+                    and set(fields) & _GUARDED_CONTRACT_DATE_FIELDS and instance.status == 'Sent'):
+                return _json.dumps({
+                    'updated': False, 'id': str(id),
+                    'error': 'Sent-contract dates require routine_contract_date_correction authorization; nothing was saved.',
+                })
+
+            if (collection == 'contract' and set(fields) & _GUARDED_CONTRACT_PRICING_FIELDS
+                    and instance.status in _GUARDED_PRICED_CONTRACT_STATUSES
+                    and not instruction_context):
+                return _json.dumps({
+                    'updated': False, 'id': str(id),
+                    'error': (f'Changing price or issuer fields on a {instance.status} contract requires an '
+                              'explicit_user_instruction authorization_context; nothing was saved.'),
+                })
+
+            if contract_contact_correction:
                 if instance.status != 'Draft':
                     return _json.dumps({
                         'updated': False, 'id': str(id),
                         'error': 'Contract contact correction requires Draft status; nothing was saved.',
                     })
 
-            if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_SERVICE_ITEM_FIELDS:
+            if service_item_correction:
                 if instance.status != 'Draft':
                     return _json.dumps({
                         'updated': False, 'id': str(id),
                         'error': 'Contract service-item correction requires Draft status; nothing was saved.',
                     })
 
-            if collection == 'contract' and set(fields) & _GUARDED_CONTRACT_SEND_FIELDS:
+            if collection == 'contract' and send_bookkeeping:
                 bound_number = (
                     signed_send_receipt['payload']['contract_number']
                     if signed_send_receipt else
@@ -1390,9 +1484,21 @@ def update_record(
                 return _json.dumps({
                     'updated': False, 'id': str(id), 'error': 'Stale expected_version; nothing was saved.',
                 })
+            # Compare plain JSON: nested serializers return list/dict subclasses
+            # and UUID objects. A write-only switch such as
+            # replace_service_locations has no stored value; its before is null.
+            current_fields = SerializerClass(instance).fields
+            write_only = {
+                key for key in before
+                if key in current_fields and current_fields[key].write_only
+            }
+            observed = _json.loads(_json.dumps(
+                {key: current[key] for key in before if key in current}, default=str,
+            ))
             if any(
-                key not in current or not _strict_json_equal(current[key], value)
-                for key, value in before.items()
+                before[key] is not None if key in write_only
+                else key not in observed or not _strict_json_equal(observed[key], before[key])
+                for key in before
             ):
                 return _json.dumps({
                     'updated': False, 'id': str(id), 'error': 'Expected values no longer match; nothing was saved.',
@@ -1534,7 +1640,7 @@ def update_record(
                         'post_version': readback['updated_at'],
                     },
                 )
-            if collection == 'contract' and set(fields) == _GUARDED_CONTRACT_SEND_FIELDS:
+            if collection == 'contract' and send_bookkeeping:
                 if instance.contract_number != bound_number:
                     transaction.set_rollback(True)
                     return _json.dumps({
@@ -1615,15 +1721,33 @@ def update_record(
                         'updated': False, 'id': str(id),
                         'error': 'Quote send receipt was used concurrently; nothing was saved.',
                     })
-            persisted = {}
-            for key in applied:
-                src = serializer.fields[key].source or key
-                val = getattr(instance, src, None)
-                persisted[key] = val if isinstance(val, (list, dict)) else (
-                    str(val) if val is not None else None
+            if not (identity_correction_context or contract_layout_correction or contract_date_context):
+                # Every other guarded write records who changed what and on
+                # whose instruction, so a broad writer stays traceable.
+                instance = model.objects.get(id=id)
+                post_version = SerializerClass(instance).data.get('updated_at')
+                additional = {
+                    'kind': context_kind or 'guarded_update',
+                    'expected_version': expected_version,
+                    'post_version': post_version,
+                }
+                if instruction_context:
+                    additional.update({
+                        'requested_by': instruction_context['requested_by'],
+                        'source_reference': instruction_context['source_reference'],
+                    })
+                AuditLog.objects.create(
+                    action='UPDATE', model_name=model.__name__, record_id=str(id),
+                    user=_agent_gate._current_user(),
+                    changes={key: {'before': before[key], 'after': fields[key]} for key in fields},
+                    additional_data=additional,
                 )
+            persisted = {
+                key: _persisted_field(collection, instance, serializer, key, fields)
+                for key in applied
+            }
             result = {'updated': True, 'id': str(id), 'applied': persisted}
-            if collection == 'contract' and set(fields) == _GUARDED_CONTRACT_SEND_FIELDS:
+            if collection == 'contract' and send_bookkeeping:
                 result['contract_number'] = instance.contract_number
                 if signed_send_receipt:
                     result.update({
@@ -1686,24 +1810,10 @@ def update_record(
 
     instance = serializer.save()
     # Read-back so the caller can verify what was actually persisted.
-    persisted = {}
-    for key in applied:
-        if collection == 'contract' and key == 'service_locations':
-            from crm_app.serializers import ContractServiceLocationSerializer
-            locations = instance.service_locations.order_by('sort_order', 'id')
-            persisted[key] = ContractServiceLocationSerializer(
-                locations,
-                many=True,
-            ).data
-            continue
-        if collection == 'contract' and key == 'replace_service_locations':
-            # This is a write-only operation mode, not a model attribute. Echo the
-            # accepted value so the caller can verify which semantics were applied.
-            persisted[key] = bool(fields[key])
-            continue
-        src = serializer.fields[key].source or key
-        val = getattr(instance, src, None)
-        persisted[key] = str(val) if val is not None else None
+    persisted = {
+        key: _persisted_field(collection, instance, serializer, key, fields, keep_json=False)
+        for key in applied
+    }
     result = {'updated': True, 'id': str(id), 'applied': persisted}
     if dropped:
         result['warning_ignored_keys'] = dropped
