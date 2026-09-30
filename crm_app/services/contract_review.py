@@ -1,4 +1,9 @@
-"""Reserve a renewal's final number for review without recording delivery."""
+"""Reserve a Draft contract's final number for review without recording delivery.
+
+Renewals have used this since September. New contracts use it too (Norbert,
+2026-09-30), so the PDF a customer receives already carries its permanent
+HK-CT/TH-CT number and the contract can later be recorded as Sent unchanged.
+"""
 
 import re
 
@@ -18,9 +23,16 @@ class ContractReviewError(ValueError):
     """The requested review cannot be prepared without changing its scope."""
 
 
-@transaction.atomic
 def generate_numbered_renewal_review(contract_id, expected_version, render_pdf):
-    """Render one current renewal Draft with its permanent Cira-owned number.
+    """Render one current renewal Draft with its permanent Cira-owned number."""
+    return generate_numbered_contract_review(
+        contract_id, expected_version, render_pdf, require_renewal=True,
+    )
+
+
+@transaction.atomic
+def generate_numbered_contract_review(contract_id, expected_version, render_pdf, *, require_renewal=False):
+    """Render one current Draft contract with its permanent Cira-owned number.
 
     The caller supplies the last observed updated_at, never a document number.
     The contract row remains locked through rendering. A failed PDF rolls back
@@ -41,9 +53,11 @@ def generate_numbered_renewal_review(contract_id, expected_version, render_pdf):
     ).get(pk=contract_id)
     if contract.updated_at != expected:
         raise ContractReviewError('stale_read: contract changed; read it again before preparing the review PDF.')
-    if contract.status != 'Draft' or not contract.renewed_from_id:
+    if require_renewal and (contract.status != 'Draft' or not contract.renewed_from_id):
         raise ContractReviewError('Numbered renewal review requires an existing linked renewal in Draft status.')
-    if contract.renewed_from.company_id != contract.company_id:
+    if contract.status != 'Draft':
+        raise ContractReviewError('A final number can be reserved only for a Draft contract.')
+    if contract.renewed_from_id and contract.renewed_from.company_id != contract.company_id:
         raise ContractReviewError('Renewal and predecessor must belong to the same company.')
     if contract.sent_date is not None:
         raise ContractReviewError('A Draft with a sent date needs reconciliation before review preparation.')

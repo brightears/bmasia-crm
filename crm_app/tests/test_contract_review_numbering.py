@@ -15,6 +15,7 @@ from crm_app.mcp import generate_contract_pdf
 from crm_app.models import Company, Contract, DocumentSequence, User
 from crm_app.services.contract_review import (
     ContractReviewError,
+    generate_numbered_contract_review,
     generate_numbered_renewal_review,
 )
 from crm_app.services.rene_phase2_common import rfc3339
@@ -173,4 +174,62 @@ def test_mcp_review_flag_is_not_truthy_string(renewal):
     _, draft = renewal
     result = json.loads(generate_contract_pdf(str(draft.id), 'false', rfc3339(draft.updated_at)))
     assert 'error' in result
+    assert not DocumentSequence.objects.exists()
+
+
+@pytest.fixture
+def new_contract(db):
+    company = Company.objects.create(
+        name='New Customer Hotel', country='Cambodia', billing_entity='BMAsia Limited'
+    )
+    draft = Contract.objects.create(
+        company=company, contract_number='DRAFT-8101', contract_type='Annual',
+        status='Draft', is_active=False, start_date=date(2026, 10, 15),
+        end_date=date(2027, 10, 14), currency='USD',
+        value=Decimal('520.00'), total_value=Decimal('520.00'),
+    )
+    draft.service_locations.create(location_name='Lobby', platform='beatbreeze', price=260)
+    draft.service_locations.create(location_name='Rooftop', platform='beatbreeze', price=260)
+    return draft
+
+
+def test_new_contract_pdf_gets_final_number_and_stays_draft(new_contract):
+    User.objects.create(username='new-contract-admin', role='Admin')
+    result = json.loads(generate_contract_pdf(
+        str(new_contract.id), expected_version=rfc3339(new_contract.updated_at),
+        reserve_final_number=True,
+    ))
+    assert 'error' not in result, result
+    assert result['contract_number'].startswith('HK-CT')
+    pdf = base64.b64decode(result['content_b64'])
+    text = '\n'.join(page.extract_text() or '' for page in PdfReader(io.BytesIO(pdf)).pages)
+    assert result['contract_number'] in text
+    assert 'DRAFT-' not in text
+    new_contract.refresh_from_db()
+    assert new_contract.status == 'Draft'
+    assert new_contract.sent_date is None
+    assert new_contract.contract_number == result['contract_number']
+
+
+def test_new_contract_retry_reuses_number(new_contract):
+    first = generate_numbered_contract_review(
+        str(new_contract.id), rfc3339(new_contract.updated_at), fake_pdf)[1]
+    new_contract.refresh_from_db()
+    second = generate_numbered_contract_review(
+        str(new_contract.id), rfc3339(new_contract.updated_at), fake_pdf)[1]
+    assert second['contract_number'] == first['contract_number']
+
+
+def test_final_number_requires_draft(new_contract):
+    Contract.objects.filter(pk=new_contract.pk).update(status='Active')
+    new_contract.refresh_from_db()
+    with pytest.raises(ContractReviewError, match='only for a Draft'):
+        generate_numbered_contract_review(
+            str(new_contract.id), rfc3339(new_contract.updated_at), fake_pdf)
+    assert not DocumentSequence.objects.exists()
+
+
+def test_renewal_only_flag_still_refuses_new_contract(new_contract):
+    with pytest.raises(ContractReviewError, match='linked renewal'):
+        generate(new_contract)
     assert not DocumentSequence.objects.exists()

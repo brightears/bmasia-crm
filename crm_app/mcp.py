@@ -28,6 +28,7 @@ from crm_app.contract_send_receipts import (
     ReceiptVerificationError, verify_signed_contract_send_context,
 )
 from crm_app.quote_send_receipts import (
+    verify_attested_contract_send_context,
     ReceiptVerificationError as QuoteReceiptVerificationError,
     verify_signed_quote_send_context,
 )
@@ -585,11 +586,13 @@ _GUARDED_CONTEXT_COLLECTIONS = {
     'routine_contract_date_correction': {'contract'},
     'verified_contract_send_bookkeeping': {'contract'},
     'signed_contract_send_bookkeeping': {'contract'},
+    'attested_contract_send_bookkeeping': {'contract'},
     'signed_quote_send_bookkeeping': {'quote'},
 }
 _GUARDED_SEND_CONTEXT_KINDS = frozenset({
     'verified_contract_send_bookkeeping',
     'signed_contract_send_bookkeeping',
+    'attested_contract_send_bookkeeping',
     'signed_quote_send_bookkeeping',
 })
 
@@ -873,6 +876,16 @@ def _guarded_contract_send_authorization(record_id, fields, before, expected_ver
                 expected_version=expected_version,
             )
         except ReceiptVerificationError as exc:
+            return str(exc), None
+        return None, verified
+    if context.get('kind') == 'attested_contract_send_bookkeeping':
+        # Contracts Lyra sends from norbert@, attested by the quote attestor.
+        try:
+            verified = verify_attested_contract_send_context(
+                context, record_id=record_id, fields=fields, before=before,
+                expected_version=expected_version,
+            )
+        except QuoteReceiptVerificationError as exc:
             return str(exc), None
         return None, verified
 
@@ -2036,7 +2049,8 @@ def _pdf_response_payload(response, default_filename: str) -> str:
 
 @mcp_server.tool()
 def generate_contract_pdf(
-    id: str, reserve_renewal_number: bool = False, expected_version: str = ""
+    id: str, reserve_renewal_number: bool = False, expected_version: str = "",
+    reserve_final_number: bool = False,
 ) -> str:
     """Generate a contract PDF by contract ID.
 
@@ -2050,6 +2064,10 @@ def generate_contract_pdf(
     sent_date, activation, or its predecessor. Retrying a numbered Draft reuses
     its number. Inspect the returned PDF and obtain Nikki's approval before any
     delivery; never change the approved PDF after approval.
+
+    reserve_final_number=True does the same for any Draft contract, new or
+    renewal: use it for the customer-ready PDF so the customer receives the
+    permanent HK-CT/TH-CT number that the later Sent record keeps.
     """
     from django.test import RequestFactory
     from crm_app.models import Contract
@@ -2065,17 +2083,21 @@ def generate_contract_pdf(
     from django.core.exceptions import ValidationError
     from crm_app.services.contract_review import (
         ContractReviewError,
+        generate_numbered_contract_review,
         generate_numbered_renewal_review,
     )
 
-    if type(reserve_renewal_number) is not bool:
-        return json.dumps({"error": "reserve_renewal_number must be a boolean."})
-    if reserve_renewal_number:
+    if type(reserve_renewal_number) is not bool or type(reserve_final_number) is not bool:
+        return json.dumps({"error": "reserve_renewal_number and reserve_final_number must be booleans."})
+    if reserve_renewal_number or reserve_final_number:
         _agent_gate.observe(tool='generate_contract_pdf', verb='reserve_number', collection='contract',
                             record_id=id, expected_version=expected_version)
     try:
         if reserve_renewal_number:
             response, metadata = generate_numbered_renewal_review(id, expected_version, render)
+            return json.dumps({**json.loads(_pdf_response_payload(response, f'contract_{id}.pdf')), **metadata})
+        if reserve_final_number:
+            response, metadata = generate_numbered_contract_review(id, expected_version, render)
             return json.dumps({**json.loads(_pdf_response_payload(response, f'contract_{id}.pdf')), **metadata})
         contract = Contract.objects.get(id=id)
         return _pdf_response_payload(render(contract), f'contract_{id}.pdf')
