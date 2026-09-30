@@ -636,6 +636,41 @@ def _strict_json_equal(left, right):
     return _strict_scalar_equal(left, right)
 
 
+def _guarded_field_equal(field, current, expected):
+    """Compare a stored value with a caller's before-value by the field's type.
+
+    The MCP query tool returns decimals as numbers (260.0) and datetimes in
+    UTC, while the serializer returns "260.00" and local offsets. Those are
+    the same value; anything else stays a strict JSON comparison.
+    """
+    from decimal import Decimal, InvalidOperation
+    from rest_framework import serializers as drf
+
+    if isinstance(field, drf.ListSerializer):
+        return (isinstance(current, list) and isinstance(expected, list)
+                and len(current) == len(expected)
+                and all(_guarded_field_equal(field.child, c, e) for c, e in zip(current, expected)))
+    if isinstance(field, drf.Serializer):
+        return (isinstance(current, dict) and isinstance(expected, dict)
+                and set(current) == set(expected)
+                and all(_guarded_field_equal(field.fields.get(k), current[k], expected[k]) for k in current))
+    if current is None or expected is None:
+        return current is None and expected is None
+    if isinstance(field, (drf.DecimalField, drf.FloatField, drf.IntegerField)):
+        if isinstance(current, bool) or isinstance(expected, bool):
+            return False
+        if not isinstance(current, (str, int, float)) or not isinstance(expected, (str, int, float)):
+            return False
+        try:
+            return Decimal(str(current)) == Decimal(str(expected))
+        except InvalidOperation:
+            return False
+    if isinstance(field, drf.DateTimeField):
+        left, right = _guarded_version(current), _guarded_version(expected)
+        return left is not None and left == right
+    return _strict_json_equal(current, expected)
+
+
 def _guarded_json_object(raw):
     """Parse a guarded payload without accepting duplicate keys or non-finite values."""
     def reject_constant(value):
@@ -1497,7 +1532,8 @@ def update_record(
             ))
             if any(
                 before[key] is not None if key in write_only
-                else key not in observed or not _strict_json_equal(observed[key], before[key])
+                else key not in observed
+                or not _guarded_field_equal(current_fields.get(key), observed[key], before[key])
                 for key in before
             ):
                 return _json.dumps({

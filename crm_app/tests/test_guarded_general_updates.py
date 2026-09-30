@@ -254,3 +254,79 @@ def test_draft_service_locations_can_be_replaced_under_the_lock():
     assert [row['location_name'] for row in result['applied']['service_locations']] == ['Lobby', 'Pool']
     assert result['applied']['replace_service_locations'] is True
     assert contract.service_locations.count() == 2
+
+
+def _query_style_opportunity():
+    company = Company.objects.create(name='Query shape company', billing_entity='BMAsia Limited')
+    return Opportunity.objects.create(
+        company=company, name='Query shape deal', stage='Quotation Sent',
+        expected_value=Decimal('260.00'), probability=30,
+    )
+
+
+@pytest.mark.django_db
+def test_query_tool_numbers_match_serializer_decimals():
+    # Cira reads with query_data_collections, which returns 260.0, not "260.00".
+    opportunity = _query_style_opportunity()
+    observed = OpportunitySerializer(opportunity).data
+    patch = {'stage': 'Contract Sent', 'probability': 60, 'expected_value': 520}
+
+    result = json.loads(update_record(
+        'opportunity', str(opportunity.pk), json.dumps(patch),
+        expected_version=observed['updated_at'],
+        expected_values=json.dumps({'stage': 'Quotation Sent', 'probability': 30, 'expected_value': 260.0}),
+        authorization_context=json.dumps(_instruction(opportunity, patch)),
+    ))
+
+    assert result['updated'] is True, result
+    opportunity.refresh_from_db()
+    assert opportunity.expected_value == Decimal('520.00')
+    assert opportunity.probability == 60
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('before', [
+    {'expected_value': 261.0},
+    {'expected_value': '260.01'},
+    {'expected_value': None},
+    {'expected_value': True},
+])
+def test_a_different_number_still_fails_the_lock(before):
+    opportunity = _query_style_opportunity()
+    observed = OpportunitySerializer(opportunity).data
+    patch = {'expected_value': 520}
+
+    result = json.loads(update_record(
+        'opportunity', str(opportunity.pk), json.dumps(patch),
+        expected_version=observed['updated_at'],
+        expected_values=json.dumps(before),
+        authorization_context=json.dumps(_instruction(opportunity, patch)),
+    ))
+
+    assert result['error'] == 'Expected values no longer match; nothing was saved.'
+    opportunity.refresh_from_db()
+    assert opportunity.expected_value == Decimal('260.00')
+
+
+@pytest.mark.django_db
+def test_nested_zone_price_accepts_query_tool_number():
+    contract = _contract()
+    location = ContractServiceLocation.objects.create(
+        contract=contract, location_name='Lobby', platform='beatbreeze', sort_order=0,
+        price=Decimal('520.00'),
+    )
+    observed = ContractSerializer(contract).data
+    before = json.loads(json.dumps(observed['service_locations'], default=str))
+    before[0]['price'] = 520.0
+    patch = {'service_locations': [{'id': str(location.pk), 'location_name': 'Main lobby',
+                                    'platform': 'beatbreeze', 'sort_order': 0, 'price': '520.00'}]}
+
+    result = json.loads(update_record(
+        'contract', str(contract.pk), json.dumps(patch),
+        expected_version=observed['updated_at'],
+        expected_values=json.dumps({'service_locations': before}),
+    ))
+
+    assert result['updated'] is True, result
+    location.refresh_from_db()
+    assert location.location_name == 'Main lobby'
