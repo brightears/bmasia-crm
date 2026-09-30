@@ -179,6 +179,8 @@ def test_projection_uses_real_model_preferences_and_excludes_private_data():
 
 def test_no_primary_guessing_and_opt_out_holds():
     current = company(primary_count=2)
+    # Two legacy "Primary" types and no flag is ambiguous.
+    current.contacts.update(is_primary=False)
     row = api.project_company(current, timezone.now())
     assert row["primary_contact_id"] is None
     assert "PRIMARY_CONTACT_MISSING_OR_AMBIGUOUS" in row["holds"]
@@ -186,6 +188,23 @@ def test_no_primary_guessing_and_opt_out_holds():
     current.contacts.update(receives_quarterly_emails=False)
     row = api.project_company(current, timezone.now())
     assert "CONTACT_QUARTERLY_EMAILS_DISABLED" in row["holds"]
+
+
+def test_flagged_primary_wins_over_legacy_primary_type():
+    current = company(primary_count=1)
+    legacy = Contact.objects.create(
+        company=current, name="Legacy Contact", email="legacy@example.test",
+        is_primary=False, contact_type="Primary",
+    )
+    flagged = current.contacts.get(is_primary=True)
+    row = api.project_company(current, timezone.now())
+    assert row["primary_contact_id"] == str(flagged.id)
+    assert "PRIMARY_CONTACT_MISSING_OR_AMBIGUOUS" not in row["holds"]
+    flagged.is_primary = False
+    flagged.contact_type = "Other"
+    flagged.save()
+    row = api.project_company(current, timezone.now())
+    assert row["primary_contact_id"] == str(legacy.id)
 
 
 def test_critical_ticket_count_is_not_hidden_by_record_cap():

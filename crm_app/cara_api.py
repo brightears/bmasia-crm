@@ -233,10 +233,12 @@ def project_company(company, observed_at):
         and row["start_date"] <= today
         and (row["end_date"] is None or row["end_date"] >= today)
     ]
-    primaries = [
+    # An explicitly flagged active primary wins. The legacy "Primary" contact
+    # type counts only when no contact carries the flag.
+    primaries = [row for row in contacts if row["is_active"] and row["is_primary"]] or [
         row
         for row in contacts
-        if row["is_active"] and (row["is_primary"] or row["contact_type"] == "Primary")
+        if row["is_active"] and row["contact_type"] == "Primary"
     ]
     holds = []
     if not company.is_active:

@@ -43,6 +43,7 @@ interface ContactFormData {
   department: string;
   status: 'Active' | 'Inactive';
   is_decision_maker: boolean;
+  is_primary: boolean;
   linkedin_url: string;
   notes: string;
   preferred_contact_method: 'Email' | 'Phone' | 'Mobile' | 'LinkedIn' | '';
@@ -76,6 +77,7 @@ const ContactForm: React.FC<ContactFormProps> = ({
     department: '',
     status: 'Active',
     is_decision_maker: false,
+    is_primary: false,
     linkedin_url: '',
     notes: '',
     preferred_contact_method: '',
@@ -113,6 +115,7 @@ const ContactForm: React.FC<ContactFormProps> = ({
         department: contact.department || '',
         status: contact.is_active ? 'Active' : 'Inactive',
         is_decision_maker: contact.contact_type === 'Decision Maker',
+        is_primary: contact.is_primary ?? false,
         linkedin_url: contact.linkedin_url || '',
         notes: contact.notes || '',
         preferred_contact_method: contact.preferred_contact_method || '',
@@ -140,6 +143,7 @@ const ContactForm: React.FC<ContactFormProps> = ({
         department: '',
         status: 'Active',
         is_decision_maker: false,
+        is_primary: false,
         linkedin_url: '',
         notes: '',
         preferred_contact_method: '',
@@ -216,8 +220,15 @@ const ContactForm: React.FC<ContactFormProps> = ({
 
     try {
       // Map frontend form data to backend API format
+      // Keep an existing Primary/Technical/Billing type on edit; the switch
+      // only adds or removes the Decision Maker type.
+      const existingType = contact?.contact_type;
       const contactType: 'Primary' | 'Technical' | 'Billing' | 'Decision Maker' | 'Other' =
-        formData.is_decision_maker ? 'Decision Maker' : 'Other';
+        formData.is_decision_maker
+          ? 'Decision Maker'
+          : existingType && existingType !== 'Decision Maker'
+            ? existingType
+            : 'Other';
 
       const submitData: Partial<Contact> = {
         name: `${formData.first_name} ${formData.last_name}`.trim(),
@@ -229,7 +240,7 @@ const ContactForm: React.FC<ContactFormProps> = ({
         company: formData.company,
         contact_type: contactType,
         preferred_contact_method: formData.preferred_contact_method || '',
-        is_primary: false, // Default to non-primary
+        is_primary: formData.is_primary,
         is_active: formData.status === 'Active',
         linkedin_url: formData.linkedin_url || '',
         notes: formData.notes || '',
@@ -520,6 +531,20 @@ const ContactForm: React.FC<ContactFormProps> = ({
                   />
                 }
                 label="Decision Maker"
+              />
+            </Box>
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <Box sx={{ pt: 2 }}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={formData.is_primary}
+                    onChange={(e) => handleFieldChange('is_primary', e.target.checked)}
+                  />
+                }
+                label="Primary contact"
               />
             </Box>
           </Grid>
