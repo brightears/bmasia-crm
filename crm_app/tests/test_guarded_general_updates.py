@@ -412,3 +412,41 @@ def test_zone_lock_still_catches_real_differences(tamper):
 
     assert result['error'] == 'Expected values no longer match; nothing was saved.'
     assert contract.service_locations.count() == 6
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('switch_before', ['true', 'omitted'])
+def test_replace_switch_is_not_part_of_the_lock(switch_before):
+    # Hilton Colombo 1 Oct: Cira sent replace_service_locations=true, or left it out.
+    contract = _bavi_contract()
+    observed = ContractSerializer(contract).data
+    patch = {'value': '1820.00', 'total_value': '1820.00',
+             'replace_service_locations': True, 'service_locations': _seven_zones(contract)}
+    expected = {'value': 1560.0, 'total_value': 1560.0, 'service_locations': _query_tool_rows(contract)}
+    if switch_before == 'true':
+        expected['replace_service_locations'] = True
+
+    result = json.loads(update_record(
+        'contract', str(contract.pk), json.dumps(patch),
+        expected_version=observed['updated_at'], expected_values=json.dumps(expected),
+    ))
+
+    assert result['updated'] is True, result
+    assert contract.service_locations.count() == 7
+
+
+@pytest.mark.django_db
+def test_stored_field_still_required_in_expected_values():
+    contract = _bavi_contract()
+    observed = ContractSerializer(contract).data
+    patch = {'value': '1820.00', 'total_value': '1820.00',
+             'replace_service_locations': True, 'service_locations': _seven_zones(contract)}
+    expected = {'value': 1560.0, 'service_locations': _query_tool_rows(contract)}
+
+    result = json.loads(update_record(
+        'contract', str(contract.pk), json.dumps(patch),
+        expected_version=observed['updated_at'], expected_values=json.dumps(expected),
+    ))
+
+    assert result['error'] == 'Guarded expected_values keys must exactly match patch keys.'
+    assert contract.service_locations.count() == 6

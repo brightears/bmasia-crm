@@ -639,6 +639,13 @@ def _strict_json_equal(left, right):
     return _strict_scalar_equal(left, right)
 
 
+def _write_only_fields(collection):
+    """Serializer fields that accept input but have no stored value to lock."""
+    _model, serializer_path = _COLLECTION_MAP[collection]
+    fields = _get_serializer_class(serializer_path)().fields
+    return {name for name, field in fields.items() if field.write_only}
+
+
 def _guarded_field_equal(field, current, expected):
     """Compare a stored value with a caller's before-value by the field's type.
 
@@ -1224,7 +1231,10 @@ def update_record(
             before = _guarded_json_object(expected_values)
         except (TypeError, ValueError, _json.JSONDecodeError):
             return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded expected_values must be a JSON object.'})
-        if set(before) != set(fields):
+        # A write-only switch (replace_service_locations) has no stored value
+        # to lock, so it may be absent from expected_values or carry anything.
+        write_only_keys = _write_only_fields(collection)
+        if set(before) - write_only_keys != set(fields) - write_only_keys:
             return _json.dumps({'updated': False, 'id': str(id), 'error': 'Guarded expected_values keys must exactly match patch keys.'})
         if any(not _guarded_json_value(value) for value in fields.values()) or any(
             not _guarded_json_value(value) for value in before.values()
@@ -1548,21 +1558,15 @@ def update_record(
                     'updated': False, 'id': str(id), 'error': 'Stale expected_version; nothing was saved.',
                 })
             # Compare plain JSON: nested serializers return list/dict subclasses
-            # and UUID objects. A write-only switch such as
-            # replace_service_locations has no stored value; its before is null.
+            # and UUID objects. Write-only switches are not part of the lock.
             current_fields = SerializerClass(instance).fields
-            write_only = {
-                key for key in before
-                if key in current_fields and current_fields[key].write_only
-            }
             observed = _json.loads(_json.dumps(
                 {key: current[key] for key in before if key in current}, default=str,
             ))
             if any(
-                before[key] is not None if key in write_only
-                else key not in observed
+                key not in observed
                 or not _guarded_field_equal(current_fields.get(key), observed[key], before[key])
-                for key in before
+                for key in before if key not in write_only_keys
             ):
                 return _json.dumps({
                     'updated': False, 'id': str(id), 'error': 'Expected values no longer match; nothing was saved.',
@@ -1803,7 +1807,7 @@ def update_record(
                 AuditLog.objects.create(
                     action='UPDATE', model_name=model.__name__, record_id=str(id),
                     user=_agent_gate._current_user(),
-                    changes={key: {'before': before[key], 'after': fields[key]} for key in fields},
+                    changes={key: {'before': before.get(key), 'after': fields[key]} for key in fields},
                     additional_data=additional,
                 )
             persisted = {
