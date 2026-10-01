@@ -650,13 +650,28 @@ def _guarded_field_equal(field, current, expected):
     from rest_framework import serializers as drf
 
     if isinstance(field, drf.ListSerializer):
-        return (isinstance(current, list) and isinstance(expected, list)
-                and len(current) == len(expected)
-                and all(_guarded_field_equal(field.child, c, e) for c, e in zip(current, expected)))
+        if not (isinstance(current, list) and isinstance(expected, list) and len(current) == len(expected)):
+            return False
+        # Rows with ids are matched by id: the query tool and the serializer
+        # may order them differently.
+        if all(isinstance(row, dict) and row.get('id') for row in current + expected):
+            by_id = {str(row['id']): row for row in current}
+            return (len(by_id) == len(current)
+                    and {str(row['id']) for row in expected} == set(by_id)
+                    and all(_guarded_field_equal(field.child, by_id[str(row['id'])], row) for row in expected))
+        return all(_guarded_field_equal(field.child, c, e) for c, e in zip(current, expected))
     if isinstance(field, drf.Serializer):
-        return (isinstance(current, dict) and isinstance(expected, dict)
-                and set(current) == set(expected)
-                and all(_guarded_field_equal(field.fields.get(k), current[k], expected[k]) for k in current))
+        if not (isinstance(current, dict) and isinstance(expected, dict)):
+            return False
+        # The query tool omits a nested row's link back to its parent and
+        # read-only fields. Every writable value must still be present and equal.
+        omitted = set(current) - set(expected)
+        if set(expected) - set(current) or any(
+            not (isinstance(field.fields.get(k), drf.RelatedField) or getattr(field.fields.get(k), 'read_only', False))
+            for k in omitted
+        ):
+            return False
+        return all(_guarded_field_equal(field.fields.get(k), current[k], expected[k]) for k in expected)
     if current is None or expected is None:
         return current is None and expected is None
     if isinstance(field, (drf.DecimalField, drf.FloatField, drf.IntegerField)):

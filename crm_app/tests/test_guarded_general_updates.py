@@ -330,3 +330,85 @@ def test_nested_zone_price_accepts_query_tool_number():
     assert result['updated'] is True, result
     location.refresh_from_db()
     assert location.location_name == 'Main lobby'
+
+
+def _bavi_contract():
+    company = Company.objects.create(name='Ba Vi style resort', billing_entity='BMAsia Limited')
+    contract = Contract.objects.create(
+        company=company, contract_number='DRAFT-0087', contract_type='Annual', status='Draft',
+        start_date=date(2026, 8, 1), end_date=date(2027, 7, 31),
+        value=Decimal('1560.00'), total_value=Decimal('1560.00'),
+    )
+    for order, name in enumerate(['Lobby', 'Senses', 'Tonkin', 'Spa', 'Pool', 'Bar'], 1):
+        ContractServiceLocation.objects.create(
+            contract=contract, location_name=name, platform='custom',
+            custom_service_name='Beat Breeze', sort_order=order, price=Decimal('260.00'),
+        )
+    return contract
+
+
+def _query_tool_rows(contract):
+    # Shape returned by query_data_collections: no parent link, numbers as floats.
+    return [
+        {'id': str(row.id), 'location_name': row.location_name, 'platform': row.platform,
+         'custom_service_name': row.custom_service_name, 'sort_order': row.sort_order,
+         'price': float(row.price)}
+        for row in contract.service_locations.order_by('-sort_order')
+    ]
+
+
+def _seven_zones(contract):
+    rows = [
+        {'id': str(row.id), 'location_name': row.location_name, 'platform': 'custom',
+         'custom_service_name': 'Beat Breeze', 'sort_order': row.sort_order, 'price': '260.00'}
+        for row in contract.service_locations.order_by('sort_order')
+    ]
+    rows.append({'location_name': '1902 Lounge', 'platform': 'custom',
+                 'custom_service_name': 'Beat Breeze', 'sort_order': 7, 'price': '260.00'})
+    return rows
+
+
+@pytest.mark.django_db
+def test_query_tool_zone_rows_lock_a_seven_zone_replacement():
+    contract = _bavi_contract()
+    observed = ContractSerializer(contract).data
+    patch = {'value': '1820.00', 'total_value': '1820.00',
+             'replace_service_locations': True, 'service_locations': _seven_zones(contract)}
+    expected = {'value': 1560.0, 'total_value': 1560.0, 'replace_service_locations': None,
+                'service_locations': _query_tool_rows(contract)}
+
+    result = json.loads(update_record(
+        'contract', str(contract.pk), json.dumps(patch),
+        expected_version=observed['updated_at'], expected_values=json.dumps(expected),
+    ))
+
+    assert result['updated'] is True, result
+    contract.refresh_from_db()
+    assert contract.service_locations.count() == 7
+    assert contract.value == Decimal('1820.00')
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('tamper', ['price', 'drop_row', 'drop_writable_key'])
+def test_zone_lock_still_catches_real_differences(tamper):
+    contract = _bavi_contract()
+    observed = ContractSerializer(contract).data
+    rows = _query_tool_rows(contract)
+    if tamper == 'price':
+        rows[0]['price'] = 250.0
+    elif tamper == 'drop_row':
+        rows.pop()
+    else:
+        del rows[0]['location_name']
+    patch = {'value': '1820.00', 'total_value': '1820.00',
+             'replace_service_locations': True, 'service_locations': _seven_zones(contract)}
+    expected = {'value': 1560.0, 'total_value': 1560.0, 'replace_service_locations': None,
+                'service_locations': rows}
+
+    result = json.loads(update_record(
+        'contract', str(contract.pk), json.dumps(patch),
+        expected_version=observed['updated_at'], expected_values=json.dumps(expected),
+    ))
+
+    assert result['error'] == 'Expected values no longer match; nothing was saved.'
+    assert contract.service_locations.count() == 6
