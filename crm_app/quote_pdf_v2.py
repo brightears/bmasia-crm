@@ -48,6 +48,20 @@ def _address_text(format_address_multiline, company):
     return value.replace("<br/>", "\n").replace("<br />", "\n")
 
 
+def subscription_unit_suffix(quote):
+    """Cadence under a subscription unit price.
+
+    A one-time or sub-annual quote (e.g. a prorated add-on to an existing
+    contract) prices each zone for its own period, so "per year" would misstate
+    the rate. Annual and multi-year quotes keep "per zone / year".
+    """
+    duration_months = quote.contract_duration_months or 12
+    billing_frequency = getattr(quote, "billing_frequency", "annual") or "annual"
+    if billing_frequency == "one-time" or duration_months < 12:
+        return "per zone / period"
+    return "per zone / year"
+
+
 def _quote_totals(quote, line_items, format_duration, entity):
     currency = quote.currency
     duration_months = quote.contract_duration_months or 12
@@ -229,7 +243,7 @@ def build_quote_pdf_v2(
 
         unit_value = money(quote.currency, unit_price)
         if code in SUBSCRIPTION_CODES:
-            unit_value += "\nper zone / year"
+            unit_value += "\n" + subscription_unit_suffix(quote)
         rows.append([
             product_cell,
             description_cell,
