@@ -214,3 +214,36 @@ def test_invalid_provenance_context_holds(context):
     contract.refresh_from_db()
     assert contract.start_date == date(2026, 9, 1)
     assert not AuditLog.objects.filter(record_id=str(contract.pk)).exists()
+
+
+@pytest.mark.django_db
+def test_date_correction_can_carry_custom_terms_atomically():
+    contract = _contract()
+    contract.custom_terms = 'Placeholder dates until payment.'
+    contract.save(update_fields=['custom_terms'])
+    patch = {'start_date': '2026-10-01', 'end_date': '2027-09-30',
+             'custom_terms': 'The subscription term is 1 October 2026 to 30 September 2027.'}
+    result = _update(contract, patch)
+    contract.refresh_from_db()
+    assert result['updated'] is True
+    assert contract.start_date == date(2026, 10, 1)
+    assert contract.custom_terms == patch['custom_terms']
+    assert contract.status == 'Sent'
+    audit = AuditLog.objects.get(record_id=str(contract.pk))
+    assert set(audit.changes) == set(patch)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize('patch', [
+    {'custom_terms': 'Wording only belongs in an ordinary guarded update.'},
+    {'start_date': '2026-10-01', 'sent_date': '2026-10-01'},
+    {'start_date': '2026-10-01', 'contract_number': 'HK-CT1'},
+    {'start_date': '2026-10-01', 'price_per_zone': '1.00'},
+])
+def test_date_lane_still_refuses_non_date_only_or_protected_fields(patch):
+    contract = _contract()
+    result = _update(contract, patch)
+    assert result['updated'] is False
+    contract.refresh_from_db()
+    assert contract.start_date == date(2026, 9, 1)
+    assert not AuditLog.objects.filter(record_id=str(contract.pk)).exists()

@@ -573,6 +573,12 @@ _GUARDED_CONTRACT_PRICING_FIELDS = frozenset({
     'replace_service_locations',
 })
 _GUARDED_PRICED_CONTRACT_STATUSES = frozenset({'Sent', 'Active'})
+# A Sent-contract date correction may carry ordinary wording edits in the same
+# atomic patch (6 Oct 2026: Fountainhead's term dates plus custom_terms), but
+# never status, send bookkeeping, identity or price changes.
+_GUARDED_CONTRACT_DATE_LANE_EXCLUDED = frozenset({
+    'status', 'sent_date', 'contract_number', 'company', 'company_id',
+}) | _GUARDED_CONTRACT_PRICING_FIELDS
 _GUARDED_INSTRUCTION_REQUESTERS = frozenset({'norbert', 'nikki', 'lyra', 'theo'})
 # Every accepted authorization_context kind and the collections it applies to.
 _GUARDED_CONTEXT_COLLECTIONS = {
@@ -1033,8 +1039,12 @@ def _guarded_contract_date_authorization(fields, raw):
     Cira authenticates the writer and verifies the sender before forwarding;
     this context records that source, not a new owner-approval requirement.
     """
-    if not set(fields) or not set(fields).issubset(_GUARDED_CONTRACT_DATE_FIELDS):
-        return 'Contract date correction may change start_date or end_date only.', None
+    date_fields = set(fields) & _GUARDED_CONTRACT_DATE_FIELDS
+    if not date_fields:
+        return 'Contract date correction must change start_date or end_date.', None
+    if set(fields) & _GUARDED_CONTRACT_DATE_LANE_EXCLUDED:
+        return ('Contract date correction cannot change status, send bookkeeping, '
+                'contract number, company or price fields.'), None
     try:
         context = _guarded_json_object(raw)
     except (TypeError, ValueError, _json.JSONDecodeError):
@@ -1051,7 +1061,7 @@ def _guarded_contract_date_authorization(fields, raw):
         if (not isinstance(value, str) or not 1 <= len(value) <= limit
                 or value.strip() != value or not value.isprintable()):
             return f'Contract date correction {name} is invalid.', None
-    for value in fields.values():
+    for value in (fields[key] for key in date_fields):
         if not isinstance(value, str):
             return 'Contract date correction requires ISO calendar dates.', None
         try:
@@ -1171,7 +1181,9 @@ def update_record(
                 the pinned Premier kind=verified_contract_send_bookkeeping.
               - start_date/end_date on a Sent unsigned contract:
                 kind=routine_contract_date_correction with requested_by,
-                source_reference and reason.
+                source_reference and reason. The same patch may also change
+                ordinary wording fields such as custom_terms, but not status,
+                sent_date, number, company or price fields.
               Optional named lanes that add their own checks and audit:
               explicit_source_company_correction / explicit_source_contact_correction,
               explicit_user_contract_contact, explicit_user_contract_service_items,
