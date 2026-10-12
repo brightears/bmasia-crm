@@ -72,6 +72,9 @@ def contract_tailoring_context(contract):
             'For a full template, replacement clauses need a present named slot; '
             'a missing slot requires a tailored template copy and clause selection. '
             'Additional terms and payment schedule are inserted before signatures when no slot exists. '
+            'In custom_terms, a line "[under: duration]" (or commencement, payment, activation) '
+            'places the following wording inside that numbered clause; a full template needs '
+            'the matching {{under_duration}}-style slot. '
             'Preview the PDF and resolve its structured clarifications before delivery.'
         ),
     }

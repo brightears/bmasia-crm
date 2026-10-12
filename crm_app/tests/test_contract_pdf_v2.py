@@ -479,3 +479,87 @@ def test_contract_pricing_conflict_is_still_actionable_and_nonmutating(contract,
     assert "pricing" in str(response.data).casefold()
     assert _writes(captured) == []
     assert _snapshot(contract) == before
+
+
+NAKA_SECTION_4 = (
+    "This agreement shall be delivered and signed when a party's signature is required, only by email. "
+    "All documents and signatures affixed will be treated in all respects as having the same force "
+    "and effect as original signed documents for purposes of validity."
+)
+
+
+def test_split_clause_placements_keeps_plain_terms_unchanged():
+    from crm_app.contract_pdf_v2 import split_clause_placements
+    plain = "Ordinary wording.\n[under: liability]\nStays literal."
+    assert split_clause_placements(plain) == (plain, {})
+    assert split_clause_placements(
+        "General term.\n[Under: Duration]\nFirst.\n[under:payment]\nSecond.\n[under: duration]\nThird."
+    ) == ("General term.", {"duration": "First.\nThird.", "payment": "Second."})
+
+
+def test_standard_contract_places_marked_wording_inside_clause_4(contract, client):
+    contract.custom_terms = "[under: duration]\n" + NAKA_SECTION_4
+    contract.save()
+
+    response = client.get(f"/api/v1/contracts/{contract.pk}/pdf/")
+
+    _assert_a4(response)
+    text = _text(response.content)
+    assert text.count(NAKA_SECTION_4) == 1
+    assert text.index("4. Duration") < text.index(NAKA_SECTION_4) < text.index("5. Service Packages")
+    assert "Additional terms and conditions" not in text
+    assert "[under" not in text
+
+
+def test_standard_contract_keeps_unmarked_terms_after_activation(contract, client):
+    contract.custom_terms = (
+        "The Lobby zone may use a separate seasonal playlist.\n"
+        "[under: liability]\nNot a supported clause.\n"
+        "[under: duration]\n" + NAKA_SECTION_4
+    )
+    contract.save()
+
+    response = client.get(f"/api/v1/contracts/{contract.pk}/pdf/")
+
+    _assert_a4(response)
+    text = _text(response.content)
+    assert text.index("4. Duration") < text.index(NAKA_SECTION_4) < text.index("5. Service Packages")
+    additional = text.index("Additional terms and conditions")
+    assert text.index("Activation Date") < additional < text.index("The Lobby zone may use")
+    assert additional < text.index("[under: liability] Not a supported clause.")
+    assert text.count(NAKA_SECTION_4) == 1
+
+
+def test_master_agreement_labels_clause_placed_wording(contract, client):
+    contract.contract_category = "corporate_master"
+    contract.custom_terms = "[under: duration]\n" + NAKA_SECTION_4
+    contract.save()
+
+    response = client.get(f"/api/v1/contracts/{contract.pk}/pdf/")
+
+    _assert_a4(response)
+    text = _text(response.content)
+    assert "Duration: " + NAKA_SECTION_4 in text
+    assert "[under" not in text
+
+
+def test_full_template_needs_named_slot_for_clause_placed_wording(contract, client):
+    template = ContractTemplate.objects.create(
+        name="Clause slot agreement", template_type="preamble", pdf_format="standard",
+        content="Term of agreement.<br/>{{under_duration}}<br/>{{zones_table}}<br/>{{signature_blocks}}",
+    )
+    contract.preamble_template = template
+    contract.custom_terms = "[under: duration]\n" + NAKA_SECTION_4
+    contract.save()
+
+    response = client.get(f"/api/v1/contracts/{contract.pk}/pdf/")
+    _assert_a4(response)
+    text = _text(response.content)
+    assert text.index("Term of agreement.") < text.index(NAKA_SECTION_4)
+    assert text.count(NAKA_SECTION_4) == 1 and "{{" not in text
+
+    template.content = "Term of agreement.<br/>{{zones_table}}<br/>{{signature_blocks}}"
+    template.save()
+    response = client.get(f"/api/v1/contracts/{contract.pk}/pdf/")
+    assert response.status_code == 422
+    assert response.data["fields"] == [{"field": "custom_terms", "accepted_slots": ["under_duration"]}]

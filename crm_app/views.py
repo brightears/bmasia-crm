@@ -30,7 +30,9 @@ from decimal import Decimal
 from xml.sax.saxutils import escape as xml_escape
 from crm_app.services.document_context import effective_billing_entity
 from crm_app.services.document_entity_filters import filter_document_entity
-from crm_app.contract_pdf_v2 import optional_clause_paragraph
+from crm_app.contract_pdf_v2 import (
+    clause_addition_markup, optional_clause_paragraph, split_clause_placements,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -3349,6 +3351,7 @@ and<br/><br/>
 
             # NUMBERED CLAUSES STRUCTURE (only when no template)
             clause_num = 1
+            additional_terms_text, placed_terms = split_clause_placements(contract.custom_terms)
 
             # Clause 1: Agreement Structure
             elements.append(Paragraph(
@@ -3382,7 +3385,8 @@ and<br/><br/>
 
             # Clause 3: Commencement Date
             elements.append(Paragraph(
-                f"<b>{clause_num}.</b> Commencement Date: {contract.start_date.strftime('%d %B %Y') if contract.start_date else '[Date]'}",
+                f"<b>{clause_num}.</b> Commencement Date: {contract.start_date.strftime('%d %B %Y') if contract.start_date else '[Date]'}"
+                f"{clause_addition_markup(placed_terms, 'commencement')}",
                 clause_style
             ))
             clause_num += 1
@@ -3391,12 +3395,14 @@ and<br/><br/>
             if contract.start_date and contract.end_date:
                 duration_text = _format_duration(contract.start_date, contract.end_date)
                 elements.append(Paragraph(
-                    f"<b>{clause_num}.</b> Duration: {duration_text} from {contract.start_date.strftime('%d %B %Y')} to {contract.end_date.strftime('%d %B %Y')}",
+                    f"<b>{clause_num}.</b> Duration: {duration_text} from {contract.start_date.strftime('%d %B %Y')} to {contract.end_date.strftime('%d %B %Y')}"
+                    f"{clause_addition_markup(placed_terms, 'duration')}",
                     clause_style
                 ))
             else:
                 elements.append(Paragraph(
-                    f"<b>{clause_num}.</b> Duration: As specified in schedule",
+                    f"<b>{clause_num}.</b> Duration: As specified in schedule"
+                    f"{clause_addition_markup(placed_terms, 'duration')}",
                     clause_style
                 ))
             clause_num += 1
@@ -3549,7 +3555,8 @@ and<br/><br/>
 
             payment_text = self._substitute_template_variables(payment_text, contract)
             elements.append(Paragraph(
-                f"<b>{clause_num}.</b> Terms of payment: {payment_text}",
+                f"<b>{clause_num}.</b> Terms of payment: {payment_text}"
+                f"{clause_addition_markup(placed_terms, 'payment')}",
                 clause_style
             ))
             payment_schedule = optional_clause_paragraph(
@@ -3643,7 +3650,8 @@ and<br/><br/>
 
             activation_text = self._substitute_template_variables(activation_text, contract)
             elements.append(Paragraph(
-                f"<b>{clause_num}.</b> Activation Date: {activation_text}",
+                f"<b>{clause_num}.</b> Activation Date: {activation_text}"
+                f"{clause_addition_markup(placed_terms, 'activation')}",
                 clause_style
             ))
             clause_num += 1
@@ -3651,7 +3659,7 @@ and<br/><br/>
             # Explicit customer-facing additions remain normal agreement prose;
             # internal notes are never a source of contractual wording.
             additional_terms = optional_clause_paragraph(
-                'Additional terms and conditions', contract.custom_terms,
+                'Additional terms and conditions', additional_terms_text,
                 body_style, allow_markup=True,
             )
             if additional_terms is not None:
@@ -4060,8 +4068,18 @@ and<br/><br/>
             )
             if optional_clause is not None:
                 elements.append(optional_clause)
+        # These formats have no numbered clauses; clause-placed wording keeps
+        # its clause name as the label.
+        additional_terms_text, placed_terms = split_clause_placements(contract.custom_terms)
+        for clause, label in (('commencement', 'Commencement'), ('duration', 'Duration'),
+                              ('payment', 'Terms of payment'), ('activation', 'Activation')):
+            placed_clause = optional_clause_paragraph(
+                label, placed_terms.get(clause, ''), body_style, allow_markup=True,
+            )
+            if placed_clause is not None:
+                elements.append(placed_clause)
         additional_terms = optional_clause_paragraph(
-            'Additional terms and conditions', contract.custom_terms,
+            'Additional terms and conditions', additional_terms_text,
             body_style, allow_markup=True,
         )
         if additional_terms is not None:
@@ -4464,8 +4482,18 @@ and<br/><br/>
         # FIX 2026-06-07 (Vera): was rendering contract.notes (INTERNAL-ONLY — leaks import/CRM-tracking
         # context onto the customer PDF). The participation path missed the 2026-05-05 principal-terms fix;
         # use contract.custom_terms, matching _generate_principal_terms_pdf and _generate_master_agreement_pdf.
+        # These formats have no numbered clauses; clause-placed wording keeps
+        # its clause name as the label.
+        additional_terms_text, placed_terms = split_clause_placements(contract.custom_terms)
+        for clause, label in (('commencement', 'Commencement'), ('duration', 'Duration'),
+                              ('payment', 'Terms of payment'), ('activation', 'Activation')):
+            placed_clause = optional_clause_paragraph(
+                label, placed_terms.get(clause, ''), body_style, allow_markup=True,
+            )
+            if placed_clause is not None:
+                elements.append(placed_clause)
         additional_terms = optional_clause_paragraph(
-            'Additional terms and conditions', contract.custom_terms,
+            'Additional terms and conditions', additional_terms_text,
             body_style, allow_markup=True,
         )
         if additional_terms is not None:

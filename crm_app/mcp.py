@@ -95,7 +95,10 @@ to recover the raw PDF. On failure returns `{"error": "..."}`.
   get_commercial_document_context before and after an authorized change.
 - **Tailoring**: use quote line items, payment_schedule and terms_conditions;
   contract preamble_custom, payment_custom, activation_custom, custom_terms,
-  payment_schedule, service items/locations and signatories. Saved templates are
+  payment_schedule, service items/locations and signatories. custom_terms prints
+  as "Additional terms and conditions" after the numbered clauses; a line
+  "[under: duration]" (or commencement, payment, activation) puts the wording
+  after it inside that clause instead, e.g. clause 4 Duration. Saved templates are
   reusable starting points, not a mandatory catalogue of permitted commercial deals.
   Corporate full-template edits must use that template's explicit editable slots;
   if a slot is missing, follow the PDF error's clarification instead of silently

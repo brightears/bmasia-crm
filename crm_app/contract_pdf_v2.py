@@ -102,6 +102,42 @@ def _template_issuer_conflicts(content, issuer):
     return False
 
 
+# Customer wording that belongs inside a numbered principal-terms clause, not
+# in "Additional terms and conditions" after clause 8. 12 Oct 2026: The Naka
+# Phuket wanted its e-signature sentences under clause 4 (Duration), as in the
+# prior agreement. In custom_terms, a line "[under: duration]" starts a block
+# for that clause; text before the first marker stays an additional term.
+# Other bracketed lines are ordinary wording and print as written.
+CLAUSE_PLACEMENTS = ('commencement', 'duration', 'payment', 'activation')
+_CLAUSE_PLACEMENT_MARKER = re.compile(
+    r'^[ \t]*\[\s*under\s*:\s*(' + '|'.join(CLAUSE_PLACEMENTS) + r')\s*\][ \t]*(?:\r?\n|$)',
+    re.I | re.M,
+)
+
+
+def split_clause_placements(value):
+    """Split custom_terms into (additional terms, {clause: wording})."""
+    value = value or ''
+    parts = _CLAUSE_PLACEMENT_MARKER.split(value)
+    if len(parts) == 1:
+        return value, {}
+    placed = {}
+    for name, body in zip(parts[1::2], parts[2::2]):
+        body = body.strip()
+        if body:
+            name = name.lower()
+            placed[name] = placed[name] + '\n' + body if name in placed else body
+    return parts[0].strip(), placed
+
+
+def clause_addition_markup(placed, clause):
+    """Markup appended inside a numbered clause, on its own line."""
+    value = placed.get(clause, '')
+    if not clean_text(value).strip():
+        return ''
+    return '<br/>' + _markup(value).replace('\n', '<br/>')
+
+
 def full_template_source(contract):
     """Select an explicit full-body override without mutating its shared template.
 
@@ -166,6 +202,13 @@ def tailored_template_content(contract, resolved_content=None):
             if not value and slot == '{{payment_terms}}':
                 continue
             content = content.replace(slot, html_text(value) if getattr(contract, field, '') else _markup(value))
+    additional_terms, placed = split_clause_placements(getattr(contract, 'custom_terms', ''))
+    for clause in CLAUSE_PLACEMENTS:
+        slot = f'{{{{under_{clause}}}}}'
+        value = placed.get(clause, '')
+        if value and slot not in content and not already_present(value):
+            missing.append({'field': 'custom_terms', 'accepted_slots': [f'under_{clause}']})
+        content = content.replace(slot, html_text(value) if value else '')
     if missing:
         raise ContractTailoringClarification(missing)
 
@@ -185,7 +228,7 @@ def tailored_template_content(contract, resolved_content=None):
         ('custom_terms', ('additional_terms', 'custom_terms'), 'Additional terms and conditions'),
         ('payment_schedule', ('payment_schedule',), 'Payment schedule'),
     ):
-        value = getattr(contract, field, '') or ''
+        value = (additional_terms if field == 'custom_terms' else getattr(contract, field, '')) or ''
         found = [f'{{{{{slot}}}}}' for slot in slots if f'{{{{{slot}}}}}' in content]
         for slot in found:
             content = content.replace(slot, html_text(value) if value.strip() else '')
