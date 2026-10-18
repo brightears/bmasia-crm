@@ -207,6 +207,42 @@ def test_quote_internal_notes_are_never_rendered_but_terms_remain_visible():
     assert "CUSTOMER REMARKS" not in joined
 
 
+def test_hardware_only_one_time_quote_omits_inapplicable_contract_term():
+    quote = sample_quote()
+    hardware = quote.line_items.all()[-1]
+    hardware.unit_price = Decimal("250")
+    hardware.unit_value = None
+    hardware.line_total = Decimal("500")
+    quote.line_items = type(quote.line_items)([hardware])
+    quote.subtotal = hardware.line_total
+    quote.total_value = hardware.line_total
+    quote.billing_frequency = "one-time"
+
+    joined = "\n".join(_page_texts(_reader(_quote_bytes(quote))))
+
+    assert "Currency / term" not in joined
+    assert "USD / 1 year" not in joined
+    assert "Contract term: 1 year" not in joined
+    assert "CURRENCY" in joined
+    assert "USD" in joined
+    assert "Billing: One-time" in joined
+
+
+def test_one_time_subscription_quote_keeps_its_contract_period():
+    quote = sample_quote()
+    subscription = quote.line_items.all()[0]
+    quote.line_items = type(quote.line_items)([subscription])
+    quote.subtotal = subscription.line_total
+    quote.total_value = subscription.line_total
+    quote.billing_frequency = "one-time"
+    quote.contract_duration_months = 3
+
+    joined = "\n".join(_page_texts(_reader(_quote_bytes(quote))))
+
+    assert "USD / 3 months" in joined
+    assert "Contract term: 3 months" in joined
+
+
 def test_invoice_internal_notes_are_never_rendered_but_payment_terms_remain_visible():
     invoice = sample_invoice()
     invoice.notes = "INTERNAL-ONLY-INVOICE-NOTE"

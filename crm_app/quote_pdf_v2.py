@@ -143,18 +143,27 @@ def build_quote_pdf_v2(
     duration_months = quote.contract_duration_months or 12
     billing_frequency = getattr(quote, "billing_frequency", "annual") or "annual"
     billing_label = BILLING_FREQUENCY_DISPLAY.get(billing_frequency, billing_frequency.title())
+    line_items = list(quote.line_items.all())
+    show_contract_term = billing_frequency != "one-time" or any(
+        is_subscription_product(getattr(item, "product_service", ""))
+        for item in line_items
+    )
 
     story = document_intro(
         "Quotation",
         "A clear view of the services, commercial terms and payment details.",
         styles,
     )
-    story.append(metadata_table([
+    metadata = [
         ("Quote number", quote.quote_number),
         ("Issued", _format_date(quote.valid_from)),
         ("Valid until", _format_date(quote.valid_until)),
-        ("Currency / term", f"{quote.currency} / {format_duration(duration_months)}"),
-    ], styles))
+    ]
+    if show_contract_term:
+        metadata.append(("Currency / term", f"{quote.currency} / {format_duration(duration_months)}"))
+    else:
+        metadata.append(("Currency", quote.currency))
+    story.append(metadata_table(metadata, styles))
 
     issuer_lines = [entity["name"], entity["address"], f"Phone: {entity['phone']}"]
     if entity.get("tax"):
@@ -183,14 +192,15 @@ def build_quote_pdf_v2(
     ))
 
     story.extend(section_start("01", "Services and pricing", styles, minimum_following_height=125))
-    story.append(Paragraph(
-        f"<b>Billing:</b> {escape(clean_text(billing_label))}"
-        f" &nbsp;&nbsp;|&nbsp;&nbsp; <b>Contract term:</b> {escape(clean_text(format_duration(duration_months)))}",
-        styles["body"],
-    ))
+    billing_markup = f"<b>Billing:</b> {escape(clean_text(billing_label))}"
+    if show_contract_term:
+        billing_markup += (
+            " &nbsp;&nbsp;|&nbsp;&nbsp; <b>Contract term:</b> "
+            f"{escape(clean_text(format_duration(duration_months)))}"
+        )
+    story.append(Paragraph(billing_markup, styles["body"]))
     story.append(Spacer(1, 7))
 
-    line_items = list(quote.line_items.all())
     multi_zone = sum(
         (_decimal_value(getattr(item, "quantity", 0)) for item in line_items if is_subscription_product(getattr(item, "product_service", ""))),
         Decimal("0"),
