@@ -52,7 +52,8 @@ import {
   ConfirmationNumber,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Company, Contact, Opportunity, Contract, Zone, Ticket } from '../types';
+import { Company, Contact, Opportunity, Contract, ContractAddendum, Zone, Ticket } from '../types';
+import { describeChange } from '../components/ContractAddenda';
 import ApiService from '../services/api';
 import CompanyForm from '../components/CompanyForm';
 import ContactForm from '../components/ContactForm';
@@ -98,6 +99,7 @@ const CompanyDetail: React.FC = () => {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
+  const [addenda, setAddenda] = useState<ContractAddendum[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
@@ -125,17 +127,19 @@ const CompanyDetail: React.FC = () => {
       setCompany(companyData);
 
       // Load related data
-      const [contactsResponse, opportunitiesResponse, contractsResponse, zonesResponse, ticketsResponse] = await Promise.all([
+      const [contactsResponse, opportunitiesResponse, contractsResponse, zonesResponse, ticketsResponse, addendaResponse] = await Promise.all([
         ApiService.getContacts({ company: id }),
         ApiService.getOpportunities({ company: id }),
         ApiService.getContracts({ company: id }),
         ApiService.getZonesByCompany(id),
         ApiService.getTickets({ company: id, page_size: 100 }),
+        ApiService.getContractAddenda({ contract__company: id }).catch(() => [] as ContractAddendum[]),
       ]);
 
       setContacts(contactsResponse.results);
       setOpportunities(opportunitiesResponse.results);
       setContracts(contractsResponse.results);
+      setAddenda(addendaResponse);
       setZones(zonesResponse);
       setTickets(ticketsResponse.results || []);
     } catch (err: any) {
@@ -655,6 +659,41 @@ const CompanyDetail: React.FC = () => {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                 Contracts will appear here when opportunities are converted to deals
               </Typography>
+            </Box>
+          )}
+          {addenda.length > 0 && (
+            <Box sx={{ mt: 3 }}>
+              <Typography variant="subtitle1" sx={{ mb: 1 }}>Addenda</Typography>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Addendum</TableCell>
+                      <TableCell>Status</TableCell>
+                      <TableCell>Effective</TableCell>
+                      <TableCell>Changes</TableCell>
+                      <TableCell>Actions</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {addenda.map((addendum) => (
+                      <TableRow key={addendum.id} hover>
+                        <TableCell>{addendum.addendum_number}</TableCell>
+                        <TableCell><Chip label={addendum.status} size="small" /></TableCell>
+                        <TableCell>{new Date(addendum.effective_date).toLocaleDateString()}</TableCell>
+                        <TableCell>{addendum.changes.map(describeChange).join('; ')}</TableCell>
+                        <TableCell>
+                          <Tooltip title="View Contract">
+                            <IconButton size="small" onClick={() => navigate(`/contracts/${addendum.contract}`)}>
+                              <Assignment />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
             </Box>
           )}
         </TabPanel>

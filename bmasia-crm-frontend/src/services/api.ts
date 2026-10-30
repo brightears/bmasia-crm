@@ -6,6 +6,7 @@ import {
   EnrollInSequenceResponse, SegmentFilterCriteria, Zone, PreviewZone, ContractZone, Device,
   ClientTechDetail,
   ContractTemplate, ServicePackageItem, CorporatePdfTemplate, ContractDocument,
+  ContractAddendum, ContractAddendumInput,
   SeasonalTriggerDate,
   Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry,
   APAgingReport, APAgingSummary, OverdueExpense, MonthlyExpenseSummary,
@@ -1386,6 +1387,40 @@ class ApiService {
 
   async getCorporatePdfTemplates(params?: any): Promise<ApiResponse<any>> {
     const response = await authApi.get('/corporate-pdf-templates/', { params });
+    return response.data;
+  }
+
+  // Contract addenda (CRM-007)
+  async getContractAddenda(params: { contract?: string; contract__company?: string }): Promise<ContractAddendum[]> {
+    const response = await authApi.get('/contract-addenda/', { params: { ...params, page_size: 100 } });
+    return response.data.results || response.data || [];
+  }
+
+  async createContractAddendum(contractId: string, data: ContractAddendumInput): Promise<ContractAddendum> {
+    const response = await authApi.post<ContractAddendum>('/contract-addenda/', { contract: contractId, ...data });
+    return response.data;
+  }
+
+  async updateContractAddendum(id: string, data: ContractAddendumInput, expectedVersion: string): Promise<ContractAddendum> {
+    const response = await authApi.patch<ContractAddendum>(`/contract-addenda/${id}/`, {
+      ...data, expected_version: expectedVersion,
+    });
+    return response.data;
+  }
+
+  async setContractAddendumStatus(
+    id: string, status: 'Sent' | 'Signed' | 'Cancelled', expectedVersion: string, date?: string,
+  ): Promise<ContractAddendum> {
+    const path = { Sent: 'mark-sent', Signed: 'mark-signed', Cancelled: 'cancel' }[status];
+    const body: Record<string, string> = { expected_version: expectedVersion };
+    if (date && status === 'Sent') body.sent_date = date;
+    if (date && status === 'Signed') body.signed_date = date;
+    const response = await authApi.post<ContractAddendum>(`/contract-addenda/${id}/${path}/`, body);
+    return response.data;
+  }
+
+  async downloadContractAddendumPDF(id: string): Promise<Blob> {
+    const response = await authApi.get(`/contract-addenda/${id}/pdf/`, { responseType: 'blob' });
     return response.data;
   }
 

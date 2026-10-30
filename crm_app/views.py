@@ -70,7 +70,7 @@ def _unicode_base_fonts(styles):
 
 from .models import (
     User, Company, Contact, Note, Task, AuditLog,
-    Opportunity, OpportunityActivity, Contract, Invoice, InvoiceLineItem, ContractZone,
+    Opportunity, OpportunityActivity, Contract, ContractAddendum, Invoice, InvoiceLineItem, ContractZone,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailTemplate, EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
     CustomerSegment, EmailCampaign, CampaignRecipient,
@@ -90,7 +90,7 @@ from .models import (
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
     TaskSerializer, OpportunitySerializer, OpportunityActivitySerializer,
-    ContractSerializer, ContractZoneSerializer, InvoiceSerializer, AuditLogSerializer,
+    ContractSerializer, ContractAddendumSerializer, ContractZoneSerializer, InvoiceSerializer, AuditLogSerializer,
     LoginSerializer, DashboardStatsSerializer, BulkOperationSerializer,
     QuoteSerializer, QuoteLineItemSerializer, QuoteAttachmentSerializer, QuoteActivitySerializer,
     EmailTemplateSerializer, EmailSequenceSerializer, SequenceStepSerializer,
@@ -6052,6 +6052,81 @@ and<br/><br/>
         active_zones = ContractZone.objects.filter(contract=contract, is_active=True)
         serializer = ContractZoneSerializer(active_zones, many=True)
         return Response(serializer.data)
+
+
+class ContractAddendumViewSet(BaseModelViewSet):
+    """Addenda to numbered contracts (CRM-007).
+
+    POST /contract-addenda/ {contract, effective_date, changes, ...} creates a
+    Draft numbered <contract>-A<n>. PATCH edits a Draft. Status moves only
+    through mark-sent / mark-signed / cancel; mark-signed applies the changes
+    to the contract. Addenda are never deleted: cancel instead.
+    """
+    queryset = ContractAddendum.objects.select_related('contract', 'contract__company', 'created_by').all()
+    serializer_class = ContractAddendumSerializer
+    filterset_fields = ['contract', 'status', 'contract__company']
+    search_fields = ['addendum_number', 'contract__company__name']
+    ordering_fields = ['created_at', 'effective_date', 'addendum_number']
+    ordering = ['-created_at']
+    http_method_names = ['get', 'post', 'patch', 'head', 'options']
+
+    def _respond(self, run, success_status=status.HTTP_200_OK):
+        from crm_app.services.contract_addenda import AddendumError
+        try:
+            addendum = run()
+        except AddendumError as exc:
+            code = {'not_found': 404, 'version_conflict': 409}.get(exc.code, 400)
+            return Response(exc.payload(), status=code)
+        addendum.refresh_from_db()
+        return Response(self.get_serializer(addendum).data, status=success_status)
+
+    def create(self, request, *args, **kwargs):
+        from crm_app.services.contract_addenda import create_addendum
+        fields = {key: value for key, value in request.data.items() if key != 'contract'}
+        return self._respond(lambda: create_addendum(request.data.get('contract'), fields, user=request.user),
+                             status.HTTP_201_CREATED)
+
+    def partial_update(self, request, *args, **kwargs):
+        from crm_app.services.contract_addenda import update_draft
+        fields = {key: value for key, value in request.data.items() if key != 'expected_version'}
+        return self._respond(lambda: update_draft(
+            kwargs['pk'], fields, expected_version=request.data.get('expected_version'), user=request.user))
+
+    @action(detail=True, methods=['post'], url_path='mark-sent')
+    def mark_sent(self, request, pk=None):
+        from crm_app.services.contract_addenda import mark_sent
+        return self._respond(lambda: mark_sent(
+            pk, sent_date=request.data.get('sent_date'),
+            expected_version=request.data.get('expected_version'), user=request.user))
+
+    @action(detail=True, methods=['post'], url_path='mark-signed')
+    def mark_signed(self, request, pk=None):
+        from crm_app.services.contract_addenda import mark_signed
+        return self._respond(lambda: mark_signed(
+            pk, signed_date=request.data.get('signed_date'),
+            expected_version=request.data.get('expected_version'), user=request.user))
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        from crm_app.services.contract_addenda import cancel
+        return self._respond(lambda: cancel(
+            pk, expected_version=request.data.get('expected_version'), user=request.user))
+
+    @action(detail=True, methods=['get'])
+    def pdf(self, request, pk=None):
+        from django.conf import settings
+        from crm_app.addendum_pdf import build_addendum_pdf
+        addendum = self.get_object()
+        try:
+            data = build_addendum_pdf(addendum, logo_path=os.path.join(
+                settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png'))
+        except ValueError as exc:
+            return Response({'error': str(exc), 'code': 'UNSUPPORTED_BILLING_ENTITY'}, status=422)
+        response = HttpResponse(data, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="Addendum_{addendum.addendum_number}.pdf"'
+        self.log_action('VIEW', addendum, {'action': 'Addendum PDF generated',
+                                           'addendum_number': addendum.addendum_number})
+        return response
 
 
 class InvoiceViewSet(BaseModelViewSet):

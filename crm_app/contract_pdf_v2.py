@@ -672,7 +672,6 @@ def _flowables(source, width, styles, *, cell=False):
 def build_contract_pdf(contract, body, *, title, logo_path=None, preview=False):
     styles = document_styles()
     entity = entity_profile_for(effective_billing_entity(contract))
-    company = contract.company
     document_id = contract.contract_number or ''
     if document_id.startswith('DRAFT-'):
         document_id = ''
@@ -684,6 +683,18 @@ def build_contract_pdf(contract, body, *, title, logo_path=None, preview=False):
         ('Service period', f'{start} - {end}'),
         ('Currency', contract.currency),
     ], styles))
+    story.append(contract_party_cards(contract, entity, styles))
+    story.append(Spacer(1, 12))
+    story.extend(_flowables(body, CONTENT_WIDTH, styles))
+    while story and isinstance(story[-1], (Spacer, PageBreak)):
+        story.pop()
+    return build_document_pdf(story, document_title=title, document_id=document_id,
+                              entity=entity, logo_path=logo_path, preview=preview)
+
+
+def contract_party_cards(contract, entity, styles):
+    """The "Issued by" / "Prepared for" cards shared by agreements and addenda."""
+    company = contract.company
     issuer_lines = [entity['name'], entity['address'], f"Phone: {entity['phone']}"]
     if entity.get('tax'):
         issuer_lines.append(f"Tax ID: {entity['tax']}")
@@ -696,10 +707,4 @@ def build_contract_pdf(contract, body, *, title, logo_path=None, preview=False):
     customer_lines = [company.legal_entity_name or company.name, address]
     if getattr(company, 'tax_id', ''):
         customer_lines.append(f'Tax ID: {company.tax_id}')
-    story.append(identity_cards('Issued by', issuer_lines, 'Prepared for', customer_lines, styles))
-    story.append(Spacer(1, 12))
-    story.extend(_flowables(body, CONTENT_WIDTH, styles))
-    while story and isinstance(story[-1], (Spacer, PageBreak)):
-        story.pop()
-    return build_document_pdf(story, document_title=title, document_id=document_id,
-                              entity=entity, logo_path=logo_path, preview=preview)
+    return identity_cards('Issued by', issuer_lines, 'Prepared for', customer_lines, styles)
