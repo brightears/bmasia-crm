@@ -22,7 +22,7 @@ from crm_app.models import (
     Company, Contact, Contract, Invoice, Quote, Opportunity, AuditLog,
     Task, Zone, ContractTemplate, ContractLineItem, InvoiceLineItem, QuoteLineItem,
     ContractServiceLocation, ClientTechDetail, Device, Ticket, KBArticle,
-    ContractSendReceiptUse, QuoteSendReceiptUse,
+    ContractSendReceiptUse, QuoteSendReceiptUse, ContractAddendum,
 )
 from crm_app.contract_send_receipts import (
     ReceiptVerificationError, verify_signed_contract_send_context,
@@ -82,6 +82,7 @@ to recover the raw PDF. On failure returns `{"error": "..."}`.
   request for the renewal pack; marked "not a tax invoice"; creates no Invoice/AR/tax record)
 - `generate_quote_pdf(id)` — generate quote PDF
 - `generate_invoice_pdf(id)` — generate invoice PDF
+- `generate_addendum_pdf(id)` — render a contract addendum PDF
 - `get_commercial_document_context(collection, id)` — read current issuer,
   currency, document fields and writable field names before tailoring a draft.
 
@@ -117,6 +118,12 @@ to recover the raw PDF. On failure returns `{"error": "..."}`.
   Existing rows omitted from that complete list are deleted only in this explicit
   mode, and the whole update rolls back if pricing validation fails.
 - Contract numbers are auto-generated (read-only).
+- **Addenda**: to change a numbered contract after it was Sent (add/remove zones,
+  new dates, new client name/address, an added or replaced clause, bank details),
+  use `create_contract_addendum` — not a new contract and not a hand-made PDF.
+  Its number is the contract number + -A<n>. Status Draft → Sent → Signed (or
+  Cancelled) via `set_contract_addendum_status`; the contract and company change
+  only when it is Signed.
 """)
 
 
@@ -450,6 +457,23 @@ class InvoiceLineItemQuery(ModelQueryToolset):
     ]
     search_fields = ['description', 'product_service']
     extra_instructions = "Line items attached to invoices. Use to verify what's on an invoice PDF or audit nested-write results."
+
+
+class ContractAddendumQuery(ModelQueryToolset):
+    model = ContractAddendum
+    fields = [
+        'id', 'contract', 'sequence', 'addendum_number', 'status', 'effective_date', 'changes',
+        'customer_signatory_name', 'customer_signatory_title', 'bmasia_signatory_name',
+        'bmasia_signatory_title', 'notes', 'sent_date', 'signed_date', 'applied_at',
+        'applied_snapshot', 'created_at', 'updated_at',
+    ]
+    search_fields = ['addendum_number', 'notes']
+    extra_instructions = (
+        "Addenda to numbered contracts (number = contract number + -A<n>). Status: Draft, Sent, "
+        "Signed, Cancelled. Changes apply to the contract only when Signed; applied_snapshot holds "
+        "the before/after values. Write through create_contract_addendum, update_contract_addendum "
+        "and set_contract_addendum_status, never through create_record."
+    )
 
 
 # ============================================================
@@ -2222,6 +2246,152 @@ def generate_invoice_pdf(id: str) -> str:
     viewset = InvoiceViewSet.as_view({'get': 'pdf'})
     response = viewset(request, pk=id)
     return _pdf_response_payload(response, f'invoice_{id}.pdf')
+
+
+def _addendum_result(addendum):
+    from crm_app.services.contract_addenda import value_summary
+    summary = value_summary(addendum)
+    return {
+        'id': str(addendum.id),
+        'addendum_number': addendum.addendum_number,
+        'contract_id': str(addendum.contract_id),
+        'contract_number': addendum.contract.contract_number,
+        'status': addendum.status,
+        'effective_date': addendum.effective_date.isoformat(),
+        'changes': addendum.changes,
+        'value_summary': None if summary is None else {key: str(value) for key, value in summary.items()},
+        'expected_version': addendum.updated_at.isoformat(),
+    }
+
+
+def _addendum_call(run):
+    from crm_app.services.contract_addenda import AddendumError
+    try:
+        addendum = run()
+    except AddendumError as exc:
+        return json.dumps({'ok': False, **exc.payload()})
+    addendum.refresh_from_db()
+    return json.dumps({'ok': True, **_addendum_result(addendum)})
+
+
+def _addendum_fields(data):
+    try:
+        fields = json.loads(data or '{}')
+    except json.JSONDecodeError as exc:
+        raise ValueError(f'Invalid JSON: {exc}')
+    if not isinstance(fields, dict):
+        raise ValueError('data must be a JSON object.')
+    return fields
+
+
+@mcp_server.tool()
+def create_contract_addendum(contract_id: str, data: str) -> str:
+    """Create a Draft addendum to a numbered Sent/Active/Renewed contract.
+
+    The CRM numbers it <contract number>-A<n>, copies the parties from the
+    contract, and changes nothing on the contract until it is marked Signed.
+
+    data (JSON object): effective_date (YYYY-MM-DD, default today), changes
+    (list, required), optional customer_signatory_name/title and
+    bmasia_signatory_name/title (blank uses the contract's), notes (internal).
+
+    Change items, by "type":
+    - zone_add: name, platform (soundtrack|beatbreeze|custom), price (amount
+      charged under this addendum), optional annual_price, start_date,
+      custom_service_name (custom only). Adds a zone; value rises by price.
+    - zone_remove: service_location_id (a row on this contract), credit
+      (value drops by this; "0" allowed). Not for line-item-priced contracts.
+    - dates: start_date and/or end_date.
+    - party: legal_name and/or address {address_line1, address_line2, city,
+      state, postal_code, country}; applies to the company when Signed.
+    - clause: action add|replace, clause_ref (required to replace), text.
+    - bank_details: optional intro text; the issuer's bank details are copied
+      in by the CRM. Never type bank numbers.
+
+    Returns {"ok": true, id, addendum_number, expected_version, ...} or
+    {"ok": false, "error", "code", "details"}.
+    """
+    _agent_gate.observe(tool='create_contract_addendum', verb='create', collection='contractaddendum',
+                        record_id=contract_id, data=data)
+    from crm_app.services.contract_addenda import create_addendum
+    try:
+        fields = _addendum_fields(data)
+    except ValueError as exc:
+        return json.dumps({'ok': False, 'error': str(exc), 'code': 'invalid'})
+    return _addendum_call(lambda: create_addendum(contract_id, fields, user=_agent_gate._current_user()))
+
+
+@mcp_server.tool()
+def update_contract_addendum(id: str, data: str, expected_version: str) -> str:
+    """Edit a Draft addendum. expected_version is its current updated_at
+    (returned by every addendum tool). data takes the same fields as
+    create_contract_addendum; a supplied changes list replaces the old one."""
+    _agent_gate.observe(tool='update_contract_addendum', verb='update', collection='contractaddendum',
+                        record_id=id, data=data, expected_version=expected_version)
+    from crm_app.services.contract_addenda import update_draft
+    try:
+        fields = _addendum_fields(data)
+    except ValueError as exc:
+        return json.dumps({'ok': False, 'error': str(exc), 'code': 'invalid'})
+    if not expected_version:
+        return json.dumps({'ok': False, 'error': 'expected_version is required.', 'code': 'invalid'})
+    return _addendum_call(lambda: update_draft(
+        id, fields, expected_version=expected_version, user=_agent_gate._current_user()))
+
+
+@mcp_server.tool()
+def set_contract_addendum_status(id: str, status: str, expected_version: str, date: str = "") -> str:
+    """Move an addendum to Sent, Signed or Cancelled.
+
+    Draft -> Sent (date = sent date, default today); Sent -> Signed (date =
+    signed date) applies the changes to the contract and company in one
+    locked write, and refuses if the contract total would stop matching its
+    zones; Draft/Sent -> Cancelled. Signed and Cancelled are final.
+    Record Signed only when the customer's signed copy is in hand.
+    """
+    _agent_gate.observe(tool='set_contract_addendum_status', verb='update', collection='contractaddendum',
+                        record_id=id, data={'status': status}, expected_version=expected_version)
+    from crm_app.services import contract_addenda
+    if not expected_version:
+        return json.dumps({'ok': False, 'error': 'expected_version is required.', 'code': 'invalid'})
+    user = _agent_gate._current_user()
+    if status == 'Sent':
+        run = lambda: contract_addenda.mark_sent(id, sent_date=date or None, expected_version=expected_version, user=user)
+    elif status == 'Signed':
+        run = lambda: contract_addenda.mark_signed(id, signed_date=date or None, expected_version=expected_version, user=user)
+    elif status == 'Cancelled':
+        run = lambda: contract_addenda.cancel(id, expected_version=expected_version, user=user)
+    else:
+        return json.dumps({'ok': False, 'error': 'status must be Sent, Signed or Cancelled.', 'code': 'invalid'})
+    return _addendum_call(run)
+
+
+@mcp_server.tool()
+def generate_addendum_pdf(id: str) -> str:
+    """Render an addendum PDF (same letterhead and signing area as its contract).
+
+    Returns JSON string: {"filename": str, "size": int, "content_b64": str}.
+    On failure returns {"error": "..."}. Does not change status or send anything.
+    """
+    from crm_app.addendum_pdf import build_addendum_pdf
+    from crm_app.services.contract_addenda import AddendumError
+    from django.conf import settings
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    import os
+    try:
+        addendum = ContractAddendum.objects.select_related('contract', 'contract__company').get(id=id)
+    except (ContractAddendum.DoesNotExist, ValueError, DjangoValidationError):
+        return json.dumps({"error": f"Addendum with ID '{id}' not found."})
+    try:
+        data = build_addendum_pdf(addendum, logo_path=os.path.join(
+            settings.BASE_DIR, 'crm_app', 'static', 'crm_app', 'images', 'bmasia_logo.png'))
+    except (AddendumError, ValueError) as exc:
+        return json.dumps({"error": str(exc)})
+    return json.dumps({
+        "filename": f"Addendum_{addendum.addendum_number}.pdf",
+        "size": len(data),
+        "content_b64": base64.b64encode(data).decode('ascii'),
+    })
 
 
 def _get_system_user():

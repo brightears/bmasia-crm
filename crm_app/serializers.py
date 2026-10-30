@@ -7,7 +7,7 @@ from django.db import transaction
 from django.db.models import Sum
 from .models import (
     User, Company, Contact, Note, Task, TaskComment, AuditLog,
-    Opportunity, OpportunityActivity, Contract, ContractLineItem, Invoice, InvoiceLineItem, Zone, ContractZone,
+    Opportunity, OpportunityActivity, Contract, ContractAddendum, ContractLineItem, Invoice, InvoiceLineItem, Zone, ContractZone,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailCampaign, CampaignRecipient, EmailTemplate,
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
@@ -2783,3 +2783,42 @@ class AIEmailDraftSerializer(serializers.ModelSerializer):
 
     def get_step_number(self, obj):
         return obj.execution.step.step_number
+
+
+class ContractAddendumSerializer(serializers.ModelSerializer):
+    """Read shape for contract addenda. Writes go through
+    crm_app.services.contract_addenda so every path validates and numbers alike."""
+    contract_number = serializers.CharField(source='contract.contract_number', read_only=True)
+    contract_status = serializers.CharField(source='contract.status', read_only=True)
+    company = serializers.UUIDField(source='contract.company_id', read_only=True)
+    company_name = serializers.CharField(source='contract.company.name', read_only=True)
+    currency = serializers.CharField(source='contract.currency', read_only=True)
+    value_summary = serializers.SerializerMethodField()
+    version = serializers.SerializerMethodField()
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ContractAddendum
+        fields = [
+            'id', 'contract', 'contract_number', 'contract_status', 'company', 'company_name',
+            'currency', 'sequence', 'addendum_number', 'status', 'effective_date', 'changes',
+            'customer_signatory_name', 'customer_signatory_title',
+            'bmasia_signatory_name', 'bmasia_signatory_title', 'notes',
+            'sent_date', 'signed_date', 'applied_at', 'applied_snapshot', 'value_summary',
+            'version', 'created_by', 'created_by_name', 'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
+
+    def get_value_summary(self, obj):
+        from crm_app.services.contract_addenda import value_summary
+        summary = value_summary(obj)
+        if summary is None:
+            return None
+        return {key: str(value) for key, value in summary.items()}
+
+    def get_version(self, obj):
+        return obj.updated_at.isoformat() if obj.updated_at else None
+
+    def get_created_by_name(self, obj):
+        user = obj.created_by
+        return (user.get_full_name() or user.username) if user else ''

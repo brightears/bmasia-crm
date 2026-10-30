@@ -410,6 +410,7 @@ export interface ServiceLocation {
   platform: 'soundtrack' | 'beatbreeze' | 'custom';
   custom_service_name?: string;
   sort_order?: number;
+  price?: number | string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -1341,6 +1342,67 @@ export interface CorporatePdfTemplate {
   use_corporate_branding: boolean;
   company: string; // FK to corporate parent company
   company_name?: string;
+}
+
+export type AddendumStatus = 'Draft' | 'Sent' | 'Signed' | 'Cancelled';
+export type AddendumPlatform = 'soundtrack' | 'beatbreeze' | 'custom';
+
+export interface AddendumAddress {
+  address_line1?: string;
+  address_line2?: string;
+  city?: string;
+  state?: string;
+  postal_code?: string;
+  country?: string;
+}
+
+export type AddendumChange =
+  | { type: 'zone_add'; name: string; platform: AddendumPlatform; custom_service_name?: string;
+      price: string; annual_price?: string | null; start_date?: string }
+  | { type: 'zone_remove'; service_location_id: string; credit: string; name?: string; platform?: AddendumPlatform }
+  | { type: 'dates'; start_date?: string | null; end_date?: string | null;
+      previous_start_date?: string | null; previous_end_date?: string | null }
+  | { type: 'party'; legal_name?: string | null; address?: AddendumAddress | null;
+      previous_legal_name?: string; previous_address?: AddendumAddress }
+  | { type: 'clause'; action: 'add' | 'replace'; clause_ref?: string; text: string }
+  | { type: 'bank_details'; text?: string; beneficiary?: string; bank?: string; swift?: string; account?: string };
+
+export interface ContractAddendum {
+  id: string;
+  contract: string;
+  contract_number: string;
+  contract_status: string;
+  company: string;
+  company_name: string;
+  currency: string;
+  sequence: number;
+  addendum_number: string;
+  status: AddendumStatus;
+  effective_date: string;
+  changes: AddendumChange[];
+  customer_signatory_name: string;
+  customer_signatory_title: string;
+  bmasia_signatory_name: string;
+  bmasia_signatory_title: string;
+  notes: string;
+  sent_date: string | null;
+  signed_date: string | null;
+  applied_at: string | null;
+  value_summary: { currency: string; before: string; change: string; after: string } | null;
+  version: string;
+  created_by_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContractAddendumInput {
+  effective_date?: string;
+  changes?: AddendumChange[];
+  customer_signatory_name?: string;
+  customer_signatory_title?: string;
+  bmasia_signatory_name?: string;
+  bmasia_signatory_title?: string;
+  notes?: string;
 }
 
 export interface ContractDocument {
