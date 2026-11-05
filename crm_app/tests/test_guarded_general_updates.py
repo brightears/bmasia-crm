@@ -10,9 +10,9 @@ import json
 import pytest
 
 from crm_app.mcp import update_record
-from crm_app.models import AuditLog, Company, Contract, ContractServiceLocation, Opportunity, Quote
+from crm_app.models import AuditLog, Company, Contact, Contract, ContractServiceLocation, Opportunity, Quote
 from crm_app.serializers import (
-    CompanySerializer, ContractSerializer, OpportunitySerializer, QuoteSerializer,
+    CompanySerializer, ContactSerializer, ContractSerializer, OpportunitySerializer, QuoteSerializer,
 )
 
 
@@ -85,6 +85,33 @@ def test_guarded_update_keeps_optimistic_lock():
     company.refresh_from_db()
     assert company.legal_entity_name == ''
     assert not AuditLog.objects.filter(record_id=str(company.pk)).exists()
+
+
+@pytest.mark.django_db
+def test_contact_mail_flags_can_be_disabled_under_the_lock():
+    company = Company.objects.create(name='Mail preference company', billing_entity='BMAsia Limited')
+    contact = Contact.objects.create(
+        company=company, name='Mail preference contact', email='mail-preference@example.test',
+    )
+    observed = ContactSerializer(contact).data
+    flags = {
+        'receives_notifications',
+        'receives_renewal_emails',
+        'receives_seasonal_emails',
+        'receives_payment_emails',
+        'receives_quarterly_emails',
+        'receives_soundtrack_alerts',
+        'receives_quote_emails',
+        'receives_contract_emails',
+        'receives_invoice_emails',
+    }
+    patch = {flag: False for flag in flags}
+
+    result = _guarded('contact', contact, observed, patch)
+
+    assert result['updated'] is True, result
+    contact.refresh_from_db()
+    assert all(getattr(contact, flag) is False for flag in flags)
 
 
 @pytest.mark.django_db

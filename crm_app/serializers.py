@@ -102,6 +102,7 @@ class ContactSerializer(serializers.ModelSerializer):
             'preferred_contact_method', 'linkedin_url', 'notes', 'last_contacted',
             'created_at', 'updated_at',
             # Granular email preferences
+            'receives_notifications',
             'receives_renewal_emails', 'receives_seasonal_emails',
             'receives_payment_emails', 'receives_quarterly_emails',
             'receives_soundtrack_alerts',
