@@ -61,6 +61,7 @@ import {
 import { Contract, Invoice, ContractZone, ServiceLocation, EmailLogEntry } from '../types';
 import ApiService from '../services/api';
 import ContractDocuments from './ContractDocuments';
+import ContractAddenda from './ContractAddenda';
 
 interface ContractDetailProps {
   open: boolean;
@@ -801,6 +802,11 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
                 </Box>
               )}
             </Paper>
+          </Grid>
+
+          {/* Addenda (CRM-007) */}
+          <Grid item xs={12}>
+            <ContractAddenda contract={contract} onContractChanged={loadContractDetails} />
           </Grid>
 
           {/* Contract Documents */}
