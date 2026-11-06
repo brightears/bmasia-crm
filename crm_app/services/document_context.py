@@ -12,6 +12,17 @@ BILLING_ENTITY_CHOICES = (
 )
 
 
+def customer_legal_entity_name(company):
+    """Return the customer's legal name with its saved branch exactly once."""
+    if not company:
+        return ''
+    name = (getattr(company, 'legal_entity_name', '') or getattr(company, 'name', '') or '').strip()
+    branch = (getattr(company, 'branch', '') or '').strip()
+    if branch and branch.casefold() not in name.casefold():
+        return f'{name} ({branch})'
+    return name
+
+
 def effective_billing_entity(document):
     """Return the document override, otherwise its Company's canonical issuer."""
     override = getattr(document, 'billing_entity', '')

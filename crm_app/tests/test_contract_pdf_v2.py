@@ -169,6 +169,53 @@ def test_standard_contract_keeps_principal_terms_and_explicit_tailoring(contract
     assert "INTERNAL-ONLY-CRM-TRACKING-SENTINEL" not in text
 
 
+def test_standard_contract_prints_company_branch_and_witness_role(contract, client):
+    contract.company.branch = "Branch 00001"
+    contract.company.save(update_fields=["branch"])
+    contract.additional_customer_signatories = [{
+        "name": "Wanda Witness",
+        "title": "Legal Manager",
+        "role": "Witness",
+    }]
+    contract.save(update_fields=["additional_customer_signatories"])
+
+    response = client.get(f"/api/v1/contracts/{contract.pk}/pdf/")
+
+    _assert_a4(response)
+    text = _text(response.content)
+    legal_entity = "Harbour Hospitality Limited (Branch 00001)"
+    assert text.count(legal_entity) >= 3
+    assert "WITNESS" in text
+    assert "Wanda Witness" in text
+
+
+def test_template_contract_does_not_duplicate_branch_already_in_legal_name(contract, client):
+    contract.company.legal_entity_name = "One Bangkok Co., Ltd (Branch 00008)"
+    contract.company.branch = "Branch 00008"
+    contract.company.save(update_fields=["legal_entity_name", "branch"])
+    contract.additional_customer_signatories = [{
+        "name": "Wendy Witness",
+        "role": "Witness",
+    }]
+    contract.preamble_template = ContractTemplate.objects.create(
+        name="Branch-aware agreement", template_type="preamble", pdf_format="standard",
+        content=(
+            "The legal customer is {{hotel_legal_name}}.<br/>"
+            "{{zones_table}}<br/>{{signature_blocks}}"
+        ),
+    )
+    contract.save(update_fields=["additional_customer_signatories", "preamble_template"])
+
+    response = client.get(f"/api/v1/contracts/{contract.pk}/pdf/")
+
+    _assert_a4(response)
+    text = _text(response.content)
+    assert "One Bangkok Co., Ltd (Branch 00008)" in text
+    assert "(Branch 00008) (Branch 00008)" not in text
+    assert "WITNESS" in text
+    assert "Wendy Witness" in text
+
+
 def test_full_generic_template_preserves_legal_text_and_includes_tailored_clauses(contract, client):
     template = ContractTemplate.objects.create(
         name="Independent Hospitality Agreement", template_type="preamble",
@@ -398,6 +445,8 @@ def test_mcp_nonreserving_contract_pdf_has_no_business_or_audit_writes(contract,
     "_generate_participation_agreement_pdf",
 ])
 def test_direct_renewal_style_generator_uses_v2_without_audit_mutation(contract, method):
+    contract.company.branch = "Branch 00001"
+    contract.company.save(update_fields=["branch"])
     request = RequestFactory().get(f"/api/v1/contracts/{contract.pk}/pdf/")
     request.user = AnonymousUser()
     view = ContractViewSet()
@@ -406,6 +455,7 @@ def test_direct_renewal_style_generator_uses_v2_without_audit_mutation(contract,
     with CaptureQueriesContext(connection) as captured:
         response = getattr(view, method)(contract)
     _assert_a4(response)
+    assert "Harbour Hospitality Limited (Branch 00001)" in _text(response.content)
     assert _writes(captured) == []
     assert _snapshot(contract) == before
 

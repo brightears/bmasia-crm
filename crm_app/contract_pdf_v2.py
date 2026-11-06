@@ -19,7 +19,7 @@ from crm_app.commercial_pdf import (
     document_styles, entity_profile_for, html_text, identity_cards,
     metadata_table,
 )
-from crm_app.services.document_context import effective_billing_entity
+from crm_app.services.document_context import customer_legal_entity_name, effective_billing_entity
 from crm_app.contract_signature_layouts import (
     SIGNATURE_LAYOUT_SLOTS,
     SIGNATURE_LAYOUT_TOKEN_PATTERN,
@@ -693,7 +693,7 @@ def build_contract_pdf(contract, body, *, title, logo_path=None, preview=False):
     if not address:
         address = '\n'.join(str(getattr(company, key, '') or '') for key in
                             ('address_line1', 'address_line2', 'city', 'state', 'postal_code', 'country'))
-    customer_lines = [company.legal_entity_name or company.name, address]
+    customer_lines = [customer_legal_entity_name(company), address]
     if getattr(company, 'tax_id', ''):
         customer_lines.append(f'Tax ID: {company.tax_id}')
     story.append(identity_cards('Issued by', issuer_lines, 'Prepared for', customer_lines, styles))

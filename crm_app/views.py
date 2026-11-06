@@ -28,7 +28,7 @@ import re
 import uuid
 from decimal import Decimal
 from xml.sax.saxutils import escape as xml_escape
-from crm_app.services.document_context import effective_billing_entity
+from crm_app.services.document_context import customer_legal_entity_name, effective_billing_entity
 from crm_app.services.document_entity_filters import filter_document_entity
 from crm_app.contract_pdf_v2 import (
     clause_addition_markup, optional_clause_paragraph, split_clause_placements,
@@ -2097,8 +2097,8 @@ class ContractViewSet(BaseModelViewSet):
             '{{issuer_swift}}': issuer['swift'],
             # Company & Client Info
             '{{company_name}}': company.name if company else '',
-            '{{legal_entity_name}}': company.legal_entity_name or company.name if company else '',
-            '{{company_legal_name}}': company.legal_entity_name or company.name if company else '',  # alias
+            '{{legal_entity_name}}': customer_legal_entity_name(company),
+            '{{company_legal_name}}': customer_legal_entity_name(company),  # alias
             '{{client_address}}': self._format_company_address(company) if company else '',
             '{{company_address}}': self._format_company_address(company) if company else '',  # alias
             '{{contact_name}}': contact['name'],
@@ -2107,7 +2107,7 @@ class ContractViewSet(BaseModelViewSet):
             '{{customer_contact_name}}': contact['name'],
             '{{customer_contact_email}}': contact['email'],
             '{{customer_contact_title}}': contact['title'],
-            '{{hotel_legal_name}}': company.legal_entity_name or company.name if company else '',
+            '{{hotel_legal_name}}': customer_legal_entity_name(company),
             '{{hotel_trading_name}}': getattr(contract, 'property_name', '') or company.name if company else '',
 
             # Contract Details
@@ -2574,7 +2574,7 @@ class ContractViewSet(BaseModelViewSet):
         bmasia_signatory = contract.bmasia_signatory_name or 'Chris Andrews'
         bmasia_title = contract.bmasia_signatory_title or 'Director'
         bmasia_date = datetime.now().strftime('%d %B %Y')
-        default_customer_entity = getattr(company, 'legal_entity_name', '') or getattr(company, 'name', '')
+        default_customer_entity = customer_legal_entity_name(company)
 
         def clean_text(value, fallback=''):
             value = fallback if value in (None, '') else value
@@ -2660,6 +2660,7 @@ class ContractViewSet(BaseModelViewSet):
             return {
                 'name': signatory.get('name') or 'Authorized Representative',
                 'title': signatory.get('title') or 'Authorized Representative',
+                'role': signatory.get('role') or '',
                 'entity': entity,
                 'poa': poa,
             }
@@ -2674,7 +2675,7 @@ class ContractViewSet(BaseModelViewSet):
         for signatory in additional_signatories:
             if isinstance(signatory, dict) and any(signatory.get(key) for key in (
                 'name', 'title', 'legal_entity_name', 'entity_name', 'entity', 'company_name',
-                'poa', 'poa_reference', 'power_of_attorney', 'authority',
+                'poa', 'poa_reference', 'power_of_attorney', 'authority', 'role',
             )):
                 customer_signatories.append(normalize_customer_signatory(signatory))
 
@@ -2715,6 +2716,8 @@ class ContractViewSet(BaseModelViewSet):
                 customer_sig_content.append(Spacer(1, 0.3*inch))
                 customer_sig_content.append(Spacer(1, 0.6*inch))  # Space for signature
             customer_sig_content.append(Paragraph('_' * 35, sig_line_style))
+            if signatory['role'].strip().casefold() == 'witness':
+                customer_sig_content.append(Paragraph('<b>WITNESS</b>', sig_title_style))
             customer_sig_content.append(Paragraph(f"<b>{clean_text(signatory['name'])}</b>", sig_name_style))
             customer_sig_content.append(Paragraph(clean_text(signatory['title']), sig_title_style))
             customer_sig_content.append(Paragraph(f"<b>{clean_text(signatory['entity'])}</b>", sig_company_style))
@@ -3058,7 +3061,7 @@ class ContractViewSet(BaseModelViewSet):
         # Create card-style BILL TO section. Hilton values are plain CRM text,
         # while Paragraph parses XML-like markup; preserve only our explicit
         # line breaks and escape every dynamic line at this boundary.
-        bill_to_name = company.legal_entity_name or company.name
+        bill_to_name = customer_legal_entity_name(company)
         bill_to_address = format_address_multiline(company)
         if self._is_hilton_full_template(contract):
             bill_to_name = xml_escape(str(bill_to_name or ''))
@@ -3339,7 +3342,7 @@ class ContractViewSet(BaseModelViewSet):
 This agreement is made on {contract.start_date.strftime('%d %B %Y') if contract.start_date else '[date]'} between:<br/><br/>
 <b>{entity_name}</b>, with registered address at {entity_address} (BMA),<br/><br/>
 and<br/><br/>
-<b>{company.legal_entity_name or company.name}</b>, with registered address at {self._format_company_address(company)} (Client).<br/><br/>
+<b>{customer_legal_entity_name(company)}</b>, with registered address at {self._format_company_address(company)} (Client).<br/><br/>
 (Together "The Parties")<br/><br/>
 {whereas_clause}
                 """
@@ -3806,7 +3809,7 @@ and<br/><br/>
         customer_sig_content.append(Paragraph(f"<b>{customer_signatory}</b>", sig_name_style))
         if customer_title and customer_title != customer_signatory:
             customer_sig_content.append(Paragraph(customer_title, sig_title_style))
-        customer_sig_content.append(Paragraph(f"<b>{company.legal_entity_name or company.name}</b>", sig_company_style))
+        customer_sig_content.append(Paragraph(f"<b>{customer_legal_entity_name(company)}</b>", sig_company_style))
         customer_sig_content.append(Spacer(1, 0.1*inch))
         customer_sig_content.append(Paragraph('Date: _________________', sig_date_style))
 
@@ -3817,9 +3820,11 @@ and<br/><br/>
                 customer_sig_content.append(Spacer(1, 0.3*inch))  # Space between signatories
                 customer_sig_content.append(Spacer(1, 0.6*inch))  # Space for signature
                 customer_sig_content.append(Paragraph('_' * 35, sig_line_style))
+                if str(signatory.get('role', '')).strip().casefold() == 'witness':
+                    customer_sig_content.append(Paragraph('<b>WITNESS</b>', sig_title_style))
                 customer_sig_content.append(Paragraph(f"<b>{signatory.get('name', 'Authorized Representative')}</b>", sig_name_style))
                 customer_sig_content.append(Paragraph(signatory.get('title', ''), sig_title_style))
-                customer_sig_content.append(Paragraph(f"<b>{company.legal_entity_name or company.name}</b>", sig_company_style))
+                customer_sig_content.append(Paragraph(f"<b>{customer_legal_entity_name(company)}</b>", sig_company_style))
                 customer_sig_content.append(Spacer(1, 0.1*inch))
                 customer_sig_content.append(Paragraph('Date: _________________', sig_date_style))
 
@@ -4030,7 +4035,7 @@ and<br/><br/>
                 {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
                 """, body_style),
                 Paragraph(f"""
-                <b>{company.legal_entity_name or company.name}</b><br/>
+                <b>{customer_legal_entity_name(company)}</b><br/>
                 {format_address_multiline(company)}
                 """, body_style)
             ]
@@ -4127,7 +4132,7 @@ and<br/><br/>
             ['_' * 40, '_' * 40],
             [bmasia_signatory, customer_signatory],
             [bmasia_title, customer_title],
-            [entity_name, company.legal_entity_name or company.name],
+            [entity_name, customer_legal_entity_name(company)],
             ['', ''],
             ['Date: _________________', 'Date: _________________'],
         ]
@@ -4347,7 +4352,7 @@ and<br/><br/>
             master_ref_text = f"""
             <b>Master Agreement Number:</b> {master_contract.contract_number}<br/>
             <b>Master Agreement Date:</b> {master_contract.start_date.strftime('%B %d, %Y')}<br/>
-            <b>Corporate Parent:</b> {master_contract.company.legal_entity_name or master_contract.company.name}<br/>
+            <b>Corporate Parent:</b> {customer_legal_entity_name(master_contract.company)}<br/>
             <b>Master Agreement Status:</b> {master_contract.status}
             """
             elements.append(Paragraph(master_ref_text, body_style))
@@ -4367,7 +4372,7 @@ and<br/><br/>
                 {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
                 """, body_style),
                 Paragraph(f"""
-                <b>{company.legal_entity_name or company.name}</b><br/>
+                <b>{customer_legal_entity_name(company)}</b><br/>
                 {format_address_multiline(company)}
                 """, body_style)
             ]
@@ -4513,7 +4518,7 @@ and<br/><br/>
             ['_' * 40, '_' * 40],
             [bmasia_signatory, customer_signatory],
             [bmasia_title, customer_title],
-            [entity_name, company.legal_entity_name or company.name],
+            [entity_name, customer_legal_entity_name(company)],
             ['', ''],
             ['Date: _________________', 'Date: _________________'],
         ]
@@ -4693,7 +4698,7 @@ and<br/><br/>
         info_data = [
             [Paragraph('<b>Field</b>', att_table_style), Paragraph('<b>Details</b>', att_table_style)],
             ['Supplier', f'{entity_name}\n{entity_address}\n{entity_phone}' + (f'\nTax ID: {entity_tax}' if entity_tax else '')],
-            ['Hotel', f'{company.legal_entity_name or company.name}'],
+            ['Hotel', f'{customer_legal_entity_name(company)}'],
             ['Premises', f'{company.full_address if company.full_address else company.country}'],
             ['Effective Date', contract.start_date.strftime('%B %d, %Y')],
             ['Term', f'{_format_duration(contract.start_date, contract.end_date)} from {contract.start_date.strftime("%B %d, %Y")} to {contract.end_date.strftime("%B %d, %Y")}'],
@@ -4958,7 +4963,7 @@ and<br/><br/>
         # Preamble
         preamble = f"""THIS HOTEL PARTICIPATION AGREEMENT (this "<b>Agreement</b>") is entered into as of
         {contract.start_date.strftime('%B %d, %Y')} (the "<b>Effective Date</b>") by and between {entity_name}
-        ("<b>Supplier</b>") and {company.legal_entity_name or company.name} ("<b>Hotel</b>").
+        ("<b>Supplier</b>") and {customer_legal_entity_name(company)} ("<b>Hotel</b>").
         The Hotel and Supplier may be referred to herein individually as a "<b>Party</b>" and collectively as the "<b>Parties</b>"."""
 
         elements.append(Paragraph(preamble, exd_body_style))
@@ -5231,7 +5236,7 @@ and<br/><br/>
         info_data = [
             [Paragraph('<b>Field</b>', table_style), Paragraph('<b>Details</b>', table_style)],
             ['Supplier', f'{entity_name}\n{entity_address}\n{entity_phone}' + (f'\nTax ID: {entity_tax}' if entity_tax else '')],
-            ['Hotel', f'{company.legal_entity_name or company.name}'],
+            ['Hotel', f'{customer_legal_entity_name(company)}'],
             ['Premises', f'{company.full_address if company.full_address else company.country}'],
             ['Effective Date', contract.start_date.strftime('%B %d, %Y')],
             ['Term', f'{_format_duration(contract.start_date, contract.end_date)} from {contract.start_date.strftime("%B %d, %Y")} to {contract.end_date.strftime("%B %d, %Y")}'],
@@ -5484,7 +5489,7 @@ and<br/><br/>
             ['_' * 40, '_' * 40],
             [bmasia_signatory, customer_signatory],
             [bmasia_title, customer_title],
-            [entity_name, company.legal_entity_name or company.name],
+            [entity_name, customer_legal_entity_name(company)],
             ['', ''],
             ['Date: _________________', 'Date: _________________'],
         ]
@@ -5611,7 +5616,7 @@ and<br/><br/>
         # Preamble
         preamble = f"""THIS HOTEL PARTICIPATION AGREEMENT (this "<b>Agreement</b>") is entered into as of
         {contract.start_date.strftime('%B %d, %Y')} (the "<b>Effective Date</b>") by and between {entity_name}
-        ("<b>Supplier</b>") and {company.legal_entity_name or company.name} ("<b>Hotel</b>").
+        ("<b>Supplier</b>") and {customer_legal_entity_name(company)} ("<b>Hotel</b>").
         The Hotel and Supplier may be referred to herein individually as a "<b>Party</b>" and collectively as the "<b>Parties</b>"."""
 
         elements.append(Paragraph(preamble, body_style))
@@ -5763,7 +5768,7 @@ and<br/><br/>
 
         signature_data = [
             [Paragraph('<b>SUPPLIER:</b>', body_style), Paragraph('<b>HOTEL:</b>', body_style)],
-            [entity_name, company.legal_entity_name or company.name],
+            [entity_name, customer_legal_entity_name(company)],
             ['', ''],
             ['', ''],
             ['By: _' * 25, 'By: _' * 25],
