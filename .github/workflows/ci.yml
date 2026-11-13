@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: bmasia_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # Throwaway values for the CI job only; nothing here is a real credential.
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/bmasia_ci
+      SECRET_KEY: ci-test-only-not-a-real-key
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-test.txt
+
+      # The PDF renderers load DejaVuSans.ttf / DejaVuSans-Bold.ttf by file name;
+      # ReportLab finds them under /usr/share/fonts/truetype on Ubuntu.
+      - name: Provide DejaVu fonts
+        run: |
+          if [ ! -f /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf ] || \
+             [ ! -f /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf ]; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends fonts-dejavu-core
+          fi
+
+      - name: Install dependencies
+        id: deps
+        run: python -m pip install -r requirements.txt -r requirements-test.txt
+
+      - name: Check PDF fonts resolve
+        run: >-
+          python -c "from reportlab.pdfbase.ttfonts import TTFont;
+          [print(TTFont(n, n + '.ttf').face.filename) for n in ('DejaVuSans', 'DejaVuSans-Bold')]"
+
+      - name: Django system check
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: python manage.py check
+
+      # Reported but not yet blocking: the models currently differ from the
+      # migration history (index names and two field definitions). Remove
+      # continue-on-error once a migration that reconciles them has landed.
+      - name: Check for missing migrations
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        continue-on-error: true
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Test suite
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: python -m pytest -q -p no:cacheprovider
+
+      # Hermetic suite with its own settings; see tests/cara_readonly/README.md.
+      - name: Cara read-only tests
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: >-
+          env -u DJANGO_SETTINGS_MODULE -u SECRET_KEY -u DATABASE_URL
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+          python -m pytest -c tests/cara_readonly/pytest.ini -p no:cacheprovider tests/cara_readonly
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: bmasia-crm-frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: bmasia-crm-frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: bmasia-crm-frontend/package-lock.json
+
+      - name: Install dependencies
+        id: deps
+        run: npm ci --no-audit --no-fund
+
+      - name: Type check
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: npm run typecheck
+
+      - name: Unit tests
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: npm test -- --watchAll=false
+
+      # Same command and settings as the Render build (render.yaml sets CI=false;
+      # the build script disables the ESLint plugin, whose warnings would
+      # otherwise fail the build under CI=true).
+      - name: Production build
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        env:
+          CI: "false"
+        run: npm run build
