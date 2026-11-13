@@ -20,42 +20,6 @@ from crm_app.tests.factories import ContractFactory
 from crm_app.views import ContractViewSet
 
 
-@pytest.fixture(scope="session")
-def django_db_setup(
-    request,
-    django_test_environment,
-    django_db_blocker,
-    django_db_use_migrations,
-    django_db_keepdb,
-    django_db_createdb,
-    django_db_modify_db_settings,
-):
-    """Use a real isolated DB despite the legacy suite's no-op session fixture."""
-    from django.test.utils import setup_databases, teardown_databases
-    from pytest_django.fixtures import _disable_migrations
-
-    if not django_db_use_migrations:
-        _disable_migrations()
-
-    setup_args = {}
-    if django_db_keepdb and not django_db_createdb:
-        setup_args["keepdb"] = True
-
-    with django_db_blocker.unblock():
-        db_config = setup_databases(
-            verbosity=request.config.option.verbose,
-            interactive=False,
-            **setup_args,
-        )
-    yield
-    if not django_db_keepdb:
-        with django_db_blocker.unblock():
-            teardown_databases(
-                db_config,
-                verbosity=request.config.option.verbose,
-            )
-
-
 def _flat_contract(zone_names=("Lobby", "Pool")):
     contract = ContractFactory(
         value=Decimal("580.00"),
