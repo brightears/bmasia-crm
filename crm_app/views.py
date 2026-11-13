@@ -7868,32 +7868,6 @@ class AuthViewSet(viewsets.ViewSet):
         return ip
 
 
-@csrf_exempt
-def reset_admin(request):
-    """Reset admin password to default"""
-    User = get_user_model()
-    
-    # Delete any existing admin users
-    deleted_count = User.objects.filter(username='admin').delete()[0]
-    
-    # Create new admin user
-    admin_user = User.objects.create_superuser(
-        username='admin',
-        email='admin@bmasia.com',
-        password='bmasia123',
-        role='Admin'
-    )
-    
-    return HttpResponse(f"""
-        <h2>✅ Admin Reset Successful!</h2>
-        <p>Deleted {deleted_count} existing admin users</p>
-        <p>Created fresh admin user:</p>
-        <strong>Username:</strong> admin<br>
-        <strong>Password:</strong> bmasia123<br><br>
-        <a href="/admin/" style="background: #1976d2; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Go to Admin Login</a>
-    """)
-
-
 # ============================================================================
 # CAMPAIGN API ENDPOINTS
 # ============================================================================
