@@ -21,7 +21,7 @@ from rest_framework.authtoken.views import obtain_auth_token
 from django.conf import settings
 from crm_app.admin_setup import create_admin_view
 from crm_app.rene_mcp_server import RenePhase2MCPView
-from crm_app.views import debug_soundtrack_api, apply_migration_0025_view, email_tracking_pixel
+from crm_app.views import email_tracking_pixel
 from django.http import HttpResponse
 import subprocess
 import os
@@ -85,9 +85,6 @@ urlpatterns = [
     path('api-token-auth/', obtain_auth_token, name='api_token_auth'),  # DRF token auth
     # SECURITY 2026-07-02: removed unauthenticated setup-admin/reset-admin routes — they granted full
     # superuser takeover with a fixed password. Use the `createadmin` / `reset_admin` management commands.
-    path('debug-soundtrack/', debug_soundtrack_api, name='debug_soundtrack'),
-    # Emergency migration endpoint
-    path('api/apply-migration-0025/', apply_migration_0025_view, name='apply_migration_0025'),
     # Email open tracking pixel (unauthenticated - called by email clients)
     path('t/<str:token>/', email_tracking_pixel, name='email_tracking_pixel'),
     # For now, redirect root to admin until React frontend is properly deployed
