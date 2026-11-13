@@ -34,6 +34,7 @@ from crm_app.quote_send_receipts import (
 )
 from crm_app.rene_auth import is_exact_rene_phase2_mcp_request
 from crm_app.services import agent_gate as _agent_gate
+from crm_app.services import mcp_audit as _mcp_audit
 from crm_app.rene_mcp_server import rene_phase2_mcp_server
 from crm_app.views import ContractViewSet, QuoteViewSet, InvoiceViewSet  # Only for PDF tools
 
@@ -1121,7 +1122,12 @@ def create_record(collection: str, data: str) -> str:
     model, serializer_path = _COLLECTION_MAP[collection]
     SerializerClass = _get_serializer_class(serializer_path)
 
-    serializer = SerializerClass(data=fields)
+    # Give the serializer the caller's request, as the REST views do, so
+    # creator fields (created_by) are set from the authenticated caller.
+    caller = _mcp_audit.caller()
+    serializer = SerializerClass(
+        data=fields, context={'request': _mcp_audit.current_request()} if caller else {},
+    )
     _, dropped = _dropped_keys(serializer, fields)
     if collection == 'contract' and dropped:
         return _json.dumps({
@@ -1132,7 +1138,20 @@ def create_record(collection: str, data: str) -> str:
     if not serializer.is_valid():
         return f"Validation errors: {_json.dumps(serializer.errors)}"
 
-    instance = serializer.save()
+    save_kwargs = {}
+    if (caller and 'created_by' not in serializer.validated_data
+            and any(f.name == 'created_by' for f in model._meta.concrete_fields)):
+        save_kwargs['created_by'] = caller
+    with transaction.atomic():
+        instance = serializer.save(**save_kwargs)
+        applied, _ = _dropped_keys(serializer, fields)
+        _mcp_audit.record(
+            'CREATE', model.__name__, instance.pk, tool='create_record',
+            changes=_mcp_audit.created_fields(
+                _mcp_audit.snapshot(SerializerClass, instance), applied, fields,
+            ),
+            extra={'collection': collection},
+        )
     # Return a concise summary
     result = {'id': str(instance.id)}
     _add_lifecycle_note(result, serializer)
@@ -1721,6 +1740,7 @@ def update_record(
                     })
                 audit = AuditLog.objects.create(
                     action='UPDATE', model_name='Contract', record_id=str(id),
+                    user=_agent_gate._current_user(),
                     changes={
                         key: {'before': before[key], 'after': fields[key]}
                         for key in fields
@@ -1905,7 +1925,16 @@ def update_record(
             'ignored_keys': dropped,
         })
 
-    instance = serializer.save()
+    before_snapshot = _mcp_audit.snapshot(SerializerClass, instance)
+    with transaction.atomic():
+        instance = serializer.save()
+        _mcp_audit.record(
+            'UPDATE', model.__name__, instance.pk, tool='update_record',
+            changes=_mcp_audit.diff(
+                before_snapshot, _mcp_audit.snapshot(SerializerClass, instance),
+            ),
+            extra={'collection': collection, 'kind': 'unguarded_update'},
+        )
     # Read-back so the caller can verify what was actually persisted.
     persisted = {
         key: _persisted_field(collection, instance, serializer, key, fields, keep_json=False)
@@ -1990,7 +2019,13 @@ def delete_record(collection: str, id: str) -> str:
         return f"Error: {collection} with ID '{id}' not found."
 
     name = getattr(instance, 'name', None) or getattr(instance, 'contract_number', None) or str(id)
-    instance.delete()
+    deleted = _mcp_audit.summary(instance)
+    with transaction.atomic():
+        _total, cascade = instance.delete()
+        _mcp_audit.record(
+            'DELETE', model.__name__, deleted['id'], tool='delete_record',
+            extra={'collection': collection, 'deleted': deleted, 'cascade': cascade},
+        )
     return f"Deleted {collection} '{name}' ({id})."
 
 
@@ -2054,7 +2089,20 @@ def convert_quote_to_contract(quote_id: str, overrides_json: str = "") -> str:
         except _json.JSONDecodeError as e:
             return f"Error: invalid overrides_json — {e}"
     try:
-        contract, info = _convert(quote, overrides)
+        with transaction.atomic():
+            contract, info = _convert(quote, overrides)
+            if not info.get('already_existed'):
+                created = {'company': contract.company_id, 'quote': quote.pk,
+                           'contract_number': contract.contract_number, 'status': contract.status}
+                if isinstance(overrides, dict):
+                    created.update({key: getattr(contract, key, None) for key in overrides
+                                    if key != 'contract_duration_months'})
+                _mcp_audit.record(
+                    'CREATE', 'Contract', contract.pk, tool='convert_quote_to_contract',
+                    changes={key: {'old': None, 'new': value} for key, value in created.items()},
+                    extra={'source_quote_id': str(quote.pk), 'source_quote_number': quote.quote_number,
+                           'service_locations_derived': info.get('service_locations_derived')},
+                )
     except (TypeError, ValueError) as exc:
         return _json.dumps({'error': 'clarification_required', 'detail': str(exc)})
     return _json.dumps({'contract_id': str(contract.id), 'contract_number': contract.contract_number,
@@ -2063,6 +2111,14 @@ def convert_quote_to_contract(quote_id: str, overrides_json: str = "") -> str:
 # ============================================================
 # Custom tools — PDF generation
 # ============================================================
+
+
+def _pdf_request_user():
+    """Run the PDF viewsets as the MCP caller so their rows name who asked.
+
+    Falls back to the old system user only when no caller can be resolved.
+    """
+    return _agent_gate._current_user() or _get_system_user()
 
 
 def _pdf_response_payload(response, default_filename: str) -> str:
@@ -2124,7 +2180,7 @@ def generate_contract_pdf(
     def render(contract):
         factory = RequestFactory()
         request = factory.get(f'/api/v1/contracts/{contract.id}/pdf/')
-        request.user = _get_system_user()
+        request.user = _pdf_request_user()
         request._bmasia_suppress_pdf_activity = True
         viewset = ContractViewSet.as_view({'get': 'pdf'})
         return viewset(request, pk=contract.id)
@@ -2180,7 +2236,7 @@ def generate_proforma_pdf(id: str) -> str:
 
     factory = RequestFactory()
     request = factory.get(f'/api/v1/contracts/{id}/proforma-pdf/')
-    request.user = _get_system_user()
+    request.user = _pdf_request_user()
 
     viewset = ContractViewSet.as_view({'get': 'proforma_pdf'})
     response = viewset(request, pk=id)
@@ -2205,7 +2261,7 @@ def generate_quote_pdf(id: str) -> str:
 
     factory = RequestFactory()
     request = factory.get(f'/api/v1/quotes/{id}/pdf/')
-    request.user = _get_system_user()
+    request.user = _pdf_request_user()
     request._bmasia_suppress_pdf_activity = True
 
     viewset = QuoteViewSet.as_view({'get': 'pdf'})
@@ -2231,7 +2287,7 @@ def generate_invoice_pdf(id: str) -> str:
 
     factory = RequestFactory()
     request = factory.get(f'/api/v1/invoices/{id}/pdf/')
-    request.user = _get_system_user()
+    request.user = _pdf_request_user()
     request._bmasia_suppress_pdf_activity = True
 
     viewset = InvoiceViewSet.as_view({'get': 'pdf'})

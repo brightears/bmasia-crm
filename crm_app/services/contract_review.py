@@ -12,6 +12,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from crm_app.models import Contract, RenePreparedContract
+from crm_app.services import mcp_audit
 from crm_app.services.rene_phase2 import (
     RenePhase2Error,
     _reserve_final_contract_number,
@@ -73,10 +74,21 @@ def generate_numbered_contract_review(contract_id, expected_version, render_pdf,
         # Updating exactly these fields avoids lifecycle/revenue side effects
         # from Contract.save() and its signals. Status and delivery evidence
         # remain unchanged, including historical Draft is_active values.
+        previous_number = contract.contract_number
         Contract.objects.filter(pk=contract.pk).update(
             contract_number=number, updated_at=timezone.now()
         )
         contract.refresh_from_db()
+        # Same transaction: a failed render rolls back the number and its row.
+        mcp_audit.record(
+            'UPDATE', 'Contract', contract.pk, tool='generate_contract_pdf',
+            changes={'contract_number': {'old': previous_number, 'new': contract.contract_number}},
+            extra={
+                'kind': 'renewal_number_reservation' if require_renewal else 'final_number_reservation',
+                'expected_version': expected_version,
+                'post_version': rfc3339(contract.updated_at),
+            },
+        )
     elif re.fullmatch(r'(?:HK|TH)-CT\d{5,}', number) is None:
         raise ContractReviewError('The existing contract number needs reconciliation before review preparation.')
 
