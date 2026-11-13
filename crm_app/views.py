@@ -1374,115 +1374,136 @@ class ContractViewSet(BaseModelViewSet):
     def duplicate_for_renewal(self, request, pk=None):
         """
         Create a new contract as a renewal of the current one.
-        - Copies all details from the original contract
+        - Copies all details, zones, service items, service locations and line items
         - Sets start_date = original end_date
         - Sets end_date = start_date + renewal_period_months
-        - Marks original contract as 'Renewed'
         - Links new contract to original via renewed_from
         The renewal is created as a DRAFT (INC-20260622-e4cd8f): it must flow through
         Draft → Sent → Active like any contract, not be born 'Active' (signed/live) unsent.
         Its real CT number is deferred until it reaches Sent (it carries a DRAFT-xxxx until then).
+        The original is NOT changed here: it stays in its current status and becomes Renewed
+        only when the renewal itself becomes Active (services/contract_lifecycle.py).
+        Everything runs in one transaction, so a failure leaves no orphan Draft.
         """
         from dateutil.relativedelta import relativedelta
-        import uuid
 
-        original = self.get_object()
+        with transaction.atomic():
+            original = self.get_object()
+            # Lock the original so two concurrent clicks cannot both pass the check below.
+            original = Contract.objects.select_for_update().get(pk=original.pk)
 
-        # Calculate new dates
-        new_start_date = original.end_date
-        renewal_months = original.renewal_period_months or 12
-        new_end_date = new_start_date + relativedelta(months=renewal_months)
+            if original.end_date is None:
+                return Response(
+                    {'error': 'The contract has no end date, so the renewal term cannot be computed.'},
+                    status=status.HTTP_400_BAD_REQUEST)
 
-        # Create the new contract
-        new_contract = Contract.objects.create(
-            company=original.company,
-            billing_entity=original.billing_entity,
-            payment_schedule=original.payment_schedule,
-            opportunity=None,  # New contract, no opportunity link
-            # contract_number omitted on purpose → save() assigns a deferred DRAFT-xxxx; the real
-            # CT number is minted only when the draft is advanced to Sent (INC-20260622-e4cd8f).
-            contract_type=original.contract_type,
-            service_type=original.service_type,
-            status='Draft',
-            start_date=new_start_date,
-            end_date=new_end_date,
-            value=original.value,
-            currency=original.currency,
-            auto_renew=original.auto_renew,
-            renewal_period_months=original.renewal_period_months,
-            is_active=False,  # Draft renewal is not live until it is signed/activated
-            payment_terms=original.payment_terms,
-            billing_frequency=original.billing_frequency,
-            discount_percentage=original.discount_percentage,
-            notes=f"Renewal of {original.contract_number}",
-            soundtrack_account_id=original.soundtrack_account_id,
-            renewed_from=original,
-            send_renewal_reminders=original.send_renewal_reminders,
-            contract_category=original.contract_category,
-            master_contract=original.master_contract,
-            lifecycle_type='renewal',
-            property_name=original.property_name,
-            # Content fields — REAL field names. The previous kwargs (corporate_parent, preamble_text,
-            # payment_terms_text, activation_terms_text, custom_*, service_package_items) are NOT Contract
-            # fields and raised AttributeError → HTTP 500 on EVERY call (self-audit 2026-07-02).
-            preamble_template=original.preamble_template,
-            preamble_custom=original.preamble_custom,
-            payment_template=original.payment_template,
-            payment_custom=original.payment_custom,
-            activation_template=original.activation_template,
-            activation_custom=original.activation_custom,
-            custom_terms=original.custom_terms,
-            show_zone_pricing_detail=original.show_zone_pricing_detail,
-            price_per_zone=original.price_per_zone,
-            custom_service_items=original.custom_service_items,
-            bmasia_contact_name=original.bmasia_contact_name,
-            bmasia_contact_title=original.bmasia_contact_title,
-            bmasia_contact_email=original.bmasia_contact_email,
-            customer_contact_name=original.customer_contact_name,
-            customer_contact_title=original.customer_contact_title,
-        )
+            # The original no longer leaves Active at draft time, so refuse a second
+            # in-flight renewal instead of stacking duplicate drafts.
+            existing = (Contract.objects.filter(renewed_from=original, company_id=original.company_id)
+                        .filter(status__in=['Draft', 'Sent', 'Active'])
+                        .order_by('created_at').first())
+            if existing:
+                return Response({
+                    'error': (f'A renewal already exists for {original.contract_number}: '
+                              f'{existing.contract_number} ({existing.status}).'),
+                    'existing_renewal_id': str(existing.id),
+                    'existing_renewal_number': existing.contract_number,
+                    'existing_renewal_status': existing.status,
+                }, status=status.HTTP_409_CONFLICT)
 
-        # Copy zones to new contract
-        for zone in original.zones.all():
-            new_contract.zones.add(zone)
+            # Calculate new dates
+            new_start_date = original.end_date
+            renewal_months = original.renewal_period_months or 12
+            new_end_date = new_start_date + relativedelta(months=renewal_months)
 
-        # Copy service_items (M2M — cannot be passed to create())
-        if original.service_items.exists():
-            new_contract.service_items.set(original.service_items.all())
-        # Copy service locations — the canonical rows that drive the contract PDF product/zone table
-        for loc in original.service_locations.all():
-            new_contract.service_locations.create(
-                location_name=loc.location_name, platform=loc.platform,
-                custom_service_name=loc.custom_service_name, sort_order=loc.sort_order, price=loc.price)
-        # Copy line items
-        for li in original.line_items.all():
-            new_contract.line_items.create(
-                product_service=li.product_service, description=li.description, quantity=li.quantity,
-                unit_price=li.unit_price, discount_percentage=li.discount_percentage,
-                tax_rate=li.tax_rate, line_total=li.line_total)
+            # Create the new contract
+            new_contract = Contract.objects.create(
+                company=original.company,
+                billing_entity=original.billing_entity,
+                payment_schedule=original.payment_schedule,
+                opportunity=None,  # New contract, no opportunity link
+                # contract_number omitted on purpose → save() assigns a deferred DRAFT-xxxx; the real
+                # CT number is minted only when the draft is advanced to Sent (INC-20260622-e4cd8f).
+                contract_type=original.contract_type,
+                service_type=original.service_type,
+                status='Draft',
+                start_date=new_start_date,
+                end_date=new_end_date,
+                value=original.value,
+                currency=original.currency,
+                auto_renew=original.auto_renew,
+                renewal_period_months=original.renewal_period_months,
+                is_active=False,  # Draft renewal is not live until it is signed/activated
+                payment_terms=original.payment_terms,
+                billing_frequency=original.billing_frequency,
+                discount_percentage=original.discount_percentage,
+                notes=f"Renewal of {original.contract_number}",
+                soundtrack_account_id=original.soundtrack_account_id,
+                renewed_from=original,
+                send_renewal_reminders=original.send_renewal_reminders,
+                contract_category=original.contract_category,
+                master_contract=original.master_contract,
+                lifecycle_type='renewal',
+                property_name=original.property_name,
+                # Content fields — REAL field names. The previous kwargs (corporate_parent, preamble_text,
+                # payment_terms_text, activation_terms_text, custom_*, service_package_items) are NOT Contract
+                # fields and raised AttributeError → HTTP 500 on EVERY call (self-audit 2026-07-02).
+                preamble_template=original.preamble_template,
+                preamble_custom=original.preamble_custom,
+                payment_template=original.payment_template,
+                payment_custom=original.payment_custom,
+                activation_template=original.activation_template,
+                activation_custom=original.activation_custom,
+                custom_terms=original.custom_terms,
+                show_zone_pricing_detail=original.show_zone_pricing_detail,
+                price_per_zone=original.price_per_zone,
+                custom_service_items=original.custom_service_items,
+                bmasia_contact_name=original.bmasia_contact_name,
+                bmasia_contact_title=original.bmasia_contact_title,
+                bmasia_contact_email=original.bmasia_contact_email,
+                customer_contact_name=original.customer_contact_name,
+                customer_contact_title=original.customer_contact_title,
+            )
 
-        # Mark original as renewed
-        original.status = 'Renewed'
-        original.is_active = False
-        original.save()
+            # Copy the zones still covered by the original. ContractZone.start_date is required,
+            # so each link starts with the renewal term; ended links stay on the original as history.
+            zone_ids = list(original.contract_zones.filter(is_active=True)
+                            .values_list('zone_id', flat=True).distinct())
+            ContractZone.objects.bulk_create([
+                ContractZone(contract=new_contract, zone_id=zone_id,
+                             start_date=new_start_date, is_active=True)
+                for zone_id in zone_ids
+            ])
 
-        self.log_action('CREATE', new_contract, {
-            'action': 'Renewal created',
-            'renewed_from': str(original.id),
-            'original_contract_number': original.contract_number
-        })
+            # Copy service_items (M2M — cannot be passed to create())
+            if original.service_items.exists():
+                new_contract.service_items.set(original.service_items.all())
+            # Copy service locations — the canonical rows that drive the contract PDF product/zone table
+            for loc in original.service_locations.all():
+                new_contract.service_locations.create(
+                    location_name=loc.location_name, platform=loc.platform,
+                    custom_service_name=loc.custom_service_name, sort_order=loc.sort_order, price=loc.price)
+            # Copy line items
+            for li in original.line_items.all():
+                new_contract.line_items.create(
+                    product_service=li.product_service, description=li.description, quantity=li.quantity,
+                    unit_price=li.unit_price, discount_percentage=li.discount_percentage,
+                    tax_rate=li.tax_rate, line_total=li.line_total)
 
-        self.log_action('UPDATE', original, {
-            'status': {'old': 'Active', 'new': 'Renewed'},
-            'is_active': {'old': True, 'new': False},
-            'action': 'Marked as renewed'
-        })
+            self.log_action('CREATE', new_contract, {
+                'action': 'Renewal draft created',
+                'renewed_from': str(original.id),
+                'original_contract_number': original.contract_number,
+                'original_status': original.status,
+                'original_status_changed': False,
+            })
 
         serializer = self.get_serializer(new_contract)
         return Response({
-            'message': f'Renewal draft {new_contract.contract_number} created (Draft → send → sign to activate)',
+            'message': (f'Renewal draft {new_contract.contract_number} created (Draft → send → sign to activate). '
+                        f'{original.contract_number} stays {original.status} until the renewal becomes Active.'),
             'new_contract': serializer.data,
-            'original_status': 'Renewed'
+            'original_status': original.status,
         }, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'])

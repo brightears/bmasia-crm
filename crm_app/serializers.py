@@ -782,7 +782,7 @@ class ContractSerializer(serializers.ModelSerializer):
             'id', 'company', 'company_name', 'opportunity', 'opportunity_name',
             'quote', 'quote_number',
             'contract_number', 'contract_type', 'service_type', 'status', 'start_date', 'end_date',
-            'sent_date',
+            'sent_date', 'signed_date',
             'value', 'tax_rate', 'tax_amount', 'total_value',
             'currency', 'billing_entity', 'effective_billing_entity', 'auto_renew', 'renewal_period_months', 'is_active',
             'payment_terms', 'payment_schedule', 'billing_frequency', 'discount_percentage', 'notes',
@@ -975,11 +975,31 @@ class ContractSerializer(serializers.ModelSerializer):
             contract.save()
 
         self._validate_service_location_pricing(contract)
+        if contract.status == 'Active' and contract.renewed_from_id:
+            self._close_renewed_predecessor(contract)
         return contract
+
+    def _close_renewed_predecessor(self, contract):
+        """Lifecycle choke point for REST and MCP writes: a renewal going Active
+        closes its Active predecessor (same transaction, audited)."""
+        from crm_app.services.contract_lifecycle import close_renewed_predecessor
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user is None:
+            # MCP tools build serializers without a request; use the caller
+            # the agent gate resolved for this MCP request, if any.
+            from crm_app.services import agent_gate
+            user = agent_gate._current_user()
+        self.lifecycle_result = close_renewed_predecessor(
+            contract, user=user, source='contract_serializer',
+        )
+        return self.lifecycle_result
 
     @transaction.atomic
     def update(self, instance, validated_data):
         """Update contract with tax recalculation and nested line items"""
+        was_active = instance.status == 'Active'
+        previous_renewed_from_id = instance.renewed_from_id
         line_items_data = validated_data.pop('line_items', None)
         use_line_tax = 'tax_rate' not in validated_data and any('tax_rate' in item for item in (line_items_data or []))
         preserve_line_totals = False
@@ -1058,6 +1078,14 @@ class ContractSerializer(serializers.ModelSerializer):
             or pricing_fields_changed
         ):
             self._validate_service_location_pricing(instance)
+
+        # Fires when the contract becomes Active, or when an Active contract is
+        # newly linked to a predecessor. Ordinary edits of an already-Active
+        # contract leave legacy pairs to the close_renewed_predecessors backfill.
+        if instance.status == 'Active' and instance.renewed_from_id and (
+            not was_active or instance.renewed_from_id != previous_renewed_from_id
+        ):
+            self._close_renewed_predecessor(instance)
 
         return instance
 
