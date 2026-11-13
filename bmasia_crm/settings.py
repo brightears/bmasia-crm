@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 from decouple import config, Csv
+import logging
 import os
 
 # Allow sync ORM calls from async context (needed for MCP server tools)
@@ -20,12 +21,30 @@ os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# A named logger, not the root logging.warning(): calling the module-level
+# function here would install a root handler before Django applies LOGGING.
+_startup_logger = logging.getLogger('bmasia_crm.settings')
+
+
+def _warn_if_builtin_default(name, value, builtin_default):
+    """Log one warning when a sensitive setting resolves to its built-in default.
+
+    Only the setting's name is logged, never its value.
+    """
+    if value == builtin_default:
+        _startup_logger.warning(
+            '%s is not set in the environment; using the built-in development default',
+            name,
+        )
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = config('SECRET_KEY', default='django-insecure-fallback-key-for-demo-only')
+_BUILTIN_SECRET_KEY = 'django-insecure-fallback-key-for-demo-only'
+SECRET_KEY = config('SECRET_KEY', default=_BUILTIN_SECRET_KEY)
+_warn_if_builtin_default('SECRET_KEY', SECRET_KEY, _BUILTIN_SECRET_KEY)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=False, cast=bool)
@@ -354,7 +373,11 @@ SOUNDTRACK_CLIENT_SECRET = config('SOUNDTRACK_CLIENT_SECRET', default='')
 
 # Field Encryption Key for encrypted model fields (Equipment credentials, etc.)
 # Generate a new key with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-FIELD_ENCRYPTION_KEY = config('FIELD_ENCRYPTION_KEY', default='3gnXjsPSDoeTaNo0hlFuWXCVVI3mox7SeG2r3jGehlE=')
+_BUILTIN_FIELD_ENCRYPTION_KEY = '3gnXjsPSDoeTaNo0hlFuWXCVVI3mox7SeG2r3jGehlE='
+FIELD_ENCRYPTION_KEY = config('FIELD_ENCRYPTION_KEY', default=_BUILTIN_FIELD_ENCRYPTION_KEY)
+_warn_if_builtin_default(
+    'FIELD_ENCRYPTION_KEY', FIELD_ENCRYPTION_KEY, _BUILTIN_FIELD_ENCRYPTION_KEY
+)
 
 # Disable admin authentication for development
 ADMIN_ENABLED = config('ADMIN_ENABLED', default='False', cast=bool)

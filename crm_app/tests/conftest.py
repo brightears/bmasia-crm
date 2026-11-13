@@ -9,6 +9,32 @@ any Postgres, independent of the legacy migration history.
 import pytest
 
 
+@pytest.fixture(scope="session")
+def django_db_setup(django_db_setup, django_db_blocker):
+    """Keep test-created contract templates clear of the reserved Hilton template IDs.
+
+    `crm_app.views` recognises the maintained Hilton agreement by fixed primary
+    keys. PostgreSQL sequences are not rolled back between tests, so without
+    this a template created by an unrelated test could receive one of those
+    IDs, depending on test order, and be rendered under the Hilton rules.
+    SQLite reuses rolled-back IDs and does not reach them.
+    """
+    from django.db import connection
+    from crm_app.models import ContractTemplate
+    from crm_app.views import HILTON_FULL_TEMPLATE_IDS
+
+    if connection.vendor == "postgresql":
+        table = ContractTemplate._meta.db_table
+        reserved_max = max(int(pk) for pk in HILTON_FULL_TEMPLATE_IDS)
+        with django_db_blocker.unblock(), connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT setval(pg_get_serial_sequence(%s, 'id'), "
+                f"GREATEST(%s, (SELECT COALESCE(MAX(id), 0) FROM {connection.ops.quote_name(table)})))",
+                [table, reserved_max],
+            )
+    yield
+
+
 @pytest.fixture(autouse=True)
 def enable_db_access_for_all_tests(db):
     pass
