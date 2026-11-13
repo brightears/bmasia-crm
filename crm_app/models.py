@@ -1242,6 +1242,54 @@ class ContractServiceLocation(TimestampedModel):
         return f"{self.location_name} ({self.get_platform_display()})"
 
 
+class ContractAddendum(TimestampedModel):
+    """A one-page change to an existing numbered contract (CRM-007).
+
+    Kept apart from Contract on purpose: renewal book, revenue, P&L, reminder
+    emails and agent reads all count Contract rows, and an addendum is not a
+    second agreement. Its number is the parent's plus -A<n>; it never draws
+    from DocumentSequence. The structured ``changes`` touch the parent
+    contract only when the addendum is marked Signed, and ``applied_snapshot``
+    keeps the before/after values of that one write.
+    """
+    STATUS_CHOICES = [
+        ('Draft', 'Draft'),
+        ('Sent', 'Sent'),
+        ('Signed', 'Signed'),
+        ('Cancelled', 'Cancelled'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    contract = models.ForeignKey(Contract, on_delete=models.PROTECT, related_name='addenda')
+    sequence = models.PositiveIntegerField()
+    addendum_number = models.CharField(max_length=60, unique=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Draft')
+    effective_date = models.DateField(help_text="Date the changes take effect")
+    changes = models.JSONField(default=list, help_text="Validated change items; see crm_app/services/contract_addenda.py")
+    customer_signatory_name = models.CharField(max_length=255, blank=True, help_text="Blank uses the contract's signatory")
+    customer_signatory_title = models.CharField(max_length=255, blank=True)
+    bmasia_signatory_name = models.CharField(max_length=255, blank=True)
+    bmasia_signatory_title = models.CharField(max_length=255, blank=True)
+    notes = models.TextField(blank=True, help_text="Internal only; never printed")
+    sent_date = models.DateField(null=True, blank=True)
+    signed_date = models.DateField(null=True, blank=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
+    applied_snapshot = models.JSONField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='created_contract_addenda',
+    )
+
+    class Meta:
+        ordering = ['contract', 'sequence']
+        constraints = [
+            models.UniqueConstraint(fields=['contract', 'sequence'], name='uniq_contract_addendum_sequence'),
+        ]
+
+    def __str__(self):
+        return f"{self.addendum_number} ({self.status})"
+
+
 # ============================================================================
 # Contract Content Management System
 # ============================================================================
