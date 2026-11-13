@@ -269,7 +269,14 @@ CORS_ALLOW_HEADERS = [
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
-    }
+    },
+    # Used ONLY by crm_app.login_throttle for the login / token-obtain rate
+    # limits. Keep it separate so the default cache (and every other DRF
+    # throttle, which uses the default) is unaffected.
+    'login_throttle': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'bmasia-login-throttle',
+    },
 }
 
 # Security Settings for Production

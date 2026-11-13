@@ -7776,6 +7776,15 @@ class AuthViewSet(viewsets.ViewSet):
             return [IsAuthenticated()]
         return super().get_permissions()
 
+    def get_throttles(self):
+        # Login checks a password, so it gets the dedicated login rate limits
+        # on top of the defaults. Other auth actions keep the defaults only.
+        throttles = super().get_throttles()
+        if self.action == 'login':
+            from .login_throttle import LOGIN_THROTTLE_CLASSES
+            throttles += [throttle() for throttle in LOGIN_THROTTLE_CLASSES]
+        return throttles
+
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def login(self, request):
         """User login"""

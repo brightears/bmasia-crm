@@ -17,7 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from django.views.generic import RedirectView
-from rest_framework.authtoken.views import obtain_auth_token
+from crm_app.login_throttle import throttled_obtain_auth_token
 from crm_app.rene_mcp_server import RenePhase2MCPView
 from crm_app.views import email_tracking_pixel
 
@@ -31,7 +31,7 @@ urlpatterns = [
         name='rene_phase2_mcp',
     ),
     path('', include('mcp_server.urls')),  # MCP server at /mcp/
-    path('api-token-auth/', obtain_auth_token, name='api_token_auth'),  # DRF token auth
+    path('api-token-auth/', throttled_obtain_auth_token, name='api_token_auth'),  # DRF token auth (rate limited)
     # SECURITY 2026-07-02: removed unauthenticated setup-admin/reset-admin routes — they granted full
     # superuser takeover with a fixed password. Use the `createadmin` / `reset_admin` management commands.
     # Email open tracking pixel (unauthenticated - called by email clients)
