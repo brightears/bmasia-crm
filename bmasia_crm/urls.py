@@ -32,8 +32,9 @@ urlpatterns = [
     ),
     path('', include('mcp_server.urls')),  # MCP server at /mcp/
     path('api-token-auth/', throttled_obtain_auth_token, name='api_token_auth'),  # DRF token auth (rate limited)
-    # SECURITY 2026-07-02: removed unauthenticated setup-admin/reset-admin routes — they granted full
-    # superuser takeover with a fixed password. Use the `createadmin` / `reset_admin` management commands.
+    # SECURITY 2026-07-02: removed unauthenticated setup-admin/reset-admin routes. To create or reset
+    # the admin user, run the `createadmin` / `reset_admin` management commands from a shell; they take
+    # the password from ADMIN_INITIAL_PASSWORD or an interactive prompt and have no default.
     # Email open tracking pixel (unauthenticated - called by email clients)
     path('t/<str:token>/', email_tracking_pixel, name='email_tracking_pixel'),
     # For now, redirect root to admin until React frontend is properly deployed

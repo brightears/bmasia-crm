@@ -9,13 +9,11 @@ A comprehensive Customer Relationship Management system built for BMAsia with Dj
 - **Zone Discovery**: Automatically fetches zones for specific account IDs
 - **Real-time Status**: Online/offline/no_device status tracking
 - **Admin Interface**: Easy zone management and bulk synchronization
-- **Debug Endpoint**: `/debug-soundtrack/` for API troubleshooting
-- **Authentication**: Temporarily disabled for development phase
+- **Authentication**: The API requires a login (JWT or DRF token) except for the login and token endpoints
 
 ### 🔧 Live Deployment
 - **Main Site**: https://bmasia-crm.onrender.com
-- **Debug URL**: https://bmasia-crm.onrender.com/debug-soundtrack/?test=1&account_id=YOUR_ACCOUNT_ID
-- **Admin Access**: No login required during development
+- **Admin Access**: Staff login required
 
 ### 📍 Restore Point
 To restore to this working version:
@@ -176,9 +174,6 @@ SOUNDTRACK_CLIENT_SECRET=REDACTED_set_in_render_dashboard
 ### Analytics
 - `/api/v1/dashboard/stats/` - Dashboard statistics
 - `/api/v1/opportunities/pipeline/` - Sales pipeline data
-
-### Soundtrack Integration
-- `/debug-soundtrack/` - Debug endpoint for API testing
 
 ## Development
 
