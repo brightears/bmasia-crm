@@ -125,10 +125,15 @@ class AutoEnrollmentService:
             # Find contracts expiring on the target date
             # Note: Contract model uses 'Active' (capital A) for status
             # Only include contracts that have renewal reminders enabled
+            # A contract whose renewal is already in flight stays Active until the
+            # renewal itself goes Active, so skip it here: no expiry reminders
+            # while a Draft/Sent/Active successor exists.
             contracts = Contract.objects.filter(
                 end_date=target_date,
                 status='Active',
                 send_renewal_reminders=True
+            ).exclude(
+                renewals__status__in=['Draft', 'Sent', 'Active']
             ).select_related('company')
 
             logger.info(f"Found {contracts.count()} contracts expiring on {target_date} for sequence {sequence.name}")

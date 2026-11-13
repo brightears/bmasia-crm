@@ -265,7 +265,7 @@ class ContractQuery(ModelQueryToolset):
         'id', 'contract_number', 'company', 'contract_type', 'service_type', 'status',
         'lifecycle_type', 'start_date', 'end_date', 'value', 'currency',
         'total_value', 'billing_entity', 'billing_frequency', 'payment_terms', 'payment_schedule', 'auto_renew',
-        'renewal_period_months', 'renewed_from', 'renewal_notice_sent', 'sent_date',
+        'renewal_period_months', 'renewed_from', 'renewal_notice_sent', 'sent_date', 'signed_date',
         'contract_category', 'is_active', 'master_contract', 'notes',
         'preamble_template', 'preamble_custom', 'payment_template', 'payment_custom',
         'activation_template', 'activation_custom', 'custom_terms', 'custom_service_items',
@@ -282,6 +282,9 @@ class ContractQuery(ModelQueryToolset):
         "or from Active (terminated after going live). "
         "service_type = product (Soundtrack / Beat Breeze). lifecycle_type: new/renewal/addon/churn. "
         "renewed_from links a renewal to the contract it replaced (renewal lineage). "
+        "When a renewal becomes Active, its Active predecessor on the same company is set to "
+        "Renewed automatically (audited); a predecessor in any other status is left alone. "
+        "signed_date is the customer's signature date: set it only from evidence, never guess. "
         "For a month's renewals use the renewal_book tool. $lookup with 'company' to join company details."
     )
 
@@ -527,6 +530,15 @@ def _persisted_field(collection, instance, serializer, key, fields, keep_json=Tr
     if keep_json and isinstance(val, (list, dict)):
         return val
     return str(val) if val is not None else None
+
+
+def _add_lifecycle_note(result, serializer):
+    """Report what the renewal lifecycle rule did to the predecessor, if it ran."""
+    lifecycle = getattr(serializer, 'lifecycle_result', None)
+    if lifecycle is not None:
+        from dataclasses import asdict
+        result['predecessor_lifecycle'] = asdict(lifecycle)
+    return result
 
 
 _GUARDED_CONTRACT_CONTACT_FIELDS = frozenset({
@@ -1142,6 +1154,7 @@ def create_record(collection: str, data: str) -> str:
         )
     # Return a concise summary
     result = {'id': str(instance.id)}
+    _add_lifecycle_note(result, serializer)
     for attr in ['name', 'contract_number', 'invoice_number', 'quote_number',
                  'ticket_number', 'article_number', 'title', 'email', 'subject']:
         if hasattr(instance, attr) and getattr(instance, attr):
@@ -1850,6 +1863,7 @@ def update_record(
                 for key in applied
             }
             result = {'updated': True, 'id': str(id), 'applied': persisted}
+            _add_lifecycle_note(result, serializer)
             if collection == 'contract' and send_bookkeeping:
                 result['contract_number'] = instance.contract_number
                 if signed_send_receipt:
@@ -1927,6 +1941,7 @@ def update_record(
         for key in applied
     }
     result = {'updated': True, 'id': str(id), 'applied': persisted}
+    _add_lifecycle_note(result, serializer)
     if dropped:
         result['warning_ignored_keys'] = dropped
         result['warning'] = ('These keys were NOT saved (DRF drops non-writable keys silently). '

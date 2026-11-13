@@ -353,13 +353,13 @@ const Contracts: React.FC = () => {
   };
 
   const handleDuplicateForRenewal = async (contract: Contract) => {
-    if (window.confirm(`Create renewal contract for "${contract.contract_number}"?\n\nThis will:\n• Create a new Active contract starting ${contract.end_date}\n• Mark the current contract as Renewed`)) {
+    if (window.confirm(`Create renewal contract for "${contract.contract_number}"?\n\nThis will:\n• Create a new Draft renewal starting ${contract.end_date}\n• Keep the current contract ${contract.status} until the renewal is signed and set to Active`)) {
       try {
         const result = await ApiService.duplicateForRenewal(contract.id);
-        setSuccess(`Renewal contract ${result.new_contract.contract_number} created successfully`);
+        setSuccess(`Renewal draft ${result.new_contract.contract_number} created. ${contract.contract_number} stays ${result.original_status} until the renewal becomes Active.`);
         loadContracts();
-      } catch (err) {
-        setError('Failed to create renewal contract');
+      } catch (err: any) {
+        setError(err?.response?.data?.error || 'Failed to create renewal contract');
       }
     }
     setActionMenuAnchor(null);

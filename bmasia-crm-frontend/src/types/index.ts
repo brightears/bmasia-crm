@@ -308,6 +308,7 @@ export interface Contract {
   status: 'Draft' | 'Sent' | 'Active' | 'Renewed' | 'Expired' | 'Cancelled';
   start_date: string;
   end_date: string;
+  signed_date?: string | null;
   value: number;
   currency: string;
   billing_entity?: string;

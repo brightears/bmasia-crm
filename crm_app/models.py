@@ -1008,6 +1008,9 @@ class Contract(TimestampedModel):
 
     # Follow-up tracking (for unsigned contracts in "Sent" status)
     sent_date = models.DateField(null=True, blank=True, help_text="Auto-set when status changes to Sent")
+    signed_date = models.DateField(
+        null=True, blank=True,
+        help_text="Date the customer signed this contract. Recorded only from evidence; never inferred.")
     first_followup_sent = models.BooleanField(default=False)
     second_followup_sent = models.BooleanField(default=False)
 
