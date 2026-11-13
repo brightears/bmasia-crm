@@ -271,14 +271,10 @@ const ContactForm: React.FC<ContactFormProps> = ({
       onSave();
     } catch (err: any) {
       console.error('=== Contact Save ERROR ===');
-      console.error('Full error object:', err);
       console.error('Error message:', err.message);
-      console.error('Error response:', err.response);
 
       if (err.response) {
         console.error('Response status:', err.response.status);
-        console.error('Response data:', JSON.stringify(err.response.data, null, 2));
-        console.error('Response headers:', err.response.headers);
       }
 
       if (err.response?.data) {

@@ -207,7 +207,7 @@ const UserForm: React.FC<UserFormProps> = ({
         onSuccess('User created successfully');
       }
     } catch (err: any) {
-      console.error('User save error:', err);
+      console.error('User save error:', err.response?.status ?? 'no response');
       if (err.response?.data) {
         if (typeof err.response.data === 'object') {
           const fieldErrors: Record<string, string> = {};

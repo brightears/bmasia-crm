@@ -94,7 +94,6 @@ const EmailAutomations: React.FC = () => {
 
       console.log('Loading email automations with params:', params);
       const response: ApiResponse<EmailSequence> = await ApiService.getEmailSequences(params);
-      console.log('Email Automations API response:', response);
 
       setSequences(response.results || []);
       setTotalCount(response.count || 0);

@@ -108,7 +108,6 @@ const EmailTemplates: React.FC = () => {
 
       console.log('Loading email templates with params:', params);
       const response: ApiResponse<EmailTemplate> = await ApiService.getEmailTemplates(params);
-      console.log('Email Templates API response:', response);
 
       setTemplates(response.results || []);
       setTotalCount(response.count || 0);
