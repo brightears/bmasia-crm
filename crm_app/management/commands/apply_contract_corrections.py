@@ -34,8 +34,11 @@ WRITE PATH
       for collisions with imported numbers);
     - Contract.save() runs, so updated_at is bumped and the post_save handlers
       run as they would on any save (none acts on Active);
-    - sent_date and is_active are left as they are (a normal activation leaves
-      them too; a Draft activated this way keeps sent_date empty);
+    - is_active becomes True, as ContractSerializer does on a transition to
+      Active (renewal Drafts are created with is_active=False); it is
+      journalled and audited like any other touched field;
+    - sent_date is left as it is (a normal activation leaves it too; a Draft
+      activated this way keeps sent_date empty);
     - signed_date is set only when the file gives one and the field is empty;
     - set_renewed_from links the successor to the old term of its pair only
       when the successor has no link yet (a different link refuses the group);
@@ -548,7 +551,7 @@ class Command(BaseCommand):
             if activation.set_renewed_from and current_link is None:
                 notes.append('renewed_from set to old term')
             if not s.is_active:
-                notes.append('is_active=False kept, as a normal activation leaves it')
+                notes.append('is_active False -> True')
             plan['details'][activation.contract_id] = '; '.join(notes)
 
         if renewal:
@@ -588,12 +591,14 @@ class Command(BaseCommand):
                 except RenePhase2Error:
                     raise _Refused('number_reservation_failed')
             s.status = 'Active'
+            s.is_active = True  # same rule as ContractSerializer._mark_live_on_activation
             if activation.signed_date and s.signed_date is None:
                 s.signed_date = activation.signed_date
             if activation.set_renewed_from and s.renewed_from_id is None:
                 s.renewed_from_id = uuid.UUID(activation.set_renewed_from)
             s.save(update_fields=[
-                'status', 'contract_number', 'sent_date', 'signed_date', 'renewed_from', 'updated_at'])
+                'status', 'is_active', 'contract_number', 'sent_date', 'signed_date', 'renewed_from',
+                'updated_at'])
             s.refresh_from_db()
             after = snapshot(s)
             AuditLog.objects.create(

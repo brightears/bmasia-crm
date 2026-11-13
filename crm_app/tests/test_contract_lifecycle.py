@@ -426,6 +426,94 @@ def test_renewal_draft_activation_then_closes_original():
     _assert_closed(original, new)
 
 
+# --- is_active on activation ---------------------------------------------------
+
+def _rest_audit(contract):
+    return AuditLog.objects.get(
+        model_name='Contract', record_id=str(contract.pk), action='UPDATE',
+        additional_data__view='ContractViewSet',
+    )
+
+
+def test_renewal_draft_goes_live_when_activated_over_rest():
+    original = _rich_original()
+    new = Contract.objects.get(pk=_duplicate(original).data['new_contract']['id'])
+    assert (new.status, new.is_active) == ('Draft', False)
+
+    response = _rest_patch(new, {'status': 'Active'})
+
+    assert response.status_code == 200, response.data
+    new.refresh_from_db()
+    assert (new.status, new.is_active) == ('Active', True)
+    assert _rest_audit(new).changes['is_active'] == {'old': False, 'new': True}
+    _assert_closed(original, new)
+
+
+def test_activation_respects_explicit_is_active_in_same_patch():
+    _, successor = _pair()
+    assert successor.is_active is False
+
+    response = _rest_patch(successor, {'status': 'Active', 'is_active': False})
+
+    assert response.status_code == 200, response.data
+    successor.refresh_from_db()
+    assert (successor.status, successor.is_active) == ('Active', False)
+    assert 'is_active' not in _rest_audit(successor).changes
+
+
+def test_activation_of_already_live_contract_leaves_is_active_alone():
+    _, successor = _pair()
+    Contract.objects.filter(pk=successor.pk).update(is_active=True)
+    successor.refresh_from_db()
+
+    response = _rest_patch(successor, {'status': 'Active'})
+
+    assert response.status_code == 200, response.data
+    successor.refresh_from_db()
+    assert successor.is_active is True
+    changes = _rest_audit(successor).changes
+    assert changes['status'] == {'old': 'Sent', 'new': 'Active'}
+    assert 'is_active' not in changes
+
+
+def test_edit_of_already_active_contract_does_not_touch_is_active():
+    contract = _contract(_company(), status='Active', is_active=False)
+    response = _rest_patch(contract, {'status': 'Active', 'notes': 'edited'})
+    assert response.status_code == 200, response.data
+    contract.refresh_from_db()
+    assert contract.is_active is False
+
+
+def test_non_active_transition_does_not_touch_is_active():
+    _, successor = _pair(successor_status='Draft')
+    response = _rest_patch(successor, {'status': 'Sent'})
+    assert response.status_code == 200, response.data
+    successor.refresh_from_db()
+    assert (successor.status, successor.is_active) == ('Sent', False)
+
+
+@pytest.mark.parametrize('supplied, expected', [(None, True), (False, False), (True, True)])
+def test_contract_born_active_is_live_unless_told_otherwise(supplied, expected):
+    company = _company()
+    data = {'company': str(company.pk), 'status': 'Active', 'start_date': '2026-11-01',
+            'end_date': '2027-10-31', 'value': '1200.00'}
+    if supplied is not None:
+        data['is_active'] = supplied
+    serializer = ContractSerializer(data=data)
+    assert serializer.is_valid(), serializer.errors
+    contract = serializer.save()
+    contract.refresh_from_db()
+    assert contract.is_active is expected
+
+
+def test_mcp_update_record_activation_sets_is_active():
+    _, successor = _pair()
+    result = json.loads(update_record('contract', str(successor.pk), json.dumps({'status': 'Active'})))
+    assert result['updated'] is True, result
+    successor.refresh_from_db()
+    assert (successor.status, successor.is_active) == ('Active', True)
+
+
 # --- backfill command ----------------------------------------------------------
 
 def _run_backfill(**kwargs):

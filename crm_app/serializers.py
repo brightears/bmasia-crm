@@ -949,6 +949,7 @@ class ContractSerializer(serializers.ModelSerializer):
 
         # Auto-calculate tax fields
         validated_data = self._calculate_tax_fields(validated_data)
+        self._mark_live_on_activation(validated_data, was_active=False)
 
         contract = Contract.objects.create(**validated_data)
         for item_data in line_items_data:
@@ -995,11 +996,20 @@ class ContractSerializer(serializers.ModelSerializer):
         )
         return self.lifecycle_result
 
+    @staticmethod
+    def _mark_live_on_activation(validated_data, *, was_active):
+        """Lifecycle rule: a contract that becomes Active is live (is_active=True),
+        unless the same write sets is_active itself. Renewal Drafts are created
+        with is_active=False (duplicate_for_renewal); this is where they go live."""
+        if validated_data.get('status') == 'Active' and not was_active and 'is_active' not in validated_data:
+            validated_data['is_active'] = True
+
     @transaction.atomic
     def update(self, instance, validated_data):
         """Update contract with tax recalculation and nested line items"""
         was_active = instance.status == 'Active'
         previous_renewed_from_id = instance.renewed_from_id
+        self._mark_live_on_activation(validated_data, was_active=was_active)
         line_items_data = validated_data.pop('line_items', None)
         use_line_tax = 'tax_rate' not in validated_data and any('tax_rate' in item for item in (line_items_data or []))
         preserve_line_totals = False

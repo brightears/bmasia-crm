@@ -384,8 +384,9 @@ def test_rerun_after_execute_is_already_applied(tmp_path):
 # --- Draft successor parity with a normal activation ------------------------------
 
 def test_draft_successor_gets_same_treatment_as_rest_activation(tmp_path):
-    old, new = _pair(successor_status='Draft', number='DRAFT-0901')
-    twin_old, twin_new = _pair(successor_status='Draft', number='DRAFT-0902')
+    # As duplicate_for_renewal creates them: not live until activated.
+    old, new = _pair(successor_status='Draft', number='DRAFT-0901', is_active=False)
+    twin_old, twin_new = _pair(successor_status='Draft', number='DRAFT-0902', is_active=False)
 
     out, _ = _execute(tmp_path, _file(tmp_path, _b(old, new)))
     user = User.objects.create_user(username=f'corrections-rest-{next(_numbers)}', role='Sales')
@@ -398,7 +399,7 @@ def test_draft_successor_gets_same_treatment_as_rest_activation(tmp_path):
         x.refresh_from_db()
     fields = ('status', 'is_active', 'sent_date', 'signed_date', 'renewed_from_id')
     assert [getattr(new, f) for f in fields[:-1]] == [getattr(twin_new, f) for f in fields[:-1]]
-    assert (new.status, new.sent_date, new.renewed_from_id) == ('Active', None, old.pk)
+    assert (new.status, new.is_active, new.sent_date, new.renewed_from_id) == ('Active', True, None, old.pk)
     assert [getattr(old, f) for f in fields] == [getattr(twin_old, f) for f in fields]
     assert (old.status, old.is_active) == ('Renewed', False)
     # Final number from the same sequence and format as the REST path.
@@ -430,6 +431,38 @@ def test_dry_run_mentions_number_reservation_without_minting(tmp_path):
     assert 'final number reserved (was DRAFT-0904)' in out
     new.refresh_from_db()
     assert new.contract_number == 'DRAFT-0904'
+
+
+# --- is_active ---------------------------------------------------------------------
+
+def test_activation_sets_is_active_and_revert_restores_it(tmp_path):
+    old, new = _pair(successor_status='Draft', number='DRAFT-0910', is_active=False)
+    path = _file(tmp_path, _b(old, new))
+
+    dry = _run('--file', path)
+    assert 'is_active False -> True' in dry
+    out, journal_path = _execute(tmp_path, path)
+
+    new.refresh_from_db()
+    assert (new.status, new.is_active) == ('Active', True)
+    assert _command_audits(new).get().changes['is_active'] == {'old': False, 'new': True}
+    row = next(r for r in json.load(open(journal_path))['groups'][0]['contracts']
+               if r['contract_id'] == str(new.pk))
+    assert (row['before']['is_active'], row['after']['is_active']) == (False, True)
+
+    _run('--revert', journal_path, '--execute')
+    new.refresh_from_db()
+    assert (new.status, new.is_active) == ('Draft', False)
+
+
+def test_activation_of_live_contract_does_not_touch_is_active(tmp_path):
+    c = _contract(_company(), status='Sent', is_active=True)
+    dry = _run('--file', _file(tmp_path, _c(c)))
+    assert 'is_active' not in dry
+    _, journal_path = _execute(tmp_path, _file(tmp_path, _c(c), name='run.json'))
+    assert 'is_active' not in _command_audits(c).get().changes
+    row = json.load(open(journal_path))['groups'][0]['contracts'][0]
+    assert 'is_active' not in row['before']
 
 
 # --- set_renewed_from and signed_date ---------------------------------------------
