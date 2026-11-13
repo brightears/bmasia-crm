@@ -95,3 +95,21 @@ def test_render_release_flags_are_explicit():
         ("RUN_LEGACY_DEPLOY_REPAIRS", "False"),
     ):
         assert f"- key: {key}\n        value: \"{value}\"" in blueprint
+
+
+def test_build_bootstrap_creates_admin_only_through_createadmin(tmp_path):
+    calls, env = _stub_commands(tmp_path)
+    env["RUN_DEPLOY_BOOTSTRAP"] = "True"
+
+    subprocess.run(["bash", "build.sh"], cwd=ROOT, env=env, check=True)
+
+    invoked = calls.read_text()
+    assert "python manage.py createadmin --noinput" in invoked
+    assert "manage.py shell" not in invoked
+
+
+def test_build_has_no_inline_superuser_creation():
+    build = (ROOT / "build.sh").read_text()
+
+    assert "create_superuser" not in build
+    assert "ADMIN_INITIAL_PASSWORD" in build

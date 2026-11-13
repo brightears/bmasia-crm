@@ -631,7 +631,7 @@ class CompanyViewSet(BaseModelViewSet):
     search_fields = ['name', 'website', 'notes', 'country']
     ordering_fields = ['name', 'created_at', 'updated_at', 'industry', 'country']
     ordering = ['name']
-    # Inherits permission_classes = [AllowAny] from BaseModelViewSet for development
+    # Inherits permission_classes = [IsAuthenticated] from BaseModelViewSet
     filterset_fields = ['industry', 'is_active', 'country', 'is_corporate_parent', 'parent_company']
 
     def get_queryset(self):
@@ -7768,6 +7768,23 @@ class AuthViewSet(viewsets.ViewSet):
     """ViewSet for authentication"""
     permission_classes = [AllowAny]
 
+    def get_permissions(self):
+        # These actions are routed by hand with as_view({...}) in urls.py, which
+        # ignores the per-action permission_classes given to @action, so the
+        # class-level AllowAny would otherwise apply to `me` as well.
+        if self.action == 'me':
+            return [IsAuthenticated()]
+        return super().get_permissions()
+
+    def get_throttles(self):
+        # Login checks a password, so it gets the dedicated login rate limits
+        # on top of the defaults. Other auth actions keep the defaults only.
+        throttles = super().get_throttles()
+        if self.action == 'login':
+            from .login_throttle import LOGIN_THROTTLE_CLASSES
+            throttles += [throttle() for throttle in LOGIN_THROTTLE_CLASSES]
+        return throttles
+
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def login(self, request):
         """User login"""
@@ -7866,32 +7883,6 @@ class AuthViewSet(viewsets.ViewSet):
         else:
             ip = request.META.get('REMOTE_ADDR')
         return ip
-
-
-@csrf_exempt
-def reset_admin(request):
-    """Reset admin password to default"""
-    User = get_user_model()
-    
-    # Delete any existing admin users
-    deleted_count = User.objects.filter(username='admin').delete()[0]
-    
-    # Create new admin user
-    admin_user = User.objects.create_superuser(
-        username='admin',
-        email='admin@bmasia.com',
-        password='bmasia123',
-        role='Admin'
-    )
-    
-    return HttpResponse(f"""
-        <h2>✅ Admin Reset Successful!</h2>
-        <p>Deleted {deleted_count} existing admin users</p>
-        <p>Created fresh admin user:</p>
-        <strong>Username:</strong> admin<br>
-        <strong>Password:</strong> bmasia123<br><br>
-        <a href="/admin/" style="background: #1976d2; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Go to Admin Login</a>
-    """)
 
 
 # ============================================================================

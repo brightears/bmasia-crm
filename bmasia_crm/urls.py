@@ -15,62 +15,11 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path, include, re_path
+from django.urls import path, include
 from django.views.generic import RedirectView
-from rest_framework.authtoken.views import obtain_auth_token
-from django.conf import settings
-from crm_app.admin_setup import create_admin_view
+from crm_app.login_throttle import throttled_obtain_auth_token
 from crm_app.rene_mcp_server import RenePhase2MCPView
 from crm_app.views import email_tracking_pixel
-from django.http import HttpResponse
-import subprocess
-import os
-
-def reset_admin_view(request):
-    """DISABLED 2026-07-02 (security): unauthenticated superuser reset with a fixed password was a
-    full account-takeover hole. Route removed; use the `reset_admin` / `createadmin` management commands."""
-    from django.http import HttpResponseForbidden
-    return HttpResponseForbidden('Disabled for security. Use the reset_admin management command.')
-    try:
-        from crm_app.models import User
-        
-        # Delete existing admin users
-        deleted_count = User.objects.filter(username='admin').delete()[0]
-        
-        # Create fresh admin user
-        admin_user = User.objects.create_superuser(
-            username='admin',
-            email='admin@bmasia.com',
-            password='bmasia123',
-            first_name='BMAsia',
-            last_name='Admin',
-            role='Admin'
-        )
-        
-        return HttpResponse(f'''
-        <h2>✅ Admin Reset Successful!</h2>
-        <p>Deleted {deleted_count} existing admin users</p>
-        <p>Created fresh admin user:</p>
-        <strong>Username:</strong> admin<br>
-        <strong>Password:</strong> bmasia123<br><br>
-        <a href="/admin/" style="background: #1976d2; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Go to Admin Login</a>
-        ''')
-        
-    except Exception as e:
-        # Try fallback with Django's built-in User
-        try:
-            from django.contrib.auth.models import User as BaseUser
-            BaseUser.objects.filter(username='admin').delete()
-            BaseUser.objects.create_superuser('admin', 'admin@bmasia.com', 'bmasia123')
-            return HttpResponse(f'''
-            <h2>✅ Fallback Admin Created!</h2>
-            <p>Created using Django's base User model:</p>
-            <strong>Username:</strong> admin<br>
-            <strong>Password:</strong> bmasia123<br><br>
-            <a href="/admin/" style="background: #1976d2; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Go to Admin Login</a>
-            ''')
-        except Exception as e2:
-            return HttpResponse(f'❌ Error: {e}<br>❌ Fallback Error: {e2}')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -82,9 +31,10 @@ urlpatterns = [
         name='rene_phase2_mcp',
     ),
     path('', include('mcp_server.urls')),  # MCP server at /mcp/
-    path('api-token-auth/', obtain_auth_token, name='api_token_auth'),  # DRF token auth
-    # SECURITY 2026-07-02: removed unauthenticated setup-admin/reset-admin routes — they granted full
-    # superuser takeover with a fixed password. Use the `createadmin` / `reset_admin` management commands.
+    path('api-token-auth/', throttled_obtain_auth_token, name='api_token_auth'),  # DRF token auth (rate limited)
+    # SECURITY 2026-07-02: removed unauthenticated setup-admin/reset-admin routes. To create or reset
+    # the admin user, run the `createadmin` / `reset_admin` management commands from a shell; they take
+    # the password from ADMIN_INITIAL_PASSWORD or an interactive prompt and have no default.
     # Email open tracking pixel (unauthenticated - called by email clients)
     path('t/<str:token>/', email_tracking_pixel, name='email_tracking_pixel'),
     # For now, redirect root to admin until React frontend is properly deployed

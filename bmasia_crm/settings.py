@@ -188,8 +188,11 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.SessionAuthentication',
         'rest_framework.authentication.TokenAuthentication',
     ],
+    # Every DRF view requires a logged-in user unless it opts out explicitly.
+    # Login and token-obtain views set their own AllowAny / empty permissions;
+    # crm_app/tests/test_anonymous_api_surface.py keeps that list explicit.
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',  # Disabled auth for development
+        'rest_framework.permissions.IsAuthenticated',
     ],
     'DEFAULT_RENDERER_CLASSES': [
         'crm_app.renderers.UUIDJSONRenderer',  # Custom renderer for UUID serialization
@@ -266,7 +269,14 @@ CORS_ALLOW_HEADERS = [
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
-    }
+    },
+    # Used ONLY by crm_app.login_throttle for the login / token-obtain rate
+    # limits. Keep it separate so the default cache (and every other DRF
+    # throttle, which uses the default) is unaffected.
+    'login_throttle': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'bmasia-login-throttle',
+    },
 }
 
 # Security Settings for Production

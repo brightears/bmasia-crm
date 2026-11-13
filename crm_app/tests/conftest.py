@@ -21,3 +21,13 @@ def clear_mcp_request_context():
     token = django_request_ctx.set(None)
     yield
     django_request_ctx.reset(token)
+
+
+@pytest.fixture(autouse=True)
+def clear_login_throttle_cache():
+    """Login rate-limit counters live in an in-process cache; start each test clean."""
+    from django.core.cache import caches
+    from crm_app.login_throttle import LOGIN_THROTTLE_CACHE_ALIAS
+    caches[LOGIN_THROTTLE_CACHE_ALIAS].clear()
+    yield
+    caches[LOGIN_THROTTLE_CACHE_ALIAS].clear()

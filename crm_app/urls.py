@@ -1,12 +1,11 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from rest_framework.authtoken.views import obtain_auth_token
 from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
     TokenRefreshView,
     TokenVerifyView,
 )
 from . import views, admin_views
+from .login_throttle import ThrottledTokenObtainPairView, throttled_obtain_auth_token
 from .rene_views import ReneTokenCapabilitiesView
 from .cara_api import CaraCapabilitiesView, CaraCustomerCareView
 
@@ -120,12 +119,12 @@ urlpatterns = [
     path('v1/auth/me/', views.AuthViewSet.as_view({'get': 'me'}), name='auth_me'),
 
     # JWT token endpoints (fallback)
-    path('v1/jwt/token/', TokenObtainPairView.as_view(), name='jwt_token_obtain_pair'),
+    path('v1/jwt/token/', ThrottledTokenObtainPairView.as_view(), name='jwt_token_obtain_pair'),
     path('v1/jwt/token/refresh/', TokenRefreshView.as_view(), name='jwt_token_refresh'),
     path('v1/jwt/token/verify/', TokenVerifyView.as_view(), name='jwt_token_verify'),
 
     # Legacy token auth
-    path('auth/token/', obtain_auth_token, name='api_token_auth'),
+    path('auth/token/', throttled_obtain_auth_token, name='api_token_auth'),
 
     # Admin custom views
     path('admin/send-email/', admin_views.send_email_view, name='admin_send_email'),

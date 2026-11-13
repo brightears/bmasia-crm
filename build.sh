@@ -14,15 +14,10 @@ python manage.py collectstatic --no-input
 # an explicitly authorized maintenance run, but never execute them as a side
 # effect of an ordinary application build.
 if [ "${RUN_DEPLOY_BOOTSTRAP:-False}" = "True" ]; then
-python manage.py shell << EOF 2>/dev/null || echo "Skipping superuser creation (tables may not exist yet)"
-from django.contrib.auth import get_user_model
-User = get_user_model()
-if not User.objects.filter(username='admin').exists():
-    User.objects.create_superuser('admin', 'admin@bmasiamusic.com', 'bmasia123')
-    print('Superuser created')
-else:
-    print('Superuser already exists')
-EOF
+# Creates the admin user only if it is missing. The password must come from
+# the ADMIN_INITIAL_PASSWORD environment variable; there is no default, and
+# without it the command refuses and admin creation is skipped.
+python manage.py createadmin --noinput || echo "Skipping admin creation (ADMIN_INITIAL_PASSWORD not set, or tables do not exist yet)"
 
 # Create email templates (may fail if tables don't exist)
 python manage.py create_email_templates 2>/dev/null || echo "Skipping email template creation (tables may not exist yet)"
