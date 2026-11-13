@@ -631,7 +631,7 @@ class CompanyViewSet(BaseModelViewSet):
     search_fields = ['name', 'website', 'notes', 'country']
     ordering_fields = ['name', 'created_at', 'updated_at', 'industry', 'country']
     ordering = ['name']
-    # Inherits permission_classes = [AllowAny] from BaseModelViewSet for development
+    # Inherits permission_classes = [IsAuthenticated] from BaseModelViewSet
     filterset_fields = ['industry', 'is_active', 'country', 'is_corporate_parent', 'parent_company']
 
     def get_queryset(self):
