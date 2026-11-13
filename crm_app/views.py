@@ -7768,6 +7768,14 @@ class AuthViewSet(viewsets.ViewSet):
     """ViewSet for authentication"""
     permission_classes = [AllowAny]
 
+    def get_permissions(self):
+        # These actions are routed by hand with as_view({...}) in urls.py, which
+        # ignores the per-action permission_classes given to @action, so the
+        # class-level AllowAny would otherwise apply to `me` as well.
+        if self.action == 'me':
+            return [IsAuthenticated()]
+        return super().get_permissions()
+
     @action(detail=False, methods=['post'], permission_classes=[AllowAny])
     def login(self, request):
         """User login"""
