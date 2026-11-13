@@ -48,35 +48,13 @@ class AuthService {
       (config) => {
         const token = this.getAccessToken();
 
-        // Construct full URL for logging
-        const fullUrl = `${config.baseURL}${config.url}`;
-
-        console.log('=== REQUEST INTERCEPTOR ===');
-        console.log('Full URL:', fullUrl);
-        console.log('Method:', config.method?.toUpperCase());
-        console.log('Base URL:', config.baseURL);
-        console.log('Endpoint:', config.url);
-        console.log('Params:', config.params);
-        console.log('Has Token:', !!token);
-
         if (token && !this.isTokenExpired(token)) {
           config.headers.Authorization = `Bearer ${token}`;
-          console.log('Authorization Header (first 30 chars):', `${token.substring(0, 30)}...`);
-        } else if (token) {
-          console.log('Token exists but is EXPIRED');
-        } else {
-          console.log('No token available');
         }
-
-        console.log('Request Headers:', JSON.stringify(config.headers, null, 2));
-        console.log('========================\n');
 
         return config;
       },
       (error) => {
-        console.error('=== REQUEST INTERCEPTOR ERROR ===');
-        console.error('Error:', error);
-        console.error('==================================\n');
         return Promise.reject(error);
       }
     );
@@ -84,48 +62,10 @@ class AuthService {
     // Response interceptor for token refresh
     this.api.interceptors.response.use(
       (response) => {
-        console.log('=== RESPONSE INTERCEPTOR (SUCCESS) ===');
-        console.log('Status:', response.status);
-        console.log('Status Text:', response.statusText);
-        console.log('URL:', response.config.url);
-        console.log('Response Headers:', JSON.stringify(response.headers, null, 2));
-        console.log('Response Data Type:', typeof response.data);
-        console.log('Response Data:', JSON.stringify(response.data, null, 2));
-
-        // Check if data was transformed
-        if (response.data && typeof response.data === 'object') {
-          console.log('Response Data Keys:', Object.keys(response.data));
-          if ('count' in response.data) {
-            console.log('Has count property:', response.data.count);
-          }
-          if ('results' in response.data) {
-            console.log('Has results property, length:', response.data.results?.length);
-          }
-        }
-        console.log('======================================\n');
-
         return response;
       },
       async (error) => {
-        console.error('=== RESPONSE INTERCEPTOR (ERROR) ===');
-
-        if (error.response) {
-          // Server responded with error status
-          console.error('Error Status:', error.response.status);
-          console.error('Error Status Text:', error.response.statusText);
-          console.error('Error URL:', error.config?.url);
-          console.error('Error Data:', JSON.stringify(error.response.data, null, 2));
-          console.error('Error Headers:', JSON.stringify(error.response.headers, null, 2));
-        } else if (error.request) {
-          // Request was made but no response received
-          console.error('No response received');
-          console.error('Request:', error.request);
-        } else {
-          // Something else happened
-          console.error('Error Message:', error.message);
-        }
-        console.error('Error Config:', JSON.stringify(error.config, null, 2));
-        console.error('=====================================\n');
+        console.error('API request failed:', error.response?.status ?? 'no response', error.config?.url?.split('?')[0]);
 
         const originalRequest = error.config;
 
@@ -175,7 +115,7 @@ class AuthService {
 
       return response.data;
     } catch (error: any) {
-      console.error('Login request failed:', error);
+      console.error('Login request failed:', error.response?.status ?? 'no response');
 
       // Handle different error response formats
       let errorMessage = 'Login failed';
@@ -207,9 +147,9 @@ class AuthService {
       if (refreshToken) {
         await this.api.post('/auth/logout/', { refresh: refreshToken });
       }
-    } catch (error) {
+    } catch (error: any) {
       // Continue with logout even if API call fails
-      console.error('Logout API error:', error);
+      console.error('Logout API error:', error.response?.status ?? 'no response');
     } finally {
       this.clearAuthData();
     }

@@ -170,7 +170,7 @@ const MyProfile: React.FC = () => {
       setPasswordData({ old_password: '', new_password: '' });
       setConfirmPassword('');
     } catch (err: any) {
-      console.error('Change password error:', err);
+      console.error('Change password error:', err.response?.status ?? 'no response');
       const errorMsg = err.response?.data?.detail || err.response?.data?.error || err.message || 'Unknown error';
       setPasswordErrors([errorMsg]);
       showSnackbar(`Failed to change password: ${errorMsg}`, 'error');
@@ -199,7 +199,7 @@ const MyProfile: React.FC = () => {
       // Clear password field for security
       setSmtpData({ ...smtpData, smtp_password: '' });
     } catch (err: any) {
-      console.error('Save SMTP error:', err);
+      console.error('Save SMTP error:', err.response?.status ?? 'no response');
       const errorMsg = err.response?.data?.detail || err.response?.data?.error || err.message || 'Unknown error';
       setError(`Failed to save SMTP settings: ${errorMsg}`);
       showSnackbar(`Failed to save SMTP settings: ${errorMsg}`, 'error');

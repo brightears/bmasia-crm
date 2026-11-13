@@ -79,7 +79,6 @@ const Campaigns: React.FC = () => {
 
       console.log('Loading campaigns with params:', params);
       const response: ApiResponse<EmailCampaign> = await ApiService.getCampaigns(params);
-      console.log('Campaigns API response:', response);
 
       setCampaigns(response.results || []);
       setTotalCount(response.count || 0);

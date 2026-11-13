@@ -100,38 +100,8 @@ class ApiService {
       return MockApiService.getCompanies(params);
     }
 
-    console.log('=== ApiService.getCompanies START ===');
-    console.log('Params:', JSON.stringify(params, null, 2));
-    console.log('authApi instance baseURL:', (authApi as any).defaults?.baseURL);
-    console.log('Making request to endpoint: /companies/');
-
-    try {
-      const response = await authApi.get<ApiResponse<Company>>('/companies/', { params });
-
-      console.log('=== ApiService.getCompanies RESPONSE ===');
-      console.log('Response Status:', response.status);
-      console.log('Response Status Text:', response.statusText);
-      console.log('Response Data (raw):', JSON.stringify(response.data, null, 2));
-      console.log('Response count:', response.data.count);
-      console.log('Response results length:', response.data.results?.length || 0);
-
-      if (response.data.results && response.data.results.length > 0) {
-        console.log('First company:', JSON.stringify(response.data.results[0], null, 2));
-      } else {
-        console.warn('WARNING: Results array is empty!');
-      }
-
-      console.log('====================================\n');
-
-      return response.data;
-    } catch (error: any) {
-      console.error('=== ApiService.getCompanies ERROR ===');
-      console.error('Error:', error);
-      console.error('Error message:', error.message);
-      console.error('Error response:', error.response);
-      console.error('=====================================\n');
-      throw error;
-    }
+    const response = await authApi.get<ApiResponse<Company>>('/companies/', { params });
+    return response.data;
   }
 
   async getCompaniesSimple(params?: any): Promise<{id: string; name: string; billing_entity: string}[]> {
