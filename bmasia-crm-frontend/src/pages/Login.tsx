@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import {
   Box,
   Paper,
@@ -17,7 +17,7 @@ import { LockOutlined } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 
 const Login: React.FC = () => {
-  const { login, loading } = useAuth();
+  const { login, loading, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [credentials, setCredentials] = useState({
@@ -26,6 +26,13 @@ const Login: React.FC = () => {
     remember_me: true,
   });
   const [error, setError] = useState('');
+
+  // Someone who is already signed in is sent on to the page they asked for.
+  const requested = (location.state as any)?.from;
+  if (isAuthenticated && !loading) {
+    const target = requested?.pathname ? `${requested.pathname}${requested.search || ''}` : '/dashboard';
+    return <Navigate to={target} replace />;
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
