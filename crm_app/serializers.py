@@ -210,7 +210,7 @@ class ZoneSerializer(serializers.ModelSerializer):
 
     def get_current_contract(self, obj):
         """Get the currently active contract for this zone"""
-        active_link = obj.zone_contracts.filter(is_active=True).select_related('contract').first()
+        active_link = obj.get_current_link()
         if active_link:
             return {
                 'id': str(active_link.contract.id),
@@ -1021,7 +1021,7 @@ class ContractSerializer(serializers.ModelSerializer):
 
     def _close_renewed_predecessor(self, contract):
         """Lifecycle choke point for REST and MCP writes: a renewal going Active
-        closes its Active predecessor (same transaction, audited)."""
+        closes its Active or Expired predecessor (same transaction, audited)."""
         from crm_app.services.contract_lifecycle import close_renewed_predecessor
         request = self.context.get('request')
         user = getattr(request, 'user', None)

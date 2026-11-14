@@ -1149,6 +1149,32 @@ class Contract(TimestampedModel):
         """Get count of currently active zones"""
         return self.get_active_zones().count()
 
+    def get_term_links(self):
+        """Zone links that covered any part of this contract's term.
+
+        A link counts when it started on or before the term's end and has no
+        end date or ended on or after the term's start, whether or not it is
+        active today. An open end or start of the term is no limit. This is the
+        basis for documents, template text and zone counts when the contract has
+        no service-location rows: a Renewed term whose links were handed over to
+        its renewal, or a Cancelled term, still shows the zones it covered.
+        """
+        from django.db.models import Q
+        links = self.contract_zones.all()
+        if self.end_date:
+            links = links.filter(start_date__lte=self.end_date)
+        if self.start_date:
+            links = links.filter(Q(end_date__isnull=True) | Q(end_date__gte=self.start_date))
+        return links
+
+    def get_term_zones(self):
+        """Zones linked to this contract during its term (see get_term_links)."""
+        return self.zones.filter(pk__in=self.get_term_links().values('zone_id')).distinct()
+
+    def get_term_zone_count(self):
+        """Count of zones linked to this contract during its term."""
+        return self.get_term_zones().count()
+
 
 class ContractZone(TimestampedModel):
     """
@@ -1997,9 +2023,26 @@ class Zone(TimestampedModel):
 
         self.save()
 
+    def get_current_link(self):
+        """The zone's current contract link, in a defined order.
+
+        Among the active links: a link whose contract is Active comes first,
+        then the link that started last, then the contract that started last,
+        then the link id (so the answer never depends on database row order).
+        """
+        from django.db.models import Case, IntegerField, Value, When
+        return (
+            self.zone_contracts.filter(is_active=True)
+            .select_related('contract')
+            .annotate(_active_first=Case(When(contract__status='Active', then=Value(0)),
+                                         default=Value(1), output_field=IntegerField()))
+            .order_by('_active_first', '-start_date', '-contract__start_date', 'pk')
+            .first()
+        )
+
     def get_active_contract(self):
-        """Get the currently active contract for this zone"""
-        active_link = self.zone_contracts.filter(is_active=True).first()
+        """Get the currently active contract for this zone (see get_current_link)"""
+        active_link = self.get_current_link()
         return active_link.contract if active_link else None
 
     def mark_as_cancelled(self):

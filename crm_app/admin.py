@@ -1061,9 +1061,32 @@ class ContractAdmin(admin.ModelAdmin):
         return form
 
     def bulk_update_status_active(self, request, queryset):
-        """Mark selected contracts as active"""
-        updated_count = queryset.update(status='Active', is_active=True)
-        self.message_user(request, f'Successfully marked {updated_count} contracts as active')
+        """Mark selected contracts as active.
+
+        Runs the same lifecycle rule as REST/MCP activation, and like them only for a
+        contract that becomes Active here (one that was Active already is left to the
+        close_renewed_predecessors backfill): its same-company Active or Expired
+        predecessor becomes Renewed and hands its zone links over (audited), all in one
+        transaction with the status change. Contracts are handled in term order (start
+        date), so in a selected chain each earlier term is activated before its renewal
+        closes it.
+        """
+        from django.db import transaction
+        from crm_app.services.contract_lifecycle import close_renewed_predecessor
+        with transaction.atomic():
+            ids = list(queryset.values_list('pk', flat=True))
+            becoming_active = list(Contract.objects.select_for_update().filter(pk__in=ids)
+                                   .exclude(status='Active').values_list('pk', flat=True))
+            updated_count = Contract.objects.filter(pk__in=ids).update(status='Active', is_active=True)
+            closed = 0
+            for contract in Contract.objects.filter(pk__in=becoming_active, renewed_from__isnull=False) \
+                    .order_by('start_date', 'created_at', 'pk'):
+                if close_renewed_predecessor(contract, user=request.user, source='admin_bulk_activate').closed:
+                    closed += 1
+        message = f'Successfully marked {updated_count} contracts as active'
+        if closed:
+            message += f'; {closed} earlier term(s) set to Renewed and their zone links handed over'
+        self.message_user(request, message)
     bulk_update_status_active.short_description = 'Mark selected contracts as active'
 
     def bulk_update_status_inactive(self, request, queryset):

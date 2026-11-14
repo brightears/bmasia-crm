@@ -47,7 +47,9 @@ WRITE PATH
       must not close anything (a group where it would is refused up front).
   Mark renewed (class A) calls the same lifecycle rule for the existing Active
   successor, so the old term is closed by the same code (queryset update of
-  status/is_active, updated_at bump, AuditLog row).
+  status/is_active, updated_at bump, AuditLog row). The rule also hands over
+  the old term's links to zones the successor holds (end_date = the day before
+  the successor starts); the journal records them and --revert reopens them.
   Every changed contract gets exactly one AuditLog UPDATE row whose
   additional_data carries command, batch_id, group, class and evidence.
 
@@ -122,7 +124,10 @@ from django.utils import timezone
 
 from crm_app.models import AuditLog, Contract
 from crm_app.services import contract_corrections_v2 as v2
-from crm_app.services.contract_lifecycle import CLOSED, close_renewed_predecessor
+from crm_app.services import contract_lifecycle
+from crm_app.services.contract_lifecycle import (
+    CLOSED, close_renewed_predecessor, handed_over_links_state, reopen_handed_over_links,
+)
 
 COMMAND = 'apply_contract_corrections'
 FILE_FORMAT = 'contract-corrections/v1'
@@ -562,7 +567,8 @@ class Command(BaseCommand):
                     raise _Refused('renewed_from_conflict')
             elif link:
                 predecessor = Contract.objects.select_for_update().filter(pk=link).first()
-                if predecessor and predecessor.company_id == s.company_id and predecessor.status == 'Active':
+                if predecessor and predecessor.company_id == s.company_id \
+                        and predecessor.status in contract_lifecycle.CLOSABLE:
                     raise _Refused('would_close_contract_outside_file')
             if _needs_final_number(s):
                 notes.append(f'final number reserved (was {s.contract_number or "empty"})')
@@ -656,11 +662,15 @@ class Command(BaseCommand):
             c.refresh_from_db()
             before, after = befores[e.contract_id], snapshot(c)
             touched = [f for f in JOURNAL_FIELDS if before[f] != after[f]] + ['updated_at']
-            journal_rows.append({
+            row = {
                 'contract_id': e.contract_id, 'class': e.cls, 'evidence': e.evidence,
                 'before': {f: before[f] for f in touched},
                 'after': {f: after[f] for f in touched},
-            })
+            }
+            if closure.outcome == CLOSED and closure.predecessor_id == e.contract_id and closure.zone_links_closed:
+                # The lifecycle rule handed the old term's zone links over; --revert reopens them.
+                row['zone_links_closed'] = list(closure.zone_links_closed)
+            journal_rows.append(row)
             changes = _changes(before, after)
             details[e.contract_id] = ', '.join(
                 f'{f} {v["old"]} -> {v["new"]}' for f, v in changes.items() if f != 'status')
@@ -722,15 +732,19 @@ class Command(BaseCommand):
                 }
                 if any(row['contract_id'] not in locked for row in rows):
                     return 'missing_contract'
+                handed = [link for r in rows for link in r.get('zone_links_closed', [])]
                 if all(self._matches(locked[r['contract_id']], r['after']) for r in rows):
-                    pass
+                    if handed_over_links_state(handed) != 'after':
+                        return 'changed_since_apply'
                 elif all(self._matches(locked[r['contract_id']], {
-                        f: v for f, v in r['before'].items() if f in REVERT_FIELDS}) for r in rows):
+                        f: v for f, v in r['before'].items() if f in REVERT_FIELDS}) for r in rows) \
+                        and (not handed or handed_over_links_state(handed) == 'before'):
                     return 'already_reverted'
                 else:
                     return 'changed_since_apply'
                 if not self.execute_mode:
                     return 'would_revert'
+                reopen_handed_over_links(handed)
                 for row in rows:
                     c = locked[row['contract_id']]
                     before = snapshot(c)
