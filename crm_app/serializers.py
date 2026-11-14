@@ -1348,6 +1348,18 @@ class DashboardStatsSerializer(serializers.Serializer):
     churned_count = serializers.IntegerField(default=0)
     net_revenue = serializers.DecimalField(max_digits=12, decimal_places=2, default=0)
 
+    # The money totals above, per currency: [{'currency': 'THB', 'total': '108000.00'}, ...].
+    # The fields above add every currency together and are kept as they are for existing readers.
+    contracts_value_by_currency = serializers.ListField(default=list)
+    monthly_revenue_by_currency = serializers.ListField(default=list)
+    previous_month_revenue_by_currency = serializers.ListField(default=list)
+    total_overdue_amount_by_currency = serializers.ListField(default=list)
+    pending_renewal_value_by_currency = serializers.ListField(default=list)
+    new_revenue_by_currency = serializers.ListField(default=list)
+    renewal_revenue_by_currency = serializers.ListField(default=list)
+    churned_revenue_by_currency = serializers.ListField(default=list)
+    net_revenue_by_currency = serializers.ListField(default=list)
+
 
 class BulkOperationSerializer(serializers.Serializer):
     """Serializer for bulk operations"""

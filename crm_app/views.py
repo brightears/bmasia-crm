@@ -7345,10 +7345,44 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     filterset_fields = ['user', 'action', 'model_name']
 
 
+def _sum_by_currency(items, amount):
+    """Add up ``amount(item)`` per the item's own ``currency``, never across currencies.
+
+    Returns ``[{'currency': 'THB', 'total': '110000.50'}, ...]`` sorted by currency, with totals as
+    strings so no precision is lost (same shape as Company.active_contract_value_by_currency).
+    A currency with no items is left out; an item without a currency is grouped under ''.
+    """
+    from decimal import Decimal
+    totals = {}
+    for item in items:
+        value = amount(item)
+        if value is None:
+            continue
+        currency = (getattr(item, 'currency', '') or '').upper()
+        totals[currency] = totals.get(currency, Decimal('0')) + Decimal(str(value))
+    return [
+        {'currency': currency, 'total': str(totals[currency].quantize(Decimal('0.01')))}
+        for currency in sorted(totals)
+    ]
+
+
+def _net_by_currency(added, subtracted):
+    """Per-currency ``sum(added) - sum(subtracted)``; inputs are _sum_by_currency results."""
+    from decimal import Decimal
+    totals = {}
+    for rows, sign in [(group, 1) for group in added] + [(subtracted, -1)]:
+        for row in rows:
+            totals[row['currency']] = totals.get(row['currency'], Decimal('0')) + sign * Decimal(row['total'])
+    return [
+        {'currency': currency, 'total': str(totals[currency].quantize(Decimal('0.01')))}
+        for currency in sorted(totals)
+    ]
+
+
 class DashboardViewSet(viewsets.ViewSet):
     """ViewSet for dashboard statistics"""
     permission_classes = [IsAuthenticated]
-    
+
     def _classify_lifecycle(self, contract):
         """Classify contract lifecycle type with inference when lifecycle_type is blank."""
         if contract.lifecycle_type:
@@ -7484,13 +7518,17 @@ class DashboardViewSet(viewsets.ViewSet):
         from decimal import Decimal
         new_revenue = Decimal('0')
         renewal_revenue = Decimal('0')
+        new_contracts = []
+        renewal_contracts = []
         for c in monthly_contracts:
             ltype = self._classify_lifecycle(c)
             val = c.value or Decimal('0')
             if ltype == 'new':
                 new_revenue += val
+                new_contracts.append(c)
             elif ltype in ('renewal', 'addon'):
                 renewal_revenue += val
+                renewal_contracts.append(c)
 
         # Churn: contracts ending this month with no successor
         next_month = (current_month + timedelta(days=32)).replace(day=1)
@@ -7530,13 +7568,17 @@ class DashboardViewSet(viewsets.ViewSet):
             )
             m_new = 0.0
             m_renewal = 0.0
+            m_new_contracts = []
+            m_renewal_contracts = []
             for c in started_qs:
                 ltype = self._classify_lifecycle(c)
                 val = float(c.value or 0)
                 if ltype == 'new':
                     m_new += val
+                    m_new_contracts.append(c)
                 else:
                     m_renewal += val
+                    m_renewal_contracts.append(c)
 
             # Contracts ending this month without renewal (churn)
             ended_qs = Contract.objects.filter(
@@ -7548,6 +7590,18 @@ class DashboardViewSet(viewsets.ViewSet):
                 ended_qs = filter_document_entity(ended_qs, billing_entity)
             m_churn = sum(float(c.value or 0) for c in ended_qs)
 
+            # The same month per currency (each contract's own currency, never added across).
+            contract_value = lambda c: c.value or 0  # noqa: E731
+            m_new_by = _sum_by_currency(m_new_contracts, contract_value)
+            m_renewal_by = _sum_by_currency(m_renewal_contracts, contract_value)
+            m_churn_by = _sum_by_currency(ended_qs, contract_value)
+            m_revenue_by = _net_by_currency([m_new_by, m_renewal_by], [])
+            m_net_by = _net_by_currency([m_new_by, m_renewal_by], m_churn_by)
+            month_currencies = sorted({row['currency'] for row in m_revenue_by + m_churn_by})
+
+            def _total(rows, currency):
+                return next((row['total'] for row in rows if row['currency'] == currency), '0.00')
+
             revenue_trend.append({
                 'month': m_start.strftime('%b'),
                 'revenue': m_new + m_renewal,
@@ -7555,8 +7609,43 @@ class DashboardViewSet(viewsets.ViewSet):
                 'renewal_revenue': m_renewal,
                 'churned_revenue': m_churn,
                 'net_revenue': m_new + m_renewal - m_churn,
+                'by_currency': [
+                    {
+                        'currency': currency,
+                        'revenue': _total(m_revenue_by, currency),
+                        'new_revenue': _total(m_new_by, currency),
+                        'renewal_revenue': _total(m_renewal_by, currency),
+                        'churned_revenue': _total(m_churn_by, currency),
+                        'net_revenue': _total(m_net_by, currency),
+                    }
+                    for currency in month_currencies
+                ],
             })
         stats['revenue_trend'] = revenue_trend
+
+        # --- The same money totals per currency ---
+        # The fields above add contract values and invoice amounts of every currency together
+        # (they are kept unchanged for existing readers). These say how much is in each currency.
+        # Opportunities have no currency of their own, so their values are not split here.
+        contract_value = lambda c: c.value or 0  # noqa: E731
+        new_by = _sum_by_currency(new_contracts, contract_value)
+        renewal_by = _sum_by_currency(renewal_contracts, contract_value)
+        churned_by = _sum_by_currency(churned_qs, contract_value)
+        stats.update({
+            'contracts_value_by_currency': _sum_by_currency(contracts, contract_value),
+            'monthly_revenue_by_currency': _sum_by_currency(monthly_contracts, contract_value),
+            'previous_month_revenue_by_currency': _sum_by_currency(prev_month_contracts, contract_value),
+            'total_overdue_amount_by_currency': _sum_by_currency(
+                [inv for inv in invoices if inv.is_overdue], lambda inv: inv.total_amount
+            ),
+            'pending_renewal_value_by_currency': _sum_by_currency(
+                [c for c in contracts if c.is_expiring_soon and c.value], contract_value
+            ),
+            'new_revenue_by_currency': new_by,
+            'renewal_revenue_by_currency': renewal_by,
+            'churned_revenue_by_currency': churned_by,
+            'net_revenue_by_currency': _net_by_currency([new_by, renewal_by], churned_by),
+        })
 
         serializer = DashboardStatsSerializer(stats)
         return Response(serializer.data)
