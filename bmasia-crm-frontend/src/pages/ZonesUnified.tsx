@@ -315,7 +315,7 @@ const ZonesUnified: React.FC = () => {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
-          <Card sx={{ borderLeft: 4, borderColor: 'success.main' }}>
+          <Card sx={{ borderLeft: 4, borderLeftColor: 'success.main' }}>
             <CardContent>
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 Online
@@ -325,7 +325,7 @@ const ZonesUnified: React.FC = () => {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
-          <Card sx={{ borderLeft: 4, borderColor: 'error.main' }}>
+          <Card sx={{ borderLeft: 4, borderLeftColor: 'error.main' }}>
             <CardContent>
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 Offline
@@ -335,7 +335,7 @@ const ZonesUnified: React.FC = () => {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
-          <Card sx={{ borderLeft: 4, borderColor: 'grey.400' }}>
+          <Card sx={{ borderLeft: 4, borderLeftColor: 'grey.400' }}>
             <CardContent>
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 No Device
@@ -345,7 +345,7 @@ const ZonesUnified: React.FC = () => {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
-          <Card sx={{ borderLeft: 4, borderColor: 'warning.main' }}>
+          <Card sx={{ borderLeft: 4, borderLeftColor: 'warning.main' }}>
             <CardContent>
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 Pending
@@ -355,7 +355,7 @@ const ZonesUnified: React.FC = () => {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
-          <Card sx={{ borderLeft: 4, borderColor: 'error.dark' }}>
+          <Card sx={{ borderLeft: 4, borderLeftColor: 'error.dark' }}>
             <CardContent>
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 Orphaned
@@ -365,7 +365,7 @@ const ZonesUnified: React.FC = () => {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
-          <Card sx={{ borderLeft: 4, borderColor: stats.syncHealth >= 80 ? 'info.main' : 'warning.main' }}>
+          <Card sx={{ borderLeft: 4, borderLeftColor: stats.syncHealth >= 80 ? 'info.main' : 'warning.main' }}>
             <CardContent>
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 Sync Health

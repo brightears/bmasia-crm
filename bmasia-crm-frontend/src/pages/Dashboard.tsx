@@ -91,7 +91,7 @@ const KPICard: React.FC<KPICardProps> = ({
         p: 2.5,
         height: '100%',
         borderLeft: 4,
-        borderColor: borderColor,
+        borderLeftColor: borderColor,
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',

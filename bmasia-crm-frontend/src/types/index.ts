@@ -105,6 +105,9 @@ export interface Company {
   industry?: string;
   location_count: number;
   music_zone_count: number;
+  /** Product on the renewal funnel (read-only reporting field sent by the API). */
+  contracted_product?: 'beatbreeze' | 'soundtrack' | 'mixed' | '' | null;
+  contracted_zone_count?: number | null;
   avg_zones_per_location: number;
   annual_revenue?: number;
   is_active: boolean;
