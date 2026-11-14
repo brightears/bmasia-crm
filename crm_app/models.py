@@ -1997,9 +1997,26 @@ class Zone(TimestampedModel):
 
         self.save()
 
+    def get_current_link(self):
+        """The zone's current contract link, in a defined order.
+
+        Among the active links: a link whose contract is Active comes first,
+        then the link that started last, then the contract that started last,
+        then the link id (so the answer never depends on database row order).
+        """
+        from django.db.models import Case, IntegerField, Value, When
+        return (
+            self.zone_contracts.filter(is_active=True)
+            .select_related('contract')
+            .annotate(_active_first=Case(When(contract__status='Active', then=Value(0)),
+                                         default=Value(1), output_field=IntegerField()))
+            .order_by('_active_first', '-start_date', '-contract__start_date', 'pk')
+            .first()
+        )
+
     def get_active_contract(self):
-        """Get the currently active contract for this zone"""
-        active_link = self.zone_contracts.filter(is_active=True).first()
+        """Get the currently active contract for this zone (see get_current_link)"""
+        active_link = self.get_current_link()
         return active_link.contract if active_link else None
 
     def mark_as_cancelled(self):

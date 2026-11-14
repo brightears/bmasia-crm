@@ -210,7 +210,7 @@ class ZoneSerializer(serializers.ModelSerializer):
 
     def get_current_contract(self, obj):
         """Get the currently active contract for this zone"""
-        active_link = obj.zone_contracts.filter(is_active=True).select_related('contract').first()
+        active_link = obj.get_current_link()
         if active_link:
             return {
                 'id': str(active_link.contract.id),
