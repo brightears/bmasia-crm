@@ -303,15 +303,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             <Box component="img" src="/bmasia-mark.png" alt="BMAsia" sx={{ height: 32, width: 32 }} />
           ) : (
             <>
-              {darkMode ? (
-                // The grey wordmark is hard to read on dark backgrounds; use the mark plus white text.
-                <>
-                  <Box component="img" src="/bmasia-mark.png" alt="" sx={{ height: 28, width: 28 }} />
-                  <Typography sx={{ fontWeight: 600, fontSize: '1.0625rem', color: 'text.primary' }}>BMAsia</Typography>
-                </>
-              ) : (
-                <Box component="img" src="/bmasia-logo.png" alt="BMAsia" sx={{ height: 30, display: 'block' }} />
-              )}
+              {/* The grey wordmark is hard to read on dark backgrounds, so dark mode uses the white version. */}
+              <Box
+                component="img"
+                src={darkMode ? '/bmasia-logo-white.png' : '/bmasia-logo.png'}
+                alt="BMAsia"
+                sx={{ height: 30, display: 'block' }}
+              />
               <Box
                 component="span"
                 sx={{
