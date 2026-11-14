@@ -28,18 +28,20 @@ import {
 import { useNavigate } from 'react-router-dom';
 import ApiService from '../services/api';
 import { formatMoney } from '../theme';
-import { buildNavGroups } from './navigation';
+import { buildNavGroups, filterNavForRole } from './navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { canAccessModule } from '../utils/permissions';
 
-// Menu pages, searchable by their current name and by the name they had before the redesign.
-const PAGES = buildNavGroups(0).flatMap((g) =>
-  g.items.map((item) => ({ ...item, groupTitle: g.title || 'Home' }))
-);
+// Menu pages the user's menu shows, searchable by their current name and by the name they had
+// before the redesign.
+const pagesFor = (role?: string | null) =>
+  filterNavForRole(buildNavGroups(0), role).flatMap((g) =>
+    g.items.map((item) => ({ ...item, groupTitle: g.title || 'Home' }))
+  );
 
-const matchPages = (q: string): SearchResult[] => {
+const matchPages = (q: string, role?: string | null): SearchResult[] => {
   const needle = q.toLowerCase();
-  return PAGES.filter(
+  return pagesFor(role).filter(
     (p) => p.text.toLowerCase().includes(needle) || (p.formerly || '').toLowerCase().includes(needle)
   )
     .slice(0, PER_GROUP)
@@ -194,7 +196,7 @@ const GlobalSearch: React.FC = () => {
       const params = { search: q, page_size: PER_GROUP };
       // Only record types whose pages this user may open are searched.
       const allowed = SOURCES.filter((src) => canAccessModule(user, src.module));
-      const pages = matchPages(q);
+      const pages = matchPages(q, role);
 
       setResultsFor(q);
       setActive(0);

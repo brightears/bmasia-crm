@@ -159,3 +159,11 @@ it('leaves Ctrl/Cmd+K to rich-text editors', async () => {
   expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   editor.remove();
 });
+
+it('does not offer pages the role menu hides', async () => {
+  mockUser = { id: 'x', role: 'Sales', is_active: true, permissions: [] };
+  renderSearch();
+  await openAndType('balance');
+  await waitFor(() => expect(api.getCompanies).toHaveBeenCalled());
+  expect(screen.queryByText('Balance sheet')).not.toBeInTheDocument();
+});

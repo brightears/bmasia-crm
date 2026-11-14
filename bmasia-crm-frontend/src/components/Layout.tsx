@@ -41,7 +41,7 @@ import ApiService from '../services/api';
 import { useThemeContext } from '../contexts/ThemeContext';
 import MobileBottomNav from './MobileBottomNav';
 import GlobalSearch from './GlobalSearch';
-import { buildNavGroups, findNavLocation, isActivePath, NavGroup } from './navigation';
+import { buildNavGroups, filterNavForRole, findNavLocation, isActivePath, NavGroup } from './navigation';
 import { layout } from '../theme';
 
 const drawerWidth = layout.sidebarWidth;
@@ -248,7 +248,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     }
   };
 
-  const navGroups = buildNavGroups(aiDraftsPendingCount);
+  // The menu shows what the user's role needs (display only; permissions are unchanged).
+  const navGroups = filterNavForRole(buildNavGroups(aiDraftsPendingCount), user?.role);
   const { group: currentGroup, item: currentItem } = findNavLocation(navGroups, location.pathname);
 
   // Make sure the group of the page being shown is open.
