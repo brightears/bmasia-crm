@@ -1,6 +1,7 @@
 import { ContractZone } from '../types';
 
 interface TermLike {
+  status?: string | null;
   start_date?: string | null;
   end_date?: string | null;
   contract_zones?: ContractZone[];
@@ -32,4 +33,19 @@ export function linksCoveringTerm(contract: TermLike | null | undefined): Contra
     }
   });
   return Array.from(byZone.values());
+}
+
+export const ENDED_TERM_STATUSES = ['Renewed', 'Cancelled', 'Expired'];
+
+/**
+ * The zone links a document or the invoice form uses when the contract has no
+ * service-location rows: for a term that has ended (Renewed, Cancelled,
+ * Expired) the links that covered its term; for a live contract the links
+ * active today. Matches _document_zones on the server.
+ */
+export function documentZoneLinks(contract: TermLike | null | undefined): ContractZone[] {
+  if (contract?.status && ENDED_TERM_STATUSES.includes(contract.status)) {
+    return linksCoveringTerm(contract);
+  }
+  return (contract?.contract_zones || []).filter((link) => link.is_active);
 }

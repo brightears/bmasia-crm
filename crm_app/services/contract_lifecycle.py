@@ -1,12 +1,15 @@
 """Contract lifecycle rule: close the renewed predecessor when its successor goes live.
 
 Rule: when a contract becomes Active and its ``renewed_from`` predecessor belongs
-to the same company and is still Active, the predecessor becomes Renewed
+to the same company and is Active or Expired, the predecessor becomes Renewed
 (``is_active=False``) in the same transaction, with an AuditLog UPDATE row that
-records the real before/after values.
+records the real before/after values. (Expired was added with the zone hand-over:
+a term that has a successor is Renewed, whatever it was called before; the
+corrections command's create_successor has done the same since format v2.)
 
-The predecessor is never touched in any other status (Draft, Sent, Expired,
-Cancelled), nor when it belongs to another company. Those cases are reported
+The predecessor is never touched in any other status (Draft, Sent, Cancelled),
+nor when it belongs to another company, and only the direct ``renewed_from``
+predecessor is considered. Those cases are reported
 through the return value so callers can surface them. There is deliberately no
 date-based expiry here: whether a past-end contract is over is a business call.
 
@@ -30,6 +33,7 @@ from django.utils import timezone
 
 # Outcomes reported by close_renewed_predecessor().
 CLOSED = 'closed'
+CLOSABLE = ('Active', 'Expired')
 ALREADY_RENEWED = 'already_renewed'
 NO_PREDECESSOR = 'no_predecessor'
 SUCCESSOR_NOT_ACTIVE = 'successor_not_active'
@@ -175,7 +179,7 @@ def close_renewed_predecessor(successor, *, user=None, source, dry_run=False):
             return PredecessorClosure(DIFFERENT_COMPANY, **result)
         if predecessor.status == 'Renewed':
             return PredecessorClosure(ALREADY_RENEWED, **result)
-        if predecessor.status != 'Active':
+        if predecessor.status not in CLOSABLE:
             return PredecessorClosure(PREDECESSOR_NOT_ACTIVE, **result)
         if dry_run:
             rows, kept = hand_over_zone_links(predecessor, current, dry_run=True)

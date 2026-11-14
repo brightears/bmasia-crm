@@ -124,6 +124,7 @@ from django.utils import timezone
 
 from crm_app.models import AuditLog, Contract
 from crm_app.services import contract_corrections_v2 as v2
+from crm_app.services import contract_lifecycle
 from crm_app.services.contract_lifecycle import (
     CLOSED, close_renewed_predecessor, handed_over_links_state, reopen_handed_over_links,
 )
@@ -566,7 +567,8 @@ class Command(BaseCommand):
                     raise _Refused('renewed_from_conflict')
             elif link:
                 predecessor = Contract.objects.select_for_update().filter(pk=link).first()
-                if predecessor and predecessor.company_id == s.company_id and predecessor.status == 'Active':
+                if predecessor and predecessor.company_id == s.company_id \
+                        and predecessor.status in contract_lifecycle.CLOSABLE:
                     raise _Refused('would_close_contract_outside_file')
             if _needs_final_number(s):
                 notes.append(f'final number reserved (was {s.contract_number or "empty"})')

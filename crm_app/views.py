@@ -166,17 +166,30 @@ def _manager_count(manager):
         return 0
 
 
+ENDED_TERM_STATUSES = ('Renewed', 'Cancelled', 'Expired')
+
+
+def _uses_term_zones(contract):
+    return getattr(contract, 'status', None) in ENDED_TERM_STATUSES and hasattr(contract, 'get_term_zones')
+
+
 def _document_zones(contract):
-    """Zones a document shows when the contract has no service-location rows:
-    the zones linked during the contract's term (Contract.get_term_zones), not
-    only the links active today, so a Renewed term whose links were handed over
-    or a Cancelled term still lists what it covered."""
-    getter = getattr(contract, 'get_term_zones', None) or getattr(contract, 'get_active_zones', None)
+    """Zones a document shows when the contract has no service-location rows.
+
+    A term that has ended (Renewed, Cancelled, Expired) shows the zones linked
+    during its term (Contract.get_term_zones), so a Renewed term whose links were
+    handed over, or a Cancelled term, still lists what it covered. A live
+    contract shows the links open today, as before."""
+    if _uses_term_zones(contract):
+        return contract.get_term_zones()
+    getter = getattr(contract, 'get_active_zones', None)
     return getter() if getter else Zone.objects.none()
 
 
 def _document_zone_count(contract):
-    getter = getattr(contract, 'get_term_zone_count', None) or getattr(contract, 'get_zone_count', None)
+    if _uses_term_zones(contract):
+        return int(contract.get_term_zone_count())
+    getter = getattr(contract, 'get_zone_count', None)
     return int(getter()) if getter else 0
 
 

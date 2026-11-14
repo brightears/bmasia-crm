@@ -129,7 +129,7 @@ def test_the_end_date_is_never_before_the_links_own_start():
 
 def test_a_predecessor_that_is_not_active_keeps_its_links():
     company = _company()
-    for status, outcome in (('Expired', PREDECESSOR_NOT_ACTIVE), ('Renewed', ALREADY_RENEWED)):
+    for status, outcome in (('Cancelled', PREDECESSOR_NOT_ACTIVE), ('Renewed', ALREADY_RENEWED)):
         old = _contract(company, status=status, start=date(2024, 1, 1))
         new = _contract(company, status='Active', start=date(2025, 1, 1), renewed_from=old)
         zone = _zone(company)
@@ -513,3 +513,97 @@ def test_the_repair_op_hands_over_a_zone_linked_to_the_renewal_after_it_went_act
     assert '[APPLIED] Z hand_over_zone_links' in out
     assert _state(old_link) == (False, date(2025, 12, 31))
     assert zone.get_active_contract() == new
+
+
+# --- review fixes ---------------------------------------------------------------------
+
+def test_an_old_create_journal_is_not_reverted_after_the_repair_closed_its_old_links(tmp_path):
+    """A create_successor journal written before the hand-over existed (no old_zone_links_closed),
+    then the zone-link repair, then a revert of that old journal: refused, naming the repair batch.
+    Reverting the repair first, then the old journal, restores everything."""
+    company = _company()
+    old = _contract(company)
+    zone = _zone(company)
+    old_link = _link(old, zone)
+    _, g_journal = _execute(tmp_path, _file(tmp_path, [_create(old)]), 'g-journal.json')
+    new = Contract.objects.get(renewed_from=old)
+    # make it look like a run before this change: old links left open, no hand-over record
+    journal = json.loads(open(g_journal).read())
+    op = journal['groups'][0]['ops'][0]
+    for r in op.pop('old_zone_links_closed'):
+        ContractZone.objects.filter(pk=r['id']).update(is_active=True, end_date=None)
+    open(g_journal, 'w').write(json.dumps(journal))
+    assert _state(old_link) == (True, None)
+    # the repair closes the doubled link
+    old.refresh_from_db()
+    z_out, z_journal = _execute(tmp_path, _file(tmp_path, [_handover(old, new)], 'z.json'), 'z-journal.json')
+    assert '[APPLIED] Z hand_over_zone_links' in z_out
+    z_batch = json.loads(open(z_journal).read())['batch_id']
+    # reverting the old journal now is refused and names the repair batch
+    out = _run('--revert', g_journal, '--execute')
+    assert 'SKIPPED:zone_links_handed_over_since_apply' in out
+    assert f'revert the zone-link repair first (batch {z_batch})' in out
+    assert Contract.objects.filter(pk=new.pk).exists() and _state(old_link) == (False, date(2025, 12, 31))
+    # the right order works
+    assert '[REVERTED] Z hand_over_zone_links' in _run('--revert', z_journal, '--execute')
+    assert '[REVERTED] G create_successor' in _run('--revert', g_journal, '--execute')
+    assert _state(old_link) == (True, None)
+    assert zone.get_active_contract() == Contract.objects.get(pk=old.pk)
+
+
+def test_a_live_contract_document_counts_only_the_links_open_today():
+    from crm_app.views import _contract_zone_count, _document_zones
+    company = _company()
+    c = _contract(company, start=date(2025, 1, 1), end=date(2025, 12, 31))
+    gone = _zone(company)
+    _link(c, gone, is_active=False, end_date=date(2025, 3, 31))   # left mid-term
+    stays = [_zone(company) for _ in range(2)]
+    for z in stays:
+        _link(c, z)
+    assert _contract_zone_count(c) == 2
+    assert sorted(z.pk for z in _document_zones(c)) == sorted(z.pk for z in stays)
+    Contract.objects.filter(pk=c.pk).update(status='Expired')
+    c.refresh_from_db()
+    assert _contract_zone_count(c) == 3                            # an ended term shows its whole term
+
+
+def test_an_expired_old_term_hands_over_when_its_renewal_goes_active():
+    company = _company()
+    old = _contract(company, status='Expired')
+    new = _contract(company, status='Sent', start=date(2026, 1, 1), renewed_from=old)
+    zone = _zone(company)
+    old_link, _ = _link(old, zone), _link(new, zone)
+    assert _rest_patch(new, {'status': 'Active'}).status_code == 200
+    old.refresh_from_db()
+    assert old.status == 'Renewed' and old.is_active is False
+    assert _state(old_link) == (False, date(2025, 12, 31))
+    assert len(_rule_audit(old).additional_data['zone_links_closed']) == 1
+
+
+def test_admin_bulk_activate_runs_the_lifecycle_rule():
+    from unittest import mock
+    from django.contrib.admin.sites import AdminSite
+    from django.test import RequestFactory
+    from crm_app.admin import ContractAdmin
+    company = _company()
+    old = _contract(company)
+    new = _contract(company, status='Draft', start=date(2026, 1, 1), renewed_from=old)
+    zone = _zone(company)
+    old_link, _ = _link(old, zone), _link(new, zone)
+    request = RequestFactory().post('/admin/')
+    request.user = _user()
+    admin_obj = ContractAdmin(Contract, AdminSite())
+    with mock.patch.object(ContractAdmin, 'message_user') as message:
+        admin_obj.bulk_update_status_active(request, Contract.objects.filter(pk=new.pk))
+    new.refresh_from_db(), old.refresh_from_db()
+    assert new.status == 'Active' and old.status == 'Renewed'
+    assert _state(old_link) == (False, date(2025, 12, 31))
+    assert '1 earlier term(s) set to Renewed' in message.call_args[0][1]
+    assert _rule_audit(old).additional_data['source'] == 'admin_bulk_activate'
+
+
+def test_copy_refuses_clearly_when_the_renewal_has_an_ended_link_to_the_zone(tmp_path):
+    old, new, zones, _, _ = _renewed_pair(new_links=False)
+    _link(new, zones[0], is_active=False, end_date=date(2026, 2, 1))  # same start as the renewal
+    out = _run('--file', _file(tmp_path, [_handover(old, new, copy=True)]))
+    assert 'SKIPPED:renewal_has_ended_link_to_zone' in out

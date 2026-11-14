@@ -43,7 +43,7 @@ import { Invoice, InvoiceLineItem, Company, Contract } from '../types';
 import ApiService from '../services/api';
 import DocumentIssuerField from './DocumentIssuerField';
 import { DOCUMENT_BILLING_ENTITIES, effectiveBillingEntity, issuerPaymentTerms, documentValidationMessage } from '../utils/documentTailoring';
-import { linksCoveringTerm } from '../utils/contractZones';
+import { documentZoneLinks } from '../utils/contractZones';
 
 interface InvoiceFormProps {
   open: boolean;
@@ -393,7 +393,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         // Fallback: compute from zones (legacy contracts without line items)
         const billingDesc = selectedContract.billing_frequency || 'Service';
         const contractValue = parseFloat(String(selectedContract.value)) || 0;
-        const activeZones: any[] = linksCoveringTerm(selectedContract);
+        const activeZones: any[] = documentZoneLinks(selectedContract);
         const soundtrackZones = activeZones.filter((z: any) => z.zone_platform === 'soundtrack');
         const beatBreezeZones = activeZones.filter((z: any) => z.zone_platform === 'beatbreeze');
         const zoneCount = activeZones.length || 1;
@@ -452,7 +452,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
       }
 
       // Auto-fill property name from contract zones
-      const activeZones: any[] = linksCoveringTerm(selectedContract);
+      const activeZones: any[] = documentZoneLinks(selectedContract);
       const propertyNames = Array.from(new Set(activeZones.map((z: any) => z.property_name).filter(Boolean))) as string[];
       if (propertyNames.length > 0) {
         setPropertyName(propertyNames.join(', '));

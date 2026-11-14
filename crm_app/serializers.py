@@ -1021,7 +1021,7 @@ class ContractSerializer(serializers.ModelSerializer):
 
     def _close_renewed_predecessor(self, contract):
         """Lifecycle choke point for REST and MCP writes: a renewal going Active
-        closes its Active predecessor (same transaction, audited)."""
+        closes its Active or Expired predecessor (same transaction, audited)."""
         from crm_app.services.contract_lifecycle import close_renewed_predecessor
         request = self.context.get('request')
         user = getattr(request, 'user', None)
