@@ -42,8 +42,9 @@ OPERATIONS (one per entry, ``op``)
                      (``successor_id``: renewed_from = contract_id, same
                      company), closes the contract's active links to every zone
                      the renewal actively holds, exactly as the lifecycle rule
-                     does when a renewal goes Active (end_date = the day before
-                     the renewal starts, never before the link's start). With
+                     does when a renewal goes Active (end_date = the earlier
+                     of the day before the renewal starts and the contract's
+                     own end date, never before the link's start). With
                      ``copy_missing_links: true`` the contract's other active
                      zones are first linked to the renewal (start_date = the
                      renewal's start), so every zone moves over; refused when
@@ -116,7 +117,8 @@ CREATE (create_successor)
   ContractZone link on the new contract (start_date = the new term's start,
   is_active True), as ContractViewSet.duplicate_for_renewal does. The old
   contract's links to those zones are then handed over: closed with end_date =
-  the day before the new term starts (never before the link's start), by the
+  the earlier of the day before the new term starts and the old term's end date
+  (never before the link's start), by the
   lifecycle rule for an Active old contract and by the same helper for an
   Expired one, and journalled. A zone that is also linked to another live
   contract is not a refusal here (the zone stays covered by the new term).
@@ -187,7 +189,7 @@ from crm_app.models import (
 )
 from crm_app.services.contract_lifecycle import (
     CLOSED, close_renewed_predecessor, hand_over_zone_links, handed_over_links_state,
-    handover_end_date, reopen_handed_over_links,
+    audit_rows, handover_end_date, reopen_handed_over_links,
 )
 
 FILE_FORMAT_V2 = 'contract-corrections/v2'
@@ -885,7 +887,7 @@ class V2Runner:
             f'with {len(new.locations)} service location(s) '
             f'({", ".join(f"{k} {v}" for k, v in sorted(platforms.items()))})'
             f'{"; copies " + str(links) + " active zone link(s) to the new term" if links else ""}'
-            f'{"; hands them over (old links end " + handover_end_date(None, new.start).isoformat() + ")" if links else ""}')
+            f'{"; hands them over (old links end " + handover_end_date(None, new.start, c.end_date).isoformat() + ")" if links else ""}')
         return plan
 
     def _check_hand_over_zone_links(self, e, c, locked, members):
@@ -917,7 +919,7 @@ class V2Runner:
             raise Refused('zone_shared_with_live_contract')
         plan = {'state': 'expected' if (to_close or to_copy) else 'target', 'detail': ''}
         if plan['state'] == 'expected':
-            end = handover_end_date(None, s.start_date).isoformat()
+            end = handover_end_date(None, s.start_date, c.end_date).isoformat()
             kept = len(missing) - len(to_copy)
             plan['detail'] = (
                 f'renewal {s.pk} {s.contract_number}: '
@@ -1116,8 +1118,7 @@ class V2Runner:
             _, old_after = self._close_as_renewed(
                 old, group, e, 'Correction: Expired -> Renewed (current term created)',
                 {'successor_id': str(contract.pk), 'successor_contract_number': contract.contract_number,
-                 'zone_links_closed': [{'id': r['id'], 'zone_id': r['zone_id'], 'end_date': r['after']['end_date']}
-                                       for r in handed_over],
+                 'zone_links_closed': audit_rows(handed_over),
                  'zones_not_taken_over': list(kept)})
         new_zone_ids = list(ContractZone.objects.filter(contract=contract, is_active=True).values_list('zone_id', flat=True))
         if ContractZone.objects.filter(contract=old, is_active=True, zone_id__in=new_zone_ids).exists():
@@ -1171,8 +1172,7 @@ class V2Runner:
             'old': active_before, 'new': ContractZone.objects.filter(contract=c, is_active=True).count()}}, group, e, {
             'action': f'Correction: zone links handed over to renewal {s.contract_number}',
             'successor_id': str(s.pk), 'successor_contract_number': s.contract_number,
-            'zone_links_closed': [{'id': r['id'], 'zone_id': r['zone_id'], 'end_date': r['after']['end_date']}
-                                  for r in rows_closed],
+            'zone_links_closed': audit_rows(rows_closed),
             'zone_links_created_on_successor': created_rows,
             'zones_not_taken_over': list(kept),
         })

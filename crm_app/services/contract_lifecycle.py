@@ -15,8 +15,9 @@ date-based expiry here: whether a past-end contract is over is a business call.
 
 Zone hand-over: in the same transaction, every zone the successor actively
 holds is handed over. The predecessor's active link to that zone is closed with
-``end_date`` = the day before the successor starts (never before the link's own
-start) and ``is_active`` False. Zones the successor does not hold stay open on
+``end_date`` = the earlier of the day before the successor starts and the
+predecessor's own end date (never before the link's own start) and ``is_active``
+False. Zones the successor does not hold stay open on
 the predecessor and are listed in the audit row as ``zones_not_taken_over`` for
 a human to confirm. Zone status is not touched. Links of Expired contracts are
 never touched by date: a contract that merely runs out keeps its links.
@@ -63,13 +64,25 @@ def _iso(value):
     return value.isoformat() if value is not None else None
 
 
-def handover_end_date(link_start, successor_start):
-    """The day before the successor starts, never before the link's own start."""
+def handover_end_date(link_start, successor_start, predecessor_end=None):
+    """When a handed-over link ends: the earlier of the day before the successor
+    starts and the predecessor's own end date (a term that ended before a gap does
+    not cover the gap), never before the link's own start."""
     if successor_start is None:
         end = timezone.now().date()
     else:
         end = successor_start - timedelta(days=1)
+    if predecessor_end is not None and predecessor_end < end:
+        end = predecessor_end
     return max(end, link_start) if link_start else end
+
+
+def audit_rows(rows):
+    """The closed links as written to an audit row: id, zone, new end date and the
+    link's previous end date and state, so a hand-over can be undone by hand."""
+    return [{'id': r['id'], 'zone_id': r['zone_id'], 'end_date': r['after']['end_date'],
+             'previous_end_date': r['before']['end_date'], 'previous_is_active': r['before']['is_active']}
+            for r in rows]
 
 
 def hand_over_zone_links(predecessor, successor, *, dry_run=False):
@@ -93,7 +106,7 @@ def hand_over_zone_links(predecessor, successor, *, dry_run=False):
         if link.zone_id not in held:
             kept.add(str(link.zone_id))
             continue
-        end = handover_end_date(link.start_date, successor.start_date)
+        end = handover_end_date(link.start_date, successor.start_date, predecessor.end_date)
         others = sorted(str(pk) for pk in ContractZone.objects.filter(zone_id=link.zone_id, is_active=True)
                         .exclude(pk=link.pk).values_list('pk', flat=True))
         rows.append({
@@ -210,8 +223,7 @@ def close_renewed_predecessor(successor, *, user=None, source, dry_run=False):
                 'source': source,
                 'successor_id': str(current.pk),
                 'successor_contract_number': current.contract_number,
-                'zone_links_closed': [{'id': r['id'], 'zone_id': r['zone_id'], 'end_date': r['after']['end_date']}
-                                      for r in rows],
+                'zone_links_closed': audit_rows(rows),
                 'zones_not_taken_over': list(kept),
                 'timestamp': timezone.now().isoformat(),
             },

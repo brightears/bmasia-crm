@@ -607,3 +607,81 @@ def test_copy_refuses_clearly_when_the_renewal_has_an_ended_link_to_the_zone(tmp
     _link(new, zones[0], is_active=False, end_date=date(2026, 2, 1))  # same start as the renewal
     out = _run('--file', _file(tmp_path, [_handover(old, new, copy=True)]))
     assert 'SKIPPED:renewal_has_ended_link_to_zone' in out
+
+
+# --- second review: gaps, admin transitions, audit detail ---------------------------------
+
+def test_an_old_term_that_ended_before_a_gap_closes_its_link_at_its_own_end():
+    company = _company()
+    old = _contract(company, status='Expired', start=date(2024, 1, 1), end=date(2024, 12, 31))
+    new = _contract(company, status='Sent', start=date(2026, 3, 1), renewed_from=old)
+    zone = _zone(company)
+    old_link, _ = _link(old, zone), _link(new, zone)
+    assert _rest_patch(new, {'status': 'Active'}).status_code == 200
+    assert _state(old_link) == (False, date(2024, 12, 31))   # not stretched to 2026-02-28
+    row = _rule_audit(old).additional_data['zone_links_closed'][0]
+    assert row == {'id': str(old_link.pk), 'zone_id': str(zone.pk), 'end_date': '2024-12-31',
+                   'previous_end_date': None, 'previous_is_active': True}
+
+
+def test_create_successor_after_a_gap_closes_old_links_at_the_old_term_end(tmp_path):
+    company = _company()
+    old = _contract(company, status='Expired', start=date(2024, 1, 1), end=date(2024, 12, 31))
+    link = _link(old, _zone(company))
+    out = _run('--file', _file(tmp_path, [_create(old)]))
+    assert 'hands them over (old links end 2024-12-31)' in out
+    _execute(tmp_path, _file(tmp_path, [_create(old)], 'b.json'))
+    assert _state(link) == (False, date(2024, 12, 31))
+
+
+def test_the_repair_move_after_a_gap_closes_old_links_at_the_old_term_end(tmp_path):
+    company = _company()
+    old = _contract(company, status='Renewed', start=date(2025, 1, 1), end=date(2025, 12, 31))
+    new = _contract(company, start=date(2026, 11, 1), renewed_from=old)
+    links = [_link(old, _zone(company)) for _ in range(3)]
+    out = _run('--file', _file(tmp_path, [_handover(old, new, copy=True)]))
+    assert 'closes 3 link(s) of this contract (end 2025-12-31)' in out
+    _, journal_path = _execute(tmp_path, _file(tmp_path, [_handover(old, new, copy=True)], 'b.json'))
+    assert all(_state(l) == (False, date(2025, 12, 31)) for l in links)
+    audit = AuditLog.objects.get(record_id=str(old.pk), additional_data__op='hand_over_zone_links')
+    assert all(r['previous_end_date'] is None and r['previous_is_active'] is True
+               for r in audit.additional_data['zone_links_closed'])
+    assert '[REVERTED] Z hand_over_zone_links' in _run('--revert', journal_path, '--execute')
+    assert all(_state(l) == (True, None) for l in links)
+
+
+def _admin_activate(contracts):
+    from unittest import mock
+    from django.contrib.admin.sites import AdminSite
+    from django.test import RequestFactory
+    from crm_app.admin import ContractAdmin
+    request = RequestFactory().post('/admin/')
+    request.user = _user()
+    with mock.patch.object(ContractAdmin, 'message_user'):
+        ContractAdmin(Contract, AdminSite()).bulk_update_status_active(
+            request, Contract.objects.filter(pk__in=[c.pk for c in contracts]))
+
+
+def test_admin_activate_leaves_already_active_renewals_alone():
+    company = _company()
+    old = _contract(company, status='Expired', start=date(2024, 1, 1))
+    live = _contract(company, start=date(2025, 1, 1), renewed_from=old)
+    zone = _zone(company)
+    old_link, _ = _link(old, zone), _link(live, zone)
+    _admin_activate([live])
+    old.refresh_from_db()
+    assert old.status == 'Expired' and _state(old_link) == (True, None)
+
+
+def test_admin_activate_closes_a_selected_chain_whatever_the_id_order():
+    import uuid
+    company = _company()
+    x = _contract(company, start=date(2024, 1, 1))
+    a = _contract(company, status='Sent', start=date(2025, 1, 1), renewed_from=x,
+                  id=uuid.UUID('ffffffff-0000-4000-8000-000000000001'))
+    b = _contract(company, status='Sent', start=date(2026, 1, 1), renewed_from=a,
+                  id=uuid.UUID('00000000-0000-4000-8000-000000000001'))  # sorts before a by id
+    _admin_activate([a, b])
+    for contract, status in ((x, 'Renewed'), (a, 'Renewed'), (b, 'Active')):
+        contract.refresh_from_db()
+        assert contract.status == status
