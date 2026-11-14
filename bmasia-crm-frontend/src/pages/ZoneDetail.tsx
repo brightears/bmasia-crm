@@ -358,7 +358,7 @@ const ZoneDetail: React.FC = () => {
                       </Typography>
                       <Typography variant="body1">
                         {zone.created_at
-                          ? format(new Date(zone.created_at), 'MMM dd, yyyy')
+                          ? format(new Date(zone.created_at), 'd MMM yyyy')
                           : '-'}
                       </Typography>
                     </Box>
@@ -368,7 +368,7 @@ const ZoneDetail: React.FC = () => {
                       </Typography>
                       <Typography variant="body1">
                         {zone.updated_at
-                          ? format(new Date(zone.updated_at), 'MMM dd, yyyy')
+                          ? format(new Date(zone.updated_at), 'd MMM yyyy')
                           : '-'}
                       </Typography>
                     </Box>
@@ -465,7 +465,7 @@ const ZoneDetail: React.FC = () => {
                                       Start Date
                                     </Typography>
                                     <Typography variant="body2">
-                                      {format(new Date(contractZone.start_date), 'MMM dd, yyyy')}
+                                      {format(new Date(contractZone.start_date), 'd MMM yyyy')}
                                     </Typography>
                                   </Box>
                                   {contractZone.end_date && (
@@ -474,7 +474,7 @@ const ZoneDetail: React.FC = () => {
                                         End Date
                                       </Typography>
                                       <Typography variant="body2">
-                                        {format(new Date(contractZone.end_date), 'MMM dd, yyyy')}
+                                        {format(new Date(contractZone.end_date), 'd MMM yyyy')}
                                       </Typography>
                                     </Box>
                                   )}
@@ -534,7 +534,7 @@ const ZoneDetail: React.FC = () => {
                                       Start Date
                                     </Typography>
                                     <Typography variant="body2">
-                                      {format(new Date(contractZone.start_date), 'MMM dd, yyyy')}
+                                      {format(new Date(contractZone.start_date), 'd MMM yyyy')}
                                     </Typography>
                                   </Box>
                                   {contractZone.end_date && (
@@ -543,7 +543,7 @@ const ZoneDetail: React.FC = () => {
                                         End Date
                                       </Typography>
                                       <Typography variant="body2">
-                                        {format(new Date(contractZone.end_date), 'MMM dd, yyyy')}
+                                        {format(new Date(contractZone.end_date), 'd MMM yyyy')}
                                       </Typography>
                                     </Box>
                                   )}
@@ -654,7 +654,7 @@ const ZoneDetail: React.FC = () => {
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2" color="text.secondary">
-                            {ticket.created_at ? format(new Date(ticket.created_at), 'MMM dd, yyyy') : '-'}
+                            {ticket.created_at ? format(new Date(ticket.created_at), 'd MMM yyyy') : '-'}
                           </Typography>
                         </TableCell>
                       </TableRow>

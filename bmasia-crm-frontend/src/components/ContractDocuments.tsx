@@ -42,6 +42,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { ContractDocument } from '../types';
 import ApiService from '../services/api';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 interface ContractDocumentsProps {
   contractId: string;
@@ -217,7 +218,7 @@ const ContractDocuments: React.FC<ContractDocumentsProps> = ({ contractId }) => 
 
   const formatDate = (dateString: string | undefined): string => {
     if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString();
+    return formatDisplayDate(dateString);
   };
 
   if (loading) {

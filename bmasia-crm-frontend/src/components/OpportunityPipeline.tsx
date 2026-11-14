@@ -33,6 +33,7 @@ import {
 import { Opportunity } from '../types';
 import ApiService from '../services/api';
 import { formatCurrency as formatCurrencyFn, getServiceLabel } from '../constants/entities';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 interface OpportunityPipelineProps {
   opportunities: Opportunity[];
@@ -76,7 +77,7 @@ const OpportunityDetailDialog: React.FC<OpportunityDetailDialogProps> = ({
 
   const formatDate = (dateString: string | null | undefined): string => {
     if (!dateString) return 'Not set';
-    return new Date(dateString).toLocaleDateString();
+    return formatDisplayDate(dateString);
   };
 
   return (
@@ -221,7 +222,7 @@ const OpportunityCard: React.FC<{
     if (diffDays === 0) return 'Today';
     if (diffDays === 1) return 'Yesterday';
     if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
+    return formatDisplayDate(date);
   };
 
   const getLastActivityIcon = () => {

@@ -109,7 +109,7 @@ const KnowledgeBaseArticle: React.FC = () => {
 
   const formatDate = (dateString: string): string => {
     try {
-      return format(new Date(dateString), 'MMMM dd, yyyy');
+      return format(new Date(dateString), 'd MMMM yyyy');
     } catch {
       return dateString;
     }

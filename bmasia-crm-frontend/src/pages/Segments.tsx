@@ -39,6 +39,7 @@ import { useNavigate } from 'react-router-dom';
 import { CustomerSegment } from '../types';
 import ApiService from '../services/api';
 import EnrollSegmentDialog from '../components/EnrollSegmentDialog';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 const Segments: React.FC = () => {
   const navigate = useNavigate();
@@ -182,7 +183,7 @@ const Segments: React.FC = () => {
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'Never';
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return formatDisplayDate(date);
   };
 
   if (loading) {

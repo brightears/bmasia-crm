@@ -55,6 +55,7 @@ import { Invoice, ApiResponse, Company, Contract } from '../types';
 import ApiService from '../services/api';
 import InvoiceForm from '../components/InvoiceForm';
 import InvoiceDetail from '../components/InvoiceDetail';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 const statusOptions = [
   { value: '', label: 'All Status' },
@@ -343,12 +344,7 @@ const Invoices: React.FC = () => {
   };
 
   const formatCurrency = (value: number, currency: string = 'USD'): string => {
-    const locale = currency === 'THB' ? 'th-TH' : 'en-US';
-    return new Intl.NumberFormat(locale, {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 2,
-    }).format(value);
+    return formatMoney(value, currency);
   };
 
   // Entity-specific QB account defaults (from Pom's actual QuickBooks chart of accounts)
@@ -434,7 +430,7 @@ const Invoices: React.FC = () => {
 
   const formatDate = (dateString: string | null | undefined): string => {
     if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString();
+    return formatDisplayDate(dateString);
   };
 
   const getStatusColor = (status: string): string => {

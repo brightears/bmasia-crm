@@ -56,6 +56,7 @@ import {
   ENTITY_OPTIONS, SERVICE_OPTIONS,
   formatCurrency, getServiceLabel,
 } from '../constants/entities';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -333,7 +334,7 @@ const Opportunities: React.FC = () => {
 
   const formatDate = (dateString: string | null | undefined): string => {
     if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString();
+    return formatDisplayDate(dateString);
   };
 
   const getStageColor = (stage: string): string => {
