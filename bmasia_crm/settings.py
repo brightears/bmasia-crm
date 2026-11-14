@@ -101,6 +101,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'crm_app.agent_gate_middleware.AgentGateRestObserverMiddleware',  # Phase 1 Stage A (observe only)
+    'crm_app.auth_observability.AuthObservabilityMiddleware',  # logs auth method per API request; never blocks
 ]
 
 ROOT_URLCONF = 'bmasia_crm.urls'
@@ -416,6 +417,13 @@ LOGGING = {
             'handlers': ['console'],
             'level': 'INFO',
             'propagate': True,
+        },
+        # One line per MCP / token-authenticated API request: auth method and
+        # caller, never a credential. See crm_app/auth_observability.py.
+        'crm_app.auth': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
         },
     },
 }
