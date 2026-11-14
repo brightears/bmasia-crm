@@ -238,7 +238,7 @@ const QuoteDetailPage: React.FC = () => {
           <Button
             variant="outlined"
             startIcon={<Edit />}
-            onClick={() => navigate(`/quotes/${quote.id}/edit`)}
+            onClick={() => navigate(`/quotes?edit=${quote.id}`)}
           >
             Edit
           </Button>
