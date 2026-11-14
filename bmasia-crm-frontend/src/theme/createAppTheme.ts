@@ -50,7 +50,8 @@ export const createAppTheme = (mode: 'light' | 'dark'): Theme => {
   const paper = isDark ? dark.paper : '#FFFFFF';
   const subtle = isDark ? dark.raised : ink[25];
   const focusRing = isDark ? brand.amber : brand.amberStrong;
-  const primaryMain = isDark ? brand.amber : brand.amberStrong;
+  // Text-safe amber (6.0:1 on white). The brighter amberStrong stays for the focus ring and tab line.
+  const primaryMain = isDark ? brand.amber : brand.amberText;
   const pageBackground = isDark ? dark.background : ink[50];
   const hoverBg = isDark ? 'rgba(255,255,255,0.05)' : alpha(ink[900], 0.04);
   const selectedBg = isDark ? alpha(brand.amber, 0.14) : brand.amberTint;
@@ -104,8 +105,8 @@ export const createAppTheme = (mode: 'light' | 'dark'): Theme => {
       fontFamily,
       htmlFontSize: 16,
       fontSize: 14,
-      h1: { fontSize: '1.875rem', fontWeight: 650, lineHeight: 1.25, letterSpacing: '-0.015em' },
-      h2: { fontSize: '1.625rem', fontWeight: 650, lineHeight: 1.25, letterSpacing: '-0.015em' },
+      h1: { fontSize: '1.875rem', fontWeight: 700, lineHeight: 1.25, letterSpacing: '-0.015em' },
+      h2: { fontSize: '1.625rem', fontWeight: 700, lineHeight: 1.25, letterSpacing: '-0.015em' },
       h3: { fontSize: '1.5rem', fontWeight: 600, lineHeight: 1.3, letterSpacing: '-0.01em' },
       // Page titles across the app use h4.
       h4: { fontSize: '1.5rem', fontWeight: 600, lineHeight: 1.3, letterSpacing: '-0.01em' },
@@ -294,7 +295,8 @@ export const createAppTheme = (mode: 'light' | 'dark'): Theme => {
           root: {
             borderRadius: layout.radius,
             backgroundColor: isDark ? dark.raised : '#FFFFFF',
-            '& .MuiOutlinedInput-notchedOutline': { borderColor: isDark ? 'rgba(255,255,255,0.18)' : ink[400] },
+            // Input outlines reach 3:1 against the field and the page in both modes.
+            '& .MuiOutlinedInput-notchedOutline': { borderColor: isDark ? 'rgba(255,255,255,0.4)' : ink.outline },
             '&:hover:not(.Mui-disabled) .MuiOutlinedInput-notchedOutline': { borderColor: textPrimary },
             '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
               borderColor: focusRing,

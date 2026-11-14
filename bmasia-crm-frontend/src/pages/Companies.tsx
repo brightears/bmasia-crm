@@ -44,16 +44,9 @@ import ApiService from '../services/api';
 import CompanyForm from '../components/CompanyForm';
 import { PageHeader, EmptyState, ProductChip } from '../components/ui';
 import { visuallyHidden } from '../theme/a11y';
+import { initialsOf } from '../theme';
 
-const companyInitials = (name: string) =>
-  name
-    .replace(/[^A-Za-z0-9 ]/g, ' ')
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join('')
-    .toUpperCase();
+const companyInitials = initialsOf;
 
 const websiteHost = (url?: string) => {
   if (!url) return '';
@@ -322,7 +315,7 @@ const Companies: React.FC = () => {
                   <TableRow
                     key={company.id}
                     hover
-                    sx={{ cursor: 'pointer', '&:hover .row-actions': { opacity: 1 } }}
+                    sx={{ cursor: 'pointer' }}
                     onClick={() => handleViewCompany(company.id)}
                   >
                     <TableCell sx={{ maxWidth: { xs: 190, md: 300 } }}>
@@ -368,7 +361,7 @@ const Companies: React.FC = () => {
                       />
                     </TableCell>
                     <TableCell align="right" sx={{ whiteSpace: 'nowrap', py: 0.5 }}>
-                      <Box className="row-actions" sx={{ opacity: { xs: 1, md: 0.55 }, transition: 'opacity 120ms', '&:focus-within': { opacity: 1 } }}>
+                      <Box className="row-actions">
                         <Tooltip title="Open">
                           <IconButton
                             size="small"
