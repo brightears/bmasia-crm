@@ -83,13 +83,6 @@ const Segments: React.FC = () => {
     setSelectedSegment(null);
   };
 
-  const handleViewMembers = () => {
-    if (selectedSegment) {
-      navigate(`/segments/${selectedSegment.id}/members`);
-    }
-    handleMenuClose();
-  };
-
   const handleEdit = () => {
     if (selectedSegment) {
       navigate(`/segments/${selectedSegment.id}/edit`);
@@ -332,10 +325,7 @@ const Segments: React.FC = () => {
         open={Boolean(anchorEl)}
         onClose={handleMenuClose}
       >
-        <MenuItem onClick={handleViewMembers}>
-          <Group fontSize="small" sx={{ mr: 1 }} />
-          View Members
-        </MenuItem>
+        {/* "View Members" removed: it linked to /segments/:id/members, a page that has never existed. */}
         <MenuItem onClick={handleEdit}>
           <Edit fontSize="small" sx={{ mr: 1 }} />
           Edit
