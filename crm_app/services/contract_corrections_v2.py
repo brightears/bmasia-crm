@@ -49,6 +49,11 @@ GROUPS
       entry, whether in one group or in two (planned_terms_overlap).
   The journal entry of a group is written inside the group's transaction,
   before commit, so a crash cannot leave applied changes without revert data.
+  When COMMIT itself raises a database error, the server may still have
+  committed: the entry is kept, flagged commit_uncertain, and the group is
+  reported as COMMIT-UNCERTAIN for an operator to check. Revert is safe either
+  way: it checks current state and writes nothing for a group that is not
+  there.
 
 REFUSALS (named reasons; nothing in the group is written)
   duplicate_contract_id, contract_in_two_groups, planned_terms_overlap,
@@ -107,7 +112,10 @@ REVERT
                      sync, is left as it is and reported). A released zone that
                      has since been linked to any other contract makes the group
                      changed_since_apply: reactivating the old link would give
-                     the zone two active links.
+                     the zone two active links. Links of other contracts that
+                     were already active on the zone before the run (stale
+                     links of an already-Cancelled contract) are recorded in
+                     the journal and do not block the revert.
     mark_renewed / set_renewed_from   restore the journalled fields.
     create_successor DELETES the created contract (and its service-location
                      rows) and restores the old contract, but only while the
@@ -586,6 +594,7 @@ class V2Runner:
             f'{len(groups)} groups ({FILE_FORMAT_V2}); classes {"/".join(sorted(selected))}')
 
         tally = OrderedDict()
+        uncertain = set()
         not_selected = 0
         for group, members in groups.items():
             cls = members[0].cls
@@ -596,10 +605,14 @@ class V2Runner:
             for entry, number, detail in rows:
                 label = {'would_apply': 'WOULD-APPLY', 'applied': 'APPLIED',
                          'already_applied': 'ALREADY-APPLIED'}.get(outcome, f'SKIPPED:{outcome}')
+                if outcome.startswith('commit_uncertain'):
+                    label = f'COMMIT-UNCERTAIN:{outcome}'
+                    uncertain.add(group)
                 self.out.write(
                     f'  [{label}] {cls} {entry.op} {entry.contract_id} {number or "-"}'
                     f'{": " + detail if detail else ""}')
-                key = outcome if outcome in ('would_apply', 'applied', 'already_applied') else f'skipped:{outcome}'
+                key = (outcome if outcome in ('would_apply', 'applied', 'already_applied')
+                       else 'commit_uncertain' if outcome.startswith('commit_uncertain') else f'skipped:{outcome}')
                 tally.setdefault(f'{cls}/{entry.op}', Counter())[key] += 1
 
         self.out.write(f'\nsummary [{cmd.mode}] batch {cmd.batch_id}')
@@ -611,6 +624,11 @@ class V2Runner:
             self.out.write(f'  not selected by --only-class: {not_selected} entries')
         if cmd.execute_mode:
             self.out.write(f'journal: {cmd.journal_path}')
+        if uncertain:
+            self.out.write(
+                f'WARNING: {len(uncertain)} group(s) hit an error at COMMIT and may or may not have been written: '
+                f'{", ".join(sorted(uncertain))}. Check those contracts on the CRM; the journal keeps their '
+                f'entries (commit_uncertain) and --revert reverts them only where the change is present.')
         elif total.get('would_apply'):
             self.out.write('re-run with --execute --journal <path> to apply.')
 
@@ -666,8 +684,12 @@ class V2Runner:
             return refused.reason, rows()
         except DatabaseError as exc:
             if self.journal['groups'] and self.journal['groups'][-1]['group'] == group:
-                self.journal['groups'].pop()
+                # The error came at COMMIT: the server may have committed although the
+                # client saw an error. Keep the entry, flagged; revert checks current
+                # state first, so it writes nothing for a group that did not commit.
+                self.journal['groups'][-1]['commit_uncertain'] = True
                 self.write_journal(self.journal)
+                return f'commit_uncertain({exc.__class__.__name__})', rows(details)
             return f'write_failed({exc.__class__.__name__})', rows()
         return 'applied', rows(details)
 
@@ -849,6 +871,10 @@ class V2Runner:
         other_links_before = set(
             ContractZone.objects.filter(zone_id__in=zone_ids).exclude(pk__in=link_ids)
             .values_list('pk', 'is_active', 'end_date'))
+        other_by_zone = {}
+        for pk, zone_id in ContractZone.objects.filter(zone_id__in=zone_ids).exclude(pk__in=link_ids) \
+                .values_list('pk', 'zone_id'):
+            other_by_zone.setdefault(str(zone_id), set()).add(str(pk))
 
         c.status = 'Cancelled'
         c.is_active = False
@@ -865,7 +891,11 @@ class V2Runner:
                        .values_list('pk', 'is_active', 'end_date')) != other_links_before:
             raise Refused('unexpected_side_effect')
 
-        zone_rows = [{'id': z, 'before': {'status': zones_before[z]}, 'after': {'status': zones_after[z]}}
+        zone_rows = [{'id': z, 'before': {'status': zones_before[z]}, 'after': {'status': zones_after[z]},
+                      # links of other contracts that were already active on this zone before the
+                      # run (e.g. stale links of an already-Cancelled contract); revert ignores them
+                      'other_active_links': sorted(str(pk) for pk, active, _ in other_links_before
+                                                   if active and str(pk) in other_by_zone.get(z, set()))}
                      for z in zone_ids]
         link_rows = [{'id': l, 'zone_id': dict(plan['links'])[l],
                       'before': {'end_date': _iso(links_before[l][0]), 'is_active': links_before[l][1]},
@@ -1068,10 +1098,11 @@ class V2Runner:
             return 'touched' if exists is not None else 'changed'
         if op['op'] == 'mark_cancelled':
             if self._contract_matches(c, op['after']):
-                own = [link['id'] for link in op['zone_links']]
+                known = [link['id'] for link in op['zone_links']]
+                known += [pk for z in op['zones'] for pk in z.get('other_active_links', [])]
                 zone_ids = [z['id'] for z in op['zones']]
-                if ContractZone.objects.filter(zone_id__in=zone_ids, is_active=True).exclude(pk__in=own).exists():
-                    return 'changed'  # the zone is live elsewhere now; reactivating would double-link it
+                if ContractZone.objects.filter(zone_id__in=zone_ids, is_active=True).exclude(pk__in=known).exists():
+                    return 'changed'  # linked elsewhere since the run; reactivating would double-link the zone
                 for link in op['zone_links']:
                     row = ContractZone.objects.filter(pk=link['id']).first()
                     if row is None or _iso(row.end_date) != link['after']['end_date'] \

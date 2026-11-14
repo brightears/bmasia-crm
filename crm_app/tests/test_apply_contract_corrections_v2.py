@@ -16,6 +16,7 @@ import pytest
 from django.core import mail
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import OperationalError, connection
 from django.utils import timezone
 
 from crm_app.management.commands import apply_contract_corrections as cmd
@@ -173,7 +174,8 @@ def test_cancel_execute_releases_zones_and_journals_them(tmp_path, status):
     journal = json.loads(open(journal_path).read())
     op = journal['groups'][0]['ops'][0]
     assert op['zone_links'][0]['before'] == {'end_date': None, 'is_active': True}
-    assert op['zones'][0] == {'id': str(zone.pk), 'before': {'status': 'online'}, 'after': {'status': 'cancelled'}}
+    assert op['zones'][0] == {'id': str(zone.pk), 'before': {'status': 'online'}, 'after': {'status': 'cancelled'},
+                              'other_active_links': []}
 
 
 def test_cancel_revert_restores_contract_links_and_zones(tmp_path):
@@ -779,6 +781,75 @@ def test_revert_of_a_cancel_is_skipped_when_the_zone_was_linked_elsewhere(tmp_pa
     assert '[SKIPPED:changed_since_apply]' in out
     assert ContractZone.objects.filter(zone=zone, is_active=True).count() == 1
     assert _status(c) == 'Cancelled'
+
+
+def test_a_stale_link_that_existed_before_the_run_does_not_block_the_revert(tmp_path):
+    company = _company()
+    legacy = _contract(company, status='Cancelled', start=date(2023, 1, 1), is_active=False)
+    c = _contract(company, status='Active', start=date(2025, 1, 1))
+    zone, link = _zone_link(c)
+    stale = ContractZone.objects.create(contract=legacy, zone=zone, start_date=legacy.start_date)  # still active
+    out, journal = _execute(tmp_path, _file(tmp_path, [_cancel(c)]))
+    assert '[APPLIED]' in out
+    op = json.loads(open(journal).read())['groups'][0]['ops'][0]
+    assert op['zones'][0]['other_active_links'] == [str(stale.pk)]
+    out = _run('--revert', journal, '--execute')
+    assert '[REVERTED]' in out
+    link.refresh_from_db()
+    stale.refresh_from_db()
+    assert link.is_active is True and stale.is_active is True  # the stale link is left as it was
+    assert _status(c) == 'Active'
+
+
+def test_a_link_added_after_the_run_still_blocks_the_revert_next_to_a_stale_one(tmp_path):
+    company = _company()
+    legacy = _contract(company, status='Cancelled', start=date(2023, 1, 1), is_active=False)
+    c = _contract(company, status='Active', start=date(2025, 1, 1))
+    zone, _ = _zone_link(c)
+    ContractZone.objects.create(contract=legacy, zone=zone, start_date=legacy.start_date)
+    _, journal = _execute(tmp_path, _file(tmp_path, [_cancel(c)]))
+    new = _contract(company, status='Active', start=date(2026, 1, 1))
+    ContractZone.objects.create(contract=new, zone=zone, start_date=new.start_date)
+    assert '[SKIPPED:changed_since_apply]' in _run('--revert', journal, '--execute')
+
+
+def _flaky_commit(really_commit):
+    real_commit = connection.commit
+
+    def commit():
+        if really_commit:
+            real_commit()
+        raise OperationalError('server closed the connection unexpectedly')
+    return commit
+
+
+@pytest.mark.django_db(transaction=True)
+def test_an_error_at_commit_keeps_the_journal_entry_for_a_group_that_committed(tmp_path):
+    c = _contract(_company(), status='Active', start=date(2025, 1, 1))
+    path = _file(tmp_path, [_cancel(c)])
+    with mock.patch.object(connection, 'commit', side_effect=_flaky_commit(True)):
+        out, journal_path = _execute(tmp_path, path)
+    assert '[COMMIT-UNCERTAIN:commit_uncertain(OperationalError)]' in out
+    assert 'WARNING: 1 group(s) hit an error at COMMIT' in out
+    group = json.loads(open(journal_path).read())['groups'][0]
+    assert group['commit_uncertain'] is True
+    assert _status(c) == 'Cancelled'  # it did commit
+    assert '[REVERTED]' in _run('--revert', journal_path, '--execute')
+    assert _status(c) == 'Active'
+
+
+@pytest.mark.django_db(transaction=True)
+def test_an_error_at_commit_for_a_group_that_did_not_commit_reverts_nothing(tmp_path):
+    c = _contract(_company(), status='Active', start=date(2025, 1, 1))
+    path = _file(tmp_path, [_cancel(c)])
+    with mock.patch.object(connection, 'commit', side_effect=_flaky_commit(False)):
+        out, journal_path = _execute(tmp_path, path)
+    assert '[COMMIT-UNCERTAIN:' in out
+    assert json.loads(open(journal_path).read())['groups'][0]['commit_uncertain'] is True
+    assert _status(c) == 'Active'  # rolled back
+    out = _run('--revert', journal_path, '--execute')
+    assert '[ALREADY-REVERTED]' in out
+    assert not AuditLog.objects.filter(additional_data__mode='revert').exists()
 
 
 def test_pricing_check_follows_the_pdf_guard(tmp_path):
