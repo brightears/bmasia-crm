@@ -40,6 +40,7 @@ import { useAuth } from '../contexts/AuthContext';
 import ApiService from '../services/api';
 import { useThemeContext } from '../contexts/ThemeContext';
 import MobileBottomNav from './MobileBottomNav';
+import GlobalSearch from './GlobalSearch';
 import { buildNavGroups, findNavLocation, isActivePath, NavGroup } from './navigation';
 import { layout } from '../theme';
 
@@ -412,6 +413,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               </Typography>
             )}
           </Box>
+
+          {/* Search the whole CRM */}
+          <GlobalSearch />
 
           {/* Header actions */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
