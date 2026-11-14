@@ -155,3 +155,42 @@ export const findNavLocation = (
   );
   return best;
 };
+
+/**
+ * Which menu entries each role sees. Display only: hidden pages still open from a link,
+ * and nothing here changes what the server allows. Paths not listed for a role are hidden;
+ * `'*'` means everything. Unknown or missing roles see everything.
+ */
+const SALES_FINANCE_HIDDEN = [
+  '/revenue',
+  '/finance/ar',
+  '/finance/ap',
+  '/finance/pl',
+  '/finance/cash-flow',
+  '/finance/balance-sheet',
+  '/finance/revenue-accrual',
+];
+
+export const MENU_BY_ROLE: Record<string, { groups: string[] | '*'; hidePaths?: string[] }> = {
+  Admin: { groups: '*' },
+  // Sales: everything except the finance reports and the admin pages. Invoices stay visible.
+  Sales: { groups: ['home', 'customers', 'sales', 'finance', 'support', 'marketing'], hidePaths: SALES_FINANCE_HIDDEN },
+  Marketing: { groups: ['home', 'customers', 'sales', 'finance', 'support', 'marketing'], hidePaths: SALES_FINANCE_HIDDEN },
+  // Finance: customers, sales documents and all of billing & finance.
+  Finance: { groups: ['home', 'customers', 'sales', 'finance'] },
+  // Tech support and music design: customers, support, and contracts/tasks from Sales.
+  Tech: { groups: ['home', 'customers', 'sales', 'support'], hidePaths: ['/opportunities', '/quotes', '/ai-drafts', '/targets'] },
+  'Tech Support': { groups: ['home', 'customers', 'sales', 'support'], hidePaths: ['/opportunities', '/quotes', '/ai-drafts', '/targets'] },
+  Music: { groups: ['home', 'customers', 'sales', 'support'], hidePaths: ['/opportunities', '/quotes', '/ai-drafts', '/targets'] },
+};
+
+export const filterNavForRole = (groups: NavGroup[], role?: string | null): NavGroup[] => {
+  const rule = role ? MENU_BY_ROLE[role] : undefined;
+  if (!rule || rule.groups === '*') return groups;
+  const allowed = rule.groups;
+  const hidden = new Set(rule.hidePaths || []);
+  return groups
+    .filter((g) => allowed.includes(g.id))
+    .map((g) => ({ ...g, items: g.items.filter((i) => !hidden.has(i.path)) }))
+    .filter((g) => g.items.length > 0);
+};
