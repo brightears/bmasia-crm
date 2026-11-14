@@ -46,8 +46,19 @@ import { layout } from '../theme';
 const drawerWidth = layout.sidebarWidth;
 const miniDrawerWidth = layout.sidebarCollapsedWidth;
 
-// Groups that start open. The group holding the current page is always opened too.
+// Groups that start open on a first visit. After that the browser remembers which groups
+// the user opened or closed. The group holding the current page is always opened too.
 const DEFAULT_OPEN_GROUPS = ['home', 'customers', 'sales'];
+const OPEN_GROUPS_KEY = 'bmasia.menu.openGroups';
+
+const readOpenGroups = (): string[] => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(OPEN_GROUPS_KEY) || 'null');
+    return Array.isArray(saved) ? saved.filter((g) => typeof g === 'string') : DEFAULT_OPEN_GROUPS;
+  } catch {
+    return DEFAULT_OPEN_GROUPS;
+  }
+};
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -195,7 +206,15 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [drawerCollapsed, setDrawerCollapsed] = useState(isTablet);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [aiDraftsPendingCount, setAiDraftsPendingCount] = useState(0);
-  const [openGroups, setOpenGroups] = useState<string[]>(DEFAULT_OPEN_GROUPS);
+  const [openGroups, setOpenGroups] = useState<string[]>(readOpenGroups);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(OPEN_GROUPS_KEY, JSON.stringify(openGroups));
+    } catch {
+      // Storage can be unavailable (private window); the menu still works.
+    }
+  }, [openGroups]);
 
   const { darkMode, toggleDarkMode } = useThemeContext();
   const avatarInputRef = useRef<HTMLInputElement>(null);

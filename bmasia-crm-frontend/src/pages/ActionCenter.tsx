@@ -123,9 +123,9 @@ const ActionCenter: React.FC = () => {
 
     const tiles = [
       { label: 'Overdue', value: data.summary.overdue_count, tone: 'error' as const, icon: <ErrorOutline /> },
-      { label: 'Due today & tomorrow', value: data.summary.today_count, tone: 'warning' as const, icon: <Today /> },
-      { label: 'Coming up this week', value: data.summary.upcoming_count, tone: 'info' as const, icon: <CalendarMonth /> },
-      { label: 'Contracts expiring', value: data.summary.expiring_count, tone: 'warning' as const, icon: <Description /> },
+      { label: 'Due soon', value: data.summary.today_count, tone: 'warning' as const, icon: <Today /> },
+      { label: 'Coming up', value: data.summary.upcoming_count, tone: 'info' as const, icon: <CalendarMonth /> },
+      { label: 'Contracts ending within 60 days', value: data.summary.expiring_count, tone: 'warning' as const, icon: <Description /> },
     ];
 
     return (
@@ -156,7 +156,7 @@ const ActionCenter: React.FC = () => {
               {tile.icon}
             </Box>
             <Box sx={{ minWidth: 0 }}>
-              <Typography sx={{ fontSize: '1.5rem', fontWeight: 650, lineHeight: 1.1, fontVariantNumeric: 'tabular-nums' }}>
+              <Typography sx={{ fontSize: '1.5rem', fontWeight: 700, lineHeight: 1.1, fontVariantNumeric: 'tabular-nums' }}>
                 {tile.value}
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.3 }}>
@@ -291,7 +291,8 @@ const ActionCenter: React.FC = () => {
     title: string,
     icon: React.ReactNode,
     tone: 'error' | 'warning' | 'info',
-    items: ActionItem[]
+    items: ActionItem[],
+    description?: string
   ) => {
     if (items.length === 0) return null;
 
@@ -303,6 +304,11 @@ const ActionCenter: React.FC = () => {
             {title}
           </Typography>
           <Chip label={items.length} size="small" color={tone} sx={{ ml: 0.5 }} />
+          {description && (
+            <Typography variant="body2" color="text.secondary" sx={{ ml: 1, display: { xs: 'none', sm: 'block' } }}>
+              {description}
+            </Typography>
+          )}
         </Box>
         {items.map(renderActionItem)}
       </Paper>
@@ -379,8 +385,15 @@ const ActionCenter: React.FC = () => {
       ) : (
         <>
           {renderSection('Overdue', <ErrorOutline />, 'error', overdueItems)}
-          {renderSection('Due today & tomorrow', <Today />, 'warning', todayItems)}
-          {renderSection('Coming up', <CalendarMonth />, 'info', upcomingItems)}
+          {/* Groups as the server defines them (see ActionCenterViewSet in views.py). */}
+          {renderSection('Due soon', <Today />, 'warning', todayItems, 'Tasks due today or tomorrow, invoices due within 7 days')}
+          {renderSection(
+            'Coming up',
+            <CalendarMonth />,
+            'info',
+            upcomingItems,
+            'Tasks this week, follow-ups in the next 2 weeks, contracts ending within 60 days'
+          )}
         </>
       )}
     </Box>

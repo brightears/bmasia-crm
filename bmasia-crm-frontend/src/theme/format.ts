@@ -20,3 +20,22 @@ export const formatMoney = (amount?: number | string | null, currency: string = 
     maximumFractionDigits: 2,
   })}`;
 };
+
+/**
+ * Two-letter initials for an avatar. Uses Latin letters and digits when there are any
+ * ("Lumen Bay Resort" -> "LB"); otherwise the first character of the name, so Thai and
+ * other scripts still get a letter instead of an empty avatar.
+ */
+export const initialsOf = (name?: string | null): string => {
+  const text = (name || '').trim();
+  if (!text) return '?';
+  const latin = text
+    .replace(/[^A-Za-z0-9 ]/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join('')
+    .toUpperCase();
+  return latin || Array.from(text)[0];
+};
