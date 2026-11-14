@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { Box, Container, CircularProgress, Typography, Paper } from '@mui/material';
 import { useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
@@ -71,10 +71,23 @@ const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => (
 
 // Protected Layout wrapper component
 const ProtectedLayout: React.FC = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
+  const location = useLocation();
+
+  // Wait until the saved session has been read. Deciding earlier sent every page reload
+  // (and every link opened in a new tab) to the sign-in page.
+  if (loading) {
+    return (
+      <Box display="flex" flexDirection="column" justifyContent="center" alignItems="center" minHeight="100vh" gap={2}>
+        <CircularProgress size={40} />
+        <Typography variant="body1">Initializing BMAsia CRM...</Typography>
+      </Box>
+    );
+  }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    // Remember the page that was asked for, so sign-in can return to it.
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   return (

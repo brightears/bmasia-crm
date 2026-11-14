@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import {
   Box,
   Paper,
@@ -15,9 +15,10 @@ import {
 } from '@mui/material';
 import { LockOutlined } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
+import { safeReturnPath } from '../utils/returnPath';
 
 const Login: React.FC = () => {
-  const { login, loading } = useAuth();
+  const { login, loading, isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [credentials, setCredentials] = useState({
@@ -26,6 +27,14 @@ const Login: React.FC = () => {
     remember_me: true,
   });
   const [error, setError] = useState('');
+
+  // Where to go after sign-in: the page the user asked for (same-app paths only), else the default.
+  const target = safeReturnPath((location.state as any)?.from, '/dashboard');
+
+  // Someone who is already signed in is sent on to that page.
+  if (isAuthenticated && !loading) {
+    return <Navigate to={target} replace />;
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
@@ -42,12 +51,8 @@ const Login: React.FC = () => {
     try {
       await login(credentials);
 
-      // Get the intended destination from location state, or default to /dashboard
-      const from = (location.state as any)?.from?.pathname || '/dashboard';
-      console.log('Login successful, navigating to:', from);
-
-      // Navigate to the intended destination
-      navigate(from, { replace: true });
+      // Navigate to the intended destination (checked by safeReturnPath above)
+      navigate(target, { replace: true });
     } catch (err: any) {
       console.error('Login component error:', err);
       // Get error message from the thrown Error object
