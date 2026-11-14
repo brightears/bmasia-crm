@@ -83,3 +83,12 @@ it('sends an already signed-in user from the sign-in page to the default page wh
   renderAt('/login');
   await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/dashboard'));
 });
+
+it.each(['//evil.example', '/\\evil.example', 'https://evil.example', 'javascript:alert(1)'])(
+  'ignores a remembered page that is not a same-app path (%s)',
+  async (pathname) => {
+    storeSession();
+    renderAt({ pathname: '/login', state: { from: { pathname, search: '' } } });
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/dashboard'));
+  }
+);

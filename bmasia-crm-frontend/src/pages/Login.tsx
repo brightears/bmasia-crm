@@ -15,6 +15,7 @@ import {
 } from '@mui/material';
 import { LockOutlined } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
+import { safeReturnPath } from '../utils/returnPath';
 
 const Login: React.FC = () => {
   const { login, loading, isAuthenticated } = useAuth();
@@ -27,10 +28,11 @@ const Login: React.FC = () => {
   });
   const [error, setError] = useState('');
 
-  // Someone who is already signed in is sent on to the page they asked for.
-  const requested = (location.state as any)?.from;
+  // Where to go after sign-in: the page the user asked for (same-app paths only), else the default.
+  const target = safeReturnPath((location.state as any)?.from, '/dashboard');
+
+  // Someone who is already signed in is sent on to that page.
   if (isAuthenticated && !loading) {
-    const target = requested?.pathname ? `${requested.pathname}${requested.search || ''}` : '/dashboard';
     return <Navigate to={target} replace />;
   }
 
@@ -49,12 +51,8 @@ const Login: React.FC = () => {
     try {
       await login(credentials);
 
-      // Get the intended destination from location state, or default to /dashboard
-      const from = (location.state as any)?.from?.pathname || '/dashboard';
-      console.log('Login successful, navigating to:', from);
-
-      // Navigate to the intended destination
-      navigate(from, { replace: true });
+      // Navigate to the intended destination (checked by safeReturnPath above)
+      navigate(target, { replace: true });
     } catch (err: any) {
       console.error('Login component error:', err);
       // Get error message from the thrown Error object
