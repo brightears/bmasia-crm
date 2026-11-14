@@ -3,14 +3,15 @@
  *
  * Brand colours come from the public BMAsia website (amber #EFA634, deep navy surfaces,
  * Beat Breeze teal, Soundtrack lavender). Text and status colours are chosen so that
- * text on its background reaches WCAG AA (4.5:1) and UI outlines reach 3:1.
+ * text on its background reaches WCAG AA (4.5:1) and UI outlines reach 3:1 (checked on white
+ * and on the page background).
  */
 
 export const brand = {
   amber: '#EFA634', // logo / primary button fill (use dark text on it: 9:1)
   amberHover: '#E2972A',
-  amberStrong: '#A86A12', // amber for text, icons and outlines on white (4.4:1)
-  amberText: '#8F560A', // amber text on tinted amber backgrounds (5.9:1)
+  amberStrong: '#A86A12', // focus ring and tab indicator only (non-text, 4.4:1 on white)
+  amberText: '#8F560A', // amber for text, links and icons (6.0:1 on white, 5.5:1 on the page)
   amberTint: '#FEF6E7', // selected / highlighted backgrounds
   amberTint2: '#FCEBCB',
   onAmber: '#101417',
@@ -21,7 +22,8 @@ export const ink = {
   900: '#0E1B26', // headings, primary text (16:1)
   700: '#2F3D4A', // body text
   500: '#5B6874', // secondary text (5.7:1)
-  400: '#8B97A3', // input borders, placeholder icons (3:1)
+  400: '#8B97A3', // placeholder icons, disabled text
+  outline: '#7E8A96', // input borders (3.5:1 on white, 3.3:1 on the page)
   300: '#C3CBD3',
   200: '#E3E7EB', // dividers, card borders
   100: '#EEF0F3',
@@ -37,8 +39,8 @@ export const product = {
 
 /** Soft status colours: tinted background + dark text, all at least 4.8:1. */
 export const status = {
-  success: { main: '#1E8A57', text: '#1B6B44', bg: '#E6F4EC' },
-  warning: { main: '#B86E00', text: '#9A5B00', bg: '#FDF1DE' },
+  success: { main: '#1B7A4C', text: '#1B6B44', bg: '#E6F4EC' }, // white on main: 5.3:1
+  warning: { main: '#A35F00', text: '#9A5B00', bg: '#FDF1DE' }, // white on main: 5.0:1
   error: { main: '#C4321F', text: '#B42318', bg: '#FDECEA' },
   info: { main: '#1F65B8', text: '#1F5FAF', bg: '#E8F0FB' },
   neutral: { main: '#5B6874', text: '#4A5561', bg: '#EEF0F3' },
