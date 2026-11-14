@@ -43,6 +43,8 @@ interface OpportunityPipelineProps {
   onOpportunityEdit: (opportunity: Opportunity) => void;
   loading?: boolean;
   entityFilter?: string;
+  /** How many opportunities match the filters on the server; more than were loaded means the board is cut off. */
+  totalCount?: number;
 }
 
 interface StageColumn {
@@ -368,6 +370,7 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
   onOpportunityEdit,
   loading = false,
   entityFilter,
+  totalCount,
 }) => {
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
@@ -454,6 +457,14 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
       {error && (
         <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
           {error}
+        </Alert>
+      )}
+
+      {totalCount !== undefined && totalCount > opportunities.length && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          The board shows the first {opportunities.length.toLocaleString('en-US')} of{' '}
+          {totalCount.toLocaleString('en-US')} matching opportunities, and its totals cover only those. Narrow the
+          filters to see the rest.
         </Alert>
       )}
 

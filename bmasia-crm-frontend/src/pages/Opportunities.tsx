@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -58,7 +58,9 @@ import {
   currencyForEntity,
 } from '../constants/entities';
 import { formatDate as formatDisplayDate, formatMoney, statusTone, visuallyHidden } from '../theme';
-import { useListState } from '../hooks/useListState';
+import { useListState, optionValues, idFromList } from '../hooks/useListState';
+import { useListSearchBox } from '../hooks/useListSearchBox';
+import { withListView } from '../hooks/listReturn';
 import { PageHeader, EmptyState, ProductChip } from '../components/ui';
 
 interface TabPanelProps {
@@ -102,6 +104,9 @@ const sortOptions = [
   { value: '-last_contact_date', label: 'Last Contacted' },
 ];
 
+/** The most the server returns in one page (its page_size cap). */
+const PIPELINE_LIMIT = 1000;
+
 const Opportunities: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
@@ -113,12 +118,33 @@ const Opportunities: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   // Search, filters, sort and page live in the address, so Back returns to the same view.
-  const list = useListState({ q: '', page: 0, size: 25, stage: '', owner: '', entity: DEFAULT_ENTITY as EntityFilter, service: 'all' as ServiceFilter, sort: '-created_at' });
+  const list = useListState(
+    { q: '', page: 0, size: 25, stage: '', owner: '', entity: DEFAULT_ENTITY as EntityFilter, service: 'all' as ServiceFilter, sort: '-created_at' },
+    {
+      stage: optionValues(stageOptions),
+      owner: idFromList(users),
+      entity: optionValues(ENTITY_OPTIONS),
+      service: optionValues(SERVICE_OPTIONS),
+      sort: optionValues(sortOptions),
+    },
+    users.length
+  );
   const [search, setSearch] = list.bind('q');
   const [page, setPage] = list.bind('page');
+  // The box's own text, written to the address shortly after typing stops.
+  const searchBox = useListSearchBox(search, (text) => {
+    setSearch(text);
+    setPage(0);
+  });
   const [rowsPerPage, setRowsPerPage] = list.bind('size');
   const [totalCount, setTotalCount] = useState(0);
   const [currentTab, setCurrentTab] = useState(0);
+  // The pipeline board loads its own copy of the list (not the table's 25-row page), so its
+  // totals cover every opportunity that matches the filters, up to the server's limit.
+  const [pipeline, setPipeline] = useState<{ items: Opportunity[]; count: number } | null>(null);
+  const [pipelineLoading, setPipelineLoading] = useState(false);
+  const [pipelineVersion, setPipelineVersion] = useState(0);
+  const pipelineRequest = useRef(0);
 
   // Filters
   const [stageFilter, setStageFilter] = list.bind('stage');
@@ -181,6 +207,28 @@ const Opportunities: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (currentTab !== 1) return;
+    const request = ++pipelineRequest.current;
+    const params: any = { page: 1, page_size: PIPELINE_LIMIT, ordering: sortBy, company__billing_entity: entityFilter };
+    if (search) params.search = search;
+    if (stageFilter) params.stage = stageFilter;
+    if (ownerFilter) params.owner = ownerFilter;
+    if (serviceFilter !== 'all') params.service_type = serviceFilter;
+    setPipelineLoading(true);
+    ApiService.getOpportunities(params)
+      .then((response: ApiResponse<Opportunity>) => {
+        if (request === pipelineRequest.current) setPipeline({ items: response.results, count: response.count });
+      })
+      .catch((err) => {
+        console.error('Pipeline error:', err);
+        if (request === pipelineRequest.current) setError('Failed to load the pipeline');
+      })
+      .finally(() => {
+        if (request === pipelineRequest.current) setPipelineLoading(false);
+      });
+  }, [currentTab, search, stageFilter, ownerFilter, entityFilter, serviceFilter, sortBy, pipelineVersion]);
+
   const loadUsers = async () => {
     try {
       const response = await ApiService.getUsers({ page_size: 100 });
@@ -191,8 +239,8 @@ const Opportunities: React.FC = () => {
   };
 
   const handleSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(event.target.value);
-    setPage(0);
+    searchBox.onChange(event.target.value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleStageChange = useCallback((event: any) => {
@@ -248,7 +296,7 @@ const Opportunities: React.FC = () => {
 
   const handleViewOpportunity = (opportunity: Opportunity) => {
     setActionMenuAnchor(null);
-    navigate(`/opportunities/${opportunity.id}`);
+    navigate(`/opportunities/${opportunity.id}`, withListView(list.searchParams));
   };
 
   const handleExportPDF = async () => {
@@ -295,6 +343,7 @@ const Opportunities: React.FC = () => {
       try {
         await ApiService.deleteOpportunity(opportunity.id);
         loadOpportunities();
+        setPipelineVersion((v) => v + 1);
       } catch (err) {
         setError('Failed to delete opportunity');
       }
@@ -315,11 +364,15 @@ const Opportunities: React.FC = () => {
     if (formMode === 'create') {
       setTotalCount(prev => prev + 1);
     }
+    setPipelineVersion((v) => v + 1);
   };
 
   const handleOpportunityUpdate = (opportunity: Opportunity) => {
     setOpportunities(prev =>
       prev.map(o => o.id === opportunity.id ? opportunity : o)
+    );
+    setPipeline((prev) =>
+      prev && { ...prev, items: prev.items.map((o) => (o.id === opportunity.id ? opportunity : o)) }
     );
   };
 
@@ -343,7 +396,7 @@ const Opportunities: React.FC = () => {
       <Box sx={{ p: 2, display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: 1, borderColor: 'divider' }}>
         <TextField
           placeholder="Search opportunities..."
-          value={search}
+          value={searchBox.value}
           onChange={handleSearchChange}
           size="small"
           inputProps={{ 'aria-label': 'Search opportunities' }}
@@ -496,7 +549,7 @@ const Opportunities: React.FC = () => {
               </TableRow>
             ) : (
               opportunities.map((opportunity) => (
-                <TableRow key={opportunity.id} hover sx={{ cursor: 'pointer' }} onClick={() => navigate(`/opportunities/${opportunity.id}`)}>
+                <TableRow key={opportunity.id} hover sx={{ cursor: 'pointer' }} onClick={() => navigate(`/opportunities/${opportunity.id}`, withListView(list.searchParams))}>
                   <TableCell sx={{ maxWidth: 320 }}>
                     <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }} noWrap>
                       {opportunity.name}
@@ -611,10 +664,11 @@ const Opportunities: React.FC = () => {
         <TabPanel value={currentTab} index={1}>
           <Box sx={{ p: 2 }}>
             <OpportunityPipeline
-              opportunities={opportunities}
+              opportunities={pipeline?.items ?? []}
+              totalCount={pipeline?.count}
               onOpportunityUpdate={handleOpportunityUpdate}
               onOpportunityEdit={handleEditOpportunity}
-              loading={loading}
+              loading={pipelineLoading && !pipeline}
               entityFilter={entityFilter}
             />
           </Box>

@@ -49,6 +49,7 @@ import ApiService from '../services/api';
 import SequenceForm from '../components/SequenceForm';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 import { useListState } from '../hooks/useListState';
+import { useListSearchBox } from '../hooks/useListSearchBox';
 
 const EmailAutomations: React.FC = () => {
   const navigate = useNavigate();
@@ -57,12 +58,20 @@ const EmailAutomations: React.FC = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   // Search, filters, sort and page live in the address, so Back returns to the same view.
-  const list = useListState({ q: '', status: '', type: 'all' as string, page: 0, size: 25 });
+  const list = useListState(
+    { q: '', status: '', type: 'all' as string, page: 0, size: 25 },
+    { status: ['', 'active', 'paused', 'archived'], type: ['all', 'auto', 'manual'] }
+  );
   const [search, setSearch] = list.bind('q');
   const [statusFilter, setStatusFilter] = list.bind('status');
   const [typeFilter, setTypeFilter] = list.bind('type');
   const [page, setPage] = list.bind('page');
   const [rowsPerPage, setRowsPerPage] = list.bind('size');
+  // The box's own text, written to the address shortly after typing stops.
+  const searchBox = useListSearchBox(search, (text) => {
+    setSearch(text);
+    setPage(0);
+  });
   const [totalCount, setTotalCount] = useState(0);
 
   // Form modal state
@@ -116,8 +125,7 @@ const EmailAutomations: React.FC = () => {
   }, [loadSequences]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(event.target.value);
-    setPage(0);
+    searchBox.onChange(event.target.value);
   };
 
   const handleTypeFilterChange = (event: React.SyntheticEvent, newValue: string) => {
@@ -325,7 +333,7 @@ const EmailAutomations: React.FC = () => {
                 fullWidth
                 size="small"
                 placeholder="Search automations by name or description..."
-                value={search}
+                value={searchBox.value}
                 onChange={handleSearchChange}
                 InputProps={{
                   startAdornment: (
