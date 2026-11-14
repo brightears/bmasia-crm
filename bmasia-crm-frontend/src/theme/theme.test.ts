@@ -27,6 +27,8 @@ describe('display formats', () => {
 
   it('formats dates the same way everywhere', () => {
     expect(formatDate('2026-11-14')).toBe('14 Nov 2026');
+    expect(formatDate('2026-09-01')).toBe('1 Sep 2026');
+    expect(formatDate(new Date(2027, 0, 31))).toBe('31 Jan 2027');
     expect(formatDate(null)).toBe('—');
     expect(formatDate('not a date')).toBe('—');
   });
