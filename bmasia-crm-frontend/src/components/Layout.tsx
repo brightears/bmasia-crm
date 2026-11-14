@@ -319,13 +319,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           sx={{ borderRadius: 1, display: 'flex', alignItems: 'center', gap: 1.25 }}
         >
           {collapsed ? (
-            <Box component="img" src="/bmasia-mark.png" alt="BMAsia" sx={{ height: 32, width: 32 }} />
+            <Box component="img" src="/brand/bmasia-symbol.svg" alt="BMAsia" sx={{ height: 32, width: 'auto', display: 'block' }} />
           ) : (
             <>
-              {/* The grey wordmark is hard to read on dark backgrounds, so dark mode uses the white version. */}
+              {/* Full logo; on dark backgrounds the version with a white wordmark. */}
               <Box
                 component="img"
-                src={darkMode ? '/bmasia-logo-white.png' : '/bmasia-logo.png'}
+                src={darkMode ? '/brand/bmasia-logo-on-dark.svg' : '/brand/bmasia-logo.svg'}
                 alt="BMAsia"
                 sx={{ height: 30, display: 'block' }}
               />
@@ -407,9 +407,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </IconButton>
           <Box
             component="img"
-            src="/bmasia-mark.png"
+            src="/brand/bmasia-symbol.svg"
             alt=""
-            sx={{ display: { xs: 'block', md: 'none' }, height: 28, width: 28 }}
+            sx={{ display: { xs: 'block', md: 'none' }, height: 28, width: 'auto' }}
           />
 
           {/* Where am I */}

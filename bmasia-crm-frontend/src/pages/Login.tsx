@@ -73,7 +73,7 @@ const Login: React.FC = () => {
           background: `radial-gradient(120% 80% at 0% 100%, ${alpha(brand.amber, 0.28)} 0%, rgba(239,166,52,0) 55%), ${brand.navy}`,
         }}
       >
-        <Box component="img" src="/bmasia-logo-white.png" alt="BMAsia" sx={{ height: 44, width: 'auto', alignSelf: 'flex-start' }} />
+        <Box component="img" src="/brand/bmasia-logo-on-dark.svg" alt="BMAsia" sx={{ height: 44, width: 'auto', alignSelf: 'flex-start' }} />
         <Box>
           <Typography sx={{ fontSize: '2rem', fontWeight: 700, lineHeight: 1.2, letterSpacing: '-0.02em', mb: 2, maxWidth: 440 }}>
             Every customer, contract and renewal in one place.
@@ -91,7 +91,7 @@ const Login: React.FC = () => {
       {/* Sign-in form */}
       <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', p: { xs: 2, sm: 4 } }}>
         <Box sx={{ width: '100%', maxWidth: 380 }}>
-          <Box component="img" src="/bmasia-logo.png" alt="BMAsia" sx={{ height: 40, display: 'block', mb: 4 }} />
+          <Box component="img" src="/brand/bmasia-logo.svg" alt="BMAsia" sx={{ height: 40, width: 'auto', display: 'block', mb: 4 }} />
           <Typography component="h1" variant="h4" sx={{ mb: 0.5 }}>
             Sign in
           </Typography>
