@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useLocation, Navigate } from 'react-router-dom';
 import {
   Box,
   Paper,
@@ -15,10 +15,12 @@ import { alpha } from '@mui/material/styles';
 import { useAuth } from '../contexts/AuthContext';
 import { getDailyQuote } from '../constants/quotes';
 import { brand } from '../theme';
+import { safeReturnPath } from '../utils/returnPath';
+
+const HOME = '/today';
 
 const Login: React.FC = () => {
-  const { login, loading } = useAuth();
-  const navigate = useNavigate();
+  const { login, loading, isAuthenticated } = useAuth();
   const location = useLocation();
   const [credentials, setCredentials] = useState({
     username: '',
@@ -26,6 +28,15 @@ const Login: React.FC = () => {
     remember_me: true,
   });
   const [error, setError] = useState('');
+
+  // Where to go after sign-in: the page the user asked for (same-app paths only), else Today,
+  // the home page for everyone.
+  const target = safeReturnPath((location.state as any)?.from, HOME);
+
+  // Someone who is already signed in is sent on to that page.
+  if (isAuthenticated && !loading) {
+    return <Navigate to={target} replace />;
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
@@ -42,12 +53,8 @@ const Login: React.FC = () => {
     try {
       await login(credentials);
 
-      // Go back to the page the user asked for, or to Today, the home page for everyone
-      const from = (location.state as any)?.from?.pathname || '/today';
-      console.log('Login successful, navigating to:', from);
-
-      // Navigate to the intended destination
-      navigate(from, { replace: true });
+      // Nothing else to do: once signed in, this page re-renders and the redirect above
+      // sends the user on (single place for post-sign-in routing).
     } catch (err: any) {
       console.error('Login component error:', err);
       // Get error message from the thrown Error object

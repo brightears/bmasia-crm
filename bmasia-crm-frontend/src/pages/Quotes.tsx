@@ -144,6 +144,25 @@ const Quotes: React.FC = () => {
     }
   }, [searchParams, setSearchParams]);
 
+  // Open the edit form for ?edit=<quote id> (the Edit button on a quote's own page links here,
+  // because quotes are edited in this page's form).
+  useEffect(() => {
+    const editId = searchParams.get('edit');
+    if (!editId) return;
+    searchParams.delete('edit');
+    setSearchParams(searchParams, { replace: true });
+    ApiService.getQuote(editId)
+      .then((q) => {
+        setSelectedQuote(q);
+        setFormMode('edit');
+        setFormOpen(true);
+      })
+      .catch((err) => {
+        console.error('Could not open quote for editing:', err);
+        setError('Could not open that quote for editing.');
+      });
+  }, [searchParams, setSearchParams]);
+
   const loadQuotes = useCallback(async () => {
     try {
       setLoading(true);

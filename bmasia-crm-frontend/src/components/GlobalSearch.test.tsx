@@ -4,9 +4,9 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import GlobalSearch from './GlobalSearch';
 import ApiService from '../services/api';
 
-let mockRole = 'Admin';
+let mockUser: any = { id: 'x', role: 'Admin', is_active: true, permissions: [] };
 jest.mock('../contexts/AuthContext', () => ({
-  useAuth: () => ({ user: { role: mockRole } }),
+  useAuth: () => ({ user: mockUser }),
 }));
 
 jest.mock('../services/api', () => ({
@@ -36,6 +36,7 @@ const renderSearch = () =>
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockUser = { id: 'x', role: 'Admin', is_active: true, permissions: [] };
   api.getCompanies.mockResolvedValue({ results: [{ id: 'co-1', name: 'Fixture Resort', city: 'Phuket', country: 'Thailand' }] });
   api.getContacts.mockResolvedValue({ results: [{ id: 'ct-1', name: 'Pat Example', title: 'GM', company: 'co-1', company_name: 'Fixture Resort' }] });
   api.getContracts.mockResolvedValue({
@@ -98,15 +99,71 @@ it('finds menu pages by their former name', async () => {
   await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/knowledge-base'));
 });
 
-it('does not offer pages the role menu hides', async () => {
-  mockRole = 'Sales';
-  api.getCompanies.mockResolvedValue({ results: [] });
-  api.getContacts.mockResolvedValue({ results: [] });
-  api.getContracts.mockResolvedValue({ results: [] });
-  renderSearch();
+const openAndType = async (text: string) => {
   fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
-  fireEvent.change(await screen.findByRole('combobox'), { target: { value: 'balance' } });
+  const input = await screen.findByRole('combobox');
+  fireEvent.change(input, { target: { value: text } });
+  return input;
+};
+
+it('only searches record types whose pages the user may open', async () => {
+  mockUser = { id: 'x', role: 'Tech Support', is_active: true, permissions: [] };
+  renderSearch();
+  await openAndType('fixture');
+  await screen.findByText('TH-TEST-0001');
+  expect(api.getQuotes).not.toHaveBeenCalled(); // Tech Support cannot open quote pages
+  expect(api.getContracts).toHaveBeenCalled();
+});
+
+it('shows each type as it arrives instead of waiting for the slowest', async () => {
+  api.getContracts.mockReturnValue(new Promise(() => {})); // never answers
+  renderSearch();
+  await openAndType('fixture');
+  expect(await screen.findByText('Fixture Resort')).toBeInTheDocument();
+  expect(screen.getByText('Pat Example')).toBeInTheDocument();
+});
+
+it('says that search failed when every type failed, not "Nothing found"', async () => {
+  for (const k of ['getCompanies', 'getContacts', 'getContracts', 'getQuotes', 'getInvoices']) {
+    api[k].mockRejectedValue(new Error('offline'));
+  }
+  renderSearch();
+  await openAndType('fixture');
+  expect(await screen.findByText(/search failed/i)).toBeInTheDocument();
+  expect(screen.queryByText(/nothing found/i)).not.toBeInTheDocument();
+});
+
+it('names the types that could not be searched when only some failed', async () => {
+  renderSearch();
+  await openAndType('fixture');
+  expect(await screen.findByText('Could not search quotes.')).toBeInTheDocument();
+});
+
+it('ignores Enter while the results still belong to the previous text', async () => {
+  renderSearch();
+  const input = await openAndType('fixture');
+  await screen.findByText('TH-TEST-0001');
+  fireEvent.change(input, { target: { value: 'fixture resort' } });
+  fireEvent.keyDown(input, { key: 'Enter' }); // within the 250 ms wait
+  expect(screen.getByTestId('where')).toHaveTextContent('/today');
+});
+
+it('leaves Ctrl/Cmd+K to rich-text editors', async () => {
+  const editor = document.createElement('div');
+  editor.className = 'ql-editor';
+  editor.setAttribute('contenteditable', 'true');
+  document.body.appendChild(editor);
+  renderSearch();
+  fireEvent.keyDown(editor, { key: 'k', metaKey: true });
+  await new Promise((r) => setTimeout(r, 50));
+  expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  editor.remove();
+});
+
+it('does not offer pages the role menu hides', async () => {
+  mockUser = { id: 'x', role: 'Sales', is_active: true, permissions: [] };
+  renderSearch();
+  await openAndType('balance');
   await waitFor(() => expect(api.getCompanies).toHaveBeenCalled());
   expect(screen.queryByText('Balance sheet')).not.toBeInTheDocument();
-  mockRole = 'Admin';
 });
