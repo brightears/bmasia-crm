@@ -51,7 +51,8 @@ import {
 import { useNavigate } from 'react-router-dom';
 import apiService from '../services/api';
 import { Zone, Company } from '../types';
-import { useListState } from '../hooks/useListState';
+import { useListState, idFromList } from '../hooks/useListState';
+import { useListSearchBox } from '../hooks/useListSearchBox';
 
 type StatusFilter = 'all' | 'online' | 'offline' | 'no_device' | 'pending' | 'orphaned';
 
@@ -116,13 +117,26 @@ const ZonesUnified: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   // Search, filters, sort and page live in the address, so Back returns to the same view.
-  const list = useListState({ q: '', status: 'all' as StatusFilter, company: 'all' as string, platform: 'all' as string, page: 0, size: 25 });
+  const list = useListState(
+    { q: '', status: 'all' as StatusFilter, company: 'all' as string, platform: 'all' as string, page: 0, size: 25 },
+    {
+      status: ['all', 'online', 'offline', 'no_device', 'pending', 'orphaned'],
+      company: idFromList(companies, 'all'),
+      platform: ['all', 'soundtrack', 'beatbreeze'],
+    },
+    companies.length
+  );
   const [searchQuery, setSearchQuery] = list.bind('q');
   const [statusFilter, setStatusFilter] = list.bind('status');
   const [companyFilter, setCompanyFilter] = list.bind('company');
   const [platformFilter, setPlatformFilter] = list.bind('platform');
   const [page, setPage] = list.bind('page');
   const [rowsPerPage, setRowsPerPage] = list.bind('size');
+  // The box's own text, written to the address shortly after typing stops.
+  const searchBox = useListSearchBox(searchQuery, (text) => {
+    setSearchQuery(text);
+    setPage(0);
+  });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [zoneToDelete, setZoneToDelete] = useState<Zone | null>(null);
 
@@ -434,8 +448,8 @@ const ZonesUnified: React.FC = () => {
                 fullWidth
                 size="small"
                 placeholder="Search zones or companies..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                value={searchBox.value}
+                onChange={(e) => searchBox.onChange(e.target.value)}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">

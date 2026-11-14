@@ -57,3 +57,64 @@ it('a setter kept from an earlier render does not undo later changes', () => {
   act(() => staleSetStatus('Sent'));
   expect(location.search).toBe('?q=lumen&status=Sent');
 });
+
+describe('values from the address are checked', () => {
+  const Checked: React.FC = () => {
+    api = useListState(
+      { q: '', status: '', sort: '-created_at', page: 0, size: 25 },
+      { status: ['', 'Draft', 'Sent'], sort: ['-created_at', 'name'] }
+    );
+    location = useLocation();
+    return null;
+  };
+  const renderChecked = (url: string) =>
+    render(
+      <MemoryRouter initialEntries={[url]}>
+        <Checked />
+      </MemoryRouter>
+    );
+
+  it.each(['-5', '0', '7', '99999', '25abc', 'abc'])('rows per page %s falls back to the default', (size) => {
+    renderChecked(`/list?size=${size}`);
+    expect(api.values.size).toBe(25);
+  });
+
+  it('accepts the page-size choices', () => {
+    renderChecked('/list?size=100');
+    expect(api.values.size).toBe(100);
+  });
+
+  it('an unknown filter or sort falls back to "all" / the default', () => {
+    renderChecked('/list?status=Bogus&sort=password');
+    expect(api.values.status).toBe('');
+    expect(api.values.sort).toBe('-created_at');
+  });
+
+  it('known values are kept', () => {
+    renderChecked('/list?status=Sent&sort=name&page=3');
+    expect(api.values).toMatchObject({ status: 'Sent', sort: 'name', page: 2 });
+  });
+
+  it('a negative or fractional page falls back to the first page', () => {
+    renderChecked('/list?page=-3');
+    expect(api.values.page).toBe(0);
+    renderChecked('/list?page=2.7');
+    expect(api.values.page).toBe(0);
+  });
+});
+
+describe('record-id filters', () => {
+  const { idFromList, isRecordId } = jest.requireActual('./useListState');
+  it('accepts UUIDs and whole numbers only', () => {
+    expect(isRecordId('9e522106-93f0-49c9-82f5-b638c7eb3b29')).toBe(true);
+    expect(isRecordId('42')).toBe(true);
+    expect(isRecordId("1' or 1=1")).toBe(false);
+  });
+  it('once the list has loaded, the id must be in it', () => {
+    const check = idFromList([{ id: 'a1b2c3d4-0000-0000-0000-000000000001' }], 'all');
+    expect(check('all')).toBe(true);
+    expect(check('a1b2c3d4-0000-0000-0000-000000000001')).toBe(true);
+    expect(check('a1b2c3d4-0000-0000-0000-000000000002')).toBe(false);
+    expect(idFromList([])('a1b2c3d4-0000-0000-0000-000000000002')).toBe(true); // not loaded yet: shape only
+  });
+});
