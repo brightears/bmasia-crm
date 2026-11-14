@@ -56,6 +56,7 @@ import ActionCenter from './pages/ActionCenter';
 import ProspectSequences from './pages/ProspectSequences';
 import AIEmailDrafts from './pages/AIEmailDrafts';
 // import LoadingSkeleton from './components/LoadingSkeleton';
+import NotFoundPage from './pages/NotFound';
 
 // Temporary placeholder components for new routes
 const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => (
@@ -548,6 +549,9 @@ function App() {
 
         {/* Mobile more page */}
         <Route path="/more" element={<PlaceholderPage title="More Options" />} />
+
+        {/* Any address that does not exist */}
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
   );

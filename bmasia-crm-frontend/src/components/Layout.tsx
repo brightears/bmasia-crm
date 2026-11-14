@@ -40,14 +40,26 @@ import { useAuth } from '../contexts/AuthContext';
 import ApiService from '../services/api';
 import { useThemeContext } from '../contexts/ThemeContext';
 import MobileBottomNav from './MobileBottomNav';
+import GlobalSearch from './GlobalSearch';
 import { buildNavGroups, findNavLocation, isActivePath, NavGroup } from './navigation';
 import { layout } from '../theme';
 
 const drawerWidth = layout.sidebarWidth;
 const miniDrawerWidth = layout.sidebarCollapsedWidth;
 
-// Groups that start open. The group holding the current page is always opened too.
+// Groups that start open on a first visit. After that the browser remembers which groups
+// the user opened or closed. The group holding the current page is always opened too.
 const DEFAULT_OPEN_GROUPS = ['home', 'customers', 'sales'];
+const OPEN_GROUPS_KEY = 'bmasia.menu.openGroups';
+
+const readOpenGroups = (): string[] => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(OPEN_GROUPS_KEY) || 'null');
+    return Array.isArray(saved) ? saved.filter((g) => typeof g === 'string') : DEFAULT_OPEN_GROUPS;
+  } catch {
+    return DEFAULT_OPEN_GROUPS;
+  }
+};
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -195,7 +207,15 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [drawerCollapsed, setDrawerCollapsed] = useState(isTablet);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [aiDraftsPendingCount, setAiDraftsPendingCount] = useState(0);
-  const [openGroups, setOpenGroups] = useState<string[]>(DEFAULT_OPEN_GROUPS);
+  const [openGroups, setOpenGroups] = useState<string[]>(readOpenGroups);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(OPEN_GROUPS_KEY, JSON.stringify(openGroups));
+    } catch {
+      // Storage can be unavailable (private window); the menu still works.
+    }
+  }, [openGroups]);
 
   const { darkMode, toggleDarkMode } = useThemeContext();
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -302,15 +322,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             <Box component="img" src="/bmasia-mark.png" alt="BMAsia" sx={{ height: 32, width: 32 }} />
           ) : (
             <>
-              {darkMode ? (
-                // The grey wordmark is hard to read on dark backgrounds; use the mark plus white text.
-                <>
-                  <Box component="img" src="/bmasia-mark.png" alt="" sx={{ height: 28, width: 28 }} />
-                  <Typography sx={{ fontWeight: 600, fontSize: '1.0625rem', color: 'text.primary' }}>BMAsia</Typography>
-                </>
-              ) : (
-                <Box component="img" src="/bmasia-logo.png" alt="BMAsia" sx={{ height: 30, display: 'block' }} />
-              )}
+              {/* The grey wordmark is hard to read on dark backgrounds, so dark mode uses the white version. */}
+              <Box
+                component="img"
+                src={darkMode ? '/bmasia-logo-white.png' : '/bmasia-logo.png'}
+                alt="BMAsia"
+                sx={{ height: 30, display: 'block' }}
+              />
               <Box
                 component="span"
                 sx={{
@@ -412,6 +430,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               </Typography>
             )}
           </Box>
+
+          {/* Search the whole CRM */}
+          <GlobalSearch />
 
           {/* Header actions */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -554,7 +575,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       </Menu>
 
       {/* Mobile Bottom Navigation */}
-      <MobileBottomNav />
+      <MobileBottomNav onOpenMenu={() => setMobileOpen(true)} />
 
       {/* Hidden avatar file input */}
       <input
