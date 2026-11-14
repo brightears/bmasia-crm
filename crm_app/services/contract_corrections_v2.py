@@ -25,8 +25,10 @@ OPERATIONS (one per entry, ``op``)
                      the same company (``successor_id``). Same write as the
                      lifecycle rule (queryset update, no save side effects).
   set_renewed_from   Sets the missing ``renewed_from`` link of an existing
-                     contract to an earlier contract of the same company. No
-                     status change; queryset update.
+                     contract to an earlier contract of the same company
+                     (``renewed_from_id``, whose state the entry states in
+                     ``renewed_from_expected``). No status change; queryset
+                     update.
   create_successor   Creates the current term as a NEW Active contract renewing
                      ``old_contract_id``, then closes the old contract as
                      Renewed: through the lifecycle rule close_renewed_predecessor
@@ -36,12 +38,23 @@ OPERATIONS (one per entry, ``op``)
 GROUPS
   Entries sharing a ``group`` are applied together or not at all, in one
   transaction, after every check of every entry passed. Contracts are locked
-  with select_for_update in primary-key order. A contract may be changed by at
-  most one entry in the whole file (otherwise every group naming it is refused).
+  with select_for_update in primary-key order, including every contract an
+  entry only refers to (successor_id, renewed_from_id), whose expected state is
+  re-checked under the lock. Across the whole file:
+    * a contract may be changed by at most one entry (duplicate_contract_id);
+    * a contract that one group changes or relies on may not appear in any
+      other group (contract_in_two_groups);
+    * the new terms planned by create_successor entries may not overlap each
+      other for the same company, or a company and a twin listed by either
+      entry, whether in one group or in two (planned_terms_overlap).
+  The journal entry of a group is written inside the group's transaction,
+  before commit, so a crash cannot leave applied changes without revert data.
 
 REFUSALS (named reasons; nothing in the group is written)
-  missing_contract, status_changed, dates_changed, updated_at_changed,
-  transition_not_allowed, partially_applied, duplicate_contract_id,
+  duplicate_contract_id, contract_in_two_groups, planned_terms_overlap,
+  predecessor_changed, journal_write_failed, missing_contract,
+  status_changed, dates_changed, updated_at_changed,
+  transition_not_allowed, partially_applied,
   zone_shared_with_live_contract, unexpected_side_effect,
   missing_successor, successor_changed, successor_other_company,
   successor_not_active, successor_not_later, successor_renews_other_contract,
@@ -91,7 +104,10 @@ REVERT
     mark_cancelled   restores status, is_active, the zone links' end_date and
                      is_active, and each zone status that is still 'cancelled'
                      (a zone whose status moved since, e.g. by the Soundtrack
-                     sync, is left as it is and reported).
+                     sync, is left as it is and reported). A released zone that
+                     has since been linked to any other contract makes the group
+                     changed_since_apply: reactivating the old link would give
+                     the zone two active links.
     mark_renewed / set_renewed_from   restore the journalled fields.
     create_successor DELETES the created contract (and its service-location
                      rows) and restores the old contract, but only while the
@@ -136,7 +152,7 @@ _COMMON = {'op', 'class', 'group', 'evidence'}
 _OP_KEYS = {
     'mark_cancelled': ({'contract_id', 'expected'}, set()),
     'mark_renewed': ({'contract_id', 'expected', 'successor_id', 'successor_expected'}, set()),
-    'set_renewed_from': ({'contract_id', 'expected', 'renewed_from_id'}, set()),
+    'set_renewed_from': ({'contract_id', 'expected', 'renewed_from_id', 'renewed_from_expected'}, set()),
     'create_successor': ({'old_contract_id', 'old_expected', 'new'}, {'twin_company_ids'}),
 }
 _EXPECTED_KEYS = {'status', 'start_date', 'end_date', 'updated_at'}
@@ -196,6 +212,7 @@ class EntryV2:
     successor_id: Optional[str] = None
     successor_expected: Optional[Expected] = None
     renewed_from_id: Optional[str] = None
+    renewed_from_expected: Optional[Expected] = None
     twin_company_ids: list = field(default_factory=list)
     new: Optional[NewTerm] = None
 
@@ -394,6 +411,7 @@ def parse_v2(data):
                 entry.successor_expected = _expected(raw['successor_expected'], f'{where} successor_expected')
             elif op == 'set_renewed_from':
                 entry.renewed_from_id = _uuid(raw['renewed_from_id'], f'{where} renewed_from_id')
+                entry.renewed_from_expected = _expected(raw['renewed_from_expected'], f'{where} renewed_from_expected')
             if contract_id in entry.referenced_ids:
                 raise _malformed(f'{where}: a contract cannot reference itself')
         entries.append(entry)
@@ -402,8 +420,35 @@ def parse_v2(data):
         if len({e.cls for e in members}) != 1:
             raise _malformed(f'group {group}: mixes classes {sorted({e.cls for e in members})}')
 
-    counts = Counter(e.contract_id for e in entries)
-    return entries, {cid for cid, n in counts.items() if n > 1}
+    return entries, file_conflicts(entries)
+
+
+def file_conflicts(entries):
+    """{group: reason} for groups refused because of another entry in the file."""
+    refused = {}
+    changed = Counter(e.contract_id for e in entries)
+    for e in entries:
+        if changed[e.contract_id] > 1:
+            refused[e.group] = 'duplicate_contract_id'
+    seen = {}
+    for e in entries:
+        for cid in (e.contract_id, *e.referenced_ids):
+            seen.setdefault(cid, set()).add(e.group)
+    for cid, groups in seen.items():
+        if len(groups) > 1:
+            for g in groups:
+                refused.setdefault(g, 'contract_in_two_groups')
+    return refused
+
+
+def planned_overlaps(creates):
+    """Keys whose planned new terms overlap: creates = [(key, company_ids, start, end)]."""
+    bad = set()
+    for i, (g1, c1, s1, e1) in enumerate(creates):
+        for g2, c2, s2, e2 in creates[i + 1:]:
+            if c1 & c2 and s1 <= e2 and s2 <= e1:
+                bad |= {g1, g2}
+    return bad
 
 
 def group_entries(entries):
@@ -513,13 +558,19 @@ class V2Runner:
     # ---- apply -------------------------------------------------------------
 
     def apply(self, data, file_sha256, opts, write_journal):
-        entries, duplicates = parse_v2(data)
+        entries, conflicts = parse_v2(data)
         self.file_sha256 = file_sha256
         self.write_journal = write_journal
         cmd = self.cmd
         groups = group_entries(entries)
         selected = set(opts.get('only_class') or []) or {e.cls for e in entries}
-        dup_groups = {e.group for e in entries if e.contract_id in duplicates}
+        creates = [e for e in entries if e.op == 'create_successor']
+        old_company = {str(pk): str(co) for pk, co in Contract.objects.filter(
+            pk__in=[e.contract_id for e in creates]).values_list('pk', 'company_id')}
+        for g in planned_overlaps([
+                (e.group, {old_company.get(e.contract_id, e.contract_id), *e.twin_company_ids}, e.new.start, e.new.end)
+                for e in creates]):
+            conflicts.setdefault(g, 'planned_terms_overlap')
 
         self.journal = {
             'format': JOURNAL_FORMAT_V2, 'command': cmd.COMMAND_NAME, 'batch_id': cmd.batch_id,
@@ -541,7 +592,7 @@ class V2Runner:
             if cls not in selected:
                 not_selected += len(members)
                 continue
-            outcome, rows = self._apply_group(group, members, group in dup_groups)
+            outcome, rows = self._apply_group(group, members, conflicts.get(group))
             for entry, number, detail in rows:
                 label = {'would_apply': 'WOULD-APPLY', 'applied': 'APPLIED',
                          'already_applied': 'ALREADY-APPLIED'}.get(outcome, f'SKIPPED:{outcome}')
@@ -563,7 +614,7 @@ class V2Runner:
         elif total.get('would_apply'):
             self.out.write('re-run with --execute --journal <path> to apply.')
 
-    def _apply_group(self, group, members, has_duplicate):
+    def _apply_group(self, group, members, conflict):
         numbers = {}
 
         def rows(details=None):
@@ -572,8 +623,8 @@ class V2Runner:
 
         ids = sorted({e.contract_id for e in members} | {i for e in members for i in e.referenced_ids})
         numbers.update({str(pk): n for pk, n in Contract.objects.filter(pk__in=ids).values_list('pk', 'contract_number')})
-        if has_duplicate:
-            return 'duplicate_contract_id', rows()
+        if conflict:
+            return conflict, rows()
         for e in members:
             if e.op == 'mark_cancelled' and e.expected.status not in CANCELLABLE:
                 return 'transition_not_allowed', rows()
@@ -602,13 +653,22 @@ class V2Runner:
                     if e.op == 'create_successor':
                         created = journal_ops[members.index(e)]['created']
                         details[e.index] = f'created {created["contract_id"]} {created["contract_number"]}; ' + details[e.index]
+                # Journal before commit: a crash after this point leaves either
+                # nothing applied (revert then finds the before state) or the
+                # changes together with their revert data.
+                self.journal['groups'].append({'group': group, 'class': members[0].cls, 'ops': journal_ops})
+                try:
+                    self.write_journal(self.journal)
+                except OSError:
+                    self.journal['groups'].pop()
+                    raise Refused('journal_write_failed')
         except Refused as refused:
             return refused.reason, rows()
         except DatabaseError as exc:
+            if self.journal['groups'] and self.journal['groups'][-1]['group'] == group:
+                self.journal['groups'].pop()
+                self.write_journal(self.journal)
             return f'write_failed({exc.__class__.__name__})', rows()
-
-        self.journal['groups'].append({'group': group, 'class': members[0].cls, 'ops': journal_ops})
-        self.write_journal(self.journal)
         return 'applied', rows(details)
 
     # ---- checks ------------------------------------------------------------
@@ -626,6 +686,11 @@ class V2Runner:
                 c, target = locked[e.contract_id], locked[e.renewed_from_id]
                 if c.status == 'Active' and target.status == 'Active' and str(target.pk) not in renewed_in_group:
                     raise Refused('predecessor_left_active')
+        # Planned new terms of this group must not overlap each other.
+        creates = [e for e in members if e.op == 'create_successor' and plans[e.index]['state'] == 'expected']
+        if planned_overlaps([(e.index, {str(locked[e.contract_id].company_id), *e.twin_company_ids},
+                              e.new.start, e.new.end) for e in creates]):
+            raise Refused('planned_terms_overlap')
         # A zone may be released only if no contract that stays live holds it.
         cancelled_in_group = {e.contract_id for e in members if e.op == 'mark_cancelled'}
         for e in members:
@@ -682,6 +747,10 @@ class V2Runner:
         target = locked.get(e.renewed_from_id)
         if target is None:
             raise Refused('missing_contract')
+        try:
+            _check_expected(target, e.renewed_from_expected, lambda x: False)
+        except Refused:
+            raise Refused('predecessor_changed')
         if c.renewed_from_id is not None:
             raise Refused('renewed_from_conflict')
         if target.company_id != c.company_id:
@@ -723,7 +792,7 @@ class V2Runner:
         company_ids = [c.company_id, *e.twin_company_ids]
         if _overlapping(company_ids, new.start, new.end, [c.pk]).exists():
             raise Refused('overlapping_contract')
-        if self._pricing_mismatch(new):
+        if self._pricing_mismatch(new, c):
             raise Refused('service_location_pricing_mismatch')
         links = ContractZone.objects.filter(contract=c, is_active=True).values('zone_id').distinct().count()
         platforms = Counter(loc['platform'] for loc in new.locations)
@@ -736,15 +805,21 @@ class V2Runner:
         return plan
 
     @staticmethod
-    def _pricing_mismatch(new):
-        """Same rule as service_location_pricing_mismatch, on the planned rows."""
-        prices = []
-        for loc in new.locations:
-            price = loc['price'] if loc['price'] is not None else new.price_per_zone
-            if price is None:
-                return False
-            prices.append(price)
-        return abs(sum(prices, Decimal('0')) - new.value) > Decimal('0.01')
+    def _pricing_mismatch(new, old):
+        """The PDF guard (service_location_pricing_mismatch) run on the planned contract."""
+        from types import SimpleNamespace
+        from crm_app.services.contract_service_locations import service_location_pricing_mismatch
+        rows = [SimpleNamespace(price=loc['price']) for loc in new.locations]
+        planned = SimpleNamespace(
+            service_locations=SimpleNamespace(all=lambda: rows),
+            show_zone_pricing_detail=old.show_zone_pricing_detail,  # copied from the old contract
+            line_items=None,                    # a created successor has no line items
+            discount_percentage=Decimal('0'),   # not copied
+            price_per_zone=new.price_per_zone,
+            value=new.value,
+            currency=old.currency,
+        )
+        return service_location_pricing_mismatch(planned) is not None
 
     # ---- writes ------------------------------------------------------------
 
@@ -993,6 +1068,10 @@ class V2Runner:
             return 'touched' if exists is not None else 'changed'
         if op['op'] == 'mark_cancelled':
             if self._contract_matches(c, op['after']):
+                own = [link['id'] for link in op['zone_links']]
+                zone_ids = [z['id'] for z in op['zones']]
+                if ContractZone.objects.filter(zone_id__in=zone_ids, is_active=True).exclude(pk__in=own).exists():
+                    return 'changed'  # the zone is live elsewhere now; reactivating would double-link it
                 for link in op['zone_links']:
                     row = ContractZone.objects.filter(pk=link['id']).first()
                     if row is None or _iso(row.end_date) != link['after']['end_date'] \

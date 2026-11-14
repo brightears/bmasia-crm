@@ -25,6 +25,11 @@ from crm_app.models import (
 from crm_app.services import contract_corrections_v2 as v2
 from crm_app.services.document_context import document_region
 
+
+def _status(contract):
+    contract.refresh_from_db()
+    return contract.status
+
 _numbers = iter(range(1, 100_000))
 PLACEHOLDER_START = date(2025, 1, 1)
 
@@ -76,7 +81,7 @@ def _renewed(old, successor, group='E:1', cls='E'):
 def _link(contract, predecessor, group='E:1', cls='E'):
     return {'op': 'set_renewed_from', 'class': cls, 'group': group, 'contract_id': str(contract.pk),
             'expected': _expected(contract), 'renewed_from_id': str(predecessor.pk),
-            'evidence': 'Fixture sheet / Tab / row 5'}
+            'renewed_from_expected': _expected(predecessor), 'evidence': 'Fixture sheet / Tab / row 5'}
 
 
 def _new_term(**overrides):
@@ -690,6 +695,111 @@ def test_create_is_not_refused_when_a_zone_is_also_held_by_another_live_contract
     assert ContractZone.objects.filter(contract=sister, zone=zone, is_active=True).exists()
     zone.refresh_from_db()
     assert zone.status == 'online'
+
+
+# --- cross-entry and revert safety (independent review, 2026-11-14) ------------------------------
+
+def test_two_creates_in_one_group_for_the_same_company_are_refused(tmp_path):
+    company = _company()
+    old_a = _contract(company, status='Expired', start=date(2025, 1, 1))
+    old_b = _contract(company, status='Expired', start=date(2025, 2, 1))
+    out, _ = _execute(tmp_path, _file(tmp_path, [_create(old_a, group='G:x'), _create(old_b, group='G:x')]))
+    assert out.count('[SKIPPED:planned_terms_overlap]') == 2
+    assert not Contract.objects.filter(company=company, status='Active').exists()
+    assert {_status(old_a), _status(old_b)} == {'Expired'}
+
+
+def test_two_creates_in_one_group_for_a_company_and_its_twin_are_refused(tmp_path):
+    company, twin = _company(), _company()
+    old_a = _contract(company, status='Expired', start=date(2025, 1, 1))
+    old_b = _contract(twin, status='Expired', start=date(2025, 1, 1))
+    out, _ = _execute(tmp_path, _file(tmp_path, [_create(old_a, group='G:t', twins=[twin]), _create(old_b, group='G:t')]))
+    assert out.count('[SKIPPED:planned_terms_overlap]') == 2
+    assert not Contract.objects.filter(company__in=[company, twin], status='Active').exists()
+
+
+def test_overlapping_creates_in_two_groups_refuse_both_groups(tmp_path):
+    company, twin = _company(), _company()
+    old_a = _contract(company, status='Expired', start=date(2025, 1, 1))
+    old_b = _contract(twin, status='Expired', start=date(2025, 1, 1))
+    out, _ = _execute(tmp_path, _file(tmp_path, [_create(old_a, group='G:1'), _create(old_b, group='G:2', twins=[company])]))
+    assert out.count('[SKIPPED:planned_terms_overlap]') == 2
+    assert not Contract.objects.filter(company__in=[company, twin], status='Active').exists()
+
+
+def test_creates_for_one_company_with_consecutive_terms_both_apply(tmp_path):
+    company = _company()
+    old_a = _contract(company, status='Expired', start=date(2025, 1, 1))
+    old_b = _contract(company, status='Expired', start=date(2025, 2, 1))
+    entries = [_create(old_a, group='G:1'),
+               _create(old_b, group='G:2', start_date='2027-03-01', end_date='2028-02-29')]
+    out, _ = _execute(tmp_path, _file(tmp_path, entries))
+    assert out.count('[APPLIED]') == 2
+
+
+def test_a_contract_relied_on_by_one_group_cannot_be_changed_by_another(tmp_path):
+    company = _company()
+    old = _contract(company, status='Active', start=date(2025, 1, 1))
+    succ = _contract(company, status='Active', start=date(2026, 1, 1))
+    out, _ = _execute(tmp_path, _file(tmp_path, [_renewed(old, succ, group='E:1'), _cancel(succ, group='D:1', cls='D')]))
+    assert out.count('[SKIPPED:contract_in_two_groups]') == 2
+    assert (_status(old), _status(succ)) == ('Active', 'Active')
+
+
+def test_a_link_target_cannot_be_changed_by_another_group(tmp_path):
+    company = _company()
+    placeholder = _contract(company, status='Active', start=date(2024, 1, 1))
+    current = _contract(company, start=date(2025, 6, 1))
+    other = _contract(company, start=date(2026, 6, 1))
+    out = _run('--file', _file(tmp_path, [_link(current, placeholder, 'E:1', 'E'), _renewed(placeholder, other, 'E:2', 'E')]))
+    assert out.count('[SKIPPED:contract_in_two_groups]') == 2
+
+
+def test_set_renewed_from_rechecks_the_predecessor_under_lock(tmp_path):
+    company = _company()
+    placeholder = _contract(company, status='Expired')
+    current = _contract(company, start=date(2025, 6, 1))
+    path = _file(tmp_path, [_link(current, placeholder)])
+    Contract.objects.filter(pk=placeholder.pk).update(status='Cancelled')
+    out, _ = _execute(tmp_path, path)
+    assert '[SKIPPED:predecessor_changed]' in out
+    current.refresh_from_db()
+    assert current.renewed_from_id is None
+
+
+def test_revert_of_a_cancel_is_skipped_when_the_zone_was_linked_elsewhere(tmp_path):
+    company = _company()
+    c = _contract(company, status='Active', start=date(2025, 1, 1))
+    zone, link = _zone_link(c)
+    _, journal = _execute(tmp_path, _file(tmp_path, [_cancel(c)]))
+    new = _contract(company, status='Active', start=date(2026, 1, 1))
+    ContractZone.objects.create(contract=new, zone=zone, start_date=new.start_date)
+    Zone.objects.filter(pk=zone.pk).update(status='online')
+    out = _run('--revert', journal, '--execute')
+    assert '[SKIPPED:changed_since_apply]' in out
+    assert ContractZone.objects.filter(zone=zone, is_active=True).count() == 1
+    assert _status(c) == 'Cancelled'
+
+
+def test_pricing_check_follows_the_pdf_guard(tmp_path):
+    rows = [{'location_name': 'Zone 1', 'platform': 'soundtrack', 'price': '100.00'}]
+    shown = _contract(_company(), status='Expired', show_zone_pricing_detail=True)
+    hidden = _contract(_company(), status='Expired', show_zone_pricing_detail=False)
+    path = _file(tmp_path, [_create(shown, group='G:1', service_locations=rows),
+                            _create(hidden, group='G:2', service_locations=rows)])
+    out, _ = _execute(tmp_path, path)
+    assert '[SKIPPED:service_location_pricing_mismatch]' in out  # per-zone prices shown on the PDF
+    assert out.count('[APPLIED]') == 1                             # hidden: the PDF guard accepts it
+    assert _created_for(hidden) is not None and _created_for(shown) is None
+
+
+def test_journal_holds_the_group_before_commit_and_a_failed_write_rolls_back(tmp_path):
+    old = _contract(_company(), status='Expired')
+    with mock.patch.object(cmd, '_write_json_atomic', side_effect=[None, OSError('disk full')]):
+        out, _ = _execute(tmp_path, _file(tmp_path, [_create(old)]))
+    assert '[SKIPPED:journal_write_failed]' in out
+    assert _created_for(old) is None and _status(old) == 'Expired'
+    assert not _audits().exists()
 
 
 # --- file handling ---------------------------------------------------------------------------
