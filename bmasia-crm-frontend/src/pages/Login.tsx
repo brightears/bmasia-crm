@@ -78,7 +78,7 @@ const Login: React.FC = () => {
           <Typography sx={{ fontWeight: 600, fontSize: '1.125rem', letterSpacing: '-0.01em' }}>BMAsia</Typography>
         </Box>
         <Box>
-          <Typography sx={{ fontSize: '2rem', fontWeight: 650, lineHeight: 1.2, letterSpacing: '-0.02em', mb: 2, maxWidth: 440 }}>
+          <Typography sx={{ fontSize: '2rem', fontWeight: 700, lineHeight: 1.2, letterSpacing: '-0.02em', mb: 2, maxWidth: 440 }}>
             Every customer, contract and renewal in one place.
           </Typography>
           <Typography sx={{ color: '#9AA6B2', maxWidth: 420 }}>
