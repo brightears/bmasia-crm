@@ -8,7 +8,7 @@ describe('safeReturnPath', () => {
   });
 
   it('rejects anything that could leave the app', () => {
-    for (const pathname of ['//evil.example', '/\\evil.example', 'https://evil.example', 'javascript:alert(1)', 'evil', '', ' /x']) {
+    for (const pathname of ['//evil.example', '/\\evil.example', 'https://evil.example', 'javascript:alert(1)', 'evil', '', ' /x', '/\t/evil.example', '/\n/evil.example', '/\r/evil.example', '/\t\\evil.example', '/x\u0000y']) {
       expect(safeReturnPath({ pathname }, '/home')).toBe('/home');
     }
   });
@@ -18,5 +18,6 @@ describe('safeReturnPath', () => {
     expect(safeReturnPath(null, '/home')).toBe('/home');
     expect(safeReturnPath({ pathname: 42 }, '/home')).toBe('/home');
     expect(safeReturnPath({ pathname: '/x', search: 'no-question-mark' }, '/home')).toBe('/x');
+    expect(safeReturnPath({ pathname: '/x', search: '?a=1\n' }, '/home')).toBe('/x');
   });
 });
