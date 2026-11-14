@@ -254,7 +254,7 @@ def test_document_number_and_unknown_context_are_refused():
 @pytest.mark.django_db
 def test_draft_service_locations_can_be_replaced_under_the_lock():
     contract = _contract()
-    ContractServiceLocation.objects.create(
+    lobby = ContractServiceLocation.objects.create(
         contract=contract, location_name='Lobby', platform='beatbreeze', sort_order=0,
         price=Decimal('260.00'),
     )
@@ -262,7 +262,8 @@ def test_draft_service_locations_can_be_replaced_under_the_lock():
     patch = {
         'replace_service_locations': True,
         'service_locations': [
-            {'location_name': 'Lobby', 'platform': 'beatbreeze', 'sort_order': 0, 'price': '260.00'},
+            {'id': str(lobby.id), 'location_name': 'Lobby', 'platform': 'beatbreeze', 'sort_order': 0,
+             'price': '260.00'},
             {'location_name': 'Pool', 'platform': 'beatbreeze', 'sort_order': 1, 'price': '260.00'},
         ],
     }
@@ -281,6 +282,7 @@ def test_draft_service_locations_can_be_replaced_under_the_lock():
     assert [row['location_name'] for row in result['applied']['service_locations']] == ['Lobby', 'Pool']
     assert result['applied']['replace_service_locations'] is True
     assert contract.service_locations.count() == 2
+    assert contract.service_locations.filter(id=lobby.id).exists()  # kept by id, not re-created
 
 
 def _query_style_opportunity():

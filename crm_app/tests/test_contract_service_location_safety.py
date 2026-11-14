@@ -117,6 +117,7 @@ def test_explicit_replace_updates_creates_and_deletes_atomically():
         contract,
         data={
             "replace_service_locations": True,
+            "remove_service_location_ids": [str(locations[1].id)],
             "service_locations": [
                 {
                     "id": str(locations[0].id),
@@ -246,6 +247,7 @@ def test_mcp_contract_update_atomically_replaces_ten_locations_with_six():
                 {
                     "value": "1200.00",
                     "replace_service_locations": True,
+                    "remove_service_location_ids": [str(row.id) for row in original_locations],
                     "service_locations": [
                         {
                             "location_name": name,

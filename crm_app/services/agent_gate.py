@@ -80,7 +80,7 @@ def _key_digest(request_key):
     """Request keys are stored only as a SHA-256 digest (never as caller text)."""
     return 'sha256:' + hashlib.sha256(str(request_key).encode('utf-8')).hexdigest()
 # update_record control keys that are not model/serializer fields.
-_CONTROL_KEYS = {'contract': {'replace_service_locations'}}
+_CONTROL_KEYS = {'contract': {'replace_service_locations', 'remove_service_location_ids'}}
 _FIELD_CACHE = {}
 
 
