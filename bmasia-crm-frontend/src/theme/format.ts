@@ -20,3 +20,20 @@ export const formatMoney = (amount?: number | string | null, currency: string = 
     maximumFractionDigits: 2,
   })}`;
 };
+
+/**
+ * Adds amounts per currency and never across currencies.
+ * Returns [currency, total] pairs sorted by currency code, e.g. [["THB", 108000], ["USD", 4450]].
+ */
+export const totalsByCurrency = (
+  items: { amount?: number | string | null; currency?: string | null }[]
+): [string, number][] => {
+  const totals: Record<string, number> = {};
+  items.forEach(({ amount, currency }) => {
+    const n = Number(amount || 0);
+    if (Number.isNaN(n)) return;
+    const cur = currency || 'USD';
+    totals[cur] = (totals[cur] || 0) + n;
+  });
+  return Object.entries(totals).sort(([a], [b]) => a.localeCompare(b));
+};
