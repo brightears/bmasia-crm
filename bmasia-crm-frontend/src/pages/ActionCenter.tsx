@@ -180,9 +180,11 @@ const ActionCenter: React.FC = () => {
           width: '100%',
           textAlign: 'left',
           display: 'flex',
+          flexWrap: { xs: 'wrap', sm: 'nowrap' },
           alignItems: 'center',
-          gap: 2,
-          px: 2.5,
+          columnGap: 2,
+          rowGap: 1,
+          px: { xs: 2, sm: 2.5 },
           py: 1.75,
           borderTop: 1,
           borderColor: 'divider',
@@ -206,7 +208,7 @@ const ActionCenter: React.FC = () => {
           {getTypeIcon(item.type)}
         </Box>
 
-        <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Box sx={{ flex: { xs: '1 1 calc(100% - 56px)', sm: 1 }, minWidth: 0 }}>
           <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }} noWrap>
             {item.title}
           </Typography>
@@ -243,10 +245,11 @@ const ActionCenter: React.FC = () => {
           sx={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'flex-end',
+            justifyContent: { xs: 'flex-start', sm: 'flex-end' },
             gap: 1,
             flexWrap: 'wrap',
-            maxWidth: { xs: 130, sm: 'none' },
+            width: { xs: '100%', sm: 'auto' },
+            pl: { xs: '52px', sm: 0 },
           }}
         >
           {item.amount && item.currency && (
@@ -278,7 +281,7 @@ const ActionCenter: React.FC = () => {
         </Box>
         <ChevronRight
           className="row-chevron"
-          sx={{ color: 'text.disabled', transition: 'transform 120ms, color 120ms', flexShrink: 0 }}
+          sx={{ color: 'text.disabled', transition: 'transform 120ms, color 120ms', flexShrink: 0, display: { xs: 'none', sm: 'block' } }}
         />
       </ButtonBase>
     );

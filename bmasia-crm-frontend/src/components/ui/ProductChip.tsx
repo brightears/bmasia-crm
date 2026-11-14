@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import { product } from '../../theme';
 
 type ProductKey = 'beatbreeze' | 'soundtrack' | 'mixed' | string | null | undefined;
@@ -22,11 +23,11 @@ const Pill: React.FC<{ kind: 'beatbreeze' | 'soundtrack' }> = ({ kind }) => (
       fontSize: '0.75rem',
       fontWeight: 600,
       whiteSpace: 'nowrap',
-      bgcolor: product[kind].bg,
-      color: product[kind].fg,
+      bgcolor: (t) => (t.palette.mode === 'dark' ? alpha(product[kind].solid, 0.16) : product[kind].bg),
+      color: (t) => (t.palette.mode === 'dark' ? product[kind].solid : product[kind].fg),
     }}
   >
-    <Box component="span" sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: product[kind].fg }} />
+    <Box component="span" sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'currentColor' }} />
     {LABELS[kind]}
   </Box>
 );
