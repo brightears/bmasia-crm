@@ -131,20 +131,29 @@ const Tasks: React.FC = () => {
   useEffect(() => {
     if (searchParams.get('new') === 'true') {
       const taskType = searchParams.get('type');
-      setSelectedTask(null);
-      setFormMode('create');
+      const companyId = searchParams.get('company');
       // Set initial task type if specified (call or event)
-      if (taskType === 'call') {
-        setInitialTaskType('Call');
-      } else if (taskType === 'event') {
-        setInitialTaskType('Event');
-      } else {
-        setInitialTaskType(null);
-      }
+      const initialType = taskType === 'call' ? 'Call' : taskType === 'event' ? 'Event' : null;
+      // Pre-fill the company when the form is opened from a company page.
+      setSelectedTask(
+        companyId
+          ? ({
+              title: '',
+              description: '',
+              priority: 'Medium',
+              status: 'To Do',
+              task_type: initialType || 'Other',
+              company: companyId,
+            } as any)
+          : null
+      );
+      setFormMode('create');
+      setInitialTaskType(initialType);
       setTaskFormOpen(true);
       // Clear the query params to avoid re-opening on refresh
       searchParams.delete('new');
       searchParams.delete('type');
+      searchParams.delete('company');
       setSearchParams(searchParams, { replace: true });
     }
   }, [searchParams, setSearchParams]);

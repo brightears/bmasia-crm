@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { useLocation, Navigate } from 'react-router-dom';
 import {
   Box,
   Paper,
@@ -17,9 +17,10 @@ import { getDailyQuote } from '../constants/quotes';
 import { brand } from '../theme';
 import { safeReturnPath } from '../utils/returnPath';
 
+const HOME = '/today';
+
 const Login: React.FC = () => {
   const { login, loading, isAuthenticated } = useAuth();
-  const navigate = useNavigate();
   const location = useLocation();
   const [credentials, setCredentials] = useState({
     username: '',
@@ -28,8 +29,9 @@ const Login: React.FC = () => {
   });
   const [error, setError] = useState('');
 
-  // Where to go after sign-in: the page the user asked for (same-app paths only), else the default.
-  const target = safeReturnPath((location.state as any)?.from, '/dashboard');
+  // Where to go after sign-in: the page the user asked for (same-app paths only), else Today,
+  // the home page for everyone.
+  const target = safeReturnPath((location.state as any)?.from, HOME);
 
   // Someone who is already signed in is sent on to that page.
   if (isAuthenticated && !loading) {
@@ -51,8 +53,8 @@ const Login: React.FC = () => {
     try {
       await login(credentials);
 
-      // Navigate to the intended destination (checked by safeReturnPath above)
-      navigate(target, { replace: true });
+      // Nothing else to do: once signed in, this page re-renders and the redirect above
+      // sends the user on (single place for post-sign-in routing).
     } catch (err: any) {
       console.error('Login component error:', err);
       // Get error message from the thrown Error object

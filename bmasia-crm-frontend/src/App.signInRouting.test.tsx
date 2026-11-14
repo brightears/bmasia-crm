@@ -1,10 +1,11 @@
 // Sign-in routing on a fresh page load (reload, or a CRM link opened in a new tab).
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import App from './App';
+import AuthService from './services/authService';
 
 // No network: axios instances and the API client never resolve, so pages stay in their loading state.
 jest.mock('axios', () => {
@@ -33,9 +34,11 @@ const storeSession = () => {
 };
 
 let seen: string[] = [];
+let lastState: any = null;
 const Where: React.FC = () => {
   const l = useLocation();
   seen.push(`${l.pathname}${l.search}`);
+  lastState = l.state;
   return <div data-testid="where">{`${l.pathname}${l.search}`}</div>;
 };
 
@@ -81,7 +84,7 @@ it('sends an already signed-in user away from the sign-in page, back to the page
 it('sends an already signed-in user from the sign-in page to the default page when nothing was asked for', async () => {
   storeSession();
   renderAt('/login');
-  await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/dashboard'));
+  await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/today'));
 });
 
 it.each(['//evil.example', '/\\evil.example', 'https://evil.example', 'javascript:alert(1)'])(
@@ -89,6 +92,42 @@ it.each(['//evil.example', '/\\evil.example', 'https://evil.example', 'javascrip
   async (pathname) => {
     storeSession();
     renderAt({ pathname: '/login', state: { from: { pathname, search: '' } } });
-    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/dashboard'));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/today'));
   }
 );
+
+describe('signing in with the form', () => {
+  const signIn = async () => {
+    jest.spyOn(AuthService, 'scheduleTokenRefresh').mockImplementation(() => undefined as any);
+    jest.spyOn(AuthService, 'login').mockImplementation(async () => {
+      storeSession();
+      return { access: 'a', refresh: 'r', user: { id: 'x', username: 'u', first_name: 'A', last_name: 'B', role: 'Admin' } } as any;
+    });
+    fireEvent.change(await screen.findByLabelText(/username/i), { target: { value: 'u' } });
+    fireEvent.change(screen.getByLabelText(/password/i), { target: { value: 'p' } });
+    fireEvent.click(screen.getByRole('button', { name: /sign in/i }));
+  };
+  afterEach(() => jest.restoreAllMocks());
+
+  it('goes to Today when no page was asked for', async () => {
+    renderAt('/login');
+    await signIn();
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/today'));
+    expect(seen).not.toContain('/dashboard');
+  });
+
+  it('goes back to the page that was asked for, query string included', async () => {
+    renderAt('/contracts/abc?tab=documents');
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/login'));
+    await signIn();
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/contracts/abc?tab=documents'));
+  });
+
+  it('opening //host while signed out (caught by the page-not-found route) still ends on Today, not another site', async () => {
+    renderAt('//evil.example');
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/login'));
+    expect(lastState?.from?.pathname).toBe('//evil.example');
+    await signIn();
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/today'));
+  });
+});
