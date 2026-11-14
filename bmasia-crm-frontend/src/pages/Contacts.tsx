@@ -16,7 +16,6 @@ import {
   IconButton,
   InputAdornment,
   Alert,
-  CircularProgress,
   FormControl,
   InputLabel,
   Select,
@@ -26,6 +25,8 @@ import {
   Menu,
   ListItemIcon,
   ListItemText,
+  Link,
+  Skeleton,
 } from '@mui/material';
 import {
   Add,
@@ -36,15 +37,18 @@ import {
   Email,
   MoreVert,
   People,
-  Business,
   LinkedIn,
   Sort,
 } from '@mui/icons-material';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, Link as RouterLink } from 'react-router-dom';
 import { Contact, Company, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import ContactForm from '../components/ContactForm';
 import ContactDetail from '../components/ContactDetail';
+import { PageHeader, EmptyState } from '../components/ui';
+import { initialsOf, visuallyHidden } from '../theme';
+import { useListState, optionValues, idFromList } from '../hooks/useListState';
+import { useListSearchBox } from '../hooks/useListSearchBox';
 
 const sortOptions = [
   { value: 'name', label: 'Name A-Z' },
@@ -55,22 +59,38 @@ const sortOptions = [
   { value: 'company__name', label: 'Company' },
 ];
 
+const statusOptions = [
+  { value: '', label: 'All' },
+  { value: 'Active', label: 'Active' },
+  { value: 'Inactive', label: 'Inactive' },
+];
+
 const Contacts: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const navigate = useNavigate();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [totalCount, setTotalCount] = useState(0);
 
-  // Filters
-  const [selectedCompany, setSelectedCompany] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState('');
-  const [sortBy, setSortBy] = useState('name');
+  // Search, filters, sort and page live in the address, so a filtered list can be shared as a
+  // link and a reload keeps the view. Unknown values in the address fall back to the defaults.
+  const list = useListState(
+    { q: '', company: '', status: '', sort: 'name', page: 0, size: 25 },
+    { company: idFromList(companies), status: optionValues(statusOptions), sort: optionValues(sortOptions) },
+    companies.length
+  );
+  const [search, setSearch] = list.bind('q');
+  const [selectedCompany, setSelectedCompany] = list.bind('company');
+  const [selectedStatus, setSelectedStatus] = list.bind('status');
+  const [sortBy, setSortBy] = list.bind('sort');
+  const [page, setPage] = list.bind('page');
+  const [rowsPerPage, setRowsPerPage] = list.bind('size');
+  // The box's own text, written to the address shortly after typing stops.
+  const searchBox = useListSearchBox(search, (text) => {
+    setSearch(text);
+    setPage(0);
+  });
 
   // Modals
   const [formOpen, setFormOpen] = useState(false);
@@ -135,8 +155,7 @@ const Contacts: React.FC = () => {
   }, []);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(event.target.value);
-    setPage(0);
+    searchBox.onChange(event.target.value);
   };
 
   const handleSortChange = (event: any) => {
@@ -204,20 +223,21 @@ const Contacts: React.FC = () => {
     setMenuContact(null);
   };
 
+  const filtersActive = Boolean(search || selectedCompany || selectedStatus);
+  const hideBelowMd = { display: { xs: 'none', md: 'table-cell' } };
+  const hideBelowLg = { display: { xs: 'none', lg: 'table-cell' } };
+
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" component="h1">
-          Contacts
-        </Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={handleNewContact}
-        >
-          New Contact
-        </Button>
-      </Box>
+      <PageHeader
+        title="Contacts"
+        subtitle="People at customer companies: who decides, who signs, who gets the invoices."
+        actions={
+          <Button variant="contained" startIcon={<Add />} onClick={handleNewContact}>
+            New Contact
+          </Button>
+        }
+      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
@@ -225,13 +245,14 @@ const Contacts: React.FC = () => {
         </Alert>
       )}
 
-      {/* Search and Filters */}
-      <Paper sx={{ mb: 2 }}>
-        <Box sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
+      {/* Filters and table in one card */}
+      <Paper sx={{ overflow: 'hidden' }}>
+        <Box sx={{ p: 2, display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: 1, borderColor: 'divider' }}>
           <TextField
-            fullWidth
-            placeholder="Search contacts..."
-            value={search}
+            sx={{ flex: '1 1 240px', maxWidth: { md: 380 } }}
+            inputProps={{ 'aria-label': 'Search contacts' }}
+            placeholder="Search by name, email, phone or company"
+            value={searchBox.value}
             onChange={handleSearchChange}
             InputProps={{
               startAdornment: (
@@ -242,8 +263,9 @@ const Contacts: React.FC = () => {
             }}
           />
           <FormControl size="small" sx={{ minWidth: 180 }}>
-            <InputLabel>Company</InputLabel>
+            <InputLabel id="contacts-company-label">Company</InputLabel>
             <Select
+              labelId="contacts-company-label"
               value={selectedCompany}
               onChange={(e) => { setSelectedCompany(e.target.value); setPage(0); }}
               label="Company"
@@ -257,21 +279,25 @@ const Contacts: React.FC = () => {
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 140 }}>
-            <InputLabel>Status</InputLabel>
+            <InputLabel id="contacts-status-label">Status</InputLabel>
             <Select
+              labelId="contacts-status-label"
               value={selectedStatus}
               onChange={(e) => { setSelectedStatus(e.target.value); setPage(0); }}
               label="Status"
             >
-              <MenuItem value="">All</MenuItem>
-              <MenuItem value="Active">Active</MenuItem>
-              <MenuItem value="Inactive">Inactive</MenuItem>
+              {statusOptions.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 200 }}>
             <Select
               value={sortBy}
               onChange={handleSortChange}
+              inputProps={{ 'aria-label': 'Sort contacts' }}
               startAdornment={<Sort sx={{ mr: 0.5, ml: -0.5, color: 'text.secondary', fontSize: 20 }} />}
               sx={{ '& .MuiSelect-select': { display: 'flex', alignItems: 'center' } }}
             >
@@ -283,141 +309,131 @@ const Contacts: React.FC = () => {
             </Select>
           </FormControl>
         </Box>
-      </Paper>
 
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Contact</TableCell>
-              <TableCell>Title</TableCell>
-              <TableCell>Company</TableCell>
-              <TableCell>Email</TableCell>
-              <TableCell>Phone</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {loading ? (
+        <TableContainer sx={{ borderRadius: 0, position: 'relative' }}>
+          <Table aria-label="Contacts">
+            <TableHead>
               <TableRow>
-                <TableCell colSpan={7} align="center">
-                  <CircularProgress />
-                </TableCell>
+                <TableCell>Contact</TableCell>
+                <TableCell>Company</TableCell>
+                <TableCell sx={hideBelowMd}>Email</TableCell>
+                <TableCell sx={hideBelowLg}>Phone</TableCell>
+                <TableCell sx={hideBelowMd}>Status</TableCell>
+                <TableCell align="right"><Box component="span" sx={visuallyHidden}>Actions</Box></TableCell>
               </TableRow>
-            ) : contacts.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} align="center">
-                  <Box sx={{ py: 4 }}>
-                    <People sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                    <Typography variant="h6" color="text.secondary">
-                      No contacts found
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {search || selectedCompany || selectedStatus ?
-                        'Try adjusting your search criteria' :
-                        'Start by adding your first contact'
-                      }
-                    </Typography>
-                  </Box>
-                </TableCell>
-              </TableRow>
-            ) : (
-              contacts.map((contact) => {
-                // Get initials from name
-                const nameParts = contact.name.split(' ');
-                const initials = nameParts.length >= 2
-                  ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`
-                  : contact.name.substring(0, 2);
-                const isDecisionMaker = contact.contact_type === 'Decision Maker';
-
-                return (
-                  <TableRow key={contact.id} hover sx={{ cursor: 'pointer' }} onClick={() => handleViewContact(contact)}>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Avatar sx={{ mr: 2, bgcolor: 'primary.main', width: 40, height: 40 }}>
-                          {initials.toUpperCase()}
-                        </Avatar>
-                        <Box>
-                          <Typography variant="body2" fontWeight="medium">
-                            {contact.name}
-                            {isDecisionMaker && (
-                              <Chip
-                                label="Decision Maker"
-                                size="small"
-                                color="primary"
-                                sx={{ ml: 1, fontSize: '0.7rem' }}
-                              />
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                Array.from({ length: 6 }).map((_, i) => (
+                  <TableRow key={`skeleton-${i}`}>
+                    {Array.from({ length: 6 }).map((__, j) => (
+                      <TableCell key={j} sx={j === 2 || j === 4 ? hideBelowMd : j === 3 ? hideBelowLg : undefined}>
+                        <Skeleton width={j === 5 ? 24 : '70%'} />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : contacts.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6}>
+                    <EmptyState
+                      icon={<People />}
+                      title={filtersActive ? 'No contacts match these filters' : 'No contacts yet'}
+                      description={filtersActive ? 'Try a different search or clear the filters.' : 'Add the first contact for a customer.'}
+                    />
+                  </TableCell>
+                </TableRow>
+              ) : (
+                contacts.map((contact) => {
+                  const isDecisionMaker = contact.contact_type === 'Decision Maker';
+                  const role = [contact.title, contact.department].filter(Boolean).join(' · ');
+                  return (
+                    <TableRow key={contact.id} hover sx={{ cursor: 'pointer' }} onClick={() => handleViewContact(contact)}>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
+                          <Avatar sx={{ width: 32, height: 32, fontSize: '0.75rem' }}>
+                            {initialsOf(contact.name)}
+                          </Avatar>
+                          <Box sx={{ minWidth: 0 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                              <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }}>{contact.name}</Typography>
+                              {isDecisionMaker && <Chip label="Decision maker" size="small" color="primary" />}
+                            </Box>
+                            {role && (
+                              <Typography variant="body2" color="text.secondary" noWrap>
+                                {role}
+                              </Typography>
                             )}
-                          </Typography>
-                          {contact.department && (
-                            <Typography variant="caption" color="text.secondary">
-                              {contact.department}
-                            </Typography>
-                          )}
+                          </Box>
                         </Box>
-                      </Box>
-                    </TableCell>
-                    <TableCell>{contact.title || '-'}</TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Business sx={{ mr: 1, fontSize: 16, color: 'text.secondary' }} />
-                        {contact.company_name}
-                      </Box>
-                    </TableCell>
-                    <TableCell>{contact.email}</TableCell>
-                    <TableCell>
-                      {contact.phone ? (
-                        <Typography variant="body2">{contact.phone}</Typography>
-                      ) : '-'}
-                    </TableCell>
-                    <TableCell>
-                      {!contact.is_active && (
+                      </TableCell>
+                      <TableCell sx={{ maxWidth: 240 }}>
+                        {contact.company ? (
+                          <Link
+                            component={RouterLink}
+                            to={`/companies/${contact.company}`}
+                            underline="hover"
+                            color="inherit"
+                            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                            sx={{ fontWeight: 500, fontSize: '0.875rem', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          >
+                            {contact.company_name}
+                          </Link>
+                        ) : (
+                          <Typography variant="body2" noWrap>{contact.company_name || '—'}</Typography>
+                        )}
+                      </TableCell>
+                      <TableCell sx={{ ...hideBelowMd, maxWidth: 260 }}>
+                        <Typography variant="body2" noWrap>{contact.email || '—'}</Typography>
+                      </TableCell>
+                      <TableCell sx={{ ...hideBelowLg, whiteSpace: 'nowrap' }}>{contact.phone || '—'}</TableCell>
+                      <TableCell sx={hideBelowMd}>
                         <Chip
-                          label="Inactive"
+                          label={contact.is_active ? 'Active' : 'Inactive'}
                           size="small"
-                          color="default"
+                          color={contact.is_active ? 'success' : 'default'}
                         />
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      </TableCell>
+                      <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
                         {contact.email && (
-                          <Tooltip title="Send Email">
+                          <Tooltip title="Send email">
                             <IconButton
                               size="small"
-                              onClick={() => handleSendEmail(contact)}
+                              aria-label={`Send email to ${contact.name}`}
+                              onClick={(e) => { e.stopPropagation(); handleSendEmail(contact); }}
                             >
-                              <Email />
+                              <Email fontSize="small" />
                             </IconButton>
                           </Tooltip>
                         )}
                         {contact.linkedin_url && (
-                          <Tooltip title="LinkedIn Profile">
+                          <Tooltip title="LinkedIn profile">
                             <IconButton
                               size="small"
-                              onClick={() => window.open(contact.linkedin_url, '_blank')}
+                              aria-label={`LinkedIn profile of ${contact.name}`}
+                              onClick={(e) => { e.stopPropagation(); window.open(contact.linkedin_url, '_blank'); }}
                             >
-                              <LinkedIn />
+                              <LinkedIn fontSize="small" />
                             </IconButton>
                           </Tooltip>
                         )}
-                        <Tooltip title="More Actions">
+                        <Tooltip title="More actions">
                           <IconButton
                             size="small"
+                            aria-label={`More actions for ${contact.name}`}
                             onClick={(e) => { e.stopPropagation(); handleMenuOpen(e, contact); }}
                           >
-                            <MoreVert />
+                            <MoreVert fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                      </Box>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
         <TablePagination
           rowsPerPageOptions={[10, 25, 50, 100]}
           component="div"
@@ -427,7 +443,7 @@ const Contacts: React.FC = () => {
           onPageChange={handleChangePage}
           onRowsPerPageChange={handleChangeRowsPerPage}
         />
-      </TableContainer>
+      </Paper>
 
       {/* Action Menu */}
       <Menu
