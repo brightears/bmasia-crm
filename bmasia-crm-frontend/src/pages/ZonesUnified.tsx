@@ -51,6 +51,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import apiService from '../services/api';
 import { Zone, Company } from '../types';
+import { useListState } from '../hooks/useListState';
 
 type StatusFilter = 'all' | 'online' | 'offline' | 'no_device' | 'pending' | 'orphaned';
 
@@ -114,12 +115,14 @@ const ZonesUnified: React.FC = () => {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [companyFilter, setCompanyFilter] = useState<string>('all');
-  const [platformFilter, setPlatformFilter] = useState<string>('all');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  // Search, filters, sort and page live in the address, so Back returns to the same view.
+  const list = useListState({ q: '', status: 'all' as StatusFilter, company: 'all' as string, platform: 'all' as string, page: 0, size: 25 });
+  const [searchQuery, setSearchQuery] = list.bind('q');
+  const [statusFilter, setStatusFilter] = list.bind('status');
+  const [companyFilter, setCompanyFilter] = list.bind('company');
+  const [platformFilter, setPlatformFilter] = list.bind('platform');
+  const [page, setPage] = list.bind('page');
+  const [rowsPerPage, setRowsPerPage] = list.bind('size');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [zoneToDelete, setZoneToDelete] = useState<Zone | null>(null);
 

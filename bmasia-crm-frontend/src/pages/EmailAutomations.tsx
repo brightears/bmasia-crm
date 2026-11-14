@@ -48,6 +48,7 @@ import { EmailSequence, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import SequenceForm from '../components/SequenceForm';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { useListState } from '../hooks/useListState';
 
 const EmailAutomations: React.FC = () => {
   const navigate = useNavigate();
@@ -55,11 +56,13 @@ const EmailAutomations: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  // Search, filters, sort and page live in the address, so Back returns to the same view.
+  const list = useListState({ q: '', status: '', type: 'all' as string, page: 0, size: 25 });
+  const [search, setSearch] = list.bind('q');
+  const [statusFilter, setStatusFilter] = list.bind('status');
+  const [typeFilter, setTypeFilter] = list.bind('type');
+  const [page, setPage] = list.bind('page');
+  const [rowsPerPage, setRowsPerPage] = list.bind('size');
   const [totalCount, setTotalCount] = useState(0);
 
   // Form modal state

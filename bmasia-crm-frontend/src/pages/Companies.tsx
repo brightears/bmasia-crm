@@ -45,6 +45,7 @@ import CompanyForm from '../components/CompanyForm';
 import { PageHeader, EmptyState, ProductChip } from '../components/ui';
 import { visuallyHidden } from '../theme/a11y';
 import { initialsOf } from '../theme';
+import { useListState } from '../hooks/useListState';
 
 const companyInitials = initialsOf;
 
@@ -67,10 +68,12 @@ const Companies: React.FC = () => {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState('name');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  // Search, filters, sort and page live in the address, so Back returns to the same view.
+  const list = useListState({ q: '', sort: 'name', page: 0, size: 25 });
+  const [search, setSearch] = list.bind('q');
+  const [sortBy, setSortBy] = list.bind('sort');
+  const [page, setPage] = list.bind('page');
+  const [rowsPerPage, setRowsPerPage] = list.bind('size');
   const [totalCount, setTotalCount] = useState(0);
   const [formOpen, setFormOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
@@ -127,7 +130,8 @@ const Companies: React.FC = () => {
   };
 
   const handleViewCompany = (id: string) => {
-    navigate(`/companies/${id}`);
+    // The company page's breadcrumb uses this to come back to the same filtered view.
+    navigate(`/companies/${id}`, { state: { listSearch: list.searchParams.toString() } });
   };
 
   const handleCreateCompany = () => {

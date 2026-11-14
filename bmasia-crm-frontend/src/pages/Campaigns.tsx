@@ -30,6 +30,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { EmailCampaign, ApiResponse } from '../types';
 import ApiService from '../services/api';
+import { useListState } from '../hooks/useListState';
 
 const getStatusColor = (
   status: string
@@ -57,11 +58,13 @@ const Campaigns: React.FC = () => {
   const [campaigns, setCampaigns] = useState<EmailCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  // Search, filters, sort and page live in the address, so Back returns to the same view.
+  const list = useListState({ q: '', status: '', type: '', page: 0, size: 25 });
+  const [search, setSearch] = list.bind('q');
+  const [statusFilter, setStatusFilter] = list.bind('status');
+  const [typeFilter, setTypeFilter] = list.bind('type');
+  const [page, setPage] = list.bind('page');
+  const [rowsPerPage, setRowsPerPage] = list.bind('size');
   const [totalCount, setTotalCount] = useState(0);
 
   const loadCampaigns = useCallback(async () => {

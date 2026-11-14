@@ -41,6 +41,7 @@ import { useNavigate } from 'react-router-dom';
 import { Ticket } from '../types';
 import ApiService from '../services/api';
 import { formatDistanceToNow } from 'date-fns';
+import { useListState } from '../hooks/useListState';
 
 const Tickets: React.FC = () => {
   const navigate = useNavigate();
@@ -52,10 +53,12 @@ const Tickets: React.FC = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [ticketToDelete, setTicketToDelete] = useState<Ticket | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<string>('all');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  // Search, filters, sort and page live in the address, so Back returns to the same view.
+  const list = useListState({ q: '', filter: 'all' as string, page: 0, size: 25 });
+  const [searchQuery, setSearchQuery] = list.bind('q');
+  const [activeFilter, setActiveFilter] = list.bind('filter');
+  const [page, setPage] = list.bind('page');
+  const [rowsPerPage, setRowsPerPage] = list.bind('size');
   const [totalCount, setTotalCount] = useState(0);
 
   const loadTickets = useCallback(async () => {

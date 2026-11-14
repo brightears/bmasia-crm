@@ -20,6 +20,7 @@ import KBSearchBar from '../components/KBSearchBar';
 import KBCategoryTree from '../components/KBCategoryTree';
 import KBFeaturedArticles from '../components/KBFeaturedArticles';
 import KBArticleList from '../components/KBArticleList';
+import { useListState } from '../hooks/useListState';
 
 const KnowledgeBase: React.FC = () => {
   const navigate = useNavigate();
@@ -35,13 +36,15 @@ const KnowledgeBase: React.FC = () => {
   const [featuredLoading, setFeaturedLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const [searchQuery, setSearchQuery] = useState('');
+  // Search, filters, sort and page live in the address, so Back returns to the same view.
+  const list = useListState({ q: '', sort: '-created_at', page: 0, size: 12 });
+  const [searchQuery, setSearchQuery] = list.bind('q');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedStatus, setSelectedStatus] = useState('');
-  const [sortBy, setSortBy] = useState('-created_at');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(12);
+  const [sortBy, setSortBy] = list.bind('sort');
+  const [page, setPage] = list.bind('page');
+  const [rowsPerPage, setRowsPerPage] = list.bind('size');
   const [totalCount, setTotalCount] = useState(0);
 
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);

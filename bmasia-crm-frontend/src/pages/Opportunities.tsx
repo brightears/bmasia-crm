@@ -57,6 +57,7 @@ import {
   formatCurrency, getServiceLabel,
 } from '../constants/entities';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { useListState } from '../hooks/useListState';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -113,18 +114,20 @@ const Opportunities: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  // Search, filters, sort and page live in the address, so Back returns to the same view.
+  const list = useListState({ q: '', page: 0, size: 25, stage: '', owner: '', entity: DEFAULT_ENTITY as EntityFilter, service: 'all' as ServiceFilter, sort: '-created_at' });
+  const [search, setSearch] = list.bind('q');
+  const [page, setPage] = list.bind('page');
+  const [rowsPerPage, setRowsPerPage] = list.bind('size');
   const [totalCount, setTotalCount] = useState(0);
   const [currentTab, setCurrentTab] = useState(0);
 
   // Filters
-  const [stageFilter, setStageFilter] = useState('');
-  const [ownerFilter, setOwnerFilter] = useState('');
-  const [entityFilter, setEntityFilter] = useState<EntityFilter>(DEFAULT_ENTITY);
-  const [serviceFilter, setServiceFilter] = useState<ServiceFilter>('all');
-  const [sortBy, setSortBy] = useState('-created_at');
+  const [stageFilter, setStageFilter] = list.bind('stage');
+  const [ownerFilter, setOwnerFilter] = list.bind('owner');
+  const [entityFilter, setEntityFilter] = list.bind('entity');
+  const [serviceFilter, setServiceFilter] = list.bind('service');
+  const [sortBy, setSortBy] = list.bind('sort');
 
   // Form state
   const [formOpen, setFormOpen] = useState(false);
