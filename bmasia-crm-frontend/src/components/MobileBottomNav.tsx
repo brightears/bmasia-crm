@@ -1,175 +1,47 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import {
   BottomNavigation,
   BottomNavigationAction,
   Paper,
-  Badge,
   useTheme,
   useMediaQuery,
 } from '@mui/material';
 import {
-  Dashboard as DashboardIcon,
-  Business as BusinessIcon,
-  People as PeopleIcon,
-  Handshake as HandshakeIcon,
-  Campaign as CampaignIcon,
-  SupportAgent as SupportAgentIcon,
-  Settings as SettingsIcon,
+  TodayOutlined,
+  BusinessOutlined,
+  HistoryEduOutlined,
+  TaskAltOutlined,
+  Menu as MenuIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import { isActivePath } from './navigation';
 
-const MobileBottomNav: React.FC = () => {
+interface MobileBottomNavProps {
+  /** Opens the full menu (the sidebar drawer). */
+  onOpenMenu?: () => void;
+}
+
+// The same four shortcuts for everyone; everything else is one tap away under "Menu".
+const ITEMS = [
+  { label: 'Today', value: '/today', icon: <TodayOutlined /> },
+  { label: 'Companies', value: '/companies', icon: <BusinessOutlined /> },
+  { label: 'Contracts', value: '/contracts', icon: <HistoryEduOutlined /> },
+  { label: 'Tasks', value: '/tasks', icon: <TaskAltOutlined /> },
+];
+
+const MENU = '__menu__';
+
+const MobileBottomNav: React.FC<MobileBottomNavProps> = ({ onOpenMenu }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = useAuth();
 
-  const getNavigationItems = useMemo(() => {
-    const baseItems = [
-      {
-        label: 'Dashboard',
-        value: '/dashboard',
-        icon: <DashboardIcon />,
-        roles: ['Sales', 'Marketing', 'Tech Support', 'Admin'],
-      },
-    ];
+  const current = ITEMS.find((item) => isActivePath(item.value, location.pathname))?.value ?? false;
 
-    switch (user?.role) {
-      case 'Sales':
-        return [
-          ...baseItems,
-          {
-            label: 'Companies',
-            value: '/companies',
-            icon: <BusinessIcon />,
-            roles: ['Sales', 'Admin'],
-          },
-          {
-            label: 'Contacts',
-            value: '/contacts',
-            icon: <PeopleIcon />,
-            roles: ['Sales', 'Admin'],
-          },
-          {
-            label: 'Opportunities',
-            value: '/opportunities',
-            icon: <Badge badgeContent={2} color="error"><HandshakeIcon /></Badge>,
-            roles: ['Sales', 'Admin'],
-          },
-          {
-            label: 'More',
-            value: '/more',
-            icon: <SettingsIcon />,
-            roles: ['Sales', 'Marketing', 'Tech Support', 'Admin'],
-          },
-        ];
-
-      case 'Marketing':
-        return [
-          ...baseItems,
-          {
-            label: 'Campaigns',
-            value: '/campaigns',
-            icon: <CampaignIcon />,
-            roles: ['Marketing', 'Admin'],
-          },
-          {
-            label: 'Contacts',
-            value: '/contacts',
-            icon: <PeopleIcon />,
-            roles: ['Marketing', 'Admin'],
-          },
-          {
-            label: 'Analytics',
-            value: '/analytics',
-            icon: <BusinessIcon />,
-            roles: ['Marketing', 'Admin'],
-          },
-          {
-            label: 'More',
-            value: '/more',
-            icon: <SettingsIcon />,
-            roles: ['Sales', 'Marketing', 'Tech Support', 'Admin'],
-          },
-        ];
-
-      case 'Tech Support':
-        return [
-          ...baseItems,
-          {
-            label: 'Tickets',
-            value: '/tickets',
-            icon: <Badge badgeContent={5} color="error"><SupportAgentIcon /></Badge>,
-            roles: ['Tech Support', 'Admin'],
-          },
-          {
-            label: 'Knowledge',
-            value: '/knowledge-base',
-            icon: <BusinessIcon />,
-            roles: ['Tech Support', 'Admin'],
-          },
-          {
-            label: 'Zones',
-            value: '/zones',
-            icon: <PeopleIcon />,
-            roles: ['Tech Support', 'Admin'],
-          },
-          {
-            label: 'More',
-            value: '/more',
-            icon: <SettingsIcon />,
-            roles: ['Sales', 'Marketing', 'Tech Support', 'Admin'],
-          },
-        ];
-
-      case 'Admin':
-        return [
-          ...baseItems,
-          {
-            label: 'Companies',
-            value: '/companies',
-            icon: <BusinessIcon />,
-            roles: ['Admin'],
-          },
-          {
-            label: 'Users',
-            value: '/users',
-            icon: <PeopleIcon />,
-            roles: ['Admin'],
-          },
-          {
-            label: 'Reports',
-            value: '/reports',
-            icon: <BusinessIcon />,
-            roles: ['Admin'],
-          },
-          {
-            label: 'More',
-            value: '/more',
-            icon: <SettingsIcon />,
-            roles: ['Admin'],
-          },
-        ];
-
-      default:
-        return baseItems;
-    }
-  }, [user?.role]);
-
-  const getCurrentValue = () => {
-    const currentPath = location.pathname;
-    const matchingItem = getNavigationItems.find(item =>
-      currentPath.startsWith(item.value)
-    );
-    return matchingItem?.value || '/dashboard';
-  };
-
-  const handleChange = (event: React.SyntheticEvent, newValue: string) => {
-    if (newValue === '/more') {
-      // Handle "More" menu - could open a drawer or navigate to a menu page
-      navigate('/more');
+  const handleChange = (_event: React.SyntheticEvent, newValue: string) => {
+    if (newValue === MENU) {
+      onOpenMenu?.();
     } else {
       navigate(newValue);
     }
@@ -182,46 +54,42 @@ const MobileBottomNav: React.FC = () => {
 
   return (
     <Paper
+      component="nav"
+      aria-label="Shortcuts"
       sx={{
         position: 'fixed',
         bottom: 0,
         left: 0,
         right: 0,
         zIndex: theme.zIndex.appBar,
-        borderTop: '1px solid',
+        borderTop: 1,
         borderColor: 'divider',
+        borderRadius: 0,
+        pb: 'env(safe-area-inset-bottom)',
       }}
-      elevation={3}
     >
       <BottomNavigation
-        value={getCurrentValue()}
+        value={current}
         onChange={handleChange}
         showLabels
         sx={{
+          bgcolor: 'background.paper',
           '& .MuiBottomNavigationAction-root': {
             minWidth: 'auto',
-            paddingTop: 1,
-            '&.Mui-selected': {
-              color: 'primary.main',
-            },
+            color: 'text.secondary',
+            '&.Mui-selected': { color: 'primary.main' },
+          },
+          '& .MuiBottomNavigationAction-label': {
+            fontSize: '0.75rem',
+            fontWeight: 500,
+            '&.Mui-selected': { fontSize: '0.75rem', fontWeight: 600 },
           },
         }}
       >
-        {getNavigationItems.map((item) => (
-          <BottomNavigationAction
-            key={item.value}
-            label={item.label}
-            value={item.value}
-            icon={item.icon}
-            sx={{
-              fontSize: '0.75rem',
-              '& .MuiBottomNavigationAction-label': {
-                fontSize: '0.75rem',
-                fontWeight: 500,
-              },
-            }}
-          />
+        {ITEMS.map((item) => (
+          <BottomNavigationAction key={item.value} label={item.label} value={item.value} icon={item.icon} />
         ))}
+        <BottomNavigationAction label="Menu" value={MENU} icon={<MenuIcon />} />
       </BottomNavigation>
     </Paper>
   );

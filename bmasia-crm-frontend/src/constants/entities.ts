@@ -20,6 +20,11 @@ export const SERVICE_OPTIONS: { value: ServiceFilter; label: string }[] = [
 
 export const DEFAULT_ENTITY: EntityFilter = 'BMAsia Limited';
 
+/** The currency a billing entity invoices in (THB for the Thai company, otherwise USD). */
+export function currencyForEntity(entity?: string | null): string {
+  return (entity && ENTITY_CURRENCY[entity]?.currency) || 'USD';
+}
+
 export function formatCurrency(value: number, entity?: string): string {
   const config = entity ? ENTITY_CURRENCY[entity] : undefined;
   const currency = config?.currency || 'USD';

@@ -27,6 +27,8 @@ import {
   Divider,
   useTheme,
   useMediaQuery,
+  Skeleton,
+  Tooltip,
 } from '@mui/material';
 import {
   Add,
@@ -45,12 +47,14 @@ import {
   Autorenew,
   Sort,
 } from '@mui/icons-material';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Contract, ApiResponse, Contact } from '../types';
 import ApiService, { EmailSendData } from '../services/api';
 import ContractForm from '../components/ContractForm';
+import { PageHeader, EmptyState } from '../components/ui';
 import ContractDetail from '../components/ContractDetail';
 import EmailSendDialog from '../components/EmailSendDialog';
+import { formatDate as formatDisplayDate, formatMoney, statusTone, visuallyHidden } from '../theme';
 
 // Statuses where the contract is locked (terminal states only — Active is editable for date/term changes)
 const LOCKED_STATUSES = ['Renewed', 'Expired', 'Cancelled'];
@@ -83,6 +87,7 @@ const sortOptions = [
 ];
 
 const Contracts: React.FC = () => {
+  const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [searchParams, setSearchParams] = useSearchParams();
@@ -195,10 +200,10 @@ const Contracts: React.FC = () => {
     setActionMenuAnchor(null);
   };
 
+  // Contracts open as their own page (shareable address) instead of a pop-up.
   const handleViewContract = (contract: Contract) => {
-    setDetailContractId(contract.id);
-    setDetailOpen(true);
     setActionMenuAnchor(null);
+    navigate(`/contracts/${contract.id}`);
   };
 
   const handleDeleteContract = async (contract: Contract) => {
@@ -245,17 +250,12 @@ const Contracts: React.FC = () => {
   };
 
   const formatCurrency = (value: number, currency = 'USD'): string => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
+    return formatMoney(value, currency);
   };
 
   const formatDate = (dateString: string | null | undefined): string => {
     if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString();
+    return formatDisplayDate(dateString);
   };
 
   const getStatusColor = (status: string): 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning' => {
@@ -367,20 +367,15 @@ const Contracts: React.FC = () => {
 
   return (
     <Box>
-      {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" component="h1">
-          Contracts
-        </Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={handleCreateContract}
-          size={isMobile ? "small" : "medium"}
-        >
-          New Contract
-        </Button>
-      </Box>
+      <PageHeader
+        title="Contracts"
+        subtitle="Every customer contract. Contracts ending soon are marked in amber."
+        actions={
+          <Button variant="contained" startIcon={<Add />} onClick={handleCreateContract}>
+            New Contract
+          </Button>
+        }
+      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
@@ -388,12 +383,13 @@ const Contracts: React.FC = () => {
         </Alert>
       )}
 
-      {/* Filters */}
-      <Paper sx={{ mb: 2 }}>
-        <Box sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
+      {/* Filters and table in one card */}
+      <Paper sx={{ overflow: 'hidden' }}>
+        <Box sx={{ p: 2, display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: 1, borderColor: 'divider' }}>
           <TextField
-            fullWidth
-            placeholder="Search contracts..."
+            sx={{ flex: '1 1 260px', maxWidth: { md: 420 } }}
+            inputProps={{ 'aria-label': 'Search contracts' }}
+            placeholder="Search by contract number or company"
             value={search}
             onChange={handleSearchChange}
             InputProps={{
@@ -460,116 +456,99 @@ const Contracts: React.FC = () => {
             </Select>
           </FormControl>
         </Box>
-      </Paper>
 
       {/* Contracts Table */}
-      <TableContainer component={Paper}>
+      <TableContainer sx={{ borderRadius: 0 }}>
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Contract Number</TableCell>
+              <TableCell>Contract</TableCell>
               <TableCell>Company</TableCell>
-              <TableCell>Start Date</TableCell>
-              <TableCell>End Date</TableCell>
-              <TableCell>Value</TableCell>
+              <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Term</TableCell>
+              <TableCell align="right">Value</TableCell>
               <TableCell>Status</TableCell>
-              <TableCell>Type</TableCell>
-              <TableCell>Renewal</TableCell>
-              <TableCell>Actions</TableCell>
+              <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Renewal</TableCell>
+              <TableCell align="right"><Box component="span" sx={visuallyHidden}>Actions</Box></TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {loading ? (
-              <TableRow>
-                <TableCell colSpan={9} align="center">
-                  <CircularProgress />
-                </TableCell>
-              </TableRow>
+              Array.from({ length: 6 }).map((_, i) => (
+                <TableRow key={`skeleton-${i}`}>
+                  {Array.from({ length: 7 }).map((__, j) => (
+                    <TableCell
+                      key={j}
+                      sx={j === 2 ? { display: { xs: 'none', md: 'table-cell' } } : j === 5 ? { display: { xs: 'none', lg: 'table-cell' } } : undefined}
+                    >
+                      <Skeleton width={j === 6 ? 24 : '70%'} />
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
             ) : contracts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} align="center">
-                  <Box sx={{ py: 4 }}>
-                    <Assignment sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                    <Typography variant="h6" color="text.secondary">
-                      No contracts found
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {search || statusFilter || typeFilter ? 'Try adjusting your filters' : 'Start by creating your first contract'}
-                    </Typography>
-                  </Box>
+                <TableCell colSpan={7}>
+                  <EmptyState
+                    icon={<Assignment />}
+                    title={search || statusFilter || typeFilter ? 'No contracts match these filters' : 'No contracts yet'}
+                    description={search || statusFilter || typeFilter ? 'Try a different search or clear the filters.' : 'Create the first contract for a customer.'}
+                  />
                 </TableCell>
               </TableRow>
             ) : (
               contracts.map((contract) => (
                 <TableRow key={contract.id} hover sx={{ cursor: 'pointer' }} onClick={() => handleViewContract(contract)}>
                   <TableCell>
-                    <Typography variant="body2" fontWeight="medium">
+                    <Typography sx={{ fontWeight: 600, fontSize: '0.875rem', whiteSpace: 'nowrap' }}>
                       {contract.contract_number}
                     </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Business sx={{ mr: 1, color: 'text.secondary' }} />
-                      <Typography variant="body2">
-                        {contract.company_name}
-                      </Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <CalendarToday sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
-                      <Typography variant="body2">
-                        {formatDate(contract.start_date)}
-                      </Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <Typography
-                      variant="body2"
-                      sx={{
-                        color: contract.is_expiring_soon ? 'warning.main' : 'text.primary',
-                        display: 'flex',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <CalendarToday sx={{ fontSize: 16, mr: 0.5 }} />
-                      {formatDate(contract.end_date)}
-                      {contract.is_expiring_soon && (
-                        <Warning sx={{ fontSize: 16, ml: 0.5, color: 'warning.main' }} />
-                      )}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
-                      {formatCurrency(contract.value, contract.currency)}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={contract.status}
-                      size="small"
-                      color={getStatusColor(contract.status)}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
+                    <Typography variant="body2" color="text.secondary">
                       {contract.contract_type}
                     </Typography>
                   </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Refresh sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
-                      <Typography variant="body2">
-                        {contract.auto_renew ? 'Auto' : 'Manual'}
-                      </Typography>
-                    </Box>
+                  <TableCell sx={{ maxWidth: 260 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>
+                      {contract.company_name}
+                    </Typography>
+                  </TableCell>
+                  <TableCell sx={{ display: { xs: 'none', md: 'table-cell' }, whiteSpace: 'nowrap' }}>
+                    <Typography variant="body2" component="div">
+                      {formatDate(contract.start_date)}
+                      {' – '}
+                      <Box
+                        component="span"
+                        sx={{
+                          color: contract.is_expiring_soon ? 'warning.dark' : 'inherit',
+                          fontWeight: contract.is_expiring_soon ? 600 : 400,
+                        }}
+                      >
+                        {formatDate(contract.end_date)}
+                      </Box>
+                      {contract.is_expiring_soon && (
+                        <Tooltip title="Ends soon">
+                          <Warning sx={{ fontSize: 16, ml: 0.5, color: 'warning.main', verticalAlign: 'text-bottom' }} />
+                        </Tooltip>
+                      )}
+                    </Typography>
+                  </TableCell>
+                  <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                    {formatCurrency(contract.value, contract.currency)}
                   </TableCell>
                   <TableCell>
+                    <Chip label={contract.status} size="small" color={statusTone(contract.status)} />
+                  </TableCell>
+                  <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>
+                    <Typography variant="body2" color={contract.auto_renew ? 'text.primary' : 'text.secondary'}>
+                      {contract.auto_renew ? 'Auto-renew' : 'Manual'}
+                    </Typography>
+                  </TableCell>
+                  <TableCell align="right">
                     <IconButton
                       size="small"
+                      aria-label={`Actions for ${contract.contract_number}`}
                       onClick={(e) => { e.stopPropagation(); handleActionMenuOpen(e, contract); }}
                     >
-                      <MoreVert />
+                      <MoreVert fontSize="small" />
                     </IconButton>
                   </TableCell>
                 </TableRow>
@@ -587,6 +566,7 @@ const Contracts: React.FC = () => {
           onRowsPerPageChange={handleChangeRowsPerPage}
         />
       </TableContainer>
+      </Paper>
 
       {/* Contract Form */}
       <ContractForm

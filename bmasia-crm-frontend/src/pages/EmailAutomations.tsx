@@ -47,6 +47,7 @@ import { useNavigate } from 'react-router-dom';
 import { EmailSequence, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import SequenceForm from '../components/SequenceForm';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 const EmailAutomations: React.FC = () => {
   const navigate = useNavigate();
@@ -268,12 +269,7 @@ const EmailAutomations: React.FC = () => {
   };
 
   const formatDate = (dateString: string): string => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
+    return formatDisplayDate(dateString);
   };
 
   return (

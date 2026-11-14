@@ -58,6 +58,7 @@ import ApiService, { EmailSendData } from '../services/api';
 import QuoteForm from '../components/QuoteForm';
 import QuoteDetail from '../components/QuoteDetail';
 import EmailSendDialog from '../components/EmailSendDialog';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 const statusOptions = [
   { value: '', label: 'All Status' },
@@ -358,24 +359,12 @@ const Quotes: React.FC = () => {
   };
 
   const formatCurrency = (value: number, currency: string = 'USD'): string => {
-    // Currency locale mapping for proper symbol display
-    const currencyLocaleMap: { [key: string]: string } = {
-      'USD': 'en-US',
-      'THB': 'th-TH',
-      'EUR': 'de-DE',
-      'GBP': 'en-GB'
-    };
-
-    return new Intl.NumberFormat(currencyLocaleMap[currency] || 'en-US', {
-      style: 'currency',
-      currency: currency,
-      minimumFractionDigits: 2,
-    }).format(value);
+    return formatMoney(value, currency);
   };
 
   const formatDate = (dateString: string | null | undefined): string => {
     if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString();
+    return formatDisplayDate(dateString);
   };
 
   const getStatusColor = (status: string): string => {

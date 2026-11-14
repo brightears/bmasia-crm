@@ -61,6 +61,7 @@ import {
 } from '@mui/icons-material';
 import { Quote, QuoteActivity, EmailLogEntry } from '../types';
 import ApiService from '../services/api';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 interface QuoteDetailProps {
   open: boolean;
@@ -207,16 +208,12 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
   };
 
   const formatCurrency = (value: number, currency: string = 'USD'): string => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 2,
-    }).format(value);
+    return formatMoney(value, currency);
   };
 
   const formatDate = (dateString: string | null | undefined): string => {
     if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString();
+    return formatDisplayDate(dateString);
   };
 
   const getStatusColor = (status: string): string => {

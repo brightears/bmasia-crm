@@ -41,6 +41,7 @@ import {
 import { User, UserRole, USER_ROLE_LABELS, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import UserForm from '../components/UserForm';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 const Users: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -367,7 +368,7 @@ const Users: React.FC = () => {
                   <TableCell>
                     {user.last_login ? (
                       <Typography variant="caption">
-                        {new Date(user.last_login).toLocaleDateString()}
+                        {formatDisplayDate(user.last_login)}
                       </Typography>
                     ) : (
                       <Typography variant="caption" color="text.secondary">
