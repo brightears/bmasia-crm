@@ -77,3 +77,18 @@ it('opens the highlighted result with the keyboard', async () => {
 
   await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/contracts/k-1'));
 });
+
+it('finds menu pages by their former name', async () => {
+  api.getCompanies.mockResolvedValue({ results: [] });
+  api.getContacts.mockResolvedValue({ results: [] });
+  api.getContracts.mockResolvedValue({ results: [] });
+  renderSearch();
+  fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+  const input = await screen.findByRole('combobox');
+  fireEvent.change(input, { target: { value: 'knowledge' } });
+
+  expect(await screen.findByText('Help articles')).toBeInTheDocument();
+  expect(screen.getByText('Support · formerly “Knowledge Base”')).toBeInTheDocument();
+  fireEvent.keyDown(input, { key: 'Enter' });
+  await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/knowledge-base'));
+});
