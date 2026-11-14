@@ -416,9 +416,11 @@ const GlobalSearch: React.FC = () => {
               ))}
             </List>
           )}
-          {q.length >= MIN_CHARS && failedGroups.length > 0 && !allFailed && (
+          {q.length >= MIN_CHARS && failedGroups.length > 0 && (!allFailed || results.length > 0) && (
             <Typography color="error" sx={{ px: 3, py: 1.5, fontSize: '0.8125rem' }} role="status">
-              Could not search {failedGroups.map((g) => g.toLowerCase()).join(', ')}.
+              {allFailed
+                ? 'Search failed for companies, contacts and documents; only CRM pages are shown. Check your connection and try again.'
+                : `Could not search ${failedGroups.map((g) => g.toLowerCase()).join(', ')}.`}
             </Typography>
           )}
         </Box>
