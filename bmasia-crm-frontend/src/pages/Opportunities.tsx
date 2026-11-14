@@ -57,6 +57,8 @@ import {
   formatCurrency, getServiceLabel,
 } from '../constants/entities';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { useListState, optionValues, idFromList } from '../hooks/useListState';
+import { useListSearchBox } from '../hooks/useListSearchBox';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -113,18 +115,35 @@ const Opportunities: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  // Search, filters, sort and page live in the address, so Back returns to the same view.
+  const list = useListState(
+    { q: '', page: 0, size: 25, stage: '', owner: '', entity: DEFAULT_ENTITY as EntityFilter, service: 'all' as ServiceFilter, sort: '-created_at' },
+    {
+      stage: optionValues(stageOptions),
+      owner: idFromList(users),
+      entity: optionValues(ENTITY_OPTIONS),
+      service: optionValues(SERVICE_OPTIONS),
+      sort: optionValues(sortOptions),
+    },
+    users.length
+  );
+  const [search, setSearch] = list.bind('q');
+  const [page, setPage] = list.bind('page');
+  // The box's own text, written to the address shortly after typing stops.
+  const searchBox = useListSearchBox(search, (text) => {
+    setSearch(text);
+    setPage(0);
+  });
+  const [rowsPerPage, setRowsPerPage] = list.bind('size');
   const [totalCount, setTotalCount] = useState(0);
   const [currentTab, setCurrentTab] = useState(0);
 
   // Filters
-  const [stageFilter, setStageFilter] = useState('');
-  const [ownerFilter, setOwnerFilter] = useState('');
-  const [entityFilter, setEntityFilter] = useState<EntityFilter>(DEFAULT_ENTITY);
-  const [serviceFilter, setServiceFilter] = useState<ServiceFilter>('all');
-  const [sortBy, setSortBy] = useState('-created_at');
+  const [stageFilter, setStageFilter] = list.bind('stage');
+  const [ownerFilter, setOwnerFilter] = list.bind('owner');
+  const [entityFilter, setEntityFilter] = list.bind('entity');
+  const [serviceFilter, setServiceFilter] = list.bind('service');
+  const [sortBy, setSortBy] = list.bind('sort');
 
   // Form state
   const [formOpen, setFormOpen] = useState(false);
@@ -190,8 +209,8 @@ const Opportunities: React.FC = () => {
   };
 
   const handleSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(event.target.value);
-    setPage(0);
+    searchBox.onChange(event.target.value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleStageChange = useCallback((event: any) => {
@@ -346,7 +365,7 @@ const Opportunities: React.FC = () => {
       <Box sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
         <TextField
           placeholder="Search opportunities..."
-          value={search}
+          value={searchBox.value}
           onChange={handleSearchChange}
           size="small"
           sx={{ flex: 1, minWidth: 200 }}

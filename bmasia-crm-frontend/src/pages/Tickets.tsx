@@ -41,6 +41,8 @@ import { useNavigate } from 'react-router-dom';
 import { Ticket } from '../types';
 import ApiService from '../services/api';
 import { formatDistanceToNow } from 'date-fns';
+import { useListState } from '../hooks/useListState';
+import { useListSearchBox } from '../hooks/useListSearchBox';
 
 const Tickets: React.FC = () => {
   const navigate = useNavigate();
@@ -52,10 +54,20 @@ const Tickets: React.FC = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [ticketToDelete, setTicketToDelete] = useState<Ticket | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<string>('all');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  // Search, filters, sort and page live in the address, so Back returns to the same view.
+  const list = useListState(
+    { q: '', filter: 'all' as string, page: 0, size: 25 },
+    { filter: ['all', 'my_tickets', 'open', 'unassigned', 'urgent'] }
+  );
+  const [searchQuery, setSearchQuery] = list.bind('q');
+  const [activeFilter, setActiveFilter] = list.bind('filter');
+  const [page, setPage] = list.bind('page');
+  const [rowsPerPage, setRowsPerPage] = list.bind('size');
+  // The box's own text, written to the address shortly after typing stops.
+  const searchBox = useListSearchBox(searchQuery, (text) => {
+    setSearchQuery(text);
+    setPage(0);
+  });
   const [totalCount, setTotalCount] = useState(0);
 
   const loadTickets = useCallback(async () => {
@@ -353,8 +365,8 @@ const Tickets: React.FC = () => {
         <TextField
           fullWidth
           placeholder="Search tickets by number, subject, or company..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          value={searchBox.value}
+          onChange={(e) => searchBox.onChange(e.target.value)}
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">

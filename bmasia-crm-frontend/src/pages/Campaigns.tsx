@@ -30,6 +30,8 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { EmailCampaign, ApiResponse } from '../types';
 import ApiService from '../services/api';
+import { useListState } from '../hooks/useListState';
+import { useListSearchBox } from '../hooks/useListSearchBox';
 
 const getStatusColor = (
   status: string
@@ -57,11 +59,24 @@ const Campaigns: React.FC = () => {
   const [campaigns, setCampaigns] = useState<EmailCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  // Search, filters, sort and page live in the address, so Back returns to the same view.
+  const list = useListState(
+    { q: '', status: '', type: '', page: 0, size: 25 },
+    {
+      status: ['', 'draft', 'scheduled', 'sending', 'sent', 'paused', 'cancelled'],
+      type: ['', 'renewal', 'payment', 'quarterly', 'newsletter', 'promotion', 'onboarding', 'engagement'],
+    }
+  );
+  const [search, setSearch] = list.bind('q');
+  const [statusFilter, setStatusFilter] = list.bind('status');
+  const [typeFilter, setTypeFilter] = list.bind('type');
+  const [page, setPage] = list.bind('page');
+  const [rowsPerPage, setRowsPerPage] = list.bind('size');
+  // The box's own text, written to the address shortly after typing stops.
+  const searchBox = useListSearchBox(search, (text) => {
+    setSearch(text);
+    setPage(0);
+  });
   const [totalCount, setTotalCount] = useState(0);
 
   const loadCampaigns = useCallback(async () => {
@@ -97,8 +112,7 @@ const Campaigns: React.FC = () => {
   }, [loadCampaigns]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(event.target.value);
-    setPage(0);
+    searchBox.onChange(event.target.value);
   };
 
   const handleChangePage = (event: unknown, newPage: number) => {
@@ -147,7 +161,7 @@ const Campaigns: React.FC = () => {
               fullWidth
               size="small"
               placeholder="Search campaigns..."
-              value={search}
+              value={searchBox.value}
               onChange={handleSearchChange}
               InputProps={{
                 startAdornment: (
