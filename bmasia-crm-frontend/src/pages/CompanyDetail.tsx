@@ -47,7 +47,7 @@ import CompanyForm from '../components/CompanyForm';
 import ContactForm from '../components/ContactForm';
 import OpportunityForm from '../components/OpportunityForm';
 import { PageHeader, SectionCard, EmptyState, DetailField, ProductChip } from '../components/ui';
-import { statusTone, humanize, formatDate, visuallyHidden } from '../theme';
+import { statusTone, humanize, formatDate, initialsOf, visuallyHidden } from '../theme';
 
 const tabLabel = (label: string, count: number) => (
   <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
@@ -296,7 +296,7 @@ const CompanyDetail: React.FC = () => {
         breadcrumbs={[{ label: 'Companies', to: '/companies' }, { label: company.name }]}
         avatar={
           <Avatar variant="rounded" sx={{ width: 52, height: 52, fontSize: '1.125rem', borderRadius: 2 }}>
-            {company.name.replace(/[^A-Za-z0-9 ]/g, ' ').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase()}
+            {initialsOf(company.name)}
           </Avatar>
         }
         title={company.name}
@@ -400,9 +400,15 @@ const CompanyDetail: React.FC = () => {
                 <DetailField label="Full address">{company.full_address}</DetailField>
               )}
               <DetailField label="Billing entity">{company.billing_entity}</DetailField>
-              <DetailField label="Music zones (contracted)">
-                {company.contracted_zone_count ?? company.music_zone_count}
-              </DetailField>
+              {company.contracted_zone_count != null ? (
+                <DetailField label="Music zones (contracted, from the renewal funnel)">
+                  {company.contracted_zone_count}
+                </DetailField>
+              ) : (
+                <DetailField label="Music zones (counted in the CRM, no contracted number yet)">
+                  {company.music_zone_count}
+                </DetailField>
+              )}
               {company.notes && (
                 <>
                   <Divider />

@@ -28,6 +28,28 @@ import {
 import { useNavigate } from 'react-router-dom';
 import ApiService from '../services/api';
 import { formatMoney } from '../theme';
+import { buildNavGroups } from './navigation';
+
+// Menu pages, searchable by their current name and by the name they had before the redesign.
+const PAGES = buildNavGroups(0).flatMap((g) =>
+  g.items.map((item) => ({ ...item, groupTitle: g.title || 'Home' }))
+);
+
+const matchPages = (q: string): SearchResult[] => {
+  const needle = q.toLowerCase();
+  return PAGES.filter(
+    (p) => p.text.toLowerCase().includes(needle) || (p.formerly || '').toLowerCase().includes(needle)
+  )
+    .slice(0, PER_GROUP)
+    .map((p) => ({
+      key: `page-${p.path}`,
+      group: 'Pages',
+      icon: p.icon,
+      title: p.text,
+      detail: p.formerly ? `${p.groupTitle} · formerly “${p.formerly}”` : p.groupTitle,
+      to: p.path,
+    }));
+};
 
 interface SearchResult {
   key: string;
@@ -84,7 +106,7 @@ const GlobalSearch: React.FC = () => {
     ]);
     if (id !== requestId.current) return; // a newer search has started
 
-    const list: SearchResult[] = [];
+    const list: SearchResult[] = [...matchPages(q)];
     const rows = <T,>(r: PromiseSettledResult<{ results?: T[] }>): T[] =>
       r.status === 'fulfilled' ? (r.value.results || []).slice(0, PER_GROUP) : [];
 
@@ -283,7 +305,7 @@ const GlobalSearch: React.FC = () => {
           {q.length < MIN_CHARS ? (
             <Typography color="text.secondary" sx={{ p: 3, fontSize: '0.875rem' }}>
               Type at least two letters. Finds companies, contacts, contracts, quotes and invoices by name or
-              number.
+              number, and pages of the CRM by their current or former name.
             </Typography>
           ) : !loading && results.length === 0 ? (
             <Typography color="text.secondary" sx={{ p: 3, fontSize: '0.875rem' }}>

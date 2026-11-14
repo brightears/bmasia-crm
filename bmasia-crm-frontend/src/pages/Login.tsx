@@ -75,7 +75,7 @@ const Login: React.FC = () => {
       >
         <Box component="img" src="/bmasia-logo-white.png" alt="BMAsia" sx={{ height: 44, width: 'auto', alignSelf: 'flex-start' }} />
         <Box>
-          <Typography sx={{ fontSize: '2rem', fontWeight: 650, lineHeight: 1.2, letterSpacing: '-0.02em', mb: 2, maxWidth: 440 }}>
+          <Typography sx={{ fontSize: '2rem', fontWeight: 700, lineHeight: 1.2, letterSpacing: '-0.02em', mb: 2, maxWidth: 440 }}>
             Every customer, contract and renewal in one place.
           </Typography>
           <Typography sx={{ color: '#9AA6B2', maxWidth: 420 }}>
