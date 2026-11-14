@@ -356,7 +356,7 @@ const CompanyDetail: React.FC = () => {
             <Tooltip title="Create Task">
               <IconButton
                 aria-label="Create Task"
-                onClick={() => navigate(`/tasks/new?company=${company.id}`)}
+                onClick={() => navigate(`/tasks?new=true&company=${company.id}`)}
                 sx={{ border: 1, borderColor: 'divider' }}
               >
                 <PlaylistAdd fontSize="small" />
