@@ -61,7 +61,8 @@ import QuoteDetail from '../components/QuoteDetail';
 import EmailSendDialog from '../components/EmailSendDialog';
 import { formatDate as formatDisplayDate, formatMoney, statusTone, visuallyHidden } from '../theme';
 import { PageHeader, EmptyState } from '../components/ui';
-import { useListState } from '../hooks/useListState';
+import { useListState, optionValues, idFromList } from '../hooks/useListState';
+import { useListSearchBox } from '../hooks/useListSearchBox';
 
 const statusOptions = [
   { value: '', label: 'All Status' },
@@ -94,7 +95,11 @@ const Quotes: React.FC = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   // Search, filters, sort and page live in the address, so Back returns to the same view.
-  const list = useListState({ q: '', status: '', company: '', sort: '-created_at', page: 0, size: 25 });
+  const list = useListState(
+    { q: '', status: '', company: '', sort: '-created_at', page: 0, size: 25 },
+    { status: optionValues(statusOptions), company: idFromList(companies), sort: optionValues(sortOptions) },
+    companies.length
+  );
   const [search, setSearch] = list.bind('q');
   const [page, setPage] = list.bind('page');
   const [rowsPerPage, setRowsPerPage] = list.bind('size');
@@ -104,6 +109,11 @@ const Quotes: React.FC = () => {
   const [statusFilter, setStatusFilter] = list.bind('status');
   const [companyFilter, setCompanyFilter] = list.bind('company');
   const [sortBy, setSortBy] = list.bind('sort');
+  // The box's own text, written to the address shortly after typing stops.
+  const searchBox = useListSearchBox(search, (text) => {
+    setSearch(text);
+    setPage(0);
+  });
 
   // Form state
   const [formOpen, setFormOpen] = useState(false);
@@ -230,8 +240,7 @@ const Quotes: React.FC = () => {
   }, []);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(event.target.value);
-    setPage(0);
+    searchBox.onChange(event.target.value);
   };
 
   const handleSortChange = (event: any) => {
@@ -417,7 +426,7 @@ const Quotes: React.FC = () => {
             sx={{ flex: '1 1 240px', maxWidth: { md: 380 } }}
             inputProps={{ 'aria-label': 'Search quotes' }}
             placeholder="Search by quote number or company"
-            value={search}
+            value={searchBox.value}
             onChange={handleSearchChange}
             InputProps={{
               startAdornment: (

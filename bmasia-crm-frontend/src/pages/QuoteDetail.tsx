@@ -19,16 +19,21 @@ import {
   Cancel,
   Assignment,
   Print,
+  Receipt,
+  Visibility,
 } from '@mui/icons-material';
 import { Quote } from '../types';
 import ApiService from '../services/api';
 import { QuoteDetail as QuoteDetailComponent } from '../components';
 import { PageHeader } from '../components/ui';
 import { statusTone } from '../theme';
+import { useListReturnPath } from '../hooks/listReturn';
 
 const QuoteDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  // The list view the user came from, when a list passed one along; otherwise the plain list.
+  const listPath = useListReturnPath('/quotes');
   const [quote, setQuote] = useState<Quote | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -120,22 +125,25 @@ const QuoteDetailPage: React.FC = () => {
     }
   };
 
-  const handleConvertToContract = async () => {
+  // As in the quote pop-up: open the contract form pre-filled from this quote, to check and
+  // change before anything is saved. (The Quotes list's Convert creates the contract directly.)
+  const handleConvertToContract = () => {
     if (!quote) return;
+    navigate(`/contracts?new=true&company=${quote.company}&quote=${quote.id}`);
+  };
 
-    if (!window.confirm('Are you sure you want to convert this quote to a contract?')) {
-      return;
-    }
+  const handleCreateInvoice = () => {
+    if (!quote) return;
+    navigate(`/invoices?new=true&company=${quote.company}&quote=${quote.id}`);
+  };
 
+  const handlePreviewPDF = async () => {
+    if (!quote) return;
     try {
-      setLoading(true);
-      await ApiService.convertQuoteToContract(quote.id);
-      setSuccess('Quote converted to contract successfully');
-      loadQuote();
+      const blob = await ApiService.previewQuotePDF(quote.id);
+      window.open(window.URL.createObjectURL(blob), '_blank');
     } catch (err) {
-      setError('Failed to convert quote to contract');
-    } finally {
-      setLoading(false);
+      setError('Failed to preview PDF');
     }
   };
 
@@ -166,7 +174,7 @@ const QuoteDetailPage: React.FC = () => {
   return (
     <Box>
       <PageHeader
-        breadcrumbs={[{ label: 'Quotes', to: '/quotes' }, { label: quote.quote_number }]}
+        breadcrumbs={[{ label: 'Quotes', to: listPath }, { label: quote.quote_number }]}
         title={quote.quote_number}
         subtitle={
           quote.company ? (
@@ -213,21 +221,29 @@ const QuoteDetailPage: React.FC = () => {
             </>
           )}
           {quote.status === 'Accepted' && (
-            <Button
-              variant="contained"
-              startIcon={<Assignment />}
-              onClick={handleConvertToContract}
-              disabled={loading}
-            >
-              Convert to Contract
-            </Button>
+            <>
+              <Button
+                variant="contained"
+                startIcon={<Assignment />}
+                onClick={handleConvertToContract}
+                disabled={loading}
+              >
+                Convert to Contract
+              </Button>
+              <Button variant="outlined" startIcon={<Receipt />} onClick={handleCreateInvoice} disabled={loading}>
+                Create Invoice
+              </Button>
+            </>
           )}
           <Button
             variant="outlined"
             startIcon={<Edit />}
-            onClick={() => navigate(`/quotes?edit=${quote.id}`)}
+            onClick={() => navigate(`${listPath}${listPath.includes('?') ? '&' : '?'}edit=${quote.id}`)}
           >
             Edit
+          </Button>
+          <Button variant="outlined" startIcon={<Visibility />} onClick={handlePreviewPDF}>
+            Preview
           </Button>
           <Button
             variant="outlined"
