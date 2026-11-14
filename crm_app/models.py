@@ -1149,6 +1149,32 @@ class Contract(TimestampedModel):
         """Get count of currently active zones"""
         return self.get_active_zones().count()
 
+    def get_term_links(self):
+        """Zone links that covered any part of this contract's term.
+
+        A link counts when it started on or before the term's end and has no
+        end date or ended on or after the term's start, whether or not it is
+        active today. An open end or start of the term is no limit. This is the
+        basis for documents, template text and zone counts when the contract has
+        no service-location rows: a Renewed term whose links were handed over to
+        its renewal, or a Cancelled term, still shows the zones it covered.
+        """
+        from django.db.models import Q
+        links = self.contract_zones.all()
+        if self.end_date:
+            links = links.filter(start_date__lte=self.end_date)
+        if self.start_date:
+            links = links.filter(Q(end_date__isnull=True) | Q(end_date__gte=self.start_date))
+        return links
+
+    def get_term_zones(self):
+        """Zones linked to this contract during its term (see get_term_links)."""
+        return self.zones.filter(pk__in=self.get_term_links().values('zone_id')).distinct()
+
+    def get_term_zone_count(self):
+        """Count of zones linked to this contract during its term."""
+        return self.get_term_zones().count()
+
 
 class ContractZone(TimestampedModel):
     """

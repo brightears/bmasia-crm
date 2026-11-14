@@ -437,3 +437,79 @@ def test_v1_journal_carries_the_hand_over_and_revert_reopens_it(tmp_path):
     assert _state(old_link) == (True, None)
     old.refresh_from_db()
     assert old.status == 'Active'
+
+
+# --- documents fall back to the links that covered the term ------------------------------
+
+def _pdf_text(contract):
+    from io import BytesIO
+    from pypdf import PdfReader
+    from rest_framework.test import APIClient
+    client = APIClient()
+    client.force_authenticate(user=User.objects.create_user(
+        username=f'handover-pdf-{next(_numbers)}', role='Admin', is_active=True))
+    response = client.get(f'/api/v1/contracts/{contract.pk}/pdf/')
+    assert response.status_code == 200, getattr(response, 'data', None)
+    return ' '.join(' '.join(p.extract_text() or '' for p in PdfReader(BytesIO(response.content)).pages).split())
+
+
+def _named_zone(company, name, platform='soundtrack'):
+    return Zone.objects.create(company=company, name=name, status='online', platform=platform)
+
+
+def test_term_links_cover_the_term_only():
+    company = _company()
+    c = _contract(company, start=date(2025, 1, 1), end=date(2025, 12, 31))
+    inside = _link(c, _zone(company), is_active=False, end_date=date(2025, 12, 31))
+    open_link = _link(c, _zone(company))
+    _link(c, _zone(company), start=date(2024, 1, 1), is_active=False, end_date=date(2024, 12, 31))  # before the term
+    _link(c, _zone(company), start=date(2026, 1, 1))                                              # after the term
+    assert sorted(l.pk for l in c.get_term_links()) == sorted([inside.pk, open_link.pk])
+    assert c.get_term_zone_count() == 2
+
+
+def test_a_renewed_term_whose_links_were_handed_over_still_shows_its_zones():
+    from crm_app.views import ContractViewSet, _contract_zone_count
+    company = _company()
+    old = _contract(company, start=date(2025, 1, 1), end=date(2025, 12, 31))
+    new = _contract(company, status='Sent', start=date(2026, 1, 1), renewed_from=old)
+    zones = [_named_zone(company, 'Rooftop Terrace'), _named_zone(company, 'Garden Lounge', platform='beatbreeze')]
+    for z in zones:
+        _link(old, z), _link(new, z)
+    assert _rest_patch(new, {'status': 'Active'}).status_code == 200
+    old.refresh_from_db()
+    assert old.status == 'Renewed' and not ContractZone.objects.filter(contract=old, is_active=True).exists()
+    assert old.get_zone_count() == 0                       # nothing active today ...
+    assert _contract_zone_count(old) == 2                  # ... but the documents count the term's zones
+    assert ContractViewSet._template_zone_count(old) == 2
+    assert sorted(ContractViewSet()._template_service_labels(old)) == ['Beat Breeze', 'Soundtrack Your Brand']
+    text = _pdf_text(old)
+    assert 'Rooftop Terrace' in text and 'Garden Lounge' in text
+
+
+def test_a_cancelled_term_whose_links_were_redated_still_shows_its_zones(tmp_path):
+    from crm_app.views import _contract_zone_count
+    company = _company()
+    c = _contract(company, status='Cancelled', start=date(2025, 6, 1), end=date(2026, 5, 30))
+    for name in ('Harbour Bar', 'Sky Pool'):
+        _link(c, _named_zone(company, name), is_active=False, end_date=date(2026, 11, 14))
+    _execute(tmp_path, _file(tmp_path, [_redate(c)]))
+    assert set(ContractZone.objects.filter(contract=c).values_list('end_date', flat=True)) == {date(2026, 5, 30)}
+    assert _contract_zone_count(c) == 2
+    text = _pdf_text(c)
+    assert 'Harbour Bar' in text and 'Sky Pool' in text
+
+
+def test_the_repair_op_hands_over_a_zone_linked_to_the_renewal_after_it_went_active(tmp_path):
+    company = _company()
+    old = _contract(company, start=date(2025, 1, 1))
+    new = _contract(company, status='Sent', start=date(2026, 1, 1), renewed_from=old)
+    zone = _zone(company)
+    old_link = _link(old, zone)
+    assert _rest_patch(new, {'status': 'Active'}).status_code == 200  # the renewal held no zone then
+    assert _state(old_link) == (True, None)
+    _link(new, zone)                                                   # linked to the renewal afterwards
+    out, _ = _execute(tmp_path, _file(tmp_path, [_handover(Contract.objects.get(pk=old.pk), new)]))
+    assert '[APPLIED] Z hand_over_zone_links' in out
+    assert _state(old_link) == (False, date(2025, 12, 31))
+    assert zone.get_active_contract() == new
