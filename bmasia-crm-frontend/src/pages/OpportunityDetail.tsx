@@ -50,6 +50,7 @@ import ActivityForm from '../components/ActivityForm';
 import { formatCurrency, getServiceLabel } from '../constants/entities';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 import { PageHeader, ProductChip } from '../components/ui';
+import { useListReturnPath } from '../hooks/listReturn';
 import { statusTone, status } from '../theme';
 
 const stageConfig = [
@@ -63,6 +64,8 @@ const stageConfig = [
 const OpportunityDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  // The list view the user came from (search, filters, page), for the breadcrumb and after delete.
+  const listPath = useListReturnPath('/opportunities');
 
   const [opportunity, setOpportunity] = useState<Opportunity | null>(null);
   const [activities, setActivities] = useState<OpportunityActivity[]>([]);
@@ -143,7 +146,7 @@ const OpportunityDetail: React.FC = () => {
   const handleDelete = async () => {
     try {
       await ApiService.deleteOpportunity(id!);
-      navigate('/opportunities');
+      navigate(listPath);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to delete opportunity');
     }
@@ -177,7 +180,7 @@ const OpportunityDetail: React.FC = () => {
     return (
       <Box>
         <Alert severity="error">{error || 'Opportunity not found'}</Alert>
-        <Button startIcon={<ArrowBack />} onClick={() => navigate('/opportunities')} sx={{ mt: 2 }}>
+        <Button startIcon={<ArrowBack />} onClick={() => navigate(listPath)} sx={{ mt: 2 }}>
           Back to Opportunities
         </Button>
       </Box>
@@ -187,7 +190,7 @@ const OpportunityDetail: React.FC = () => {
   return (
     <Box>
       <PageHeader
-        breadcrumbs={[{ label: 'Opportunities', to: '/opportunities' }, { label: opportunity.name }]}
+        breadcrumbs={[{ label: 'Opportunities', to: listPath }, { label: opportunity.name }]}
         title={opportunity.name}
         subtitle={
           <Box component="span" sx={{ display: 'inline-flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'center' }}>

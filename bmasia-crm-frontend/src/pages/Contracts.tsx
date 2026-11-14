@@ -51,6 +51,8 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Contract, ApiResponse, Contact } from '../types';
 import ApiService, { EmailSendData } from '../services/api';
 import ContractForm from '../components/ContractForm';
+import { useListState, optionValues } from '../hooks/useListState';
+import { useListSearchBox } from '../hooks/useListSearchBox';
 import { PageHeader, EmptyState } from '../components/ui';
 import EmailSendDialog from '../components/EmailSendDialog';
 import { formatDate as formatDisplayDate, formatMoney, statusTone, visuallyHidden } from '../theme';
@@ -102,33 +104,20 @@ const Contracts: React.FC = () => {
 
   // Search, filters, sort and page live in the address (?q=&status=&type=&sort=&page=&size=),
   // so Back or the breadcrumb from a contract page returns to the same view of the list.
-  const search = searchParams.get('q') || '';
-  const statusFilter = searchParams.get('status') || '';
-  const typeFilter = searchParams.get('type') || '';
-  const sortBy = searchParams.get('sort') || DEFAULT_SORT;
-  const page = Math.max(0, (parseInt(searchParams.get('page') || '1', 10) || 1) - 1);
-  const rowsPerPage = parseInt(searchParams.get('size') || '', 10) || DEFAULT_ROWS;
+  // Unknown values in the address fall back to the defaults.
+  const list = useListState(
+    { q: '', status: '', type: '', sort: DEFAULT_SORT, page: 0, size: DEFAULT_ROWS },
+    { status: optionValues(statusOptions), type: optionValues(typeOptions), sort: optionValues(sortOptions) }
+  );
+  const { q: search, status: statusFilter, type: typeFilter, sort: sortBy, page, size: rowsPerPage } = list.values;
 
-  /** Changes several list settings in one address update; empty or default values are dropped. */
-  const updateList = (changes: Record<string, string | number | null>) => {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        Object.entries(changes).forEach(([key, value]) => {
-          const isDefault =
-            value === null ||
-            value === '' ||
-            (key === 'page' && Number(value) <= 1) ||
-            (key === 'sort' && value === DEFAULT_SORT) ||
-            (key === 'size' && Number(value) === DEFAULT_ROWS);
-          if (isDefault) next.delete(key);
-          else next.set(key, String(value));
-        });
-        return next;
-      },
-      { replace: true }
-    );
+  /** Changes several list settings in one address update; null or default values are dropped. */
+  const updateList = (changes: Partial<Record<keyof typeof list.values, string | number | null>>) => {
+    Object.entries(changes).forEach(([key, value]) => list.set(key as any, value as any));
   };
+
+  // The box's own text, written to the address shortly after typing stops.
+  const searchBox = useListSearchBox(search, (text) => updateList({ q: text, page: null }));
 
   // Form state
   const [formOpen, setFormOpen] = useState(false);
@@ -198,7 +187,7 @@ const Contracts: React.FC = () => {
   }, [loadContracts]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    updateList({ q: event.target.value, page: null });
+    searchBox.onChange(event.target.value);
   };
 
   const handleSortChange = (event: any) => {
@@ -206,7 +195,7 @@ const Contracts: React.FC = () => {
   };
 
   const handleChangePage = (event: unknown, newPage: number) => {
-    updateList({ page: newPage + 1 });
+    updateList({ page: newPage });
   };
 
   const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -417,7 +406,7 @@ const Contracts: React.FC = () => {
             sx={{ flex: '1 1 260px', maxWidth: { md: 420 } }}
             inputProps={{ 'aria-label': 'Search contracts' }}
             placeholder="Search by contract number or company"
-            value={search}
+            value={searchBox.value}
             onChange={handleSearchChange}
             InputProps={{
               startAdornment: (
