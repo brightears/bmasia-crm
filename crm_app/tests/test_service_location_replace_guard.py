@@ -55,7 +55,9 @@ def test_empty_replacement_from_the_form_is_refused_and_keeps_rows():
     before = _state(contract)
     response = _patch(contract, {'notes': 'edited', 'service_locations': [], 'replace_service_locations': True})
     assert response.status_code == 400
-    assert 'would delete 3 existing service location' in str(response.data['service_locations'])
+    message = str(response.data['service_locations'])
+    assert 'would delete 3 existing service location' in message
+    assert 'If you are using the CRM website, reload the page and try again.' in message
     assert _state(contract) == before
     contract.refresh_from_db()
     assert contract.notes != 'edited'  # the whole update rolled back

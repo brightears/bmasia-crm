@@ -5,8 +5,8 @@
  * The form derives *new* rows from music line items, but saved rows must never disappear as a side
  * effect of opening and saving a contract:
  *  - on load the saved rows are shown as they are (no re-derivation from line items);
- *  - a line-item change only trims rows of a product group that line items actually back
- *    (rows imported or back-filled without line items are left alone);
+ *  - a line-item change only re-derives the product groups whose required count changed, and only
+ *    by the size of that change (rows imported or back-filled without line items are left alone);
  *  - the save payload carries rows only when they changed in this session, and names every saved
  *    row it removes in `remove_service_location_ids` (the API refuses any other deletion).
  */
@@ -58,28 +58,48 @@ export function requiredGroups(lineItems: LineItemLike[], lookup: PlatformLookup
   return groups;
 }
 
+/** Required row count per product group, as recorded after the previous sync (or at load). */
+export type RequiredCounts = Map<string, number>;
+
+export const requiredCounts = (groups: Map<string, Group>): RequiredCounts =>
+  new Map(Array.from(groups.entries()).map(([key, g]) => [key, g.required]));
+
+export const sameCounts = (a: RequiredCounts, b: RequiredCounts): boolean => {
+  const keys = new Set([...Array.from(a.keys()), ...Array.from(b.keys())]);
+  return Array.from(keys).every(key => (a.get(key) || 0) === (b.get(key) || 0));
+};
+
 export interface SyncResult {
   locations: ServiceLocationEntry[];
-  /** Saved rows (with an id) dropped by this sync; they are removed only when the form is saved. */
-  droppedSavedCount: number;
-  droppedNamedCount: number;
+  /** Saved rows (with an id) dropped so far and not restored; deleted only when the form is saved. */
+  parked: ServiceLocationEntry[];
+  /** Named rows that were never saved and are dropped now. */
+  droppedUnsavedNamedCount: number;
+  /** Blank rows added for a quantity increase. */
+  addedCount: number;
+  /** Parked saved rows put back by a quantity increase. */
+  restoredCount: number;
 }
 
 /**
- * Re-derive rows after a line-item change.
- *
- * @param lineBacked keys of groups that line items back now or backed earlier in this session
- *                   (a group whose line item was deleted is trimmed to zero; a group never backed by
- *                   a line item keeps all its rows).
+ * Re-derive rows after a line-item change, group by group, from the change in each group's
+ * required count since the previous sync:
+ *  - unchanged group: untouched (whatever its rows vs. its quantity);
+ *  - count went up: first put back saved rows parked by an earlier decrease, then add blank rows,
+ *    only up to the new count (a group that already has more rows than the new count gets nothing);
+ *  - count went down by d: drop at most d rows, never going below the new count; unnamed and unsaved
+ *    rows go first, saved named rows last.
+ * Groups no line item ever backed are never touched.
  */
 export function syncLocationsFromLineItems(
   lineItems: LineItemLike[],
   current: ServiceLocationEntry[],
   lookup: PlatformLookup,
-  lineBacked: Set<string>,
+  previous: RequiredCounts,
   newTempId: () => string,
+  parkedBefore: ServiceLocationEntry[] = [],
 ): SyncResult {
-  const required = requiredGroups(lineItems, lookup);
+  const groups = requiredGroups(lineItems, lookup);
   const order: string[] = [];
   const byGroup = new Map<string, ServiceLocationEntry[]>();
   for (const loc of current) {
@@ -90,7 +110,7 @@ export function syncLocationsFromLineItems(
     }
     byGroup.get(key)!.push(loc);
   }
-  for (const key of Array.from(required.keys())) {
+  for (const key of Array.from(groups.keys())) {
     if (!byGroup.has(key)) {
       byGroup.set(key, []);
       order.push(key);
@@ -98,20 +118,27 @@ export function syncLocationsFromLineItems(
   }
 
   const result: ServiceLocationEntry[] = [];
-  let droppedSavedCount = 0;
-  let droppedNamedCount = 0;
+  let parked = [...parkedBefore];
+  let droppedUnsavedNamedCount = 0;
+  let addedCount = 0;
+  let restoredCount = 0;
   for (const key of order) {
     const rows = byGroup.get(key)!;
-    const group = required.get(key);
-    if (!group && !lineBacked.has(key)) {
-      result.push(...rows); // never derived from line items: leave untouched
-      continue;
-    }
-    const want = group ? group.required : 0;
-    if (rows.length <= want) {
+    const before = previous.get(key) || 0;
+    const now = groups.get(key)?.required || 0;
+    if (now > before) {
       result.push(...rows);
-      const sample = group!;
-      for (let i = rows.length; i < want; i++) {
+      const sample = groups.get(key)!;
+      let have = rows.length;
+      for (const loc of parked.filter(p => groupKey(p) === key)) {
+        if (have >= now) break;
+        result.push(loc);
+        parked = parked.filter(p => p.tempId !== loc.tempId);
+        restoredCount += 1;
+        have += 1;
+      }
+      for (let i = have; i < now; i++) {
+        addedCount += 1;
         result.push({
           location_name: '', platform: sample.platform, tempId: newTempId(),
           ...(sample.platform === 'custom' ? { custom_service_name: sample.custom_service_name } : {}),
@@ -119,23 +146,41 @@ export function syncLocationsFromLineItems(
       }
       continue;
     }
-    // Too many rows: drop unnamed unsaved rows first, then unnamed saved, named unsaved, named saved.
-    const rank = (loc: ServiceLocationEntry) =>
-      (loc.location_name.trim() ? 2 : 0) + (loc.id ? 1 : 0);
+    const toDrop = Math.min(before - now, Math.max(0, rows.length - now));
+    if (toDrop <= 0) {
+      result.push(...rows); // unchanged group, or already at/below the new count
+      continue;
+    }
+    const rank = (loc: ServiceLocationEntry) => (loc.location_name.trim() ? 2 : 0) + (loc.id ? 1 : 0);
     const dropOrder = rows
       .map((loc, index) => ({ loc, index }))
       .sort((a, b) => rank(a.loc) - rank(b.loc) || b.index - a.index);
-    const drop = new Set(dropOrder.slice(0, rows.length - want).map(x => x.loc.tempId));
+    const drop = new Set(dropOrder.slice(0, toDrop).map(x => x.loc.tempId));
     for (const loc of rows) {
-      if (drop.has(loc.tempId)) {
-        if (loc.id) droppedSavedCount += 1;
-        if (loc.location_name.trim()) droppedNamedCount += 1;
-      } else {
+      if (!drop.has(loc.tempId)) {
         result.push(loc);
+      } else if (loc.id) {
+        parked.push(loc);
+      } else if (loc.location_name.trim()) {
+        droppedUnsavedNamedCount += 1;
       }
     }
   }
-  return { locations: result, droppedSavedCount, droppedNamedCount };
+  return { locations: result, parked, droppedUnsavedNamedCount, addedCount, restoredCount };
+}
+
+/** Plain-language note for the user after a sync, or '' when nothing needs saying. */
+export function syncWarning(result: SyncResult): string {
+  const parts: string[] = [];
+  if (result.parked.length) {
+    const names = result.parked.map(loc => loc.location_name.trim() || '(unnamed)').join(', ');
+    parts.push(`A music line item quantity was lowered, so ${result.parked.length} saved location(s) `
+      + `(${names}) will be deleted when you save. Raise the quantity again to keep them.`);
+  }
+  if (result.droppedUnsavedNamedCount) {
+    parts.push(`${result.droppedUnsavedNamedCount} new location(s) you had named were removed because the quantity was lowered.`);
+  }
+  return parts.join(' ');
 }
 
 /** Did the rows change in this session compared with what the form loaded? */

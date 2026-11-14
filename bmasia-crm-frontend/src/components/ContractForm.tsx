@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  RequiredCounts,
   ServiceLocationEntry,
   buildServiceLocationPayload,
   locationsChanged,
+  requiredCounts,
   requiredGroups,
+  sameCounts,
   syncLocationsFromLineItems,
+  syncWarning,
 } from '../utils/serviceLocations';
 import {
   Dialog,
@@ -169,9 +173,6 @@ const generateTempId = () => `temp-${Date.now()}-${Math.random()}`;
 const platformOfProduct = (productService: string) =>
   PRODUCT_OPTIONS.find(p => p.name === productService)?.platform;
 
-const requiredSignature = (required: ReturnType<typeof requiredGroups>) =>
-  Array.from(required.entries()).map(([key, g]) => `${key}=${g.required}`).sort().join('|');
-
 const ContractForm: React.FC<ContractFormProps> = ({
   open,
   onClose,
@@ -229,10 +230,11 @@ const ContractForm: React.FC<ContractFormProps> = ({
   const isFormInitialized = useRef(false);
   // Rows as loaded (edit) — the save sends rows only when they differ from this.
   const initialLocations = useRef<ServiceLocationEntry[]>([]);
-  // Product groups backed by music line items at load or later in this session.
-  const lineBackedGroups = useRef<Set<string>>(new Set());
-  // Row counts the line items asked for last time; rows are re-derived only when these change.
-  const lastRequiredCounts = useRef<string>('');
+  // Row count per product group the line items asked for at the last sync (or at load); only groups
+  // whose count changes are re-derived, and only by the size of the change.
+  const lastRequiredCounts = useRef<RequiredCounts>(new Map());
+  // Saved rows dropped by a quantity decrease; deleted on save unless a later increase puts them back.
+  const parkedLocations = useRef<ServiceLocationEntry[]>([]);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [masterContracts, setMasterContracts] = useState<Contract[]>([]);
   const [additionalSignatories, setAdditionalSignatories] = useState<CustomerSignatoryEntry[]>([]);
@@ -425,9 +427,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
       }));
     }
 
-    const loadedRequired = requiredGroups(contractLineItems, platformOfProduct);
-    lineBackedGroups.current = new Set(Array.from(loadedRequired.keys()));
-    lastRequiredCounts.current = requiredSignature(loadedRequired);
+    lastRequiredCounts.current = requiredCounts(requiredGroups(contractLineItems, platformOfProduct));
+    parkedLocations.current = [];
     initialLocations.current = dbLocations;
     setServiceLocations(dbLocations);
     setLineItems(contractLineItems);
@@ -477,8 +478,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
     });
     currencyEdited.current = false;
     initialLocations.current = [];
-    lineBackedGroups.current = new Set();
-    lastRequiredCounts.current = '';
+    lastRequiredCounts.current = new Map();
+    parkedLocations.current = [];
     setServiceLocations([]);
     setAttachments([]);
     setAdditionalSignatories([]);
@@ -652,20 +653,18 @@ const ContractForm: React.FC<ContractFormProps> = ({
   // and the save names them explicitly.
   useEffect(() => {
     if (!isFormInitialized.current) return;
-    const required = requiredGroups(lineItems, platformOfProduct);
-    const signature = requiredSignature(required);
-    if (signature === lastRequiredCounts.current) return;
-    lastRequiredCounts.current = signature;
-    Array.from(required.keys()).forEach(key => lineBackedGroups.current.add(key));
-    const { locations, droppedSavedCount, droppedNamedCount } = syncLocationsFromLineItems(
-      lineItems, serviceLocations, platformOfProduct, lineBackedGroups.current, generateTempId,
+    const now = requiredCounts(requiredGroups(lineItems, platformOfProduct));
+    if (sameCounts(now, lastRequiredCounts.current)) return;
+    const result = syncLocationsFromLineItems(
+      lineItems, serviceLocations, platformOfProduct, lastRequiredCounts.current, generateTempId,
+      parkedLocations.current,
     );
-    setServiceLocations(locations);
-    if (droppedSavedCount > 0) {
-      setLocationsTrimmedWarning(
-        `${droppedSavedCount} saved location(s) will be removed when you save, because the line item quantities went down`);
-    } else if (droppedNamedCount > 0) {
-      setLocationsTrimmedWarning(`${droppedNamedCount} named location(s) removed due to quantity decrease`);
+    lastRequiredCounts.current = now;
+    parkedLocations.current = result.parked;
+    setServiceLocations(result.locations);
+    const warning = syncWarning(result);
+    if (warning) {
+      setLocationsTrimmedWarning(warning);
     } else {
       setLocationsTrimmedWarning('');
     }
@@ -1593,9 +1592,9 @@ const ContractForm: React.FC<ContractFormProps> = ({
                 </Typography>
               </Box>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                New locations are generated from music line items above. Saved locations are kept as they are
-                unless you lower a music line item's quantity; any saved location that removes is named in the
-                warning above and deleted only when you save.
+                New locations are generated from music line items above. Saved locations are kept as they are;
+                only lowering a music line item's quantity removes any, and the warning above names them before
+                they are deleted on save.
               </Typography>
 
               {locationsTrimmedWarning && (

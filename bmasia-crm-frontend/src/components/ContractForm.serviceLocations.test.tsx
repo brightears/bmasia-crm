@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import ContractForm from './ContractForm';
 import ApiService from '../services/api';
 import { Contract } from '../types';
@@ -84,4 +84,47 @@ test('renaming a saved location sends the full list by id and removes nothing', 
     { id: 'row-a', location_name: 'Front desk', platform: 'soundtrack', sort_order: 0 },
     { id: 'row-b', location_name: 'Pool', platform: 'custom', sort_order: 1, custom_service_name: 'Beat Breeze' },
   ]);
+});
+
+// Review scenario A in the real form: 3 saved Soundtrack rows, one Soundtrack line item.
+const backfilled = (quantity: number) => ({
+  ...contract,
+  line_items: [{ id: 'li-1', product_service: 'Soundtrack Your Brand', description: '', quantity,
+    unit_price: 300, discount_percentage: 0, tax_rate: 0, line_total: 300 * quantity }],
+  service_locations: [
+    { id: 'row-a', location_name: 'Lobby', platform: 'soundtrack', sort_order: 0 },
+    { id: 'row-b', location_name: 'Pool', platform: 'soundtrack', sort_order: 1 },
+    { id: 'row-c', location_name: 'Spa', platform: 'soundtrack', sort_order: 2 },
+  ],
+}) as unknown as Contract;
+
+const quantityInput = () => screen.getAllByRole('spinbutton')
+  .find(el => (el as HTMLInputElement).getAttribute('min') === '0' && (el as HTMLInputElement).getAttribute('step') === '1')!;
+
+const openForm = async (c: Contract) => {
+  render(<ContractForm open mode="edit" contract={c} onClose={jest.fn()} onSave={jest.fn()} />);
+  await waitFor(() => expect(ApiService.getCompaniesSimple).toHaveBeenCalled());
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); }); // form initialised
+};
+
+test('raising a music quantity on a contract with more saved rows than the quantity keeps every row', async () => {
+  await openForm(backfilled(1));
+  fireEvent.change(quantityInput(), { target: { value: '2' } });
+  expect(screen.queryByText(/will be deleted when you save/i)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: /update contract/i }));
+  await waitFor(() => expect(ApiService.updateContract).toHaveBeenCalled());
+  const payload = (ApiService.updateContract as jest.Mock).mock.calls[0][1];
+  expect(payload).not.toHaveProperty('service_locations');
+  expect(payload).not.toHaveProperty('remove_service_location_ids');
+});
+
+test('lowering a music quantity names the saved row in the warning and removes only that row', async () => {
+  await openForm(backfilled(3));
+  fireEvent.change(quantityInput(), { target: { value: '2' } });
+  expect(screen.getByText(/1 saved location\(s\) \(Spa\) will be deleted when you save/i)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: /update contract/i }));
+  await waitFor(() => expect(ApiService.updateContract).toHaveBeenCalled());
+  const payload = (ApiService.updateContract as jest.Mock).mock.calls[0][1];
+  expect(payload.remove_service_location_ids).toEqual(['row-c']);
+  expect(payload.service_locations.map((r: { id: string }) => r.id)).toEqual(['row-a', 'row-b']);
 });

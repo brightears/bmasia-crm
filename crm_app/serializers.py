@@ -1190,7 +1190,8 @@ class ContractSerializer(serializers.ModelSerializer):
                         f"This replacement would delete {len(implicit)} existing service location(s) "
                         "that the request does not name for removal. No rows were changed. Include "
                         "them (by id) in service_locations to keep them, or list their ids in "
-                        "remove_service_location_ids to delete them."
+                        "remove_service_location_ids to delete them. If you are using the CRM "
+                        "website, reload the page and try again."
                     )
                 })
 
