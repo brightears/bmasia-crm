@@ -608,6 +608,90 @@ def test_revert_never_deletes_a_touched_created_contract(tmp_path, touch):
     assert Contract.objects.get(pk=old.pk).status == 'Renewed'
 
 
+def test_create_may_start_on_the_old_contracts_start_for_a_longer_term(tmp_path):
+    old = _contract(_company(), status='Expired', start=PLACEHOLDER_START)  # 2025 placeholder
+    rows = [{'location_name': 'Zone 1', 'platform': 'beatbreeze', 'price': '260.00'}]
+    entry = _create(old, start_date='2025-01-01', end_date='2026-12-31', value='260.00', service_locations=rows)
+    out, _ = _execute(tmp_path, _file(tmp_path, [entry]))
+    assert '[APPLIED]' in out
+    new = _created_for(old)
+    assert (new.start_date, new.end_date) == (date(2025, 1, 1), date(2026, 12, 31))
+    assert Contract.objects.get(pk=old.pk).status == 'Renewed'
+
+
+# --- create_successor: zone links carried over ------------------------------------------------
+
+def _old_with_links(status='Expired'):
+    old = _contract(_company(), status=status, start=date(2025, 3, 1))
+    z1, l1 = _zone_link(old)
+    z2, l2 = _zone_link(old, status='offline')
+    z3, l3 = _zone_link(old)
+    ContractZone.objects.filter(pk=l3.pk).update(is_active=False, end_date=date(2025, 9, 1))  # ended: history
+    return old, (z1, z2, z3), (l1, l2, l3)
+
+
+def test_create_copies_the_old_contracts_active_zone_links(tmp_path):
+    old, (z1, z2, z3), (l1, l2, l3) = _old_with_links()
+    out = _run('--file', _file(tmp_path, [_create(old)]))
+    assert 'copies 2 active zone link(s) to the new term' in out
+    out, journal_path = _execute(tmp_path, _file(tmp_path, [_create(old)], 'b.json'))
+    new = _created_for(old)
+    links = list(ContractZone.objects.filter(contract=new))
+    assert sorted(l.zone_id for l in links) == sorted([z1.pk, z2.pk])
+    assert all(l.start_date == date(2026, 3, 1) and l.is_active and l.end_date is None for l in links)
+    for link, active, end in ((l1, True, None), (l2, True, None), (l3, False, date(2025, 9, 1))):
+        link.refresh_from_db()
+        assert (link.is_active, link.end_date, link.contract_id) == (active, end, old.pk)  # old links untouched
+    _reload(z1, z2)
+    assert (z1.status, z2.status) == ('online', 'offline')
+    audit = _audits(new.pk, 'CREATE').get()
+    assert sorted(audit.additional_data['zone_links_copied']) == sorted([str(z1.pk), str(z2.pk)])
+    assert audit.changes['zone_links'] == {'old': 0, 'new': 2}
+    created = json.loads(open(journal_path).read())['groups'][0]['ops'][0]['created']
+    assert sorted(z['id'] for z in created['zone_links']) == sorted(str(l.pk) for l in links)
+
+
+def test_revert_removes_the_copied_zone_links_only(tmp_path):
+    old, (z1, z2, _), (l1, l2, _) = _old_with_links(status='Active')
+    _, journal_path = _execute(tmp_path, _file(tmp_path, [_create(old)]))
+    new = _created_for(old)
+    copied = list(ContractZone.objects.filter(contract=new).values_list('pk', flat=True))
+    out = _run('--revert', journal_path, '--execute')
+    assert '2 copied zone link(s) removed' in out
+    assert not ContractZone.objects.filter(pk__in=copied).exists()
+    assert not Contract.objects.filter(pk=new.pk).exists()
+    for link in (l1, l2):
+        link.refresh_from_db()
+        assert link.is_active is True and link.contract_id == old.pk
+    assert Zone.objects.filter(pk__in=[z1.pk, z2.pk]).count() == 2
+    assert Contract.objects.get(pk=old.pk).status == 'Active'
+
+
+def test_revert_treats_a_changed_copied_link_as_touched(tmp_path):
+    old, _, _ = _old_with_links()
+    _, journal_path = _execute(tmp_path, _file(tmp_path, [_create(old)]))
+    new = _created_for(old)
+    ContractZone.objects.filter(contract=new).update(is_active=False, end_date=date(2026, 6, 1))
+    out = _run('--revert', journal_path, '--execute')
+    assert '[SKIPPED:created_contract_touched]' in out
+    assert Contract.objects.filter(pk=new.pk).exists()
+
+
+def test_create_is_not_refused_when_a_zone_is_also_held_by_another_live_contract(tmp_path):
+    company = _company()
+    old = _contract(company, status='Expired', start=date(2025, 3, 1))
+    sister = _contract(company, status='Active', start=date(2024, 6, 1), end=date(2025, 5, 31))
+    zone, _ = _zone_link(old)
+    ContractZone.objects.create(contract=sister, zone=zone, start_date=sister.start_date)
+    out, _ = _execute(tmp_path, _file(tmp_path, [_create(old)]))
+    assert '[APPLIED]' in out
+    new = _created_for(old)
+    assert list(ContractZone.objects.filter(contract=new).values_list('zone_id', flat=True)) == [zone.pk]
+    assert ContractZone.objects.filter(contract=sister, zone=zone, is_active=True).exists()
+    zone.refresh_from_db()
+    assert zone.status == 'online'
+
+
 # --- file handling ---------------------------------------------------------------------------
 
 def test_duplicate_contract_in_file_refuses_both_groups(tmp_path):
@@ -656,7 +740,7 @@ def _valid_create():
     (lambda e: e.update({'class': 'lower'}), 'class must match'),
     (lambda e: e['new'].update(status='Draft'), 'must be Active'),
     (lambda e: e['new'].update(end_date='2026-01-01'), 'before start_date'),
-    (lambda e: e['new'].update(start_date='2024-12-01', end_date='2025-11-30'), 'must start after'),
+    (lambda e: e['new'].update(start_date='2024-12-01', end_date='2025-11-30'), 'must not start before'),
     (lambda e: e['new'].update(value='12.345'), 'at most 2 decimals'),
     (lambda e: e['new'].update(value=900), 'decimal string'),
     (lambda e: e['new'].update(currency='EUR'), 'currency'),

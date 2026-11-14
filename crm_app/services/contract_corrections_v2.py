@@ -50,6 +50,8 @@ REFUSALS (named reasons; nothing in the group is written)
   currency_mismatch, billing_entity_unresolved, new_term_not_later,
   open_renewal_exists, active_renewal_exists, overlapping_contract,
   missing_twin_company, service_location_pricing_mismatch,
+  (new_term_not_later: the new term starts before the old one; the same start
+  is allowed, for a placeholder whose real term is a longer one),
   number_reservation_failed, rule_did_not_close_old_term(<outcome>).
 
 CREATE (create_successor)
@@ -67,9 +69,14 @@ CREATE (create_successor)
       lifecycle_type 'renewal' (lifecycle_type_manually_set True, as the Rene
       renewal clone does), a final HK-CT/TH-CT number from the collision-safe
       reservation helper (never Contract.save()'s unchecked minting).
+  Zone links: every zone the old contract actively covers gets a new
+  ContractZone link on the new contract (start_date = the new term's start,
+  is_active True), as ContractViewSet.duplicate_for_renewal does. The old
+  contract's links are left as they are. A zone that is also linked to another
+  live contract is not a refusal here (nothing is released).
   Never copied: contacts, signatories, custom terms, template selections and
   their custom text, payment terms/schedule, discount, quote, opportunity,
-  line items, service items, zone links.
+  line items, service items.
   Refused when another contract of the company, or of a listed twin company,
   overlaps the new term (Cancelled contracts and the old contract itself
   excepted), when the old contract has a Draft/Sent (or Active) renewal, when
@@ -89,9 +96,11 @@ REVERT
     create_successor DELETES the created contract (and its service-location
                      rows) and restores the old contract, but only while the
                      created contract is untouched: same updated_at, same
-                     service-location rows, and no other row of any kind
-                     pointing at it (invoices, documents, zone links, renewals,
-                     tasks, emails, ...). A touched contract is never deleted
+                     service-location rows, the copied zone links unchanged
+                     and no other row of any kind pointing at it (invoices,
+                     documents, other zone links, renewals, tasks, emails,
+                     ...). Deleting it removes the copied links with it; the
+                     old contract's links were never changed. A touched contract is never deleted
                      and never auto-cancelled: the group is skipped as
                      created_contract_touched for a human to decide. The final
                      number is not handed back (a gap in the sequence).
@@ -374,8 +383,8 @@ def parse_v2(data):
                 twin_company_ids=sorted({_uuid(t, f'{where} twin_company_ids') for t in twins}),
                 new=_new_term(raw['new'], f'{where} new'),
             )
-            if entry.new.start <= entry.expected.start:
-                raise _malformed(f'{where}: the new term must start after the old term starts')
+            if entry.new.start < entry.expected.start:
+                raise _malformed(f'{where}: the new term must not start before the old term starts')
         else:
             contract_id = _uuid(raw['contract_id'], f'{where} contract_id')
             entry = EntryV2(**common, contract_id=contract_id,
@@ -465,11 +474,16 @@ def _matching_successor(old, new):
     ).order_by('created_at', 'id').first())
 
 
-def _inbound_rows(contract):
-    """Names of relations, other than service locations, that point at the contract."""
+def _inbound_rows(contract, own_links=()):
+    """Names of relations, other than service locations and the zone links this
+    command created (``own_links``), that point at the contract."""
     found = []
     for rel in Contract._meta.related_objects:
         if rel.related_model is ContractServiceLocation:
+            continue
+        if rel.related_model is ContractZone:
+            if ContractZone.objects.filter(contract=contract).exclude(pk__in=list(own_links)).exists():
+                found.append(rel.get_accessor_name())
             continue
         accessor = rel.get_accessor_name()
         if rel.one_to_one:
@@ -478,6 +492,8 @@ def _inbound_rows(contract):
         elif getattr(contract, accessor).exists():
             found.append(accessor)
     for m2m in Contract._meta.many_to_many:
+        if m2m.name == 'zones':  # through ContractZone, checked above
+            continue
         if getattr(contract, m2m.name).exists():
             found.append(m2m.name)
     return sorted(set(found))
@@ -694,7 +710,7 @@ class V2Runner:
             document_region(c)
         except ValueError:
             raise Refused('billing_entity_unresolved')
-        if not new.start > c.start_date:
+        if new.start < c.start_date:
             raise Refused('new_term_not_later')
         renewals = Contract.objects.select_for_update().filter(renewed_from_id=c.pk).order_by('pk')
         if any(r.status in ('Draft', 'Sent') for r in renewals):
@@ -709,14 +725,14 @@ class V2Runner:
             raise Refused('overlapping_contract')
         if self._pricing_mismatch(new):
             raise Refused('service_location_pricing_mismatch')
-        links = ContractZone.objects.filter(contract=c, is_active=True).count()
+        links = ContractZone.objects.filter(contract=c, is_active=True).values('zone_id').distinct().count()
         platforms = Counter(loc['platform'] for loc in new.locations)
         closure = 'lifecycle rule' if c.status == 'Active' else 'same write as the lifecycle rule'
         plan['detail'] = (
             f'{c.status} -> Renewed ({closure}); creates Active {new.start.isoformat()}..{new.end.isoformat()} '
             f'with {len(new.locations)} service location(s) '
             f'({", ".join(f"{k} {v}" for k, v in sorted(platforms.items()))})'
-            f'{"; old term keeps " + str(links) + " active zone link(s)" if links else ""}')
+            f'{"; copies " + str(links) + " active zone link(s) to the new term" if links else ""}')
         return plan
 
     @staticmethod
@@ -854,6 +870,12 @@ class V2Runner:
         contract.save()
         ContractServiceLocation.objects.bulk_create([
             ContractServiceLocation(contract=contract, **loc) for loc in new.locations])
+        # Zone links carried over as ContractViewSet.duplicate_for_renewal does; old links untouched.
+        zone_ids = sorted({str(z) for z in ContractZone.objects.filter(contract=old, is_active=True)
+                           .values_list('zone_id', flat=True)})
+        ContractZone.objects.bulk_create([
+            ContractZone(contract=contract, zone_id=zone_id, start_date=new.start, is_active=True)
+            for zone_id in zone_ids])
         from crm_app.services.contract_service_locations import service_location_pricing_mismatch
         if service_location_pricing_mismatch(contract):
             raise Refused('service_location_pricing_mismatch')
@@ -874,6 +896,7 @@ class V2Runner:
 
         contract.refresh_from_db()
         locations = list(contract.service_locations.order_by('sort_order', 'pk'))
+        links = list(ContractZone.objects.filter(contract=contract).order_by('pk'))
         self._audit('CREATE', contract.pk, {
             'status': {'old': None, 'new': 'Active'},
             'renewed_from': {'old': None, 'new': str(old.pk)},
@@ -881,7 +904,9 @@ class V2Runner:
             'end_date': {'old': None, 'new': new.end.isoformat()},
             'value': {'old': None, 'new': str(new.value)},
             'service_locations': {'old': 0, 'new': len(locations)},
-        }, group, e, {'action': 'Correction: current term created as renewal', 'renews_contract_id': str(old.pk)})
+            'zone_links': {'old': 0, 'new': len(links)},
+        }, group, e, {'action': 'Correction: current term created as renewal', 'renews_contract_id': str(old.pk),
+                      'zone_links_copied': [str(l.zone_id) for l in links]})
         return {
             'op': e.op, 'class': e.cls, 'evidence': e.evidence, 'contract_id': e.contract_id,
             'before': old_before, 'after': old_after,
@@ -890,6 +915,8 @@ class V2Runner:
                 'renewed_from': str(old.pk), 'status': contract.status,
                 'updated_at': _iso(contract.updated_at),
                 'service_locations': [{'id': str(l.pk), 'updated_at': _iso(l.updated_at)} for l in locations],
+                'zone_links': [{'id': str(l.pk), 'zone_id': str(l.zone_id), 'start_date': _iso(l.start_date)}
+                               for l in links],
             },
         }
 
@@ -953,7 +980,12 @@ class V2Runner:
                     return 'touched'
                 rows = {str(l.pk): l.updated_at for l in exists.service_locations.all()}
                 want = {r['id']: _instant(r['updated_at'], 'journal updated_at') for r in created['service_locations']}
-                if rows != want or _inbound_rows(exists):
+                own = created.get('zone_links', [])
+                links = {str(l.pk): (str(l.zone_id), _iso(l.start_date), l.is_active, l.end_date)
+                         for l in ContractZone.objects.filter(pk__in=[z['id'] for z in own])}
+                if links != {z['id']: (z['zone_id'], z['start_date'], True, None) for z in own}:
+                    return 'touched'
+                if rows != want or _inbound_rows(exists, [z['id'] for z in own]):
                     return 'touched'
                 return 'after'
             if exists is None and self._contract_matches(c, restorable):
@@ -1016,8 +1048,9 @@ class V2Runner:
                 additional_data=self._revert_meta(group, cls, op, reverted_batch,
                                                   'Correction reverted: created term deleted'),
             )
-            created.delete()
-            note = 'final number not reused'
+            copied = len(op['created'].get('zone_links', []))
+            created.delete()  # cascades to its service-location rows and its copied zone links
+            note = 'final number not reused' + (f'; {copied} copied zone link(s) removed' if copied else '')
         if op['op'] == 'mark_cancelled':
             for link in op['zone_links']:
                 ContractZone.objects.filter(pk=link['id']).update(
