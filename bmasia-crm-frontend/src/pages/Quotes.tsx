@@ -27,6 +27,7 @@ import {
   Divider,
   useTheme,
   useMediaQuery,
+  Skeleton,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -58,7 +59,9 @@ import ApiService, { EmailSendData } from '../services/api';
 import QuoteForm from '../components/QuoteForm';
 import QuoteDetail from '../components/QuoteDetail';
 import EmailSendDialog from '../components/EmailSendDialog';
-import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { formatDate as formatDisplayDate, formatMoney, statusTone, visuallyHidden } from '../theme';
+import { PageHeader, EmptyState } from '../components/ui';
+import { useListState } from '../hooks/useListState';
 
 const statusOptions = [
   { value: '', label: 'All Status' },
@@ -90,15 +93,17 @@ const Quotes: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  // Search, filters, sort and page live in the address, so Back returns to the same view.
+  const list = useListState({ q: '', status: '', company: '', sort: '-created_at', page: 0, size: 25 });
+  const [search, setSearch] = list.bind('q');
+  const [page, setPage] = list.bind('page');
+  const [rowsPerPage, setRowsPerPage] = list.bind('size');
   const [totalCount, setTotalCount] = useState(0);
 
   // Filters
-  const [statusFilter, setStatusFilter] = useState('');
-  const [companyFilter, setCompanyFilter] = useState('');
-  const [sortBy, setSortBy] = useState('-created_at');
+  const [statusFilter, setStatusFilter] = list.bind('status');
+  const [companyFilter, setCompanyFilter] = list.bind('company');
+  const [sortBy, setSortBy] = list.bind('sort');
 
   // Form state
   const [formOpen, setFormOpen] = useState(false);
@@ -386,26 +391,18 @@ const Quotes: React.FC = () => {
     return formatDisplayDate(dateString);
   };
 
-  const getStatusColor = (status: string): string => {
-    return statusOptions.find(s => s.value === status)?.color || '#2196f3';
-  };
 
   return (
     <Box>
-      {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" component="h1">
-          Quotes
-        </Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={handleCreateQuote}
-          size={isMobile ? "small" : "medium"}
-        >
-          New Quote
-        </Button>
-      </Box>
+      <PageHeader
+        title="Quotes"
+        subtitle="Price offers sent to customers. Accepted quotes can be turned into contracts."
+        actions={
+          <Button variant="contained" startIcon={<Add />} onClick={handleCreateQuote}>
+            New Quote
+          </Button>
+        }
+      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
@@ -413,12 +410,13 @@ const Quotes: React.FC = () => {
         </Alert>
       )}
 
-      {/* Filters */}
-      <Paper sx={{ mb: 2 }}>
-        <Box sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
+      {/* Filters and table in one card */}
+      <Paper sx={{ overflow: 'hidden' }}>
+        <Box sx={{ p: 2, display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: 1, borderColor: 'divider' }}>
           <TextField
-            fullWidth
-            placeholder="Search quotes..."
+            sx={{ flex: '1 1 240px', maxWidth: { md: 380 } }}
+            inputProps={{ 'aria-label': 'Search quotes' }}
+            placeholder="Search by quote number or company"
             value={search}
             onChange={handleSearchChange}
             InputProps={{
@@ -440,7 +438,7 @@ const Quotes: React.FC = () => {
                 <MenuItem key={status.value} value={status.value}>
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     {status.value && status.icon && (
-                      <Box sx={{ mr: 1, color: status.color }}>
+                      <Box sx={{ mr: 1, display: 'flex', color: statusTone(status.value) === 'default' ? 'text.secondary' : `${statusTone(status.value)}.main` }}>
                         {status.icon}
                       </Box>
                     )}
@@ -480,106 +478,84 @@ const Quotes: React.FC = () => {
             </Select>
           </FormControl>
         </Box>
-      </Paper>
 
-      <TableContainer component={Paper}>
-        <Table>
+      <TableContainer sx={{ borderRadius: 0 }}>
+        <Table aria-label="Quotes">
           <TableHead>
             <TableRow>
-              <TableCell>Quote Number</TableCell>
+              <TableCell>Quote</TableCell>
               <TableCell>Company</TableCell>
-              <TableCell>Contact</TableCell>
-              <TableCell>Total Value</TableCell>
-              <TableCell>Valid Until</TableCell>
+              <TableCell align="right">Total</TableCell>
+              <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Valid until</TableCell>
               <TableCell>Status</TableCell>
-              <TableCell>Created Date</TableCell>
-              <TableCell>Actions</TableCell>
+              <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Created</TableCell>
+              <TableCell align="right"><Box component="span" sx={visuallyHidden}>Actions</Box></TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {loading ? (
-              <TableRow>
-                <TableCell colSpan={8} align="center">
-                  <CircularProgress />
-                </TableCell>
-              </TableRow>
+              Array.from({ length: 6 }).map((_, i) => (
+                <TableRow key={`skeleton-${i}`}>
+                  {Array.from({ length: 7 }).map((__, j) => (
+                    <TableCell key={j} sx={j === 3 ? { display: { xs: 'none', sm: 'table-cell' } } : j === 5 ? { display: { xs: 'none', lg: 'table-cell' } } : undefined}>
+                      <Skeleton width={j === 6 ? 24 : '70%'} />
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
             ) : quotes.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} align="center">
-                  <Box sx={{ py: 4 }}>
-                    <RequestQuote sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                    <Typography variant="h6" color="text.secondary">
-                      No quotes found
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {search || statusFilter || companyFilter ? 'Try adjusting your filters' : 'Start by creating your first quote'}
-                    </Typography>
-                  </Box>
+                <TableCell colSpan={7}>
+                  <EmptyState
+                    icon={<RequestQuote />}
+                    title={search || statusFilter || companyFilter ? 'No quotes match these filters' : 'No quotes yet'}
+                    description={search || statusFilter || companyFilter ? 'Try a different search or clear the filters.' : 'Create the first quote for a customer.'}
+                  />
                 </TableCell>
               </TableRow>
             ) : (
               quotes.map((quote) => (
                 <TableRow key={quote.id} hover sx={{ cursor: 'pointer' }} onClick={() => handleViewQuote(quote)}>
                   <TableCell>
-                    <Typography variant="body2" fontWeight="medium">
+                    <Typography sx={{ fontWeight: 600, fontSize: '0.875rem', whiteSpace: 'nowrap' }}>
                       {quote.quote_number}
                     </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Business sx={{ mr: 1, color: 'text.secondary', fontSize: 16 }} />
-                      <Typography variant="body2">
-                        {quote.company_name}
+                    {quote.contact_name && (
+                      <Typography variant="body2" color="text.secondary" noWrap>
+                        {quote.contact_name}
                       </Typography>
-                    </Box>
+                    )}
                   </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
-                      {quote.contact_name || '-'}
+                  <TableCell sx={{ maxWidth: 260 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>
+                      {quote.company_name}
                     </Typography>
                   </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
-                      {formatCurrency(quote.total_value, quote.currency)}
-                    </Typography>
+                  <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                    {formatCurrency(quote.total_value, quote.currency)}
                   </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" sx={{
-                      color: quote.is_expired ? 'error.main' : 'text.primary'
-                    }}>
+                  <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' }, whiteSpace: 'nowrap' }}>
+                    <Typography
+                      variant="body2"
+                      sx={{ color: quote.is_expired ? 'error.main' : 'text.primary', fontWeight: quote.is_expired ? 600 : 400 }}
+                    >
                       {formatDate(quote.valid_until)}
-                      {quote.is_expired && (
-                        <Typography variant="caption" sx={{ color: 'error.main', display: 'block' }}>
-                          Expired
-                        </Typography>
-                      )}
+                      {quote.is_expired && ' · expired'}
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    <Chip
-                      label={quote.status}
-                      size="small"
-                      sx={{
-                        backgroundColor: getStatusColor(quote.status),
-                        color: 'white',
-                        fontWeight: 600
-                      }}
-                    />
+                    <Chip label={quote.status} size="small" color={statusTone(quote.status)} />
                   </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Schedule sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
-                      <Typography variant="body2">
-                        {formatDate(quote.created_at)}
-                      </Typography>
-                    </Box>
+                  <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' }, whiteSpace: 'nowrap' }}>
+                    {formatDate(quote.created_at)}
                   </TableCell>
-                  <TableCell>
+                  <TableCell align="right">
                     <IconButton
                       size="small"
+                      aria-label={`Actions for ${quote.quote_number}`}
                       onClick={(e) => { e.stopPropagation(); handleActionMenuOpen(e, quote); }}
                     >
-                      <MoreVert />
+                      <MoreVert fontSize="small" />
                     </IconButton>
                   </TableCell>
                 </TableRow>
@@ -587,16 +563,17 @@ const Quotes: React.FC = () => {
             )}
           </TableBody>
         </Table>
-        <TablePagination
-          rowsPerPageOptions={[10, 25, 50, 100]}
-          component="div"
-          count={totalCount}
-          rowsPerPage={rowsPerPage}
-          page={page}
-          onPageChange={handleChangePage}
-          onRowsPerPageChange={handleChangeRowsPerPage}
-        />
       </TableContainer>
+      <TablePagination
+        rowsPerPageOptions={[10, 25, 50, 100]}
+        component="div"
+        count={totalCount}
+        rowsPerPage={rowsPerPage}
+        page={page}
+        onPageChange={handleChangePage}
+        onRowsPerPageChange={handleChangeRowsPerPage}
+      />
+      </Paper>
 
       {/* Action Menu */}
       <Menu
