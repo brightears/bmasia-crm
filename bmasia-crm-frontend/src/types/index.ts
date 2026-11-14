@@ -500,6 +500,15 @@ export interface RevenueTrendPoint {
   renewal_revenue?: number;
   churned_revenue?: number;
   net_revenue?: number;
+  /** The same month per currency (amounts as decimal strings). Absent in older responses. */
+  by_currency?: {
+    currency: string;
+    revenue: string;
+    new_revenue: string;
+    renewal_revenue: string;
+    churned_revenue: string;
+    net_revenue: string;
+  }[];
 }
 
 export interface DashboardStats {
@@ -533,6 +542,23 @@ export interface DashboardStats {
   churned_revenue: number;
   churned_count: number;
   net_revenue: number;
+  // The money totals above, per currency (backend from the dashboard-by-currency PR on). Absent in
+  // older responses; the totals above add every currency together.
+  contracts_value_by_currency?: CurrencyTotal[];
+  monthly_revenue_by_currency?: CurrencyTotal[];
+  previous_month_revenue_by_currency?: CurrencyTotal[];
+  total_overdue_amount_by_currency?: CurrencyTotal[];
+  pending_renewal_value_by_currency?: CurrencyTotal[];
+  new_revenue_by_currency?: CurrencyTotal[];
+  renewal_revenue_by_currency?: CurrencyTotal[];
+  churned_revenue_by_currency?: CurrencyTotal[];
+  net_revenue_by_currency?: CurrencyTotal[];
+}
+
+/** An amount in one currency, as the API sends it: { currency: 'THB', total: '108000.00' }. */
+export interface CurrencyTotal {
+  currency: string;
+  total: string;
 }
 
 export interface ApiResponse<T> {
