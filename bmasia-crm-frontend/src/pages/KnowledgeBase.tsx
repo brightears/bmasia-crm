@@ -21,6 +21,7 @@ import KBCategoryTree from '../components/KBCategoryTree';
 import KBFeaturedArticles from '../components/KBFeaturedArticles';
 import KBArticleList from '../components/KBArticleList';
 import { useListState } from '../hooks/useListState';
+import { useListSearchBox } from '../hooks/useListSearchBox';
 
 const KnowledgeBase: React.FC = () => {
   const navigate = useNavigate();
@@ -37,7 +38,13 @@ const KnowledgeBase: React.FC = () => {
   const [error, setError] = useState('');
 
   // Search, filters, sort and page live in the address, so Back returns to the same view.
-  const list = useListState({ q: '', sort: '-created_at', page: 0, size: 12 });
+  const list = useListState(
+    { q: '', sort: '-created_at', page: 0, size: 12 },
+    {
+      sort: ['-created_at', 'created_at', '-updated_at', '-view_count', '-helpfulness_ratio', 'title', '-title'],
+      size: [6, 12, 24, 48], // KBArticleList's choices
+    }
+  );
   const [searchQuery, setSearchQuery] = list.bind('q');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -45,6 +52,11 @@ const KnowledgeBase: React.FC = () => {
   const [sortBy, setSortBy] = list.bind('sort');
   const [page, setPage] = list.bind('page');
   const [rowsPerPage, setRowsPerPage] = list.bind('size');
+  // The box's own text, written to the address shortly after typing stops.
+  const searchBox = useListSearchBox(searchQuery, (text) => {
+    setSearchQuery(text);
+    setPage(0);
+  });
   const [totalCount, setTotalCount] = useState(0);
 
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
@@ -130,8 +142,7 @@ const KnowledgeBase: React.FC = () => {
   }, [loadArticles]);
 
   const handleSearchChange = (query: string) => {
-    setSearchQuery(query);
-    setPage(0);
+    searchBox.onChange(query);
   };
 
   const handleCategoryChange = (categoryId: string) => {
@@ -244,7 +255,7 @@ const KnowledgeBase: React.FC = () => {
 
       {/* Search Bar */}
       <KBSearchBar
-        searchQuery={searchQuery}
+        searchQuery={searchBox.value}
         onSearchChange={handleSearchChange}
         selectedCategory={selectedCategory}
         onCategoryChange={handleCategoryChange}

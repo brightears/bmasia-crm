@@ -45,7 +45,8 @@ import CompanyForm from '../components/CompanyForm';
 import { PageHeader, EmptyState, ProductChip } from '../components/ui';
 import { visuallyHidden } from '../theme/a11y';
 import { initialsOf } from '../theme';
-import { useListState } from '../hooks/useListState';
+import { useListState, optionValues } from '../hooks/useListState';
+import { useListSearchBox } from '../hooks/useListSearchBox';
 
 const companyInitials = initialsOf;
 
@@ -69,11 +70,16 @@ const Companies: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   // Search, filters, sort and page live in the address, so Back returns to the same view.
-  const list = useListState({ q: '', sort: 'name', page: 0, size: 25 });
+  const list = useListState({ q: '', sort: 'name', page: 0, size: 25 }, { sort: optionValues(sortOptions) });
   const [search, setSearch] = list.bind('q');
   const [sortBy, setSortBy] = list.bind('sort');
   const [page, setPage] = list.bind('page');
   const [rowsPerPage, setRowsPerPage] = list.bind('size');
+  // The box's own text, written to the address shortly after typing stops.
+  const searchBox = useListSearchBox(search, (text) => {
+    setSearch(text);
+    setPage(0); // Reset to first page when searching
+  });
   const [totalCount, setTotalCount] = useState(0);
   const [formOpen, setFormOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState<Company | null>(null);
@@ -111,8 +117,7 @@ const Companies: React.FC = () => {
   }, [loadCompanies]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(event.target.value);
-    setPage(0); // Reset to first page when searching
+    searchBox.onChange(event.target.value);
   };
 
   const handleSortChange = (event: any) => {
@@ -226,7 +231,7 @@ const Companies: React.FC = () => {
           <TextField
             fullWidth
             placeholder="Search by company name, country or website"
-            value={search}
+            value={searchBox.value}
             onChange={handleSearchChange}
             inputProps={{ 'aria-label': 'Search companies' }}
             sx={{ maxWidth: { sm: 480 } }}
