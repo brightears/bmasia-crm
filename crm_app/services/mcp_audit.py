@@ -105,6 +105,9 @@ def record(action, model_name, record_id, *, tool, changes=None, extra=None):
     request = current_request()
     meta = getattr(request, 'META', None) or {}
     additional = {'timestamp': timezone.now().isoformat(), 'via': 'mcp', 'tool': tool}
+    if request is not None:
+        from crm_app.auth_observability import describe
+        additional.update(describe(request))
     if extra:
         additional.update(extra)
     return AuditLog.objects.create(

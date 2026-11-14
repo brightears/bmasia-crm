@@ -34,5 +34,6 @@ class AgentGateRestObserverMiddleware:
                 agent_gate.observe(
                     tool=f'rest:{url_name}'[:60], verb=verb, collection=_collection(url_name),
                     record_id=(getattr(match, 'kwargs', None) or {}).get('pk', ''), user=user,
+                    request=request,
                 )
         return response

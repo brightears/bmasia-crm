@@ -51,7 +51,15 @@ WRITE PATH
   Every changed contract gets exactly one AuditLog UPDATE row whose
   additional_data carries command, batch_id, group, class and evidence.
 
-FILE FORMAT (JSON, ids and values only; unknown keys are rejected)
+FORMAT v2
+  A file whose "format" is "contract-corrections/v2" is handled by
+  crm_app/services/contract_corrections_v2.py: operations mark_cancelled,
+  mark_renewed (status only), set_renewed_from and create_successor, with the
+  same safety model (dry-run default, groups all-or-nothing, expected state,
+  audit rows, journal, revert, idempotent re-run). Its docstring documents the
+  file shape, every refusal and the revert rules. v1 files below are unchanged.
+
+FILE FORMAT v1 (JSON, ids and values only; unknown keys are rejected)
     {
       "format": "contract-corrections/v1",
       "source_pulled_at": "2026-01-01T00:00:00+00:00",      (optional)
@@ -113,6 +121,7 @@ from django.db import DatabaseError, transaction
 from django.utils import timezone
 
 from crm_app.models import AuditLog, Contract
+from crm_app.services import contract_corrections_v2 as v2
 from crm_app.services.contract_lifecycle import CLOSED, close_renewed_predecessor
 
 COMMAND = 'apply_contract_corrections'
@@ -340,6 +349,7 @@ def _write_json_atomic(path, payload):
 # --------------------------------------------------------------------------
 
 class Command(BaseCommand):
+    COMMAND_NAME = COMMAND
     help = ('Apply a reviewed contract-corrections file (dry-run by default; --execute '
             'with --journal to write), or revert a run from its journal.')
 
@@ -349,8 +359,9 @@ class Command(BaseCommand):
         parser.add_argument('--execute', action='store_true',
                             help='Write. Without this flag the command only reports what it would do.')
         parser.add_argument('--journal', help='Path of the revert journal to create (required with --execute).')
-        parser.add_argument('--only-class', action='append', choices=CLASSES, dest='only_class',
-                            help='Apply only this class (repeatable). Default: all classes.')
+        parser.add_argument('--only-class', action='append', dest='only_class',
+                            help='Apply only this class (repeatable). Default: all classes. '
+                                 'v1 classes are A/B/C; v2 classes are the labels in the file.')
         parser.add_argument('--actor', help='Username the audit rows are attributed to.')
 
     # ---- entry point -----------------------------------------------------
@@ -389,7 +400,14 @@ class Command(BaseCommand):
 
     def _handle_apply(self, opts):
         data, file_sha256 = self._read_json(opts['file'], 'corrections file')
-        entries, duplicates = parse_corrections(data)
+        is_v2 = isinstance(data, dict) and data.get('format') == v2.FILE_FORMAT_V2
+        if is_v2:
+            v2.parse_v2(data)  # a malformed file stops here, before any database read
+        else:
+            entries, duplicates = parse_corrections(data)
+            bad = set(opts['only_class'] or []) - set(CLASSES)
+            if bad:
+                raise CommandError(f'--only-class {sorted(bad)}: v1 classes are {list(CLASSES)}.')
         self.file_sha256 = file_sha256
 
         journal_path = opts['journal']
@@ -402,6 +420,11 @@ class Command(BaseCommand):
                 raise CommandError(f'journal directory for {journal_path} does not exist.')
         elif journal_path:
             raise CommandError('--journal is only used with --execute.')
+
+        self.journal_path = journal_path
+        if is_v2:
+            return v2.V2Runner(self).apply(
+                data, file_sha256, opts, lambda payload: _write_json_atomic(journal_path, payload))
 
         selected = set(opts['only_class'] or CLASSES)
         groups = group_entries(entries)
@@ -647,6 +670,8 @@ class Command(BaseCommand):
 
     def _handle_revert(self, path):
         journal, _ = self._read_json(path, 'journal')
+        if isinstance(journal, dict) and journal.get('format') == v2.JOURNAL_FORMAT_V2:
+            return v2.V2Runner(self).revert(journal, path)
         if not isinstance(journal, dict) or journal.get('format') != JOURNAL_FORMAT \
                 or not isinstance(journal.get('groups'), list):
             raise CommandError(f'{path} is not a {JOURNAL_FORMAT} journal.')
