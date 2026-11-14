@@ -45,6 +45,7 @@ import { Company, Contact, Opportunity, Contract, Zone, Ticket } from '../types'
 import ApiService from '../services/api';
 import CompanyForm from '../components/CompanyForm';
 import ContactForm from '../components/ContactForm';
+import ContactDetail from '../components/ContactDetail';
 import OpportunityForm from '../components/OpportunityForm';
 import { PageHeader, SectionCard, EmptyState, DetailField, ProductChip } from '../components/ui';
 import { statusTone, humanize, formatDate, initialsOf, visuallyHidden } from '../theme';
@@ -115,6 +116,9 @@ const CompanyDetail: React.FC = () => {
   const [tabValue, setTabValue] = useState(0);
   const [editFormOpen, setEditFormOpen] = useState(false);
   const [contactFormOpen, setContactFormOpen] = useState(false);
+  // Contacts open in the same side panel the Contacts page uses (there is no contact page).
+  const [viewContact, setViewContact] = useState<Contact | null>(null);
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [opportunityFormOpen, setOpportunityFormOpen] = useState(false);
 
   useEffect(() => {
@@ -502,7 +506,7 @@ const CompanyDetail: React.FC = () => {
                                 <IconButton
                                   size="small"
                                   aria-label={`View ${contact.name}`}
-                                  onClick={() => navigate(`/contacts/${contact.id}`)}
+                                  onClick={() => setViewContact(contact)}
                                 >
                                   <ChevronRight fontSize="small" />
                                 </IconButton>
@@ -834,10 +838,21 @@ const CompanyDetail: React.FC = () => {
 
       <ContactForm
         open={contactFormOpen}
-        onClose={() => setContactFormOpen(false)}
-        onSave={handleContactSave}
-        contact={null}
+        onClose={() => { setContactFormOpen(false); setEditingContact(null); }}
+        onSave={() => { setEditingContact(null); handleContactSave(); }}
+        contact={editingContact}
         companies={[company]}
+      />
+
+      <ContactDetail
+        open={Boolean(viewContact)}
+        onClose={() => setViewContact(null)}
+        contact={viewContact}
+        onEdit={() => {
+          setEditingContact(viewContact);
+          setViewContact(null);
+          setContactFormOpen(true);
+        }}
       />
 
       <OpportunityForm

@@ -29,6 +29,8 @@ import { useNavigate } from 'react-router-dom';
 import ApiService from '../services/api';
 import { formatMoney } from '../theme';
 import { buildNavGroups } from './navigation';
+import { useAuth } from '../contexts/AuthContext';
+import { canAccessModule } from '../utils/permissions';
 
 // Menu pages, searchable by their current name and by the name they had before the redesign.
 const PAGES = buildNavGroups(0).flatMap((g) =>
@@ -63,6 +65,86 @@ interface SearchResult {
 const MIN_CHARS = 2;
 const PER_GROUP = 5;
 
+// Record types searched, each with the page-access module that guards its page.
+interface Source {
+  module: string;
+  group: string;
+  fetch: (params: any) => Promise<any>;
+  toResult: (row: any) => SearchResult;
+}
+
+const SOURCES: Source[] = [
+  {
+    module: 'companies',
+    group: 'Companies',
+    fetch: (p) => ApiService.getCompanies(p),
+    toResult: (c) => ({
+      key: `company-${c.id}`,
+      group: 'Companies',
+      icon: <BusinessOutlined />,
+      title: c.name,
+      detail: [c.city, c.country].filter(Boolean).join(', '),
+      to: `/companies/${c.id}`,
+    }),
+  },
+  {
+    module: 'contacts',
+    group: 'Contacts',
+    fetch: (p) => ApiService.getContacts(p),
+    toResult: (c) => ({
+      key: `contact-${c.id}`,
+      group: 'Contacts',
+      icon: <PersonOutline />,
+      title: c.name,
+      detail: [c.title, c.company_name].filter(Boolean).join(' · '),
+      // Contacts have no page of their own yet: open their company.
+      to: `/companies/${c.company}`,
+    }),
+  },
+  {
+    module: 'contracts',
+    group: 'Contracts',
+    fetch: (p) => ApiService.getContracts(p),
+    toResult: (c) => ({
+      key: `contract-${c.id}`,
+      group: 'Contracts',
+      icon: <HistoryEduOutlined />,
+      title: c.contract_number,
+      detail: [c.company_name, c.status, formatMoney(c.value, c.currency)].filter(Boolean).join(' · '),
+      to: `/contracts/${c.id}`,
+    }),
+  },
+  {
+    module: 'quotes',
+    group: 'Quotes',
+    fetch: (p) => ApiService.getQuotes(p),
+    toResult: (q) => ({
+      key: `quote-${q.id}`,
+      group: 'Quotes',
+      icon: <RequestQuoteOutlined />,
+      title: q.quote_number,
+      detail: [q.company_name, q.status].filter(Boolean).join(' · '),
+      to: `/quotes/${q.id}`,
+    }),
+  },
+  {
+    module: 'invoices',
+    group: 'Invoices',
+    fetch: (p) => ApiService.getInvoices(p),
+    toResult: (inv) => ({
+      key: `invoice-${inv.id}`,
+      group: 'Invoices',
+      icon: <ReceiptLongOutlined />,
+      title: inv.invoice_number,
+      detail: [inv.company_name, inv.status, formatMoney(inv.total_amount, inv.currency)].filter(Boolean).join(' · '),
+      // Invoices have no page of their own: open the contract, or else the company.
+      to: inv.contract ? `/contracts/${inv.contract}` : `/companies/${inv.company}`,
+    }),
+  },
+];
+
+const GROUP_ORDER = ['Pages', ...SOURCES.map((src) => src.group)];
+
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
 /**
@@ -73,10 +155,20 @@ const GlobalSearch: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const role = user?.role;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Results per group, in arrival order; shown in the fixed GROUP_ORDER.
+  const [groupRows, setGroupRows] = useState<Record<string, SearchResult[]>>({});
+  const [failedGroups, setFailedGroups] = useState<string[]>([]);
+  const [pending, setPending] = useState(0);
+  const [searchedCount, setSearchedCount] = useState(0);
+  // The query the shown results belong to (Enter is ignored while they belong to an older one).
+  const [resultsFor, setResultsFor] = useState('');
+  const loading = pending > 0;
+  const allFailed = !loading && failedGroups.length > 0 && failedGroups.length === searchedCount;
+  const results = useMemo(() => GROUP_ORDER.flatMap((g) => groupRows[g] || []), [groupRows]);
   const [active, setActive] = useState(0);
   const requestId = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -84,6 +176,9 @@ const GlobalSearch: React.FC = () => {
   // Keyboard shortcut
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Inside a rich-text editor Ctrl/⌘K means "add link": leave it to the editor.
+      const target = e.target as HTMLElement | null;
+      if (target && (target.isContentEditable || target.closest?.('.ql-editor, [contenteditable="true"]'))) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setOpen(true);
@@ -93,88 +188,54 @@ const GlobalSearch: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const runSearch = useCallback(async (q: string) => {
-    const id = ++requestId.current;
-    setLoading(true);
-    const params = { search: q, page_size: PER_GROUP };
-    const [companies, contacts, contracts, quotes, invoices] = await Promise.allSettled([
-      ApiService.getCompanies(params),
-      ApiService.getContacts(params),
-      ApiService.getContracts(params),
-      ApiService.getQuotes(params),
-      ApiService.getInvoices(params),
-    ]);
-    if (id !== requestId.current) return; // a newer search has started
+  const runSearch = useCallback(
+    (q: string) => {
+      const id = ++requestId.current;
+      const params = { search: q, page_size: PER_GROUP };
+      // Only record types whose pages this user may open are searched.
+      const allowed = SOURCES.filter((src) => canAccessModule(user, src.module));
+      const pages = matchPages(q);
 
-    const list: SearchResult[] = [...matchPages(q)];
-    const rows = <T,>(r: PromiseSettledResult<{ results?: T[] }>): T[] =>
-      r.status === 'fulfilled' ? (r.value.results || []).slice(0, PER_GROUP) : [];
+      setResultsFor(q);
+      setActive(0);
+      setFailedGroups([]);
+      setGroupRows({ Pages: pages });
+      setPending(allowed.length);
+      setSearchedCount(allowed.length);
+      if (allowed.length === 0) return;
 
-    rows<any>(companies).forEach((c) =>
-      list.push({
-        key: `company-${c.id}`,
-        group: 'Companies',
-        icon: <BusinessOutlined />,
-        title: c.name,
-        detail: [c.city, c.country].filter(Boolean).join(', '),
-        to: `/companies/${c.id}`,
-      })
-    );
-    rows<any>(contacts).forEach((c) =>
-      list.push({
-        key: `contact-${c.id}`,
-        group: 'Contacts',
-        icon: <PersonOutline />,
-        title: c.name,
-        detail: [c.title, c.company_name].filter(Boolean).join(' · '),
-        // Contacts have no page of their own yet: open their company.
-        to: `/companies/${c.company}`,
-      })
-    );
-    rows<any>(contracts).forEach((c) =>
-      list.push({
-        key: `contract-${c.id}`,
-        group: 'Contracts',
-        icon: <HistoryEduOutlined />,
-        title: c.contract_number,
-        detail: [c.company_name, c.status, formatMoney(c.value, c.currency)].filter(Boolean).join(' · '),
-        to: `/contracts/${c.id}`,
-      })
-    );
-    rows<any>(quotes).forEach((q) =>
-      list.push({
-        key: `quote-${q.id}`,
-        group: 'Quotes',
-        icon: <RequestQuoteOutlined />,
-        title: q.quote_number,
-        detail: [q.company_name, q.status].filter(Boolean).join(' · '),
-        to: `/quotes/${q.id}`,
-      })
-    );
-    rows<any>(invoices).forEach((inv) =>
-      list.push({
-        key: `invoice-${inv.id}`,
-        group: 'Invoices',
-        icon: <ReceiptLongOutlined />,
-        title: inv.invoice_number,
-        detail: [inv.company_name, inv.status, formatMoney(inv.total_amount, inv.currency)].filter(Boolean).join(' · '),
-        // Invoices have no page of their own: open the contract, or else the company.
-        to: inv.contract ? `/contracts/${inv.contract}` : `/companies/${inv.company}`,
-      })
-    );
-
-    setResults(list);
-    setActive(0);
-    setLoading(false);
-  }, []);
+      // Each type is shown as soon as it arrives; one slow type does not hold back the rest.
+      allowed.forEach((src) => {
+        src
+          .fetch(params)
+          .then((res: any) => {
+            if (id !== requestId.current) return; // a newer search has started
+            const rows = (res?.results || []).slice(0, PER_GROUP).map(src.toResult);
+            setGroupRows((prev) => ({ ...prev, [src.group]: rows }));
+          })
+          .catch(() => {
+            if (id !== requestId.current) return;
+            setFailedGroups((prev) => [...prev, src.group]);
+          })
+          .finally(() => {
+            if (id !== requestId.current) return;
+            setPending((n) => n - 1);
+          });
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [user, role]
+  );
 
   // Debounced search while typing
   useEffect(() => {
     const q = query.trim();
     if (q.length < MIN_CHARS) {
       requestId.current++;
-      setResults([]);
-      setLoading(false);
+      setGroupRows({});
+      setFailedGroups([]);
+      setPending(0);
+      setResultsFor('');
       return;
     }
     const t = setTimeout(() => runSearch(q), 250);
@@ -184,7 +245,11 @@ const GlobalSearch: React.FC = () => {
   const close = () => {
     setOpen(false);
     setQuery('');
-    setResults([]);
+    requestId.current++;
+    setGroupRows({});
+    setFailedGroups([]);
+    setPending(0);
+    setResultsFor('');
   };
 
   const go = (r: SearchResult) => {
@@ -199,7 +264,7 @@ const GlobalSearch: React.FC = () => {
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActive((a) => Math.max(a - 1, 0));
-    } else if (e.key === 'Enter' && results[active]) {
+    } else if (e.key === 'Enter' && results[active] && resultsFor === query.trim()) {
       e.preventDefault();
       go(results[active]);
     }
@@ -307,7 +372,11 @@ const GlobalSearch: React.FC = () => {
               Type at least two letters. Finds companies, contacts, contracts, quotes and invoices by name or
               number, and pages of the CRM by their current or former name.
             </Typography>
-          ) : !loading && results.length === 0 ? (
+          ) : !loading && results.length === 0 && allFailed ? (
+            <Typography color="error" sx={{ p: 3, fontSize: '0.875rem' }} role="alert">
+              Search failed. Check your connection and try again.
+            </Typography>
+          ) : !loading && results.length === 0 && failedGroups.length === 0 ? (
             <Typography color="text.secondary" sx={{ p: 3, fontSize: '0.875rem' }}>
               Nothing found for “{q}”.
             </Typography>
@@ -344,6 +413,11 @@ const GlobalSearch: React.FC = () => {
                 </li>
               ))}
             </List>
+          )}
+          {q.length >= MIN_CHARS && failedGroups.length > 0 && !allFailed && (
+            <Typography color="error" sx={{ px: 3, py: 1.5, fontSize: '0.8125rem' }} role="status">
+              Could not search {failedGroups.map((g) => g.toLowerCase()).join(', ')}.
+            </Typography>
           )}
         </Box>
       </Dialog>

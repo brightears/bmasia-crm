@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Link as RouterLink } from 'react-router-dom';
+import { useNavigate, useLocation, Link as RouterLink } from 'react-router-dom';
 import {
   Dialog,
   Skeleton,
@@ -100,10 +100,17 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
   onContractUpdated,
   contractId, variant = 'dialog'}) => {
   const navigate = useNavigate();
+  const location = useLocation();
+  // Back to the Contracts list as it was left (search, filters, page), when opened from there.
+  const listSearch: string = (location.state as any)?.listSearch || '';
+  const listTo = listSearch ? `/contracts?${listSearch}` : '/contracts';
   const [contract, setContract] = useState<Contract | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // Errors from actions (PDF preview/download) are shown above the contract, which stays visible.
+  const [actionError, setActionError] = useState('');
+  const [previewing, setPreviewing] = useState(false);
   const [paymentHistory] = useState<PaymentHistory[]>([]);
   const [contractEvents] = useState<ContractEvent[]>([]);
   const [sendingRenewal, setSendingRenewal] = useState(false);
@@ -185,21 +192,23 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
   const handlePreviewPDF = async () => {
     if (!contract) return;
     try {
-      setLoading(true);
+      setActionError('');
+      setPreviewing(true);
       const blob = await ApiService.previewContractPDF(contract.id);
       const url = window.URL.createObjectURL(blob);
       window.open(url, '_blank');
     } catch (err: any) {
-      setError(err instanceof Error ? err.message : 'Failed to preview PDF');
+      setActionError(`Could not open the PDF preview${err instanceof Error && err.message ? `: ${err.message}` : '.'}`);
       console.error('Failed to preview PDF:', err);
     } finally {
-      setLoading(false);
+      setPreviewing(false);
     }
   };
 
   const handleDownloadPDF = async () => {
     if (!contract) return;
     try {
+      setActionError('');
       const blob = await ApiService.downloadContractPDF(contract.id);
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -210,7 +219,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
-      setError(err instanceof Error ? err.message : 'Failed to download PDF');
+      setActionError(`Could not download the PDF${err instanceof Error && err.message ? `: ${err.message}` : '.'}`);
       console.error('Failed to download PDF:', err);
     }
   };
@@ -293,7 +302,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
   if ((error || !contract) && isPage && !loading) {
     return (
       <Box>
-        <PageHeader breadcrumbs={[{ label: 'Contracts', to: '/contracts' }, { label: 'Not found' }]} title="Contract" />
+        <PageHeader breadcrumbs={[{ label: 'Contracts', to: listTo }, { label: 'Not found' }]} title="Contract" />
         <Alert severity="error">{error || 'Contract not found'}</Alert>
       </Box>
     );
@@ -368,7 +377,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
           variant="outlined"
           startIcon={<Visibility />}
           onClick={handlePreviewPDF}
-          disabled={loading}
+          disabled={previewing}
         >
           Preview PDF
         </Button>
@@ -403,6 +412,11 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
 
   const content = (
     <>
+        {actionError && (
+          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setActionError('')}>
+            {actionError}
+          </Alert>
+        )}
         {['Renewed', 'Expired', 'Cancelled'].includes(contract.status) && (
           <Alert severity="info" icon={<Info />} sx={{ mb: 2 }}>
             This contract is <strong>{contract.status.toLowerCase()}</strong> and cannot be edited.
@@ -893,7 +907,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
     return (
       <Box>
         <PageHeader
-          breadcrumbs={[{ label: 'Contracts', to: '/contracts' }, { label: contract.contract_number }]}
+          breadcrumbs={[{ label: 'Contracts', to: listTo }, { label: contract.contract_number }]}
           title={contract.contract_number}
           subtitle={
             <Link component={RouterLink} to={`/companies/${contract.company}`} underline="hover" sx={{ fontWeight: 600 }}>

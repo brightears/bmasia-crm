@@ -52,7 +52,6 @@ import { Contract, ApiResponse, Contact } from '../types';
 import ApiService, { EmailSendData } from '../services/api';
 import ContractForm from '../components/ContractForm';
 import { PageHeader, EmptyState } from '../components/ui';
-import ContractDetail from '../components/ContractDetail';
 import EmailSendDialog from '../components/EmailSendDialog';
 import { formatDate as formatDisplayDate, formatMoney, statusTone, visuallyHidden } from '../theme';
 
@@ -86,6 +85,9 @@ const sortOptions = [
   { value: 'contract_number', label: 'Contract Number' },
 ];
 
+const DEFAULT_SORT = '-start_date';
+const DEFAULT_ROWS = 25;
+
 const Contracts: React.FC = () => {
   const navigate = useNavigate();
   const theme = useTheme();
@@ -96,24 +98,43 @@ const Contracts: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [totalCount, setTotalCount] = useState(0);
 
-  // Filters
-  const [statusFilter, setStatusFilter] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
-  const [sortBy, setSortBy] = useState('-start_date');
+  // Search, filters, sort and page live in the address (?q=&status=&type=&sort=&page=&size=),
+  // so Back or the breadcrumb from a contract page returns to the same view of the list.
+  const search = searchParams.get('q') || '';
+  const statusFilter = searchParams.get('status') || '';
+  const typeFilter = searchParams.get('type') || '';
+  const sortBy = searchParams.get('sort') || DEFAULT_SORT;
+  const page = Math.max(0, (parseInt(searchParams.get('page') || '1', 10) || 1) - 1);
+  const rowsPerPage = parseInt(searchParams.get('size') || '', 10) || DEFAULT_ROWS;
+
+  /** Changes several list settings in one address update; empty or default values are dropped. */
+  const updateList = (changes: Record<string, string | number | null>) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        Object.entries(changes).forEach(([key, value]) => {
+          const isDefault =
+            value === null ||
+            value === '' ||
+            (key === 'page' && Number(value) <= 1) ||
+            (key === 'sort' && value === DEFAULT_SORT) ||
+            (key === 'size' && Number(value) === DEFAULT_ROWS);
+          if (isDefault) next.delete(key);
+          else next.set(key, String(value));
+        });
+        return next;
+      },
+      { replace: true }
+    );
+  };
 
   // Form state
   const [formOpen, setFormOpen] = useState(false);
   const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
   const [formMode, setFormMode] = useState<'create' | 'edit'>('create');
 
-  // Detail dialog state
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [detailContractId, setDetailContractId] = useState<string | null>(null);
 
   // Action menu
   const [actionMenuAnchor, setActionMenuAnchor] = useState<null | HTMLElement>(null);
@@ -136,7 +157,15 @@ const Contracts: React.FC = () => {
       setSelectedContract(null);
       setFormMode('create');
       setFormOpen(true);
-      setSearchParams({}, { replace: true });
+      // Remove only the create-form parameters; keep the list's search and filters.
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          ['new', 'company', 'quote'].forEach((key) => next.delete(key));
+          return next;
+        },
+        { replace: true }
+      );
     }
   }, [searchParams, setSearchParams]);
 
@@ -169,22 +198,19 @@ const Contracts: React.FC = () => {
   }, [loadContracts]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(event.target.value);
-    setPage(0);
+    updateList({ q: event.target.value, page: null });
   };
 
   const handleSortChange = (event: any) => {
-    setSortBy(event.target.value);
-    setPage(0);
+    updateList({ sort: event.target.value, page: null });
   };
 
   const handleChangePage = (event: unknown, newPage: number) => {
-    setPage(newPage);
+    updateList({ page: newPage + 1 });
   };
 
   const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
+    updateList({ size: parseInt(event.target.value, 10), page: null });
   };
 
   const handleCreateContract = () => {
@@ -203,7 +229,8 @@ const Contracts: React.FC = () => {
   // Contracts open as their own page (shareable address) instead of a pop-up.
   const handleViewContract = (contract: Contract) => {
     setActionMenuAnchor(null);
-    navigate(`/contracts/${contract.id}`);
+    // The page's breadcrumb uses this to come back to the same filtered view.
+    navigate(`/contracts/${contract.id}`, { state: { listSearch: searchParams.toString() } });
   };
 
   const handleDeleteContract = async (contract: Contract) => {
@@ -404,7 +431,7 @@ const Contracts: React.FC = () => {
             <InputLabel>Status</InputLabel>
             <Select
               value={statusFilter}
-              onChange={(e) => { setStatusFilter(e.target.value); setPage(0); }}
+              onChange={(e) => updateList({ status: e.target.value, page: null })}
               label="Status"
             >
               {statusOptions.map((status) => (
@@ -431,7 +458,7 @@ const Contracts: React.FC = () => {
             <InputLabel>Type</InputLabel>
             <Select
               value={typeFilter}
-              onChange={(e) => { setTypeFilter(e.target.value); setPage(0); }}
+              onChange={(e) => updateList({ type: e.target.value, page: null })}
               label="Type"
             >
               {typeOptions.map((type) => (
@@ -580,15 +607,6 @@ const Contracts: React.FC = () => {
       />
 
       {/* Contract Detail */}
-      <ContractDetail
-        open={detailOpen}
-        onClose={() => setDetailOpen(false)}
-        onEdit={handleEditContract}
-        onContractUpdated={(updated) => {
-          setContracts(prev => prev.map(c => c.id === updated.id ? updated : c));
-        }}
-        contractId={detailContractId}
-      />
 
       {/* Email Send Dialog */}
       {emailContract && (
