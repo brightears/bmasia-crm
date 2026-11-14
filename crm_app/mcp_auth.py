@@ -19,6 +19,10 @@ class QueryParamTokenAuthentication(TokenAuthentication):
         # Fall back to query parameter
         token = request.query_params.get('token')
         if token:
-            return self.authenticate_credentials(token)
+            result = self.authenticate_credentials(token)
+            # Observability only: lets audit records and logs name the method.
+            from crm_app.auth_observability import mark_query_token
+            mark_query_token(request)
+            return result
 
         return None

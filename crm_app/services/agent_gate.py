@@ -22,6 +22,7 @@ from django.conf import settings
 from django.db import transaction
 
 from crm_app import agent_policy as policy
+from crm_app import auth_observability
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,17 @@ def _current_user():
     if user is not None and getattr(user, 'is_authenticated', False):
         return user
     return None
+
+
+def _credential_in_url(request=None):
+    """True when the caller authenticated with a token taken from the URL."""
+    if request is None:
+        try:
+            from mcp_server.djangomcp import django_request_ctx
+        except Exception:  # pragma: no cover - library layout changed
+            return False
+        request = django_request_ctx.get(None)
+    return auth_observability.auth_method(request) == auth_observability.TOKEN_QUERY
 
 
 def _as_dict(data):
@@ -189,8 +201,13 @@ def _present(raw) -> bool:
 
 
 def observe(*, tool, verb, collection='', record_id='', data=None, expected_version='',
-            expected_values='', authorization_context='', request_key='', user=None):
-    """Record the policy verdict for one write attempt. Never raises."""
+            expected_values='', authorization_context='', request_key='', user=None,
+            request=None):
+    """Record the policy verdict for one write attempt. Never raises.
+
+    ``request`` is the HTTP request when the caller has it (the REST observer);
+    MCP tools leave it out and the request is read from the MCP context.
+    """
     mode = str(getattr(settings, 'AGENT_GATE_MODE', OBSERVE) or '').lower()
     if mode != OBSERVE:
         return None
@@ -245,6 +262,8 @@ def observe(*, tool, verb, collection='', record_id='', data=None, expected_vers
             if verb == policy.UPDATE and not _present(expected_values):
                 gaps.append('expected_values_missing')
             reasons = [r[:_MAX_REASON_CHARS] for r in reasons[:_MAX_REASONS]]
+        if user is not None and _credential_in_url(request):
+            gaps.append(auth_observability.CREDENTIAL_IN_URL)
         with transaction.atomic():  # savepoint: a failed insert never poisons the caller's transaction
             row = AgentRequest.objects.create(
                 mode=mode,
