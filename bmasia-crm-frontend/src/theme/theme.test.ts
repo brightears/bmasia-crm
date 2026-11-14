@@ -1,4 +1,4 @@
-import { createAppTheme, formatDate, formatMoney, humanize, statusTone } from '.';
+import { createAppTheme, formatDate, formatMoney, humanize, initialsOf, statusTone } from '.';
 
 describe('statusTone', () => {
   it('maps statuses to one colour language regardless of case or spacing', () => {
@@ -38,6 +38,15 @@ describe('display formats', () => {
   });
 });
 
+describe('initialsOf', () => {
+  it('uses Latin initials and falls back to the first character for other scripts', () => {
+    expect(initialsOf('Lumen Bay Resort & Spa')).toBe('LB');
+    expect(initialsOf('โรงแรมตัวอย่าง')).toBe('โ');
+    expect(initialsOf('โรงแรม Example')).toBe('E');
+    expect(initialsOf('  ')).toBe('?');
+  });
+});
+
 describe('createAppTheme', () => {
   it('builds light and dark themes with the BMAsia font and colours', () => {
     const light = createAppTheme('light');
@@ -45,7 +54,7 @@ describe('createAppTheme', () => {
     expect(light.palette.mode).toBe('light');
     expect(dark.palette.mode).toBe('dark');
     expect(String(light.typography.fontFamily)).toContain('Geist');
-    expect(light.palette.primary.main).toBe('#A86A12');
+    expect(light.palette.primary.main).toBe('#8F560A');
     expect(dark.palette.primary.main).toBe('#EFA634');
   });
 });
