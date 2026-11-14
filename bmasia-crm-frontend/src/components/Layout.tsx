@@ -554,7 +554,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       </Menu>
 
       {/* Mobile Bottom Navigation */}
-      <MobileBottomNav />
+      <MobileBottomNav onOpenMenu={() => setMobileOpen(true)} />
 
       {/* Hidden avatar file input */}
       <input

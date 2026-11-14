@@ -42,8 +42,8 @@ const Login: React.FC = () => {
     try {
       await login(credentials);
 
-      // Get the intended destination from location state, or default to /dashboard
-      const from = (location.state as any)?.from?.pathname || '/dashboard';
+      // Go back to the page the user asked for, or to Today, the home page for everyone
+      const from = (location.state as any)?.from?.pathname || '/today';
       console.log('Login successful, navigating to:', from);
 
       // Navigate to the intended destination
