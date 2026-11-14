@@ -34,6 +34,8 @@ import { Opportunity } from '../types';
 import ApiService from '../services/api';
 import { formatCurrency as formatCurrencyFn, getServiceLabel } from '../constants/entities';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { brand, status } from '../theme';
+import { ProductChip } from './ui';
 
 interface OpportunityPipelineProps {
   opportunities: Opportunity[];
@@ -60,11 +62,12 @@ interface OpportunityDetailDialogProps {
 }
 
 const stageConfig = [
-  { id: 'Contacted', label: 'Contacted', color: '#2196f3' },
-  { id: 'Quotation Sent', label: 'Quotation Sent', color: '#ff9800' },
-  { id: 'Contract Sent', label: 'Contract Sent', color: '#9c27b0' },
-  { id: 'Won', label: 'Won', color: '#4caf50' },
-  { id: 'Lost', label: 'Lost', color: '#f44336' },
+  // Stage colours from the shared palette (white text on each passes AA).
+  { id: 'Contacted', label: 'Contacted', color: status.neutral.main },
+  { id: 'Quotation Sent', label: 'Quotation Sent', color: status.info.main },
+  { id: 'Contract Sent', label: 'Contract Sent', color: brand.amberText },
+  { id: 'Won', label: 'Won', color: status.success.main },
+  { id: 'Lost', label: 'Lost', color: status.error.main },
 ];
 
 const OpportunityDetailDialog: React.FC<OpportunityDetailDialogProps> = ({
@@ -245,12 +248,12 @@ const OpportunityCard: React.FC<{
       sx={{ 
         mb: 1, 
         cursor: 'grab',
-        transition: 'all 0.2s ease-in-out',
-        transform: draggedOver ? 'scale(1.02)' : 'scale(1)',
-        boxShadow: draggedOver ? theme.shadows[8] : theme.shadows[1],
-        borderLeft: `4px solid ${stageColor}`,
+        transition: 'border-color 120ms, box-shadow 120ms',
+        boxShadow: draggedOver ? theme.shadows[4] : 'none',
+        borderLeft: `3px solid ${stageColor}`,
         '&:hover': {
-          boxShadow: theme.shadows[4],
+          borderColor: 'text.secondary',
+          borderLeftColor: stageColor,
         },
         '&:active': {
           cursor: 'grabbing',
@@ -273,28 +276,16 @@ const OpportunityCard: React.FC<{
         </Typography>
 
         {opportunity.service_type && (
-          <Chip
-            label={getServiceLabel(opportunity.service_type)}
-            size="small"
-            variant="outlined"
-            sx={{ mb: 1, height: 18, fontSize: '0.65rem' }}
-          />
+          <Box sx={{ mb: 1 }}>
+            <ProductChip value={opportunity.service_type} />
+          </Box>
         )}
 
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-          <Typography variant="body2" sx={{ fontWeight: 600, color: stageColor }}>
+          <Typography variant="body2" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
             {formatCurrencyFn(opportunity.expected_value || 0, opportunity.company_billing_entity)}
           </Typography>
-          <Chip 
-            label={`${opportunity.probability}%`} 
-            size="small"
-            sx={{ 
-              backgroundColor: stageColor,
-              color: 'white',
-              fontSize: '0.75rem',
-              height: 20
-            }}
-          />
+          <Chip label={`${opportunity.probability}%`} size="small" variant="outlined" />
         </Box>
         
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -387,8 +378,9 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
   const organizeOpportunitiesByStage = (): StageColumn[] => {
     return stageConfig.map(stage => {
       const stageOpportunities = opportunities.filter(opp => opp.stage === stage.id);
-      const totalValue = stageOpportunities.reduce((sum, opp) => sum + (opp.expected_value || 0), 0);
-      const weightedValue = stageOpportunities.reduce((sum, opp) => sum + (opp.weighted_value || 0), 0);
+      // The API sends amounts as text ("18500.00"): convert before adding, or the sum becomes text.
+      const totalValue = stageOpportunities.reduce((sum, opp) => sum + Number(opp.expected_value || 0), 0);
+      const weightedValue = stageOpportunities.reduce((sum, opp) => sum + Number(opp.weighted_value || 0), 0);
       
       return {
         id: stage.id,
@@ -506,8 +498,9 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
             sx={{
               minWidth: 280,
               maxWidth: 320,
-              p: 2,
-              backgroundColor: draggedOver === stage.id ? 'action.hover' : 'background.paper',
+              p: 1.5,
+              boxShadow: 'none',
+              backgroundColor: draggedOver === stage.id ? 'action.selected' : 'background.default',
               border: draggedOver === stage.id ? `2px dashed ${stage.color}` : '1px solid',
               borderColor: draggedOver === stage.id ? stage.color : 'divider',
               transition: 'all 0.2s ease-in-out',
@@ -528,7 +521,7 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
                     mr: 1,
                   }}
                 />
-                <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
                   {stage.label}
                 </Typography>
                 <Chip 

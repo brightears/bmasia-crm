@@ -21,6 +21,7 @@ import {
   Select,
   MenuItem,
   Tabs,
+  Skeleton,
   Tab,
   Menu,
   ListItemIcon,
@@ -54,10 +55,11 @@ import OpportunityPipeline from '../components/OpportunityPipeline';
 import {
   EntityFilter, ServiceFilter, DEFAULT_ENTITY,
   ENTITY_OPTIONS, SERVICE_OPTIONS,
-  formatCurrency, getServiceLabel,
+  currencyForEntity,
 } from '../constants/entities';
-import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { formatDate as formatDisplayDate, formatMoney, statusTone, visuallyHidden } from '../theme';
 import { useListState } from '../hooks/useListState';
+import { PageHeader, EmptyState, ProductChip } from '../components/ui';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -76,11 +78,7 @@ function TabPanel(props: TabPanelProps) {
       aria-labelledby={`opportunities-tab-${index}`}
       {...other}
     >
-      {value === index && (
-        <Box sx={{ pt: 3 }}>
-          {children}
-        </Box>
-      )}
+      {value === index && <Box>{children}</Box>}
     </div>
   );
 }
@@ -340,19 +338,16 @@ const Opportunities: React.FC = () => {
     return formatDisplayDate(dateString);
   };
 
-  const getStageColor = (stage: string): string => {
-    return stageOptions.find(s => s.value === stage)?.color || '#2196f3';
-  };
-
   const renderFilters = () => (
-    <Paper sx={{ mb: 2 }}>
-      <Box sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+    <Box>
+      <Box sx={{ p: 2, display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: 1, borderColor: 'divider' }}>
         <TextField
           placeholder="Search opportunities..."
           value={search}
           onChange={handleSearchChange}
           size="small"
-          sx={{ flex: 1, minWidth: 200 }}
+          inputProps={{ 'aria-label': 'Search opportunities' }}
+          sx={{ flex: '1 1 240px', maxWidth: { md: 360 } }}
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
@@ -377,7 +372,7 @@ const Opportunities: React.FC = () => {
                       width: 12,
                       height: 12,
                       borderRadius: '50%',
-                      backgroundColor: stage.color,
+                      bgcolor: statusTone(stage.value) === 'default' ? 'grey.500' : `${statusTone(stage.value)}.main`,
                       mr: 1,
                       display: 'inline-block',
                     }}
@@ -454,125 +449,99 @@ const Opportunities: React.FC = () => {
           </Select>
         </FormControl>
       </Box>
-    </Paper>
+    </Box>
   );
 
   const renderTableView = () => (
     <>
-      <TableContainer component={Paper}>
-        <Table>
+      <TableContainer sx={{ borderRadius: 0 }}>
+        <Table aria-label="Opportunities">
           <TableHead>
             <TableRow>
-              <TableCell>Company</TableCell>
-              <TableCell>Opportunity Name</TableCell>
-              <TableCell>Service</TableCell>
+              <TableCell>Opportunity</TableCell>
+              <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>Product</TableCell>
               <TableCell>Stage</TableCell>
-              <TableCell>Expected Value</TableCell>
-              <TableCell>Probability</TableCell>
-              <TableCell>Owner</TableCell>
-              <TableCell>Last Contact</TableCell>
-              <TableCell>Follow-up Date</TableCell>
-              <TableCell>Actions</TableCell>
+              <TableCell align="right">Expected value</TableCell>
+              <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' } }}>Probability</TableCell>
+              <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Owner</TableCell>
+              <TableCell sx={{ display: { xs: 'none', xl: 'table-cell' } }}>Last contact</TableCell>
+              <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Follow-up</TableCell>
+              <TableCell align="right"><Box component="span" sx={visuallyHidden}>Actions</Box></TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {loading ? (
-              <TableRow>
-                <TableCell colSpan={10} align="center">
-                  <CircularProgress />
-                </TableCell>
-              </TableRow>
+              Array.from({ length: 6 }).map((_, i) => (
+                <TableRow key={`skeleton-${i}`}>
+                  <TableCell>
+                    <Skeleton width="60%" />
+                    <Skeleton width="40%" />
+                  </TableCell>
+                  {Array.from({ length: 8 }).map((__, j) => (
+                    <TableCell key={j} sx={j === 0 || j === 3 ? { display: { xs: 'none', md: 'table-cell' } } : j === 4 ? { display: { xs: 'none', lg: 'table-cell' } } : j === 5 ? { display: { xs: 'none', xl: 'table-cell' } } : j === 6 ? { display: { xs: 'none', sm: 'table-cell' } } : undefined}>
+                      <Skeleton width={j === 7 ? 24 : '70%'} />
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
             ) : opportunities.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} align="center">
-                  <Box sx={{ py: 4 }}>
-                    <Handshake sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                    <Typography variant="h6" color="text.secondary">
-                      No opportunities found
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {search || stageFilter || ownerFilter || serviceFilter !== 'all' ? 'Try adjusting your filters' : 'Start by creating your first opportunity'}
-                    </Typography>
-                  </Box>
+                <TableCell colSpan={9}>
+                  <EmptyState
+                    icon={<Handshake />}
+                    title={search || stageFilter || ownerFilter || serviceFilter !== 'all' ? 'No opportunities match these filters' : 'No opportunities yet'}
+                    description={search || stageFilter || ownerFilter || serviceFilter !== 'all' ? 'Try a different search or clear the filters.' : 'Create the first opportunity to start tracking a deal.'}
+                  />
                 </TableCell>
               </TableRow>
             ) : (
               opportunities.map((opportunity) => (
                 <TableRow key={opportunity.id} hover sx={{ cursor: 'pointer' }} onClick={() => navigate(`/opportunities/${opportunity.id}`)}>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Business sx={{ mr: 1, color: 'text.secondary' }} />
-                      <Typography variant="body2">
-                        {opportunity.company_name}
-                      </Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" fontWeight="medium">
+                  <TableCell sx={{ maxWidth: 320 }}>
+                    <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }} noWrap>
                       {opportunity.name}
                     </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={getServiceLabel(opportunity.service_type)}
-                      size="small"
-                      variant="outlined"
-                      sx={{ fontSize: '0.75rem' }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={opportunity.stage}
-                      size="small"
-                      sx={{
-                        backgroundColor: getStageColor(opportunity.stage),
-                        color: 'white',
-                        fontWeight: 600
-                      }}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
-                      {formatCurrency(opportunity.expected_value || 0, opportunity.company_billing_entity)}
+                    <Typography variant="body2" color="text.secondary" noWrap>
+                      {opportunity.company_name}
                     </Typography>
                   </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <TrendingUp sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
-                      <Typography variant="body2">
-                        {opportunity.probability}%
-                      </Typography>
-                    </Box>
+                  <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
+                    {opportunity.service_type ? (
+                      <ProductChip value={opportunity.service_type} />
+                    ) : (
+                      <Typography variant="body2" color="text.disabled">—</Typography>
+                    )}
                   </TableCell>
                   <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Person sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
-                      <Typography variant="body2">
-                        {opportunity.owner_name}
-                      </Typography>
-                    </Box>
+                    <Chip label={opportunity.stage} size="small" color={statusTone(opportunity.stage)} />
                   </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Schedule sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
-                      <Typography variant="body2">
-                        {formatDate(opportunity.last_contact_date)}
-                      </Typography>
-                    </Box>
+                  <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                    {formatMoney(opportunity.expected_value || 0, currencyForEntity(opportunity.company_billing_entity))}
                   </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" sx={{
-                      color: opportunity.is_overdue ? 'error.main' : 'text.primary'
-                    }}>
+                  <TableCell align="right" sx={{ display: { xs: 'none', md: 'table-cell' }, fontVariantNumeric: 'tabular-nums' }}>
+                    {opportunity.probability}%
+                  </TableCell>
+                  <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>
+                    <Typography variant="body2" noWrap>{opportunity.owner_name || '—'}</Typography>
+                  </TableCell>
+                  <TableCell sx={{ display: { xs: 'none', xl: 'table-cell' }, whiteSpace: 'nowrap' }}>
+                    {formatDate(opportunity.last_contact_date)}
+                  </TableCell>
+                  <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' }, whiteSpace: 'nowrap' }}>
+                    <Typography
+                      variant="body2"
+                      sx={{ color: opportunity.is_overdue ? 'error.main' : 'text.primary', fontWeight: opportunity.is_overdue ? 600 : 400 }}
+                    >
                       {formatDate(opportunity.follow_up_date)}
                     </Typography>
                   </TableCell>
-                  <TableCell>
+                  <TableCell align="right">
                     <IconButton
                       size="small"
+                      aria-label={`Actions for ${opportunity.name}`}
                       onClick={(e) => { e.stopPropagation(); handleActionMenuOpen(e, opportunity); }}
                     >
-                      <MoreVert />
+                      <MoreVert fontSize="small" />
                     </IconButton>
                   </TableCell>
                 </TableRow>
@@ -580,46 +549,40 @@ const Opportunities: React.FC = () => {
             )}
           </TableBody>
         </Table>
-        <TablePagination
-          rowsPerPageOptions={[10, 25, 50, 100]}
-          component="div"
-          count={totalCount}
-          rowsPerPage={rowsPerPage}
-          page={page}
-          onPageChange={handleChangePage}
-          onRowsPerPageChange={handleChangeRowsPerPage}
-        />
       </TableContainer>
+      <TablePagination
+        rowsPerPageOptions={[10, 25, 50, 100]}
+        component="div"
+        count={totalCount}
+        rowsPerPage={rowsPerPage}
+        page={page}
+        onPageChange={handleChangePage}
+        onRowsPerPageChange={handleChangeRowsPerPage}
+      />
     </>
   );
 
   return (
     <Box>
-      {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" component="h1">
-          Opportunities
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button
-            variant="outlined"
-            startIcon={exporting ? <CircularProgress size={16} /> : <PdfIcon />}
-            onClick={handleExportPDF}
-            disabled={exporting || loading}
-            size={isMobile ? "small" : "medium"}
-          >
-            Export PDF
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={handleCreateOpportunity}
-            size={isMobile ? "small" : "medium"}
-          >
-            New Opportunity
-          </Button>
-        </Box>
-      </Box>
+      <PageHeader
+        title="Opportunities"
+        subtitle="Deals in progress, from first contact to signed contract."
+        actions={
+          <>
+            <Button
+              variant="outlined"
+              startIcon={exporting ? <CircularProgress size={16} color="inherit" /> : <PdfIcon />}
+              onClick={handleExportPDF}
+              disabled={exporting || loading}
+            >
+              Export PDF
+            </Button>
+            <Button variant="contained" startIcon={<Add />} onClick={handleCreateOpportunity}>
+              New Opportunity
+            </Button>
+          </>
+        }
+      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
@@ -627,43 +590,36 @@ const Opportunities: React.FC = () => {
         </Alert>
       )}
 
-      {/* Tabs */}
-      <Paper sx={{ mb: 3 }}>
+      {/* One card: view tabs, filters (shared by both views), then the list or the pipeline */}
+      <Paper sx={{ overflow: 'hidden' }}>
         <Tabs
           value={currentTab}
           onChange={handleTabChange}
-          variant={isMobile ? "fullWidth" : "standard"}
+          variant={isMobile ? 'fullWidth' : 'standard'}
+          sx={{ px: 1 }}
         >
-          <Tab
-            icon={<TableView />}
-            label="List View"
-            iconPosition="start"
-          />
-          <Tab
-            icon={<ViewKanban />}
-            label="Pipeline"
-            iconPosition="start"
-          />
+          <Tab icon={<TableView fontSize="small" />} label="List" iconPosition="start" />
+          <Tab icon={<ViewKanban fontSize="small" />} label="Pipeline" iconPosition="start" />
         </Tabs>
+
+        {renderFilters()}
+
+        <TabPanel value={currentTab} index={0}>
+          {renderTableView()}
+        </TabPanel>
+
+        <TabPanel value={currentTab} index={1}>
+          <Box sx={{ p: 2 }}>
+            <OpportunityPipeline
+              opportunities={opportunities}
+              onOpportunityUpdate={handleOpportunityUpdate}
+              onOpportunityEdit={handleEditOpportunity}
+              loading={loading}
+              entityFilter={entityFilter}
+            />
+          </Box>
+        </TabPanel>
       </Paper>
-
-      {/* Filters — shared by both tabs */}
-      {renderFilters()}
-
-      {/* Tab Panels */}
-      <TabPanel value={currentTab} index={0}>
-        {renderTableView()}
-      </TabPanel>
-
-      <TabPanel value={currentTab} index={1}>
-        <OpportunityPipeline
-          opportunities={opportunities}
-          onOpportunityUpdate={handleOpportunityUpdate}
-          onOpportunityEdit={handleEditOpportunity}
-          loading={loading}
-          entityFilter={entityFilter}
-        />
-      </TabPanel>
 
       {/* Opportunity Form */}
       <OpportunityForm

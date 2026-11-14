@@ -1,3 +1,4 @@
+import { formatMoney } from '../theme/format';
 export const ENTITY_CURRENCY: Record<string, { currency: string; locale: string }> = {
   'BMAsia Limited': { currency: 'USD', locale: 'en-US' },
   'BMAsia (Thailand) Co., Ltd.': { currency: 'THB', locale: 'th-TH' },
@@ -25,16 +26,11 @@ export function currencyForEntity(entity?: string | null): string {
   return (entity && ENTITY_CURRENCY[entity]?.currency) || 'USD';
 }
 
+/** An amount in the billing entity's currency, written the CRM's way: "THB 108,000". */
 export function formatCurrency(value: number, entity?: string): string {
-  const config = entity ? ENTITY_CURRENCY[entity] : undefined;
-  const currency = config?.currency || 'USD';
-  const locale = config?.locale || 'en-US';
-  return new Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(value);
+  const n = Number(value ?? 0);
+  // Something that is not a number shows as a dash, never as a false 0.
+  return formatMoney(Number.isNaN(n) ? null : Math.round(n), currencyForEntity(entity));
 }
 
 export function getServiceLabel(serviceType?: string | null): string {
