@@ -30,6 +30,27 @@ class AuthService {
     timeout: 10000, // 10 second timeout
   });
 
+  // Set once a refresh has failed during the session, so several failing requests
+  // only clear the session and redirect once.
+  private sessionExpiredHandled = false;
+
+  /**
+   * Called once when the session can no longer be refreshed during use. The saved session
+   * has already been cleared; reloading the current page sends the user to sign-in.
+   * Replaceable in tests.
+   */
+  redirectAfterExpiredSession = (): void => {
+    if (window.location.pathname !== '/login') {
+      window.location.reload();
+    }
+  };
+
+  private handleSessionExpired(): void {
+    if (this.sessionExpiredHandled) return;
+    this.sessionExpiredHandled = true;
+    this.redirectAfterExpiredSession();
+  }
+
   constructor() {
     console.log('=== AuthService Constructor ===');
     console.log('API_BASE_URL:', API_BASE_URL);
@@ -68,8 +89,11 @@ class AuthService {
         console.error('API request failed:', error.response?.status ?? 'no response', error.config?.url?.split('?')[0]);
 
         const originalRequest = error.config;
+        // A failing refresh call must never start another refresh: with an expired or
+        // revoked refresh token that looped forever.
+        const isRefreshCall = String(originalRequest?.url || '').includes('/auth/refresh/');
 
-        if (error.response?.status === 401 && !originalRequest._retry) {
+        if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !isRefreshCall) {
           console.log('Attempting token refresh due to 401 error');
           originalRequest._retry = true;
 
@@ -84,7 +108,7 @@ class AuthService {
           } catch (refreshError) {
             console.error('Token refresh failed, redirecting to login');
             this.clearAuthData();
-            window.location.href = '/login';
+            this.handleSessionExpired();
             return Promise.reject(refreshError);
           }
         }
