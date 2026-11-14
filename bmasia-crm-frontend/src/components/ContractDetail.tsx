@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   Dialog,
+  Skeleton,
+  Link,
   DialogTitle,
   DialogContent,
   DialogActions,
@@ -61,7 +63,8 @@ import {
 import { Contract, Invoice, ContractZone, ServiceLocation, EmailLogEntry } from '../types';
 import ApiService from '../services/api';
 import ContractDocuments from './ContractDocuments';
-import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { formatDate as formatDisplayDate, formatMoney, statusTone } from '../theme';
+import { PageHeader } from './ui';
 
 interface ContractDetailProps {
   open: boolean;
@@ -69,6 +72,8 @@ interface ContractDetailProps {
   onEdit: (contract: Contract) => void;
   onContractUpdated?: (contract: Contract) => void;
   contractId: string | null;
+  /** 'page' renders the contract as a full record page (no pop-up). Default: 'dialog'. */
+  variant?: 'dialog' | 'page';
 }
 
 interface PaymentHistory {
@@ -93,8 +98,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
   onClose,
   onEdit,
   onContractUpdated,
-  contractId,
-}) => {
+  contractId, variant = 'dialog'}) => {
   const navigate = useNavigate();
   const [contract, setContract] = useState<Contract | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -273,6 +277,28 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
 
   if (!open || !contractId) return null;
 
+  const isPage = variant === 'page';
+
+  if (loading && isPage) {
+    return (
+      <Box>
+        <Skeleton width={220} height={20} sx={{ mb: 1 }} />
+        <Skeleton width={320} height={40} sx={{ mb: 3 }} />
+        <Skeleton variant="rounded" height={180} sx={{ mb: 3 }} />
+        <Skeleton variant="rounded" height={320} />
+      </Box>
+    );
+  }
+
+  if ((error || !contract) && isPage && !loading) {
+    return (
+      <Box>
+        <PageHeader breadcrumbs={[{ label: 'Contracts', to: '/contracts' }, { label: 'Not found' }]} title="Contract" />
+        <Alert severity="error">{error || 'Contract not found'}</Alert>
+      </Box>
+    );
+  }
+
   if (loading) {
     return (
       <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
@@ -297,6 +323,596 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
   }
 
   const progress = calculateContractProgress();
+
+  const actionButtons = (
+    <>
+        {contract.status === 'Draft' && (
+          <Button
+            variant="outlined"
+            color="primary"
+            startIcon={<Email />}
+            onClick={async () => {
+              try {
+                await ApiService.updateContract(contract.id, { status: 'Sent' });
+                const updated = await ApiService.getContract(contract.id);
+                setContract(updated);
+                onContractUpdated?.(updated);
+              } catch (err) {
+                console.error('Failed to send contract:', err);
+              }
+            }}
+          >
+            Mark as Sent
+          </Button>
+        )}
+        {contract.status === 'Sent' && (
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={<CheckCircle />}
+            onClick={async () => {
+              try {
+                await ApiService.updateContract(contract.id, { status: 'Active' });
+                const updated = await ApiService.getContract(contract.id);
+                setContract(updated);
+                onContractUpdated?.(updated);
+              } catch (err) {
+                console.error('Failed to mark as signed:', err);
+              }
+            }}
+          >
+            Mark as Signed
+          </Button>
+        )}
+        <Button
+          variant="outlined"
+          startIcon={<Visibility />}
+          onClick={handlePreviewPDF}
+          disabled={loading}
+        >
+          Preview PDF
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<GetApp />}
+          onClick={handleDownloadPDF}
+        >
+          Download PDF
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<Receipt />}
+          onClick={() => {
+            onClose();
+            navigate(`/invoices?new=true&company=${contract.company}&contract=${contract.id}`);
+          }}
+        >
+          Create Invoice
+        </Button>
+        {!['Renewed', 'Expired', 'Cancelled'].includes(contract.status) && (
+          <Button
+            variant="contained"
+            startIcon={<Edit />}
+            onClick={() => onEdit(contract)}
+          >
+            Edit Contract
+          </Button>
+        )}
+    </>
+  );
+
+  const content = (
+    <>
+        {['Renewed', 'Expired', 'Cancelled'].includes(contract.status) && (
+          <Alert severity="info" icon={<Info />} sx={{ mb: 2 }}>
+            This contract is <strong>{contract.status.toLowerCase()}</strong> and cannot be edited.
+            {contract.status === 'Renewed' && ' The renewal contract is the current version.'}
+            {(contract.status === 'Expired' || contract.status === 'Cancelled') && ' This is a historical record.'}
+          </Alert>
+        )}
+        <Grid container spacing={3}>
+          {/* Contract Overview */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3, mb: 3 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                {!isPage && (
+                <Box>
+                  <Typography variant="h5" gutterBottom>
+                    {contract.company_name}
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+                    <Chip
+                      label={contract.status}
+                      color={getStatusColor(contract.status)}
+                      size="medium"
+                    />
+                    <Chip
+                      label={contract.contract_type}
+                      variant="outlined"
+                      size="medium"
+                    />
+                    {contract.auto_renew && (
+                      <Chip
+                        label="Auto-Renew"
+                        color="info"
+                        variant="outlined"
+                        size="medium"
+                      />
+                    )}
+                  </Box>
+                </Box>
+                )}
+                <Box sx={{ textAlign: isPage ? 'left' : 'right' }}>
+                  <Typography variant="h4" color="text.primary">
+                    {formatCurrency(contract.value, contract.currency)}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Total Contract Value
+                  </Typography>
+                </Box>
+              </Box>
+
+              {/* Contract Progress */}
+              {contract.status === 'Active' && (
+                <Box sx={{ mb: 2 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      Contract Progress
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {progress}% Complete
+                    </Typography>
+                  </Box>
+                  <LinearProgress
+                    variant="determinate"
+                    value={progress}
+                    sx={{
+                      height: 8,
+                      borderRadius: 4,
+                      backgroundColor: 'grey.200',
+                    }}
+                  />
+                </Box>
+              )}
+
+              {/* Key Information */}
+              <Grid container spacing={2}>
+                <Grid item xs={12} sm={6} md={3}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                    <CalendarToday sx={{ mr: 1, color: 'text.secondary', fontSize: 20 }} />
+                    <Typography variant="body2" color="text.secondary">
+                      Start Date
+                    </Typography>
+                  </Box>
+                  <Typography variant="body1" fontWeight="medium">
+                    {formatDate(contract.start_date)}
+                  </Typography>
+                </Grid>
+
+                <Grid item xs={12} sm={6} md={3}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                    <CalendarToday sx={{ mr: 1, color: 'text.secondary', fontSize: 20 }} />
+                    <Typography variant="body2" color="text.secondary">
+                      End Date
+                    </Typography>
+                  </Box>
+                  <Typography variant="body1" fontWeight="medium">
+                    {formatDate(contract.end_date)}
+                  </Typography>
+                </Grid>
+
+                <Grid item xs={12} sm={6} md={3}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                    <AttachMoney sx={{ mr: 1, color: 'text.secondary', fontSize: 20 }} />
+                    <Typography variant="body2" color="text.secondary">
+                      Monthly Value
+                    </Typography>
+                  </Box>
+                  <Typography variant="body1" fontWeight="medium">
+                    {formatCurrency(contract.monthly_value, contract.currency)}
+                  </Typography>
+                </Grid>
+
+                <Grid item xs={12} sm={6} md={3}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                    <Warning sx={{
+                      mr: 1,
+                      fontSize: 20,
+                      color: contract.is_expiring_soon ? 'warning.main' : 'text.secondary'
+                    }} />
+                    <Typography variant="body2" color="text.secondary">
+                      Days Until Expiry
+                    </Typography>
+                  </Box>
+                  <Typography
+                    variant="body1"
+                    fontWeight="medium"
+                    color={contract.is_expiring_soon ? 'warning.main' : 'inherit'}
+                  >
+                    {contract.days_until_expiry} days
+                  </Typography>
+                </Grid>
+              </Grid>
+
+              {contract.is_expiring_soon && (
+                <Alert severity="warning" sx={{ mt: 2 }}>
+                  This contract expires in {contract.days_until_expiry} days.
+                  {!contract.renewal_notice_sent && (
+                    <Box sx={{ mt: 1 }}>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="warning"
+                        onClick={handleSendRenewalNotice}
+                        disabled={sendingRenewal}
+                        startIcon={sendingRenewal ? <CircularProgress size={16} /> : <Email />}
+                      >
+                        {sendingRenewal ? 'Sending...' : 'Send Renewal Notice'}
+                      </Button>
+                    </Box>
+                  )}
+                </Alert>
+              )}
+            </Paper>
+          </Grid>
+
+          {/* Financial Details */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Financial Details
+              </Typography>
+
+              <List dense>
+                <ListItem>
+                  <ListItemText
+                    primary="Payment Terms"
+                    secondary={contract.payment_terms || 'Net 30'}
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemText
+                    primary="Billing Frequency"
+                    secondary={contract.billing_frequency}
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemText
+                    primary="Discount Applied"
+                    secondary={`${contract.discount_percentage}%`}
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemText
+                    primary="Outstanding Amount"
+                    secondary={formatCurrency(contract.outstanding_amount, contract.currency)}
+                  />
+                </ListItem>
+                {contract.auto_renew && (
+                  <ListItem>
+                    <ListItemText
+                      primary="Renewal Period"
+                      secondary={`${contract.renewal_period_months} months`}
+                    />
+                  </ListItem>
+                )}
+              </List>
+            </Paper>
+          </Grid>
+
+          {/* Contract Timeline */}
+          <Grid item xs={12} md={6}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Contract Timeline
+              </Typography>
+
+              <Timeline sx={{ p: 0 }}>
+                <TimelineItem>
+                  <TimelineSeparator>
+                    <TimelineDot color="primary">
+                      <Assignment />
+                    </TimelineDot>
+                    <TimelineConnector />
+                  </TimelineSeparator>
+                  <TimelineContent>
+                    <Typography variant="body2" fontWeight="medium">
+                      Contract Created
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {formatDate(contract.created_at)}
+                    </Typography>
+                  </TimelineContent>
+                </TimelineItem>
+
+                {contract.status === 'Active' && (
+                  <TimelineItem>
+                    <TimelineSeparator>
+                      <TimelineDot color="success">
+                        <CheckCircle />
+                      </TimelineDot>
+                      <TimelineConnector />
+                    </TimelineSeparator>
+                    <TimelineContent>
+                      <Typography variant="body2" fontWeight="medium">
+                        Contract Active
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Started: {formatDate(contract.start_date)}
+                      </Typography>
+                    </TimelineContent>
+                  </TimelineItem>
+                )}
+
+                {contract.renewal_notice_sent && (
+                  <TimelineItem>
+                    <TimelineSeparator>
+                      <TimelineDot color="warning">
+                        <Email />
+                      </TimelineDot>
+                      <TimelineConnector />
+                    </TimelineSeparator>
+                    <TimelineContent>
+                      <Typography variant="body2" fontWeight="medium">
+                        Renewal Notice Sent
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {formatDate(contract.renewal_notice_date)}
+                      </Typography>
+                    </TimelineContent>
+                  </TimelineItem>
+                )}
+
+                <TimelineItem>
+                  <TimelineSeparator>
+                    <TimelineDot color={contract.status === 'Expired' ? 'error' : 'grey'}>
+                      <Warning />
+                    </TimelineDot>
+                  </TimelineSeparator>
+                  <TimelineContent>
+                    <Typography variant="body2" fontWeight="medium">
+                      Contract {contract.status === 'Expired' ? 'Expired' : 'Expires'}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {formatDate(contract.end_date)}
+                    </Typography>
+                  </TimelineContent>
+                </TimelineItem>
+              </Timeline>
+            </Paper>
+          </Grid>
+
+          {/* Invoices */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Related Invoices ({invoices.length})
+              </Typography>
+
+              {invoices.length > 0 ? (
+                <TableContainer>
+                  <Table>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Invoice Number</TableCell>
+                        <TableCell>Issue Date</TableCell>
+                        <TableCell>Due Date</TableCell>
+                        <TableCell>Amount</TableCell>
+                        <TableCell>Status</TableCell>
+                        <TableCell>Actions</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {invoices.map((invoice) => (
+                        <TableRow key={invoice.id} hover>
+                          <TableCell>
+                            <Typography variant="body2" fontWeight="medium">
+                              {invoice.invoice_number}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            {formatDate(invoice.issue_date)}
+                          </TableCell>
+                          <TableCell>
+                            <Typography
+                              variant="body2"
+                              color={invoice.is_overdue ? 'error.main' : 'inherit'}
+                            >
+                              {formatDate(invoice.due_date)}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            {formatCurrency(invoice.total_amount, invoice.currency)}
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              label={invoice.status}
+                              color={getInvoiceStatusColor(invoice.status)}
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <IconButton size="small" title="Download">
+                              <GetApp />
+                            </IconButton>
+                            <IconButton size="small" title="Print">
+                              <Print />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  No invoices generated for this contract yet.
+                </Typography>
+              )}
+            </Paper>
+          </Grid>
+
+          {/* Notes */}
+          {contract.notes && (
+            <Grid item xs={12}>
+              <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" gutterBottom>
+                  Contract Notes
+                </Typography>
+                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                  {contract.notes}
+                </Typography>
+              </Paper>
+            </Grid>
+          )}
+
+          {/* Service Locations */}
+          {((contract.service_locations && contract.service_locations.length > 0) || contractZones.length > 0) && (
+            <Grid item xs={12}>
+              <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                  <LocationOnIcon sx={{ color: '#FFA500' }} />
+                  Service Locations
+                  <Chip
+                    label={contract.service_locations?.length || contractZones.length}
+                    color="primary"
+                    size="small"
+                  />
+                </Typography>
+                <TableContainer>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Location</TableCell>
+                        <TableCell>Platform</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {contract.service_locations && contract.service_locations.length > 0
+                        ? contract.service_locations.map((loc, idx) => (
+                            <TableRow key={loc.id || idx}>
+                              <TableCell>{loc.location_name}</TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={loc.platform === 'soundtrack' ? 'Soundtrack' : 'Beat Breeze'}
+                                  size="small"
+                                  color={loc.platform === 'soundtrack' ? 'primary' : 'secondary'}
+                                  variant="outlined"
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        : contractZones.map((cz) => (
+                            <TableRow key={cz.id}>
+                              <TableCell>{cz.zone_name}</TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={cz.zone_platform === 'soundtrack' ? 'Soundtrack' : 'Beat Breeze'}
+                                  size="small"
+                                  color={cz.zone_platform === 'soundtrack' ? 'primary' : 'secondary'}
+                                  variant="outlined"
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))
+                      }
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Paper>
+            </Grid>
+          )}
+
+          {/* Email History */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 2 }}>
+              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Email fontSize="small" />
+                Email History
+              </Typography>
+              {emailLogs.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No emails sent for this contract yet
+                </Typography>
+              ) : (
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  {emailLogs.map((log) => (
+                    <Box key={log.id} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, p: 1.5, borderRadius: 1, bgcolor: 'grey.50' }}>
+                      <Box sx={{ mt: 0.5 }}>
+                        {log.status === 'sent' && <CheckCircle color="success" fontSize="small" />}
+                        {log.status === 'opened' && <Visibility color="info" fontSize="small" />}
+                        {log.status === 'failed' && <Cancel color="error" fontSize="small" />}
+                        {log.status === 'pending' && <Schedule color="disabled" fontSize="small" />}
+                      </Box>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                          <Typography variant="body2" fontWeight="medium">
+                            {log.email_type_display}
+                          </Typography>
+                          <Chip
+                            label={log.status_display}
+                            size="small"
+                            color={log.status === 'sent' ? 'success' : log.status === 'opened' ? 'info' : log.status === 'failed' ? 'error' : 'default'}
+                            variant="outlined"
+                          />
+                          {log.opened_at && (
+                            <Chip label={`Opened ${new Date(log.opened_at).toLocaleString()}`} size="small" color="info" />
+                          )}
+                        </Box>
+                        <Typography variant="body2" color="text.secondary" noWrap>
+                          To: {log.to_email}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" noWrap>
+                          From: {log.from_email}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {log.sent_at ? new Date(log.sent_at).toLocaleString() : log.created_at ? new Date(log.created_at).toLocaleString() : ''}
+                        </Typography>
+                        {log.status === 'failed' && log.error_message && (
+                          <Typography variant="caption" color="error" display="block">
+                            Error: {log.error_message}
+                          </Typography>
+                        )}
+                      </Box>
+                    </Box>
+                  ))}
+                </Box>
+              )}
+            </Paper>
+          </Grid>
+
+          {/* Contract Documents */}
+          <Grid item xs={12}>
+            <ContractDocuments contractId={contract.id} />
+          </Grid>
+        </Grid>
+    </>
+  );
+
+  if (isPage) {
+    return (
+      <Box>
+        <PageHeader
+          breadcrumbs={[{ label: 'Contracts', to: '/contracts' }, { label: contract.contract_number }]}
+          title={contract.contract_number}
+          subtitle={
+            <Link component={RouterLink} to={`/companies/${contract.company}`} underline="hover" sx={{ fontWeight: 600 }}>
+              {contract.company_name}
+            </Link>
+          }
+          meta={
+            <>
+              <Chip label={contract.status} size="small" color={statusTone(contract.status)} />
+              <Chip label={contract.contract_type} size="small" variant="outlined" />
+              {contract.auto_renew && <Chip label="Auto-renew" size="small" variant="outlined" color="info" />}
+            </>
+          }
+          actions={actionButtons}
+        />
+        {content}
+      </Box>
+    );
+  }
 
   return (
     <Dialog
@@ -335,6 +951,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
           <Grid item xs={12}>
             <Paper sx={{ p: 3, mb: 3 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                {!isPage && (
                 <Box>
                   <Typography variant="h5" gutterBottom>
                     {contract.company_name}
@@ -360,8 +977,9 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
                     )}
                   </Box>
                 </Box>
-                <Box sx={{ textAlign: 'right' }}>
-                  <Typography variant="h4" color="primary">
+                )}
+                <Box sx={{ textAlign: isPage ? 'left' : 'right' }}>
+                  <Typography variant="h4" color="text.primary">
                     {formatCurrency(contract.value, contract.currency)}
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
@@ -807,78 +1425,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
       </DialogContent>
 
       <DialogActions>
-        {contract.status === 'Draft' && (
-          <Button
-            variant="outlined"
-            color="primary"
-            startIcon={<Email />}
-            onClick={async () => {
-              try {
-                await ApiService.updateContract(contract.id, { status: 'Sent' });
-                const updated = await ApiService.getContract(contract.id);
-                setContract(updated);
-                onContractUpdated?.(updated);
-              } catch (err) {
-                console.error('Failed to send contract:', err);
-              }
-            }}
-          >
-            Mark as Sent
-          </Button>
-        )}
-        {contract.status === 'Sent' && (
-          <Button
-            variant="contained"
-            color="success"
-            startIcon={<CheckCircle />}
-            onClick={async () => {
-              try {
-                await ApiService.updateContract(contract.id, { status: 'Active' });
-                const updated = await ApiService.getContract(contract.id);
-                setContract(updated);
-                onContractUpdated?.(updated);
-              } catch (err) {
-                console.error('Failed to mark as signed:', err);
-              }
-            }}
-          >
-            Mark as Signed
-          </Button>
-        )}
-        <Button
-          variant="outlined"
-          startIcon={<Visibility />}
-          onClick={handlePreviewPDF}
-          disabled={loading}
-        >
-          Preview PDF
-        </Button>
-        <Button
-          variant="outlined"
-          startIcon={<GetApp />}
-          onClick={handleDownloadPDF}
-        >
-          Download PDF
-        </Button>
-        <Button
-          variant="outlined"
-          startIcon={<Receipt />}
-          onClick={() => {
-            onClose();
-            navigate(`/invoices?new=true&company=${contract.company}&contract=${contract.id}`);
-          }}
-        >
-          Create Invoice
-        </Button>
-        {!['Renewed', 'Expired', 'Cancelled'].includes(contract.status) && (
-          <Button
-            variant="contained"
-            startIcon={<Edit />}
-            onClick={() => onEdit(contract)}
-          >
-            Edit Contract
-          </Button>
-        )}
+        {actionButtons}
         <Button onClick={onClose}>
           Close
         </Button>
