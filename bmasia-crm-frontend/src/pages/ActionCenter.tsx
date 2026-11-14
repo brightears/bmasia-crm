@@ -6,8 +6,10 @@ import {
   Chip,
   IconButton,
   Tooltip,
-  CircularProgress,
-  Divider,
+  ButtonBase,
+  Skeleton,
+  Alert,
+  Button,
 } from '@mui/material';
 import {
   Assignment,
@@ -25,6 +27,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import ApiService from '../services/api';
+import { PageHeader, EmptyState } from '../components/ui';
 
 interface ActionItem {
   id: string;
@@ -108,217 +111,229 @@ const ActionCenter: React.FC = () => {
     }
   };
 
-  const getBorderColor = (urgency: ActionItem['urgency']) => {
-    switch (urgency) {
-      case 'overdue':
-        return '#d32f2f';
-      case 'today':
-        return '#FFA500';
-      case 'upcoming':
-        return '#1976d2';
-      default:
-        return '#1976d2';
-    }
-  };
-
-  const getUrgencyChipColor = (urgency: ActionItem['urgency']) => {
-    switch (urgency) {
-      case 'overdue':
-        return { bg: '#d32f2f', color: '#fff' };
-      case 'today':
-        return { bg: '#FFA500', color: '#fff' };
-      case 'upcoming':
-        return { bg: '#1976d2', color: '#fff' };
-      default:
-        return { bg: '#1976d2', color: '#fff' };
-    }
-  };
+  const urgencyTone = (urgency: ActionItem['urgency']): 'error' | 'warning' | 'info' =>
+    urgency === 'overdue' ? 'error' : urgency === 'today' ? 'warning' : 'info';
 
   const handleItemClick = (item: ActionItem) => {
     navigate(item.link_url);
   };
 
-  const renderSummaryChips = () => {
+  const renderSummary = () => {
     if (!data) return null;
 
-    const chips = [
-      {
-        label: `${data.summary.overdue_count} Overdue`,
-        bg: '#d32f2f',
-        show: data.summary.overdue_count > 0,
-      },
-      {
-        label: `${data.summary.today_count} Due Today`,
-        bg: '#FFA500',
-        show: data.summary.today_count > 0,
-      },
-      {
-        label: `${data.summary.upcoming_count} This Week`,
-        bg: '#1976d2',
-        show: data.summary.upcoming_count > 0,
-      },
-      {
-        label: `${data.summary.expiring_count} Expiring`,
-        bg: '#f57c00',
-        show: data.summary.expiring_count > 0,
-      },
+    const tiles = [
+      { label: 'Overdue', value: data.summary.overdue_count, tone: 'error' as const, icon: <ErrorOutline /> },
+      { label: 'Due today & tomorrow', value: data.summary.today_count, tone: 'warning' as const, icon: <Today /> },
+      { label: 'Coming up this week', value: data.summary.upcoming_count, tone: 'info' as const, icon: <CalendarMonth /> },
+      { label: 'Contracts expiring', value: data.summary.expiring_count, tone: 'warning' as const, icon: <Description /> },
     ];
 
     return (
-      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 3 }}>
-        {chips
-          .filter((chip) => chip.show)
-          .map((chip, index) => (
-            <Chip
-              key={index}
-              label={chip.label}
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', md: 'repeat(4, minmax(0, 1fr))' },
+          gap: { xs: 1.5, sm: 2 },
+          mb: 3,
+        }}
+      >
+        {tiles.map((tile) => (
+          <Paper key={tile.label} sx={{ p: { xs: 1.5, sm: 2 }, display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
+            <Box
               sx={{
-                backgroundColor: chip.bg,
-                color: '#fff',
-                fontWeight: 600,
+                width: 40,
+                height: 40,
+                borderRadius: 2,
+                display: 'grid',
+                placeItems: 'center',
+                flexShrink: 0,
+                bgcolor: tile.value > 0 ? `${tile.tone}.main` : 'action.hover',
+                color: tile.value > 0 ? '#fff' : 'text.secondary',
+                opacity: tile.value > 0 ? 1 : 0.8,
+                '& svg': { fontSize: 20 },
               }}
-            />
-          ))}
+            >
+              {tile.icon}
+            </Box>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography sx={{ fontSize: '1.5rem', fontWeight: 650, lineHeight: 1.1, fontVariantNumeric: 'tabular-nums' }}>
+                {tile.value}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.3 }}>
+                {tile.label}
+              </Typography>
+            </Box>
+          </Paper>
+        ))}
       </Box>
     );
   };
 
   const renderActionItem = (item: ActionItem) => {
-    const chipColors = getUrgencyChipColor(item.urgency);
+    const tone = urgencyTone(item.urgency);
 
     return (
-      <Paper
+      <ButtonBase
         key={item.id}
-        sx={{
-          p: 2,
-          mb: 2,
-          borderLeft: `4px solid ${getBorderColor(item.urgency)}`,
-          cursor: 'pointer',
-          transition: 'all 0.2s',
-          '&:hover': {
-            boxShadow: 3,
-            transform: 'translateX(4px)',
-          },
-        }}
         onClick={() => handleItemClick(item)}
+        sx={{
+          width: '100%',
+          textAlign: 'left',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 2,
+          px: 2.5,
+          py: 1.75,
+          borderTop: 1,
+          borderColor: 'divider',
+          '&:hover': { bgcolor: 'action.hover' },
+          '&:hover .row-chevron': { color: 'text.primary', transform: 'translateX(2px)' },
+        }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
-          <Box sx={{ color: getBorderColor(item.urgency), pt: 0.5 }}>
-            {getTypeIcon(item.type)}
-          </Box>
+        <Box
+          sx={{
+            width: 36,
+            height: 36,
+            borderRadius: 2,
+            display: 'grid',
+            placeItems: 'center',
+            flexShrink: 0,
+            bgcolor: 'action.hover',
+            color: `${tone}.main`,
+            '& svg': { fontSize: 20 },
+          }}
+        >
+          {getTypeIcon(item.type)}
+        </Box>
 
-          <Box sx={{ flex: 1 }}>
-            <Typography variant="body1" fontWeight={600} gutterBottom>
-              {item.title}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }} noWrap>
+            {item.title}
+          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', color: 'text.secondary' }}>
+            <Typography variant="body2" color="text.secondary" noWrap>
               {item.subtitle}
             </Typography>
-            <Tooltip
-              title={
-                <Box>
-                  <Typography variant="body2">{item.contact_email}</Typography>
-                  {item.contact_phone && (
-                    <Typography variant="body2">{item.contact_phone}</Typography>
-                  )}
-                </Box>
-              }
-              arrow
-            >
-              <Chip
-                icon={<Person />}
-                label={item.contact_name}
-                size="small"
-                sx={{ mt: 1 }}
-              />
-            </Tooltip>
-          </Box>
-
-          <Box
-            sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'flex-end',
-              gap: 1,
-            }}
-          >
-            <Chip
-              label={item.time_context}
-              size="small"
-              sx={{
-                backgroundColor: chipColors.bg,
-                color: chipColors.color,
-                fontWeight: 600,
-              }}
-            />
-            {item.amount && item.currency && (
-              <Typography variant="body2" fontWeight={600} color="primary">
-                {item.currency} {item.amount.toLocaleString()}
-              </Typography>
+            {item.contact_name && (
+              <Tooltip
+                title={
+                  <Box>
+                    <Typography variant="body2">{item.contact_email}</Typography>
+                    {item.contact_phone && (
+                      <Typography variant="body2">{item.contact_phone}</Typography>
+                    )}
+                  </Box>
+                }
+                arrow
+              >
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}
+                >
+                  <Person sx={{ fontSize: 15 }} />
+                  {item.contact_name}
+                </Typography>
+              </Tooltip>
             )}
-            {item.priority && (
-              <Chip
-                label={item.priority}
-                size="small"
-                color={item.priority === 'High' ? 'error' : 'default'}
-              />
-            )}
-            {item.type === 'contract' && item.meta?.auto_renew !== undefined && (
-              <Chip
-                label={item.meta.auto_renew ? 'Auto-renew' : 'Needs Renewal'}
-                size="small"
-                color={item.meta.auto_renew ? 'success' : 'warning'}
-              />
-            )}
-            <ChevronRight sx={{ color: 'text.secondary' }} />
           </Box>
         </Box>
-      </Paper>
+
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            gap: 1,
+            flexWrap: 'wrap',
+            maxWidth: { xs: 130, sm: 'none' },
+          }}
+        >
+          {item.amount && item.currency && (
+            <Typography
+              variant="body2"
+              sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', display: { xs: 'none', sm: 'block' } }}
+            >
+              {item.currency} {item.amount.toLocaleString()}
+            </Typography>
+          )}
+          {item.priority && (
+            <Chip
+              label={item.priority}
+              size="small"
+              variant="outlined"
+              color={item.priority === 'High' || item.priority === 'Urgent' ? 'error' : 'default'}
+              sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
+            />
+          )}
+          {item.type === 'contract' && item.meta?.auto_renew !== undefined && (
+            <Chip
+              label={item.meta.auto_renew ? 'Auto-renew' : 'Needs Renewal'}
+              size="small"
+              color={item.meta.auto_renew ? 'success' : 'warning'}
+              sx={{ display: { xs: 'none', sm: 'inline-flex' } }}
+            />
+          )}
+          <Chip label={item.time_context} size="small" color={tone} />
+        </Box>
+        <ChevronRight
+          className="row-chevron"
+          sx={{ color: 'text.disabled', transition: 'transform 120ms, color 120ms', flexShrink: 0 }}
+        />
+      </ButtonBase>
     );
   };
 
   const renderSection = (
     title: string,
     icon: React.ReactNode,
-    color: string,
+    tone: 'error' | 'warning' | 'info',
     items: ActionItem[]
   ) => {
     if (items.length === 0) return null;
 
     return (
-      <Box sx={{ mb: 4 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-          <Box sx={{ color }}>{icon}</Box>
-          <Typography variant="h6" sx={{ color }}>
+      <Paper component="section" sx={{ mb: 3, overflow: 'hidden' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2.5, py: 1.75 }}>
+          <Box sx={{ color: `${tone}.main`, display: 'flex', '& svg': { fontSize: 20 } }}>{icon}</Box>
+          <Typography variant="h6" component="h2">
             {title}
           </Typography>
-          <Chip label={items.length} size="small" sx={{ ml: 1 }} />
+          <Chip label={items.length} size="small" color={tone} sx={{ ml: 0.5 }} />
         </Box>
-        <Divider sx={{ mb: 2 }} />
         {items.map(renderActionItem)}
-      </Box>
+      </Paper>
     );
   };
 
   if (loading) {
     return (
-      <Box
-        sx={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          minHeight: '400px',
-        }}
-      >
-        <CircularProgress />
+      <Box>
+        <PageHeader title="Today" subtitle="Loading what needs your attention…" />
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }, gap: 2, mb: 3 }}>
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} variant="rounded" height={72} />
+          ))}
+        </Box>
+        <Skeleton variant="rounded" height={260} />
       </Box>
     );
   }
 
   if (error) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Typography color="error">Error: {error}</Typography>
+      <Box>
+        <PageHeader title="Today" />
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" size="small" onClick={fetchActionItems}>
+              Try again
+            </Button>
+          }
+        >
+          Could not load today's items: {error}
+        </Alert>
       </Box>
     );
   }
@@ -330,59 +345,39 @@ const ActionCenter: React.FC = () => {
   const upcomingItems = data.items.filter((item) => item.urgency === 'upcoming');
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box
-        sx={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          mb: 3,
-        }}
-      >
-        <Box>
-          <Typography variant="h4" gutterBottom>
-            Today
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
-            {getGreeting()}, {user?.first_name}! Here's what needs your attention.
-          </Typography>
-        </Box>
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5 }}>
-          <IconButton onClick={fetchActionItems} color="primary">
-            <Refresh />
-          </IconButton>
-          <Typography variant="caption" color="text.secondary">
-            Last refreshed: {lastRefreshed.toLocaleTimeString()}
-          </Typography>
-        </Box>
-      </Box>
+    <Box>
+      <PageHeader
+        title="Today"
+        subtitle={`${getGreeting()}, ${user?.first_name || 'there'}. Here's what needs your attention.`}
+        actions={
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              Updated {lastRefreshed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </Typography>
+            <Tooltip title="Refresh">
+              <IconButton onClick={fetchActionItems} aria-label="Refresh" sx={{ border: 1, borderColor: 'divider' }}>
+                <Refresh fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
+        }
+      />
 
-      {renderSummaryChips()}
+      {renderSummary()}
 
       {data.items.length === 0 ? (
-        <Box
-          sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minHeight: '300px',
-            gap: 2,
-          }}
-        >
-          <CheckCircle sx={{ fontSize: 80, color: '#4caf50' }} />
-          <Typography variant="h5" fontWeight={600}>
-            All caught up!
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
-            No urgent items need your attention right now.
-          </Typography>
-        </Box>
+        <Paper>
+          <EmptyState
+            icon={<CheckCircle />}
+            title="All caught up!"
+            description="No urgent items need your attention right now."
+          />
+        </Paper>
       ) : (
         <>
-          {renderSection('Overdue', <ErrorOutline />, '#d32f2f', overdueItems)}
-          {renderSection('Due Today & Tomorrow', <Today />, '#FFA500', todayItems)}
-          {renderSection('Coming Up', <CalendarMonth />, '#1976d2', upcomingItems)}
+          {renderSection('Overdue', <ErrorOutline />, 'error', overdueItems)}
+          {renderSection('Due today & tomorrow', <Today />, 'warning', todayItems)}
+          {renderSection('Coming up', <CalendarMonth />, 'info', upcomingItems)}
         </>
       )}
     </Box>

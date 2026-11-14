@@ -25,6 +25,9 @@ import {
   FormControl,
   Select,
   MenuItem,
+  Avatar,
+  Skeleton,
+  Tooltip,
 } from '@mui/material';
 import {
   Add,
@@ -39,6 +42,23 @@ import { useNavigate } from 'react-router-dom';
 import { Company, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import CompanyForm from '../components/CompanyForm';
+import { PageHeader, EmptyState, ProductChip } from '../components/ui';
+import { visuallyHidden } from '../theme/a11y';
+
+const companyInitials = (name: string) =>
+  name
+    .replace(/[^A-Za-z0-9 ]/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join('')
+    .toUpperCase();
+
+const websiteHost = (url?: string) => {
+  if (!url) return '';
+  return url.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '');
+};
 
 const sortOptions = [
   { value: 'name', label: 'Name A-Z' },
@@ -172,20 +192,20 @@ const Companies: React.FC = () => {
     }
   };
 
+  const hideOnMobile = { display: { xs: 'none', md: 'table-cell' } };
+  const wideOnly = { display: { xs: 'none', xl: 'table-cell' } };
+
   return (
     <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" component="h1">
-          Companies
-        </Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={handleCreateCompany}
-        >
-          Add Company
-        </Button>
-      </Box>
+      <PageHeader
+        title="Companies"
+        subtitle="Every customer account, with its product, contracts and open opportunities."
+        actions={
+          <Button variant="contained" startIcon={<Add />} onClick={handleCreateCompany}>
+            Add Company
+          </Button>
+        }
+      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -193,26 +213,41 @@ const Companies: React.FC = () => {
         </Alert>
       )}
 
-      <Paper sx={{ mb: 2 }}>
-        <Box sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
+      <Paper sx={{ overflow: 'hidden' }}>
+        {/* Toolbar: search first, then sort */}
+        <Box
+          sx={{
+            p: 2,
+            display: 'flex',
+            gap: 1.5,
+            alignItems: 'center',
+            flexWrap: { xs: 'wrap', sm: 'nowrap' },
+            borderBottom: 1,
+            borderColor: 'divider',
+          }}
+        >
           <TextField
             fullWidth
-            placeholder="Search companies..."
+            placeholder="Search by company name, country or website"
             value={search}
             onChange={handleSearchChange}
+            inputProps={{ 'aria-label': 'Search companies' }}
+            sx={{ maxWidth: { sm: 480 } }}
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
-                  <Search />
+                  <Search fontSize="small" />
                 </InputAdornment>
               ),
             }}
           />
-          <FormControl size="small" sx={{ minWidth: 200 }}>
+          <Box sx={{ flexGrow: 1, display: { xs: 'none', sm: 'block' } }} />
+          <FormControl size="small" sx={{ minWidth: 190 }}>
             <Select
               value={sortBy}
               onChange={handleSortChange}
-              startAdornment={<Sort sx={{ mr: 0.5, ml: -0.5, color: 'text.secondary', fontSize: 20 }} />}
+              inputProps={{ 'aria-label': 'Sort companies' }}
+              startAdornment={<Sort sx={{ mr: 0.5, ml: -0.5, color: 'text.secondary', fontSize: 18 }} />}
               sx={{ '& .MuiSelect-select': { display: 'flex', alignItems: 'center' } }}
             >
               {sortOptions.map((option) => (
@@ -223,118 +258,153 @@ const Companies: React.FC = () => {
             </Select>
           </FormControl>
         </Box>
-      </Paper>
 
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Company Name</TableCell>
-              <TableCell>Country</TableCell>
-              <TableCell>Industry</TableCell>
-              <TableCell>Subscription Plans</TableCell>
-              <TableCell>Opportunities</TableCell>
-              <TableCell>Contracts</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {loading ? (
+        <TableContainer sx={{ borderRadius: 0 }}>
+          <Table aria-label="Companies">
+            <TableHead>
               <TableRow>
-                <TableCell colSpan={8} align="center">
-                  <CircularProgress />
+                <TableCell>Company</TableCell>
+                <TableCell sx={hideOnMobile}>Product</TableCell>
+                <TableCell sx={hideOnMobile}>Country</TableCell>
+                <TableCell sx={hideOnMobile}>Industry</TableCell>
+                <TableCell sx={wideOnly}>Plan</TableCell>
+                <TableCell sx={hideOnMobile} align="right">Opportunities</TableCell>
+                <TableCell sx={hideOnMobile} align="right">Active contracts</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell align="right">
+                  <Box component="span" sx={visuallyHidden}>Actions</Box>
                 </TableCell>
               </TableRow>
-            ) : companies.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} align="center">
-                  <Box sx={{ py: 4 }}>
-                    <Business sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                    <Typography variant="h6" color="text.secondary">
-                      No companies found
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {search ? 'Try adjusting your search terms' : 'Start by adding your first company'}
-                    </Typography>
-                  </Box>
-                </TableCell>
-              </TableRow>
-            ) : (
-              companies.map((company) => (
-                <TableRow key={company.id} hover sx={{ cursor: 'pointer' }} onClick={() => handleViewCompany(company.id)}>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Business sx={{ mr: 1, color: 'text.secondary' }} />
-                      <Box>
-                        <Typography variant="body2" fontWeight="medium">
-                          {company.name}
-                        </Typography>
-                        {company.website && (
-                          <Typography variant="caption" color="text.secondary">
-                            {company.website}
-                          </Typography>
-                        )}
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                Array.from({ length: 6 }).map((_, i) => (
+                  <TableRow key={`skeleton-${i}`}>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                        <Skeleton variant="rounded" width={32} height={32} />
+                        <Box sx={{ flex: 1 }}>
+                          <Skeleton width="60%" />
+                          <Skeleton width="40%" />
+                        </Box>
                       </Box>
-                    </Box>
-                  </TableCell>
-                  <TableCell>{company.country || '-'}</TableCell>
-                  <TableCell>{company.industry || '-'}</TableCell>
-                  <TableCell>
-                    <Typography variant="caption" sx={{ maxWidth: 200, display: 'block' }}>
-                      {company.subscription_summary || 'No active subscriptions'}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={company.opportunities_count}
-                      size="small"
-                      color={company.opportunities_count > 0 ? 'primary' : 'default'}
+                    </TableCell>
+                    {Array.from({ length: 8 }).map((__, j) => (
+                      <TableCell key={j} sx={j === 3 ? wideOnly : j < 6 ? hideOnMobile : undefined}>
+                        <Skeleton width={j === 7 ? 60 : '70%'} />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : companies.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={9}>
+                    <EmptyState
+                      icon={<Business />}
+                      title={search ? 'No companies match your search' : 'No companies yet'}
+                      description={
+                        search
+                          ? 'Check the spelling or search for part of the name.'
+                          : 'Add your first customer to start tracking contracts and opportunities.'
+                      }
+                      action={
+                        !search && (
+                          <Button variant="contained" startIcon={<Add />} onClick={handleCreateCompany}>
+                            Add Company
+                          </Button>
+                        )
+                      }
                     />
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={company.active_contracts_count}
-                      size="small"
-                      color={company.active_contracts_count > 0 ? 'success' : 'default'}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={company.is_active ? 'Active' : 'Inactive'}
-                      size="small"
-                      color={company.is_active ? 'success' : 'default'}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <IconButton
-                      size="small"
-                      onClick={(e) => { e.stopPropagation(); handleViewCompany(company.id); }}
-                      title="View Details"
-                    >
-                      <Visibility />
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={(e) => { e.stopPropagation(); handleEditCompany(company); }}
-                      title="Edit Company"
-                    >
-                      <Edit />
-                    </IconButton>
-                    <IconButton
-                      size="small"
-                      onClick={(e) => { e.stopPropagation(); handleDeleteClick(company); }}
-                      title="Delete Company"
-                      color="error"
-                    >
-                      <Delete />
-                    </IconButton>
                   </TableCell>
                 </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+              ) : (
+                companies.map((company) => (
+                  <TableRow
+                    key={company.id}
+                    hover
+                    sx={{ cursor: 'pointer', '&:hover .row-actions': { opacity: 1 } }}
+                    onClick={() => handleViewCompany(company.id)}
+                  >
+                    <TableCell sx={{ maxWidth: { xs: 190, md: 300 } }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                        <Avatar variant="rounded" sx={{ width: 32, height: 32, fontSize: '0.75rem' }}>
+                          {companyInitials(company.name)}
+                        </Avatar>
+                        <Box sx={{ minWidth: 0 }}>
+                          <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }} noWrap>
+                            {company.name}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" noWrap>
+                            {[company.city, websiteHost(company.website)].filter(Boolean).join(' · ') || '—'}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    </TableCell>
+                    <TableCell sx={hideOnMobile}>
+                      {company.contracted_product ? (
+                        <ProductChip value={company.contracted_product} />
+                      ) : (
+                        <Typography variant="body2" color="text.disabled">—</Typography>
+                      )}
+                    </TableCell>
+                    <TableCell sx={hideOnMobile}>{company.country || '—'}</TableCell>
+                    <TableCell sx={hideOnMobile}>{company.industry || '—'}</TableCell>
+                    <TableCell sx={wideOnly}>
+                      <Typography variant="body2" color={company.subscription_summary ? 'text.primary' : 'text.secondary'} sx={{ maxWidth: 200 }}>
+                        {company.subscription_summary || 'No active subscriptions'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell sx={{ ...hideOnMobile, fontVariantNumeric: 'tabular-nums' }} align="right">
+                      {company.opportunities_count > 0 ? company.opportunities_count : <Box component="span" sx={{ color: 'text.disabled' }}>0</Box>}
+                    </TableCell>
+                    <TableCell sx={{ ...hideOnMobile, fontVariantNumeric: 'tabular-nums' }} align="right">
+                      {company.active_contracts_count > 0 ? company.active_contracts_count : <Box component="span" sx={{ color: 'text.disabled' }}>0</Box>}
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={company.is_active ? 'Active' : 'Inactive'}
+                        size="small"
+                        color={company.is_active ? 'success' : 'default'}
+                      />
+                    </TableCell>
+                    <TableCell align="right" sx={{ whiteSpace: 'nowrap', py: 0.5 }}>
+                      <Box className="row-actions" sx={{ opacity: { xs: 1, md: 0.55 }, transition: 'opacity 120ms', '&:focus-within': { opacity: 1 } }}>
+                        <Tooltip title="Open">
+                          <IconButton
+                            size="small"
+                            aria-label={`Open ${company.name}`}
+                            onClick={(e) => { e.stopPropagation(); handleViewCompany(company.id); }}
+                          >
+                            <Visibility fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Edit">
+                          <IconButton
+                            size="small"
+                            aria-label={`Edit ${company.name}`}
+                            onClick={(e) => { e.stopPropagation(); handleEditCompany(company); }}
+                          >
+                            <Edit fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Delete">
+                          <IconButton
+                            size="small"
+                            aria-label={`Delete ${company.name}`}
+                            onClick={(e) => { e.stopPropagation(); handleDeleteClick(company); }}
+                            sx={{ '&:hover': { color: 'error.main' } }}
+                          >
+                            <Delete fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
         <TablePagination
           rowsPerPageOptions={[10, 25, 50, 100]}
           component="div"
@@ -344,7 +414,7 @@ const Companies: React.FC = () => {
           onPageChange={handleChangePage}
           onRowsPerPageChange={handleChangeRowsPerPage}
         />
-      </TableContainer>
+      </Paper>
 
       {/* Company Form Modal */}
       <CompanyForm
@@ -382,7 +452,7 @@ const Companies: React.FC = () => {
             color="error"
             variant="contained"
             disabled={deleteLoading}
-            startIcon={deleteLoading ? <CircularProgress size={16} /> : <Delete />}
+            startIcon={deleteLoading ? <CircularProgress size={16} color="inherit" /> : <Delete />}
           >
             {deleteLoading ? 'Deleting...' : 'Delete'}
           </Button>

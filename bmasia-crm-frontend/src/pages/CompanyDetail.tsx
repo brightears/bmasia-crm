@@ -16,40 +16,29 @@ import {
   TableRow,
   Card,
   CardContent,
-  CardActions,
   Divider,
   GridLegacy as Grid,
   Tabs,
   Tab,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
   Avatar,
   Tooltip,
   Fab,
 } from '@mui/material';
 import {
-  Business,
   Edit,
-  Email,
-  Phone,
-  Language,
   LocationOn,
   Person,
   TrendingUp,
   Assignment,
   AccountBalance,
-  History,
   Add,
   ContactPhone,
   Handshake,
   PlaylistAdd,
   Public,
   Category,
-  Build,
   SupportAgent,
-  ConfirmationNumber,
+  ChevronRight,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Company, Contact, Opportunity, Contract, Zone, Ticket } from '../types';
@@ -57,6 +46,31 @@ import ApiService from '../services/api';
 import CompanyForm from '../components/CompanyForm';
 import ContactForm from '../components/ContactForm';
 import OpportunityForm from '../components/OpportunityForm';
+import { PageHeader, SectionCard, EmptyState, DetailField, ProductChip } from '../components/ui';
+import { statusTone, humanize, formatDate, visuallyHidden } from '../theme';
+
+const tabLabel = (label: string, count: number) => (
+  <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
+    {label}
+    <Box
+      component="span"
+      sx={{
+        minWidth: 20,
+        height: 20,
+        px: 0.75,
+        borderRadius: '10px',
+        fontSize: '0.75rem',
+        fontWeight: 600,
+        lineHeight: '20px',
+        textAlign: 'center',
+        bgcolor: 'action.hover',
+        color: 'text.secondary',
+      }}
+    >
+      {count}
+    </Box>
+  </Box>
+);
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -75,11 +89,7 @@ function TabPanel(props: TabPanelProps) {
       aria-labelledby={`company-tab-${index}`}
       {...other}
     >
-      {value === index && (
-        <Box sx={{ p: 3 }}>
-          {children}
-        </Box>
-      )}
+      {value === index && <Box>{children}</Box>}
     </div>
   );
 }
@@ -212,774 +222,601 @@ const CompanyDetail: React.FC = () => {
     );
   }
 
+  const activeZones = zones.filter(z => z.status !== 'expired' && z.status !== 'offline');
+  const inactiveZones = zones.filter(z => z.status === 'expired' || z.status === 'offline');
+  const openTickets = tickets.filter(t => !['resolved', 'closed'].includes(t.status));
+  const location = [company.city, company.country].filter(Boolean).join(', ');
+
+  const facts = [
+    { label: 'Contacts', value: contacts.length, tab: 0 },
+    { label: 'Opportunities', value: opportunities.length, tab: 1 },
+    { label: 'Contracts', value: contracts.length, tab: 2 },
+    { label: 'Music zones', value: zones.length, tab: 3 },
+    { label: 'Open tickets', value: openTickets.length, tab: 4 },
+    { label: 'Total contract value', value: formatCurrency(company.total_contract_value || 0) },
+  ];
+
+  const zoneCard = (zone: Zone, inactive: boolean) => (
+    <Grid item xs={12} sm={6} lg={4} key={zone.id}>
+      <Card
+        variant="outlined"
+        sx={{
+          cursor: 'pointer',
+          height: '100%',
+          bgcolor: inactive ? 'background.default' : 'background.paper',
+          transition: 'border-color 120ms',
+          '&:hover': { borderColor: 'text.secondary' },
+        }}
+        onClick={() => navigate(`/zones/${zone.id}`)}
+      >
+        <CardContent>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1, mb: 1 }}>
+            <Typography sx={{ fontWeight: 600, color: inactive ? 'text.secondary' : 'text.primary' }}>
+              {zone.name}
+            </Typography>
+            <Chip label={humanize(zone.status)} size="small" color={statusTone(zone.status)} />
+          </Box>
+          <ProductChip value={zone.platform} />
+          {zone.device_name && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              Device: {zone.device_name}
+            </Typography>
+          )}
+          {!inactive && zone.current_contract && (
+            <Box sx={{ mt: 1.5, pt: 1.5, borderTop: 1, borderColor: 'divider' }}>
+              <Typography variant="caption" color="text.secondary" display="block">
+                Contract
+              </Typography>
+              <Typography
+                variant="body2"
+                sx={{ color: 'primary.main', fontWeight: 600, '&:hover': { textDecoration: 'underline' } }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(`/contracts/${zone.current_contract?.id}`);
+                }}
+              >
+                {zone.current_contract?.contract_number}
+              </Typography>
+            </Box>
+          )}
+          {inactive && zone.contract_count !== undefined && zone.contract_count > 0 && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              {zone.contract_count} contract{zone.contract_count > 1 ? 's' : ''} (historical)
+            </Typography>
+          )}
+        </CardContent>
+      </Card>
+    </Grid>
+  );
+
   return (
     <Box sx={{ flexGrow: 1 }}>
-      {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
-        <Box>
-          <Typography variant="h4" component="h1" gutterBottom>
-            <Business sx={{ mr: 1, verticalAlign: 'bottom' }} />
-            {company.name}
-          </Typography>
-          <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+      {/* Record header */}
+      <PageHeader
+        breadcrumbs={[{ label: 'Companies', to: '/companies' }, { label: company.name }]}
+        avatar={
+          <Avatar variant="rounded" sx={{ width: 52, height: 52, fontSize: '1.125rem', borderRadius: 2 }}>
+            {company.name.replace(/[^A-Za-z0-9 ]/g, ' ').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase()}
+          </Avatar>
+        }
+        title={company.name}
+        meta={
+          <>
             <Chip
               label={company.is_active ? 'Active' : 'Inactive'}
               color={company.is_active ? 'success' : 'default'}
               size="small"
             />
+            <ProductChip value={company.contracted_product} />
             {company.industry && (
-              <Chip
-                label={company.industry}
-                variant="outlined"
-                size="small"
-                icon={<Category />}
-              />
+              <Chip label={company.industry} variant="outlined" size="small" icon={<Category />} />
             )}
-            {company.country && (
-              <Chip
-                label={company.country}
-                variant="outlined"
-                size="small"
-                icon={<Public />}
-              />
+            {location && (
+              <Chip label={location} variant="outlined" size="small" icon={<Public />} />
             )}
+          </>
+        }
+        actions={
+          <>
+            <Button variant="outlined" startIcon={<ContactPhone />} onClick={() => setContactFormOpen(true)}>
+              Add Contact
+            </Button>
+            <Button variant="outlined" startIcon={<Handshake />} onClick={() => setOpportunityFormOpen(true)}>
+              Create Opportunity
+            </Button>
+            <Tooltip title="Create Ticket">
+              <IconButton
+                aria-label="Create Ticket"
+                onClick={() => navigate(`/tickets/new?company=${company.id}`)}
+                sx={{ border: 1, borderColor: 'divider' }}
+              >
+                <SupportAgent fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Create Task">
+              <IconButton
+                aria-label="Create Task"
+                onClick={() => navigate(`/tasks/new?company=${company.id}`)}
+                sx={{ border: 1, borderColor: 'divider' }}
+              >
+                <PlaylistAdd fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Button variant="contained" startIcon={<Edit />} onClick={() => setEditFormOpen(true)}>
+              Edit Company
+            </Button>
+          </>
+        }
+      />
+
+      {/* Key facts: one strip instead of four separate cards */}
+      <Paper sx={{ mb: 3, display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', sm: 'repeat(3, 1fr)', lg: 'repeat(6, 1fr)' } }}>
+        {facts.map((fact, i) => (
+          <Box
+            key={fact.label}
+            component={fact.tab !== undefined ? 'button' : 'div'}
+            onClick={fact.tab !== undefined ? () => setTabValue(fact.tab as number) : undefined}
+            sx={{
+              all: 'unset',
+              boxSizing: 'border-box',
+              px: 2.5,
+              py: 2,
+              cursor: fact.tab !== undefined ? 'pointer' : 'default',
+              borderLeft: { lg: i === 0 ? 0 : 1 },
+              borderTop: { xs: i < 2 ? 0 : 1, sm: i < 3 ? 0 : 1, lg: 0 },
+              borderColor: { xs: 'divider', lg: 'divider' },
+              '&:hover': fact.tab !== undefined ? { bgcolor: 'action.hover' } : undefined,
+              '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: -2 },
+            }}
+          >
+            <Typography variant="caption" color="text.secondary" component="div">
+              {fact.label}
+            </Typography>
+            <Typography sx={{ fontSize: '1.25rem', fontWeight: 600, fontVariantNumeric: 'tabular-nums', mt: 0.25 }}>
+              {fact.value}
+            </Typography>
           </Box>
-        </Box>
-        <Button
-          variant="contained"
-          startIcon={<Edit />}
-          onClick={() => setEditFormOpen(true)}
-        >
-          Edit Company
-        </Button>
-      </Box>
+        ))}
+      </Paper>
 
-      {/* Quick Stats Cards */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                <Person sx={{ mr: 1, color: 'primary.main' }} />
-                <Typography variant="h6">{contacts.length}</Typography>
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                Contacts
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                <TrendingUp sx={{ mr: 1, color: 'warning.main' }} />
-                <Typography variant="h6">{opportunities.length}</Typography>
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                Opportunities
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                <Assignment sx={{ mr: 1, color: 'success.main' }} />
-                <Typography variant="h6">{contracts.length}</Typography>
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                Contracts
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                <AccountBalance sx={{ mr: 1, color: 'info.main' }} />
-                <Typography variant="h6">
-                  {formatCurrency(company.total_contract_value || 0)}
-                </Typography>
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                Total Value
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* Company Information */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={8}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Company Information
-              </Typography>
-              <Grid container spacing={2}>
-                {company.website && (
-                  <Grid item xs={12} sm={6}>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Language sx={{ mr: 1, color: 'text.secondary' }} />
-                      <Box>
-                        <Typography variant="caption" color="text.secondary">
-                          Website
-                        </Typography>
-                        <Typography variant="body2">
-                          <a href={company.website} target="_blank" rel="noopener noreferrer">
-                            {company.website}
-                          </a>
-                        </Typography>
-                      </Box>
-                    </Box>
-                  </Grid>
-                )}
-                <Grid item xs={12} sm={6}>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <LocationOn sx={{ mr: 1, color: 'text.secondary' }} />
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">
-                        Location
-                      </Typography>
-                      <Typography variant="body2">
-                        {[company.city, company.country].filter(Boolean).join(', ') || 'Not specified'}
-                      </Typography>
-                    </Box>
-                  </Box>
-                </Grid>
-                {company.full_address && company.full_address !== [company.city, company.country].filter(Boolean).join(', ') && (
-                  <Grid item xs={12}>
-                    <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
-                      <LocationOn sx={{ mr: 1, color: 'text.secondary', mt: 0.5 }} />
-                      <Box>
-                        <Typography variant="caption" color="text.secondary">
-                          Full Address
-                        </Typography>
-                        <Typography variant="body2">
-                          {company.full_address}
-                        </Typography>
-                      </Box>
-                    </Box>
-                  </Grid>
-                )}
-                {company.notes && (
-                  <Grid item xs={12}>
-                    <Typography variant="caption" color="text.secondary">
-                      Notes
-                    </Typography>
-                    <Typography variant="body2" sx={{ mt: 0.5 }}>
-                      {company.notes}
-                    </Typography>
-                  </Grid>
-                )}
-              </Grid>
-            </CardContent>
-          </Card>
-        </Grid>
+      <Grid container spacing={3}>
+        {/* Left: about this company */}
         <Grid item xs={12} md={4}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Quick Actions
-              </Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                <Button
-                  variant="outlined"
-                  startIcon={<ContactPhone />}
-                  onClick={() => setContactFormOpen(true)}
-                  fullWidth
-                >
-                  Add Contact
-                </Button>
-                <Button
-                  variant="outlined"
-                  startIcon={<Handshake />}
-                  onClick={() => setOpportunityFormOpen(true)}
-                  fullWidth
-                >
-                  Create Opportunity
-                </Button>
-                <Button
-                  variant="outlined"
-                  startIcon={<SupportAgent />}
-                  onClick={() => navigate(`/tickets/new?company=${company.id}`)}
-                  fullWidth
-                >
-                  Create Ticket
-                </Button>
-                <Button
-                  variant="outlined"
-                  startIcon={<PlaylistAdd />}
-                  onClick={() => navigate(`/tasks/new?company=${company.id}`)}
-                  fullWidth
-                >
-                  Create Task
-                </Button>
-              </Box>
-            </CardContent>
-          </Card>
+          <SectionCard title="About">
+            <Box sx={{ display: 'grid', gap: 2 }}>
+              <DetailField label="Website">
+                {company.website && (
+                  <a href={company.website} target="_blank" rel="noopener noreferrer">
+                    {company.website.replace(/^https?:\/\//, '')}
+                  </a>
+                )}
+              </DetailField>
+              <DetailField label="Phone">{company.phone}</DetailField>
+              <DetailField label="Email">
+                {company.email && <a href={`mailto:${company.email}`}>{company.email}</a>}
+              </DetailField>
+              <DetailField label="Location">{location}</DetailField>
+              {company.full_address && company.full_address !== location && (
+                <DetailField label="Full address">{company.full_address}</DetailField>
+              )}
+              <DetailField label="Billing entity">{company.billing_entity}</DetailField>
+              <DetailField label="Music zones (contracted)">
+                {company.contracted_zone_count ?? company.music_zone_count}
+              </DetailField>
+              {company.notes && (
+                <>
+                  <Divider />
+                  <DetailField label="Notes">
+                    <Box component="span" sx={{ whiteSpace: 'pre-line' }}>{company.notes}</Box>
+                  </DetailField>
+                </>
+              )}
+            </Box>
+          </SectionCard>
         </Grid>
-      </Grid>
 
-      {/* Tabs */}
-      <Paper sx={{ mb: 3 }}>
-        <Tabs value={tabValue} onChange={handleTabChange} aria-label="company tabs">
-          <Tab label={`Contacts (${contacts.length})`} {...a11yProps(0)} />
-          <Tab label={`Opportunities (${opportunities.length})`} {...a11yProps(1)} />
-          <Tab label={`Contracts (${contracts.length})`} {...a11yProps(2)} />
-          <Tab label={`Zones (${zones.length})`} {...a11yProps(3)} />
-          <Tab label={`Support (${tickets.filter(t => !['resolved', 'closed'].includes(t.status)).length})`} {...a11yProps(4)} />
-          <Tab label="Subscription Plans" {...a11yProps(5)} />
-        </Tabs>
+        {/* Right: related records */}
+        <Grid item xs={12} md={8}>
+          <Paper sx={{ overflow: 'hidden' }}>
+            <Tabs
+              value={tabValue}
+              onChange={handleTabChange}
+              aria-label="company tabs"
+              variant="scrollable"
+              scrollButtons="auto"
+              sx={{ px: 1 }}
+            >
+              <Tab label={tabLabel('Contacts', contacts.length)} {...a11yProps(0)} />
+              <Tab label={tabLabel('Opportunities', opportunities.length)} {...a11yProps(1)} />
+              <Tab label={tabLabel('Contracts', contracts.length)} {...a11yProps(2)} />
+              <Tab label={tabLabel('Zones', zones.length)} {...a11yProps(3)} />
+              <Tab label={tabLabel('Support', openTickets.length)} {...a11yProps(4)} />
+              <Tab label="Plans" {...a11yProps(5)} />
+            </Tabs>
 
-        <TabPanel value={tabValue} index={0}>
-          {contacts.length > 0 ? (
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Name</TableCell>
-                    <TableCell>Title</TableCell>
-                    <TableCell>Email</TableCell>
-                    <TableCell>Phone</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Decision Maker</TableCell>
-                    <TableCell>Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {contacts.map((contact) => {
-                    // Get initials from name
-                    const nameParts = contact.name.split(' ');
-                    const initials = nameParts.length >= 2
-                      ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`
-                      : contact.name.substring(0, 2);
-                    const status = contact.is_active ? 'Active' : 'Inactive';
-                    const isDecisionMaker = contact.contact_type === 'Decision Maker';
-
-                    return (
-                      <TableRow key={contact.id} hover>
-                        <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                            <Avatar sx={{ mr: 1, width: 32, height: 32 }}>
-                              {initials.toUpperCase()}
-                            </Avatar>
-                            {contact.name}
-                          </Box>
-                        </TableCell>
-                        <TableCell>{contact.title || '-'}</TableCell>
-                        <TableCell>
-                          {contact.email && (
-                            <a href={`mailto:${contact.email}`}>{contact.email}</a>
-                          )}
-                        </TableCell>
-                        <TableCell>{contact.phone || '-'}</TableCell>
-                        <TableCell>
-                          <Chip
-                            label={status}
-                            size="small"
-                            color={getStatusColor(status) as any}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {isDecisionMaker && (
-                            <Chip label="Decision Maker" size="small" color="primary" />
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Tooltip title="View Contact">
-                            <IconButton
-                              size="small"
-                              onClick={() => navigate(`/contacts/${contact.id}`)}
-                            >
-                              <Person />
-                            </IconButton>
-                          </Tooltip>
-                        </TableCell>
+            <TabPanel value={tabValue} index={0}>
+              {contacts.length > 0 ? (
+                <TableContainer>
+                  <Table>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Name</TableCell>
+                        <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Email</TableCell>
+                        <TableCell sx={{ display: { xs: 'none', xl: 'table-cell' } }}>Phone</TableCell>
+                        <TableCell>Role</TableCell>
+                        <TableCell align="right"><Box component="span" sx={visuallyHidden}>Actions</Box></TableCell>
                       </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          ) : (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <Person sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-              <Typography variant="h6" color="text.secondary" gutterBottom>
-                No contacts yet
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Add contacts to start managing relationships with this company
-              </Typography>
-              <Button
-                variant="contained"
-                startIcon={<Add />}
-                onClick={() => setContactFormOpen(true)}
-              >
-                Add First Contact
-              </Button>
-            </Box>
-          )}
-        </TabPanel>
+                    </TableHead>
+                    <TableBody>
+                      {contacts.map((contact) => {
+                        // Get initials from name
+                        const nameParts = contact.name.split(' ');
+                        const initials = nameParts.length >= 2
+                          ? `${nameParts[0][0]}${nameParts[nameParts.length - 1][0]}`
+                          : contact.name.substring(0, 2);
+                        const isDecisionMaker = contact.contact_type === 'Decision Maker';
 
-        <TabPanel value={tabValue} index={1}>
-          {opportunities.length > 0 ? (
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Name</TableCell>
-                    <TableCell>Stage</TableCell>
-                    <TableCell>Value</TableCell>
-                    <TableCell>Probability</TableCell>
-                    <TableCell>Owner</TableCell>
-                    <TableCell>Expected Close</TableCell>
-                    <TableCell>Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {opportunities.map((opportunity) => (
-                    <TableRow key={opportunity.id} hover>
-                      <TableCell>{opportunity.name}</TableCell>
-                      <TableCell>
-                        <Chip
-                          label={opportunity.stage}
-                          size="small"
-                          color={getStatusColor(opportunity.stage) as any}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {opportunity.expected_value ? formatCurrency(opportunity.expected_value) : '-'}
-                      </TableCell>
-                      <TableCell>{opportunity.probability}%</TableCell>
-                      <TableCell>{opportunity.owner_name}</TableCell>
-                      <TableCell>
-                        {opportunity.expected_close_date
-                          ? new Date(opportunity.expected_close_date).toLocaleDateString()
-                          : '-'}
-                      </TableCell>
-                      <TableCell>
-                        <Tooltip title="View Opportunity">
-                          <IconButton
-                            size="small"
-                            onClick={() => navigate(`/opportunities/${opportunity.id}`)}
-                          >
-                            <TrendingUp />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          ) : (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <TrendingUp sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-              <Typography variant="h6" color="text.secondary" gutterBottom>
-                No opportunities yet
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Create opportunities to track potential deals with this company
-              </Typography>
-              <Button
-                variant="contained"
-                startIcon={<Add />}
-                onClick={() => setOpportunityFormOpen(true)}
-              >
-                Create First Opportunity
-              </Button>
-            </Box>
-          )}
-        </TabPanel>
-
-        <TabPanel value={tabValue} index={2}>
-          {contracts.length > 0 ? (
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Contract Number</TableCell>
-                    <TableCell>Type</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Value</TableCell>
-                    <TableCell>Start Date</TableCell>
-                    <TableCell>End Date</TableCell>
-                    <TableCell>Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {contracts.map((contract) => (
-                    <TableRow key={contract.id} hover>
-                      <TableCell>{contract.contract_number}</TableCell>
-                      <TableCell>{contract.contract_type}</TableCell>
-                      <TableCell>
-                        <Chip
-                          label={contract.status}
-                          size="small"
-                          color={getStatusColor(contract.status) as any}
-                        />
-                      </TableCell>
-                      <TableCell>{formatCurrency(contract.value)}</TableCell>
-                      <TableCell>
-                        {new Date(contract.start_date).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        {new Date(contract.end_date).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        <Tooltip title="View Contract">
-                          <IconButton
-                            size="small"
-                            onClick={() => navigate(`/contracts/${contract.id}`)}
-                          >
-                            <Assignment />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          ) : (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <Assignment sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-              <Typography variant="h6" color="text.secondary" gutterBottom>
-                No contracts yet
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Contracts will appear here when opportunities are converted to deals
-              </Typography>
-            </Box>
-          )}
-        </TabPanel>
-
-        <TabPanel value={tabValue} index={3}>
-          {zones.length > 0 ? (
-            <Box>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 3 }}>
-                <Typography variant="h6">
-                  <LocationOn sx={{ mr: 1, verticalAlign: 'bottom' }} />
-                  Music Zones
-                </Typography>
-                <Button
-                  variant="contained"
-                  size="small"
-                  startIcon={<Add />}
-                  onClick={() => navigate(`/zones/new?company=${id}&return_to=${encodeURIComponent(`/companies/${id}`)}`)}
-                  sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
-                >
-                  Add Zone
-                </Button>
-              </Box>
-
-              {/* Active Zones */}
-              {zones.filter(z => z.status !== 'expired' && z.status !== 'offline').length > 0 && (
-                <Box sx={{ mb: 4 }}>
-                  <Typography variant="subtitle1" fontWeight={600} color="success.main" sx={{ mb: 2 }}>
-                    Active Zones ({zones.filter(z => z.status !== 'expired' && z.status !== 'offline').length})
-                  </Typography>
-                  <Grid container spacing={2}>
-                    {zones
-                      .filter(z => z.status !== 'expired' && z.status !== 'offline')
-                      .map((zone) => (
-                        <Grid item xs={12} sm={6} md={4} key={zone.id}>
-                          <Card
-                            variant="outlined"
-                            sx={{
-                              cursor: 'pointer',
-                              transition: 'all 0.2s',
-                              '&:hover': {
-                                boxShadow: 2,
-                                transform: 'translateY(-2px)',
-                              },
-                            }}
-                            onClick={() => navigate(`/zones/${zone.id}`)}
-                          >
-                            <CardContent>
-                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                                <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 600 }}>
-                                  {zone.name}
-                                </Typography>
-                                <Chip
-                                  label={zone.status?.replace('_', ' ')}
-                                  size="small"
-                                  color={zone.status === 'online' ? 'success' : 'warning'}
-                                  sx={{ textTransform: 'capitalize' }}
-                                />
-                              </Box>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                                <Chip
-                                  label={zone.platform}
-                                  size="small"
-                                  variant="outlined"
-                                  sx={{ textTransform: 'capitalize', fontSize: '0.75rem' }}
-                                />
-                              </Box>
-                              {zone.device_name && (
-                                <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.85rem' }}>
-                                  Device: {zone.device_name}
-                                </Typography>
-                              )}
-                              {zone.current_contract && (
-                                <Box sx={{ mt: 1, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
-                                  <Typography variant="caption" color="text.secondary" display="block">
-                                    Contract
+                        return (
+                          <TableRow key={contact.id} hover>
+                            <TableCell>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                                <Avatar sx={{ width: 32, height: 32 }}>
+                                  {initials.toUpperCase()}
+                                </Avatar>
+                                <Box sx={{ minWidth: 0 }}>
+                                  <Typography sx={{ fontWeight: 600, fontSize: '0.875rem', whiteSpace: 'nowrap' }}>
+                                    {contact.name}
+                                    {!contact.is_active && (
+                                      <Chip label="Inactive" size="small" sx={{ ml: 1 }} />
+                                    )}
                                   </Typography>
-                                  <Typography
-                                    variant="body2"
-                                    sx={{
-                                      color: 'primary.main',
-                                      fontSize: '0.85rem',
-                                      '&:hover': { textDecoration: 'underline' },
-                                    }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      navigate(`/contracts/${zone.current_contract?.id}`);
-                                    }}
-                                  >
-                                    {zone.current_contract?.contract_number}
+                                  <Typography variant="body2" color="text.secondary">
+                                    {contact.title || '—'}
                                   </Typography>
                                 </Box>
-                              )}
-                            </CardContent>
-                          </Card>
-                        </Grid>
-                      ))}
-                  </Grid>
-                </Box>
-              )}
-
-              {/* Inactive/Cancelled Zones */}
-              {zones.filter(z => z.status === 'expired' || z.status === 'offline').length > 0 && (
-                <Box>
-                  <Typography variant="subtitle1" fontWeight={600} color="text.secondary" sx={{ mb: 2 }}>
-                    Inactive Zones ({zones.filter(z => z.status === 'expired' || z.status === 'offline').length})
-                  </Typography>
-                  <Grid container spacing={2}>
-                    {zones
-                      .filter(z => z.status === 'expired' || z.status === 'offline')
-                      .map((zone) => (
-                        <Grid item xs={12} sm={6} md={4} key={zone.id}>
-                          <Card
-                            variant="outlined"
-                            sx={{
-                              cursor: 'pointer',
-                              bgcolor: 'grey.50',
-                              transition: 'all 0.2s',
-                              '&:hover': {
-                                boxShadow: 1,
-                              },
-                            }}
-                            onClick={() => navigate(`/zones/${zone.id}`)}
-                          >
-                            <CardContent>
-                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                                <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 500, color: 'text.secondary' }}>
-                                  {zone.name}
-                                </Typography>
-                                <Chip
-                                  label={zone.status?.replace('_', ' ')}
-                                  size="small"
-                                  color="error"
-                                  sx={{ textTransform: 'capitalize' }}
-                                />
                               </Box>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                                <Chip
-                                  label={zone.platform}
-                                  size="small"
-                                  variant="outlined"
-                                  sx={{ textTransform: 'capitalize', fontSize: '0.75rem' }}
-                                />
-                              </Box>
-                              {zone.contract_count !== undefined && zone.contract_count > 0 && (
-                                <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.85rem' }}>
-                                  {zone.contract_count} contract{zone.contract_count > 1 ? 's' : ''} (historical)
-                                </Typography>
+                            </TableCell>
+                            <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
+                              {contact.email && (
+                                <a href={`mailto:${contact.email}`}>{contact.email}</a>
                               )}
-                            </CardContent>
-                          </Card>
-                        </Grid>
-                      ))}
-                  </Grid>
-                </Box>
+                            </TableCell>
+                            <TableCell sx={{ display: { xs: 'none', xl: 'table-cell' }, whiteSpace: 'nowrap' }}>
+                              {contact.phone || '—'}
+                            </TableCell>
+                            <TableCell>
+                              {isDecisionMaker ? (
+                                <Chip label="Decision Maker" size="small" color="primary" />
+                              ) : (
+                                <Typography variant="body2" color="text.secondary">{contact.contact_type || '—'}</Typography>
+                              )}
+                            </TableCell>
+                            <TableCell align="right">
+                              <Tooltip title="View Contact">
+                                <IconButton
+                                  size="small"
+                                  aria-label={`View ${contact.name}`}
+                                  onClick={() => navigate(`/contacts/${contact.id}`)}
+                                >
+                                  <ChevronRight fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <EmptyState
+                  icon={<Person />}
+                  title="No contacts yet"
+                  description="Add contacts to start managing relationships with this company."
+                  action={
+                    <Button variant="contained" startIcon={<Add />} onClick={() => setContactFormOpen(true)}>
+                      Add First Contact
+                    </Button>
+                  }
+                />
               )}
-            </Box>
-          ) : (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <LocationOn sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-              <Typography variant="h6" color="text.secondary" gutterBottom>
-                No zones yet
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Add music zones to track locations and their associated contracts
-              </Typography>
-              <Button
-                variant="contained"
-                startIcon={<Add />}
-                onClick={() => navigate(`/zones/new?company=${id}&return_to=${encodeURIComponent(`/companies/${id}`)}`)}
-                sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
-              >
-                Add First Zone
-              </Button>
-            </Box>
-          )}
-        </TabPanel>
+            </TabPanel>
 
-        <TabPanel value={tabValue} index={4}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-            <Typography variant="h6">
-              <SupportAgent sx={{ mr: 1, verticalAlign: 'bottom' }} />
-              Support Tickets
-            </Typography>
-            <Button
-              variant="contained"
-              size="small"
-              startIcon={<Add />}
-              onClick={() => navigate(`/tickets/new?company=${company.id}`)}
-              sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
-            >
-              New Ticket
-            </Button>
-          </Box>
-          {tickets.length > 0 ? (
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Ticket</TableCell>
-                    <TableCell>Subject</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Priority</TableCell>
-                    <TableCell>Assigned To</TableCell>
-                    <TableCell>Created</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {tickets.map((ticket) => (
-                    <TableRow
-                      key={ticket.id}
-                      hover
-                      sx={{ cursor: 'pointer' }}
-                      onClick={() => navigate(`/tickets/${ticket.id}`)}
+            <TabPanel value={tabValue} index={1}>
+              {opportunities.length > 0 ? (
+                <TableContainer>
+                  <Table>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Name</TableCell>
+                        <TableCell>Stage</TableCell>
+                        <TableCell align="right">Value</TableCell>
+                        <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }} align="right">Probability</TableCell>
+                        <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Owner</TableCell>
+                        <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Expected close</TableCell>
+                        <TableCell align="right"><Box component="span" sx={visuallyHidden}>Actions</Box></TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {opportunities.map((opportunity) => (
+                        <TableRow
+                          key={opportunity.id}
+                          hover
+                          sx={{ cursor: 'pointer' }}
+                          onClick={() => navigate(`/opportunities/${opportunity.id}`)}
+                        >
+                          <TableCell sx={{ fontWeight: 600 }}>{opportunity.name}</TableCell>
+                          <TableCell>
+                            <Chip label={opportunity.stage} size="small" color={statusTone(opportunity.stage)} />
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                            {opportunity.expected_value ? formatCurrency(opportunity.expected_value) : '—'}
+                          </TableCell>
+                          <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }} align="right">{opportunity.probability}%</TableCell>
+                          <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{opportunity.owner_name}</TableCell>
+                          <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' }, whiteSpace: 'nowrap' }}>
+                            {formatDate(opportunity.expected_close_date)}
+                          </TableCell>
+                          <TableCell align="right" sx={{ width: 48 }}>
+                            <Tooltip title="View Opportunity">
+                              <IconButton
+                                size="small"
+                                aria-label={`View ${opportunity.name}`}
+                                onClick={(e) => { e.stopPropagation(); navigate(`/opportunities/${opportunity.id}`); }}
+                              >
+                                <ChevronRight fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <EmptyState
+                  icon={<TrendingUp />}
+                  title="No opportunities yet"
+                  description="Create an opportunity to track a potential deal with this company."
+                  action={
+                    <Button variant="contained" startIcon={<Add />} onClick={() => setOpportunityFormOpen(true)}>
+                      Create First Opportunity
+                    </Button>
+                  }
+                />
+              )}
+            </TabPanel>
+
+            <TabPanel value={tabValue} index={2}>
+              {contracts.length > 0 ? (
+                <TableContainer>
+                  <Table>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Contract</TableCell>
+                        <TableCell>Status</TableCell>
+                        <TableCell align="right">Value</TableCell>
+                        <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Term</TableCell>
+                        <TableCell align="right"><Box component="span" sx={visuallyHidden}>Actions</Box></TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {contracts.map((contract) => (
+                        <TableRow
+                          key={contract.id}
+                          hover
+                          sx={{ cursor: 'pointer' }}
+                          onClick={() => navigate(`/contracts/${contract.id}`)}
+                        >
+                          <TableCell>
+                            <Typography sx={{ fontWeight: 600, fontSize: '0.875rem', whiteSpace: 'nowrap' }}>
+                              {contract.contract_number}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">{contract.contract_type}</Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Chip label={contract.status} size="small" color={statusTone(contract.status)} />
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                            {formatCurrency(contract.value, contract.currency || 'USD')}
+                          </TableCell>
+                          <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' }, whiteSpace: 'nowrap' }}>
+                            {formatDate(contract.start_date)} – {formatDate(contract.end_date)}
+                          </TableCell>
+                          <TableCell align="right" sx={{ width: 48 }}>
+                            <Tooltip title="View Contract">
+                              <IconButton
+                                size="small"
+                                aria-label={`View ${contract.contract_number}`}
+                                onClick={(e) => { e.stopPropagation(); navigate(`/contracts/${contract.id}`); }}
+                              >
+                                <ChevronRight fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              ) : (
+                <EmptyState
+                  icon={<Assignment />}
+                  title="No contracts yet"
+                  description="Contracts appear here when an opportunity is converted into a deal."
+                />
+              )}
+            </TabPanel>
+
+            <TabPanel value={tabValue} index={3}>
+              {zones.length > 0 ? (
+                <Box sx={{ p: 2.5 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      {activeZones.length} active · {inactiveZones.length} inactive
+                    </Typography>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={<Add />}
+                      onClick={() => navigate(`/zones/new?company=${id}&return_to=${encodeURIComponent(`/companies/${id}`)}`)}
                     >
-                      <TableCell>
-                        <Typography variant="body2" fontWeight="medium">
-                          {ticket.ticket_number}
-                        </Typography>
-                      </TableCell>
-                      <TableCell>{ticket.subject}</TableCell>
-                      <TableCell>
-                        <Chip
-                          label={ticket.status.replace('_', ' ')}
-                          size="small"
-                          color={
-                            ticket.status === 'resolved' || ticket.status === 'closed' ? 'success' :
-                            ticket.status === 'new' ? 'info' :
-                            ticket.status === 'in_progress' ? 'warning' :
-                            'default'
-                          }
-                          sx={{ textTransform: 'capitalize' }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={ticket.priority}
-                          size="small"
-                          color={
-                            ticket.priority === 'urgent' ? 'error' :
-                            ticket.priority === 'high' ? 'warning' :
-                            ticket.priority === 'medium' ? 'info' :
-                            'default'
-                          }
-                          sx={{ textTransform: 'capitalize' }}
-                        />
-                      </TableCell>
-                      <TableCell>{ticket.assigned_to_name || 'Unassigned'}</TableCell>
-                      <TableCell>
-                        {new Date(ticket.created_at).toLocaleDateString()}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          ) : (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <SupportAgent sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-              <Typography variant="h6" color="text.secondary" gutterBottom>
-                No support tickets
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Create a support ticket when this company needs assistance
-              </Typography>
-              <Button
-                variant="contained"
-                startIcon={<Add />}
-                onClick={() => navigate(`/tickets/new?company=${company.id}`)}
-                sx={{ bgcolor: '#FFA500', '&:hover': { bgcolor: '#FF8C00' } }}
-              >
-                Create First Ticket
-              </Button>
-            </Box>
-          )}
-        </TabPanel>
+                      Add Zone
+                    </Button>
+                  </Box>
 
-        <TabPanel value={tabValue} index={5}>
-          {company.subscription_plans && company.subscription_plans.length > 0 ? (
-            <Grid container spacing={2}>
-              {company.subscription_plans.map((plan) => (
-                <Grid item xs={12} md={6} key={plan.id}>
-                  <Card variant="outlined">
-                    <CardContent>
-                      <Typography variant="h6" gutterBottom>
-                        {plan.tier}
+                  {activeZones.length > 0 && (
+                    <Box sx={{ mb: 3 }}>
+                      <Typography variant="overline" color="text.secondary" component="h3" sx={{ mb: 1 }}>
+                        Active zones ({activeZones.length})
                       </Typography>
-                      <Box sx={{ mb: 2 }}>
-                        <Chip
-                          label={plan.is_active ? 'Active' : 'Inactive'}
-                          size="small"
-                          color={plan.is_active ? 'success' : 'default'}
-                        />
-                      </Box>
-                      <Typography variant="body2" color="text.secondary" gutterBottom>
-                        Zone Count: {plan.zone_count}
+                      <Grid container spacing={2}>
+                        {activeZones.map((zone) => zoneCard(zone, false))}
+                      </Grid>
+                    </Box>
+                  )}
+
+                  {inactiveZones.length > 0 && (
+                    <Box>
+                      <Typography variant="overline" color="text.secondary" component="h3" sx={{ mb: 1 }}>
+                        Inactive zones ({inactiveZones.length})
                       </Typography>
-                      <Typography variant="body2" color="text.secondary" gutterBottom>
-                        Billing: {plan.billing_period}
-                      </Typography>
-                      <Typography variant="h6" color="primary">
-                        {plan.display_price}
-                      </Typography>
-                      {plan.notes && (
-                        <Typography variant="body2" sx={{ mt: 1 }}>
-                          {plan.notes}
-                        </Typography>
-                      )}
-                    </CardContent>
-                  </Card>
+                      <Grid container spacing={2}>
+                        {inactiveZones.map((zone) => zoneCard(zone, true))}
+                      </Grid>
+                    </Box>
+                  )}
+                </Box>
+              ) : (
+                <EmptyState
+                  icon={<LocationOn />}
+                  title="No zones yet"
+                  description="Add music zones to track locations and their contracts."
+                  action={
+                    <Button
+                      variant="contained"
+                      startIcon={<Add />}
+                      onClick={() => navigate(`/zones/new?company=${id}&return_to=${encodeURIComponent(`/companies/${id}`)}`)}
+                    >
+                      Add First Zone
+                    </Button>
+                  }
+                />
+              )}
+            </TabPanel>
+
+            <TabPanel value={tabValue} index={4}>
+              {tickets.length > 0 ? (
+                <>
+                  <Box sx={{ display: 'flex', justifyContent: 'flex-end', px: 2.5, pt: 2 }}>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={<Add />}
+                      onClick={() => navigate(`/tickets/new?company=${company.id}`)}
+                    >
+                      New Ticket
+                    </Button>
+                  </Box>
+                  <TableContainer>
+                    <Table>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Ticket</TableCell>
+                          <TableCell>Status</TableCell>
+                          <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Priority</TableCell>
+                          <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>Assigned to</TableCell>
+                          <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>Created</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {tickets.map((ticket) => (
+                          <TableRow
+                            key={ticket.id}
+                            hover
+                            sx={{ cursor: 'pointer' }}
+                            onClick={() => navigate(`/tickets/${ticket.id}`)}
+                          >
+                            <TableCell>
+                              <Typography sx={{ fontWeight: 600, fontSize: '0.875rem' }}>{ticket.subject}</Typography>
+                              <Typography variant="body2" color="text.secondary">{ticket.ticket_number}</Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Chip label={humanize(ticket.status)} size="small" color={statusTone(ticket.status)} />
+                            </TableCell>
+                            <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }}>
+                              <Chip label={humanize(ticket.priority)} size="small" color={statusTone(ticket.priority)} variant="outlined" />
+                            </TableCell>
+                            <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{ticket.assigned_to_name || 'Unassigned'}</TableCell>
+                            <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' }, whiteSpace: 'nowrap' }}>
+                              {formatDate(ticket.created_at)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </>
+              ) : (
+                <EmptyState
+                  icon={<SupportAgent />}
+                  title="No support tickets"
+                  description="Create a ticket when this company needs help."
+                  action={
+                    <Button
+                      variant="contained"
+                      startIcon={<Add />}
+                      onClick={() => navigate(`/tickets/new?company=${company.id}`)}
+                    >
+                      Create First Ticket
+                    </Button>
+                  }
+                />
+              )}
+            </TabPanel>
+
+            <TabPanel value={tabValue} index={5}>
+              {company.subscription_plans && company.subscription_plans.length > 0 ? (
+                <Grid container spacing={2} sx={{ p: 2.5 }}>
+                  {company.subscription_plans.map((plan) => (
+                    <Grid item xs={12} md={6} key={plan.id}>
+                      <Card variant="outlined">
+                        <CardContent>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                            <Typography sx={{ fontWeight: 600 }}>{plan.tier}</Typography>
+                            <Chip
+                              label={plan.is_active ? 'Active' : 'Inactive'}
+                              size="small"
+                              color={plan.is_active ? 'success' : 'default'}
+                            />
+                          </Box>
+                          <Typography variant="body2" color="text.secondary">
+                            {plan.zone_count} zones · billed {plan.billing_period}
+                          </Typography>
+                          <Typography sx={{ fontWeight: 600, fontSize: '1.125rem', mt: 1 }}>
+                            {plan.display_price}
+                          </Typography>
+                          {plan.notes && (
+                            <Typography variant="body2" sx={{ mt: 1 }}>
+                              {plan.notes}
+                            </Typography>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  ))}
                 </Grid>
-              ))}
-            </Grid>
-          ) : (
-            <Box sx={{ textAlign: 'center', py: 4 }}>
-              <AccountBalance sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-              <Typography variant="h6" color="text.secondary" gutterBottom>
-                No subscription plans
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Subscription plans will be displayed here once configured
-              </Typography>
-            </Box>
-          )}
-        </TabPanel>
-      </Paper>
+              ) : (
+                <EmptyState
+                  icon={<AccountBalance />}
+                  title="No subscription plans"
+                  description="Subscription plans are shown here once they are set up."
+                />
+              )}
+            </TabPanel>
+          </Paper>
+        </Grid>
+      </Grid>
 
       {/* Forms */}
       <CompanyForm
@@ -1010,7 +847,7 @@ const CompanyDetail: React.FC = () => {
         <Fab
           color="primary"
           aria-label="add"
-          sx={{ position: 'fixed', bottom: 16, right: 16 }}
+          sx={{ position: 'fixed', bottom: 80, right: 16 }}
           onClick={() => setContactFormOpen(true)}
         >
           <Add />
