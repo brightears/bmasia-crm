@@ -61,6 +61,7 @@ import {
 import { Contract, Invoice, ContractZone, ServiceLocation, EmailLogEntry } from '../types';
 import ApiService from '../services/api';
 import ContractDocuments from './ContractDocuments';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 interface ContractDetailProps {
   open: boolean;
@@ -211,17 +212,12 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
   };
 
   const formatCurrency = (value: number, currency = 'USD'): string => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
+    return formatMoney(value, currency);
   };
 
   const formatDate = (dateString: string | null | undefined): string => {
     if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString();
+    return formatDisplayDate(dateString);
   };
 
   const getStatusColor = (status: string): 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning' => {

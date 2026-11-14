@@ -48,6 +48,7 @@ import OpportunityForm from '../components/OpportunityForm';
 import ActivityTimeline from '../components/ActivityTimeline';
 import ActivityForm from '../components/ActivityForm';
 import { formatCurrency, getServiceLabel } from '../constants/entities';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 const stageConfig = [
   { id: 'Contacted', label: 'Contacted', color: '#2196f3' },
@@ -153,11 +154,7 @@ const OpportunityDetail: React.FC = () => {
 
   const formatDate = (dateString?: string | null) => {
     if (!dateString) return 'N/A';
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+    return formatDisplayDate(dateString);
   };
 
   const getStageColor = (stage: string) => {

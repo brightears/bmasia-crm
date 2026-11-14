@@ -110,7 +110,7 @@ const TaskCard: React.FC<{
     if (isToday(date)) return 'Today';
     if (isTomorrow(date)) return 'Tomorrow';
     if (isPast(date)) return `Overdue`;
-    return format(date, 'MMM d');
+    return format(date, 'd MMM');
   };
 
   const getDueDateColor = (dueDate?: string) => {

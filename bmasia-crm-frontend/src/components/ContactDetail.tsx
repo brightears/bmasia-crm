@@ -49,6 +49,7 @@ import {
 } from '@mui/icons-material';
 import { Contact, Opportunity, Note } from '../types';
 import ApiService from '../services/api';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 interface ContactDetailProps {
   open: boolean;
@@ -129,11 +130,7 @@ const ContactDetail: React.FC<ContactDetailProps> = ({
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+    return formatDisplayDate(dateString);
   };
 
   const getOpportunityStageColor = (stage: string) => {
@@ -422,7 +419,7 @@ const ContactDetail: React.FC<ContactDetailProps> = ({
                       secondary={
                         <Box>
                           <Typography variant="body2" color="text.secondary">
-                            Value: ${opportunity.expected_value?.toLocaleString() || 'Not specified'}
+                            Value: {opportunity.expected_value ? formatMoney(opportunity.expected_value, 'USD') : 'Not specified'}
                           </Typography>
                           <Typography variant="body2" color="text.secondary">
                             Owner: {opportunity.owner_name}

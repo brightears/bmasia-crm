@@ -51,6 +51,7 @@ import ApiService, { EmailSendData } from '../services/api';
 import ContractForm from '../components/ContractForm';
 import ContractDetail from '../components/ContractDetail';
 import EmailSendDialog from '../components/EmailSendDialog';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 // Statuses where the contract is locked (terminal states only — Active is editable for date/term changes)
 const LOCKED_STATUSES = ['Renewed', 'Expired', 'Cancelled'];
@@ -245,17 +246,12 @@ const Contracts: React.FC = () => {
   };
 
   const formatCurrency = (value: number, currency = 'USD'): string => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
+    return formatMoney(value, currency);
   };
 
   const formatDate = (dateString: string | null | undefined): string => {
     if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString();
+    return formatDisplayDate(dateString);
   };
 
   const getStatusColor = (status: string): 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning' => {
