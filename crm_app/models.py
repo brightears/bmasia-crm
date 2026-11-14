@@ -299,10 +299,32 @@ class Company(TimestampedModel):
     
     @property
     def total_contract_value(self):
-        """Calculate total value of active contracts"""
+        """Calculate total value of active contracts.
+
+        Note: this adds contract values regardless of currency (THB and USD together).
+        Kept unchanged for existing callers; use active_contract_value_by_currency to show money.
+        """
         return self.contracts.filter(is_active=True).aggregate(
             total=models.Sum('value')
         )['total'] or 0
+
+    @property
+    def active_contract_value_by_currency(self):
+        """Value of active contracts per currency; never adds different currencies together.
+
+        Same contracts as total_contract_value (is_active=True). Returns a list sorted by
+        currency, e.g. [{'currency': 'THB', 'total': '108000.00'}, {'currency': 'USD', 'total': '2160.00'}].
+        """
+        rows = (
+            self.contracts.filter(is_active=True)
+            .values('currency')
+            .annotate(total=models.Sum('value'))
+            .order_by('currency')
+        )
+        return [
+            {'currency': row['currency'] or 'USD', 'total': f"{(row['total'] or 0):.2f}"}
+            for row in rows
+        ]
     
     @property
     def avg_zones_per_location(self):
