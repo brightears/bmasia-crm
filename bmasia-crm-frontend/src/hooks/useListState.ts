@@ -21,6 +21,12 @@ export function useListState<T extends Record<string, Value>>(defaults: T) {
   const [searchParams, setSearchParams] = useSearchParams();
   const pending = useRef<URLSearchParams | null>(null);
   const defaultsRef = useRef(defaults);
+  // Always the current address and setter, so setters kept from an earlier render (for example
+  // inside a useCallback with no dependencies) still start from the current address.
+  const latestParams = useRef(searchParams);
+  latestParams.current = searchParams;
+  const latestSetter = useRef(setSearchParams);
+  latestSetter.current = setSearchParams;
 
   // Once the address has caught up, start from it again.
   useEffect(() => {
@@ -45,7 +51,7 @@ export function useListState<T extends Record<string, Value>>(defaults: T) {
 
   const set = useCallback(
     <K extends keyof T>(key: K, value: T[K]) => {
-      const next = new URLSearchParams(pending.current ?? searchParams);
+      const next = new URLSearchParams(pending.current ?? latestParams.current);
       const def = defaultsRef.current[key];
       const k = String(key);
       if (value === def || value === '' || value === null || value === undefined) {
@@ -54,9 +60,9 @@ export function useListState<T extends Record<string, Value>>(defaults: T) {
         next.set(k, k === 'page' ? String(Number(value) + 1) : String(value));
       }
       pending.current = next;
-      setSearchParams(next, { replace: true });
+      latestSetter.current(next, { replace: true });
     },
-    [searchParams, setSearchParams]
+    []
   );
 
   const bind = useCallback(

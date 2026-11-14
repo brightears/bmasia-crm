@@ -48,3 +48,12 @@ it('writes page as 1-based', () => {
   act(() => api.set('page', 1));
   expect(location.search).toBe('?page=2');
 });
+
+it('a setter kept from an earlier render does not undo later changes', () => {
+  renderAt('/list');
+  const [, staleSetStatus] = api.bind('status'); // kept, as in a useCallback with no dependencies
+  act(() => api.set('q', 'lumen'));
+  expect(location.search).toBe('?q=lumen');
+  act(() => staleSetStatus('Sent'));
+  expect(location.search).toBe('?q=lumen&status=Sent');
+});
