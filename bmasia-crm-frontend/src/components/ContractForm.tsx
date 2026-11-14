@@ -1,5 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  RequiredCounts,
+  ServiceLocationEntry,
+  buildServiceLocationPayload,
+  locationsChanged,
+  requiredCounts,
+  requiredGroups,
+  sameCounts,
+  syncLocationsFromLineItems,
+  syncWarning,
+} from '../utils/serviceLocations';
+import {
   Dialog,
   DialogTitle,
   DialogContent,
@@ -54,14 +65,6 @@ interface ContractFormProps {
   mode: 'create' | 'edit';
   initialCompanyId?: string;
   initialQuoteId?: string;
-}
-
-interface ServiceLocationEntry {
-  id?: string;
-  location_name: string;
-  platform: 'soundtrack' | 'beatbreeze' | 'custom';
-  custom_service_name?: string;
-  tempId: string;
 }
 
 interface CustomerSignatoryEntry {
@@ -167,6 +170,9 @@ const PRODUCT_OPTIONS = [
 // Helper function for generating temporary IDs
 const generateTempId = () => `temp-${Date.now()}-${Math.random()}`;
 
+const platformOfProduct = (productService: string) =>
+  PRODUCT_OPTIONS.find(p => p.name === productService)?.platform;
+
 const ContractForm: React.FC<ContractFormProps> = ({
   open,
   onClose,
@@ -222,6 +228,13 @@ const ContractForm: React.FC<ContractFormProps> = ({
   const [serviceLocations, setServiceLocations] = useState<ServiceLocationEntry[]>([]);
   const [locationsTrimmedWarning, setLocationsTrimmedWarning] = useState('');
   const isFormInitialized = useRef(false);
+  // Rows as loaded (edit) — the save sends rows only when they differ from this.
+  const initialLocations = useRef<ServiceLocationEntry[]>([]);
+  // Row count per product group the line items asked for at the last sync (or at load); only groups
+  // whose count changes are re-derived, and only by the size of the change.
+  const lastRequiredCounts = useRef<RequiredCounts>(new Map());
+  // Saved rows dropped by a quantity decrease; deleted on save unless a later increase puts them back.
+  const parkedLocations = useRef<ServiceLocationEntry[]>([]);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [masterContracts, setMasterContracts] = useState<Contract[]>([]);
   const [additionalSignatories, setAdditionalSignatories] = useState<CustomerSignatoryEntry[]>([]);
@@ -394,7 +407,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
       setSelectedCompanyCountry(editCompany.country || '');
     }
 
-    // Load service locations from DB, then sync platforms against line items
+    // Load service locations from DB exactly as saved. They are NOT re-derived from line items here:
+    // a contract whose rows are not backed by music line items would otherwise lose them on save.
     let dbLocations: ServiceLocationEntry[] = [];
     if (contract.service_locations && contract.service_locations.length > 0) {
       dbLocations = contract.service_locations.map(loc => ({
@@ -413,9 +427,10 @@ const ContractForm: React.FC<ContractFormProps> = ({
       }));
     }
 
-    // Sync locations against line items to fix stale platform assignments
-    const { locations: syncedLocations } = syncLocationsFromLineItems(contractLineItems, dbLocations);
-    setServiceLocations(syncedLocations);
+    lastRequiredCounts.current = requiredCounts(requiredGroups(contractLineItems, platformOfProduct));
+    parkedLocations.current = [];
+    initialLocations.current = dbLocations;
+    setServiceLocations(dbLocations);
     setLineItems(contractLineItems);
 
     // Allow sync to run after initial form population
@@ -462,6 +477,9 @@ const ContractForm: React.FC<ContractFormProps> = ({
       customer_contact_title: '',
     });
     currencyEdited.current = false;
+    initialLocations.current = [];
+    lastRequiredCounts.current = new Map();
+    parkedLocations.current = [];
     setServiceLocations([]);
     setAttachments([]);
     setAdditionalSignatories([]);
@@ -630,92 +648,23 @@ const ContractForm: React.FC<ContractFormProps> = ({
     ));
   };
 
-  // Sync service locations from music line items
-  const syncLocationsFromLineItems = (
-    currentLineItems: ContractLineItem[],
-    currentLocations: ServiceLocationEntry[]
-  ): { locations: ServiceLocationEntry[]; droppedNamedCount: number } => {
-    const requiredCounts: Record<string, number> = { soundtrack: 0, beatbreeze: 0 };
-    // Track custom products separately: { "MP3": 6 }
-    const customProducts: Record<string, number> = {};
-
-    currentLineItems.forEach(item => {
-      const product = PRODUCT_OPTIONS.find(p => p.name === item.product_service);
-      const platform = product?.platform;
-      if (platform) {
-        requiredCounts[platform] += Math.max(0, Math.round(item.quantity));
-      } else if (item.product_service && item.quantity > 0) {
-        // Custom product — use the typed product name (e.g., "MP3") or fallback to "Custom"
-        const customName = item.product_service === 'Custom' ? 'Custom' : item.product_service;
-        customProducts[customName] = (customProducts[customName] || 0) + Math.max(0, Math.round(item.quantity));
-      }
-    });
-
-    const result: ServiceLocationEntry[] = [];
-    let droppedNamedCount = 0;
-
-    // Standard platforms (soundtrack, beatbreeze)
-    for (const platform of ['soundtrack', 'beatbreeze'] as const) {
-      const existing = currentLocations.filter(loc => loc.platform === platform);
-      const required = requiredCounts[platform];
-
-      if (existing.length <= required) {
-        // Keep all existing, add blank rows to fill the gap
-        result.push(...existing);
-        for (let i = 0; i < required - existing.length; i++) {
-          result.push({ location_name: '', platform, tempId: generateTempId() });
-        }
-      } else {
-        // Need to remove some — prefer removing blank/unnamed ones first
-        const named = existing.filter(loc => loc.location_name.trim() !== '');
-        const unnamed = existing.filter(loc => loc.location_name.trim() === '');
-
-        if (named.length <= required) {
-          result.push(...named);
-          result.push(...unnamed.slice(0, required - named.length));
-        } else {
-          // Even named ones exceed required — keep first N
-          result.push(...named.slice(0, required));
-          droppedNamedCount += named.length - required;
-        }
-      }
-    }
-
-    // Custom products — generate locations with platform='custom'
-    for (const [customName, required] of Object.entries(customProducts)) {
-      const existing = currentLocations.filter(
-        loc => loc.platform === 'custom' && loc.custom_service_name === customName
-      );
-
-      if (existing.length <= required) {
-        result.push(...existing);
-        for (let i = 0; i < required - existing.length; i++) {
-          result.push({ location_name: '', platform: 'custom', custom_service_name: customName, tempId: generateTempId() });
-        }
-      } else {
-        const named = existing.filter(loc => loc.location_name.trim() !== '');
-        const unnamed = existing.filter(loc => loc.location_name.trim() === '');
-
-        if (named.length <= required) {
-          result.push(...named);
-          result.push(...unnamed.slice(0, required - named.length));
-        } else {
-          result.push(...named.slice(0, required));
-          droppedNamedCount += named.length - required;
-        }
-      }
-    }
-
-    return { locations: result, droppedNamedCount };
-  };
-
-  // Auto-sync service locations when line items change (after form is initialized)
+  // Re-derive service locations only when the music line items ask for a different number of rows
+  // (a quantity or product change by the user). Saved rows dropped here are removed on save only,
+  // and the save names them explicitly.
   useEffect(() => {
     if (!isFormInitialized.current) return;
-    const { locations, droppedNamedCount } = syncLocationsFromLineItems(lineItems, serviceLocations);
-    setServiceLocations(locations);
-    if (droppedNamedCount > 0) {
-      setLocationsTrimmedWarning(`${droppedNamedCount} named location(s) removed due to quantity decrease`);
+    const now = requiredCounts(requiredGroups(lineItems, platformOfProduct));
+    if (sameCounts(now, lastRequiredCounts.current)) return;
+    const result = syncLocationsFromLineItems(
+      lineItems, serviceLocations, platformOfProduct, lastRequiredCounts.current, generateTempId,
+      parkedLocations.current,
+    );
+    lastRequiredCounts.current = now;
+    parkedLocations.current = result.parked;
+    setServiceLocations(result.locations);
+    const warning = syncWarning(result);
+    if (warning) {
+      setLocationsTrimmedWarning(warning);
     } else {
       setLocationsTrimmedWarning('');
     }
@@ -822,8 +771,11 @@ const ContractForm: React.FC<ContractFormProps> = ({
         return;
       }
 
-      // Validate service locations have names
-      const emptyLocations = serviceLocations.filter(loc => !loc.location_name.trim());
+      // Validate service locations have names (only when the rows are being saved)
+      const locationsBeingSaved = mode === 'create' || locationsChanged(initialLocations.current, serviceLocations);
+      const emptyLocations = locationsBeingSaved
+        ? serviceLocations.filter(loc => !loc.location_name.trim())
+        : [];
       if (emptyLocations.length > 0) {
         setError(`Please fill in all ${emptyLocations.length} service location name(s)`);
         return;
@@ -859,16 +811,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
           discount_percentage: 0,
           tax_rate: item.tax_rate,
         })) } : {}),
-        service_locations: serviceLocations
-          .filter(loc => loc.location_name.trim())
-          .map((loc, index) => ({
-            ...(loc.id ? { id: loc.id } : {}),
-            location_name: loc.location_name.trim(),
-            platform: loc.platform,
-            sort_order: index,
-            ...(loc.platform === 'custom' && loc.custom_service_name ? { custom_service_name: loc.custom_service_name } : {}),
-          })),
-        replace_service_locations: true,
+        // Unchanged rows are not sent at all; changed rows name every saved row they remove.
+        ...buildServiceLocationPayload(mode === 'create' ? 'create' : 'edit', initialLocations.current, serviceLocations),
       };
 
       let savedContract: Contract;
@@ -1648,7 +1592,9 @@ const ContractForm: React.FC<ContractFormProps> = ({
                 </Typography>
               </Box>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                Auto-generated from music line items above. Adjust line item quantities to add or remove locations.
+                New locations are generated from music line items above. Saved locations are kept as they are;
+                only lowering a music line item's quantity removes any, and the warning above names them before
+                they are deleted on save.
               </Typography>
 
               {locationsTrimmedWarning && (

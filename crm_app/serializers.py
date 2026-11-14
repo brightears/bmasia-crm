@@ -746,8 +746,21 @@ class ContractSerializer(serializers.ModelSerializer):
         required=False,
         default=False,
         help_text=(
-            "Explicit full-replacement mode for UI saves. Without this flag, "
-            "service_locations performs ID-aware partial upserts and never deletes omitted rows."
+            "Full-replacement mode: service_locations is the complete intended list. Existing "
+            "rows omitted from it are deleted only when their ids are also listed in "
+            "remove_service_location_ids; otherwise the update is refused and nothing changes. "
+            "Without this flag, service_locations performs ID-aware partial upserts and never "
+            "deletes omitted rows."
+        ),
+    )
+    remove_service_location_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+        help_text=(
+            "Ids of this contract's existing service-location rows to delete. Deleting a row "
+            "always requires naming it here, in either mode."
         ),
     )
 
@@ -811,6 +824,7 @@ class ContractSerializer(serializers.ModelSerializer):
             'bmasia_contact_name', 'bmasia_contact_email', 'bmasia_contact_title',
             'customer_contact_name', 'customer_contact_email', 'customer_contact_title',
             'contract_documents', 'line_items', 'service_locations', 'replace_service_locations',
+            'remove_service_location_ids',
             # Finance tracking — Revenue lifecycle.
             # Fix 2026-05-21 (Lyra, per Cira build-request): these were absent from
             # the whitelist, causing DRF to silent-drop the fields on update. Four
@@ -900,6 +914,27 @@ class ContractSerializer(serializers.ModelSerializer):
         )
         if error:
             raise serializers.ValidationError({'service_type': error})
+
+        # Service-location deletions must be named (see _check_service_location_removals).
+        remove_ids = attrs.get('remove_service_location_ids')
+        replace = attrs.get('replace_service_locations', False)
+        locations = attrs.get('service_locations')
+        if self.instance is None:
+            if remove_ids:
+                raise serializers.ValidationError({
+                    'remove_service_location_ids': 'A new contract has no service locations to remove.'
+                })
+        else:
+            if replace and locations is None:
+                raise serializers.ValidationError({
+                    'replace_service_locations': (
+                        'Full replacement needs the complete intended service_locations list.'
+                    )
+                })
+            if locations is not None or remove_ids is not None:
+                self._check_service_location_removals(
+                    self.instance, locations or [], replace=replace, remove_ids=remove_ids or [],
+                )
         return attrs
 
     def _calculate_tax_fields(self, validated_data):
@@ -936,6 +971,10 @@ class ContractSerializer(serializers.ModelSerializer):
         use_line_tax = 'tax_rate' not in validated_data and any('tax_rate' in item for item in line_items_data)
         service_locations_data = validated_data.pop('service_locations', [])
         validated_data.pop('replace_service_locations', None)
+        if validated_data.pop('remove_service_location_ids', None):
+            raise serializers.ValidationError({
+                'remove_service_location_ids': 'A new contract has no service locations to remove.'
+            })
 
         # DRAFT placeholder numbering is handled centrally by Contract.save()
         # (MAX-based — see models.py). Do NOT generate it here.
@@ -1029,6 +1068,21 @@ class ContractSerializer(serializers.ModelSerializer):
             )
         service_locations_data = validated_data.pop('service_locations', None)
         replace_service_locations = validated_data.pop('replace_service_locations', False)
+        remove_service_location_ids = validated_data.pop('remove_service_location_ids', None)
+        if remove_service_location_ids is not None and service_locations_data is None:
+            service_locations_data = []  # removal-only update: no rows created or changed
+        if replace_service_locations and service_locations_data is None:
+            raise serializers.ValidationError({
+                'replace_service_locations': (
+                    'Full replacement needs the complete intended service_locations list.'
+                )
+            })
+        # Refuse an implicit deletion before anything is written.
+        if service_locations_data is not None:
+            self._check_service_location_removals(
+                instance, service_locations_data,
+                replace=replace_service_locations, remove_ids=remove_service_location_ids or [],
+            )
         pricing_fields_changed = any(
             field in validated_data
             for field in (
@@ -1081,6 +1135,7 @@ class ContractSerializer(serializers.ModelSerializer):
                 instance,
                 service_locations_data,
                 replace=replace_service_locations,
+                remove_ids=remove_service_location_ids or [],
             )
 
         if (
@@ -1099,8 +1154,49 @@ class ContractSerializer(serializers.ModelSerializer):
 
         return instance
 
-    def _upsert_service_locations(self, contract, locations_data, *, replace=False):
-        """Apply ID-aware partial updates without destructive implicit deletes."""
+    @staticmethod
+    def _check_service_location_removals(contract, locations_data, *, replace, remove_ids):
+        """Refuse any deletion the request did not name explicitly.
+
+        A row is deleted only when its id is in remove_service_location_ids. In replace mode
+        the list is the complete intended set, so an existing row that is neither in the list
+        nor named for removal would be deleted implicitly; that is refused, and nothing is
+        written (a form that rebuilt its list from nothing must not wipe saved rows).
+        """
+        existing = {str(pk) for pk in contract.service_locations.values_list('id', flat=True)}
+        remove = {str(pk) for pk in remove_ids}
+        foreign = sorted(remove - existing)
+        if foreign:
+            raise serializers.ValidationError({
+                'remove_service_location_ids': (
+                    f"{len(foreign)} id(s) are not service locations of this contract. "
+                    "No rows were changed."
+                )
+            })
+        submitted = {str(item['id']) for item in locations_data if item.get('id') is not None}
+        both = sorted(remove & submitted)
+        if both:
+            raise serializers.ValidationError({
+                'remove_service_location_ids': (
+                    f"{len(both)} row(s) are both kept in service_locations and listed for removal. "
+                    "No rows were changed."
+                )
+            })
+        if replace:
+            implicit = sorted(existing - submitted - remove)
+            if implicit:
+                raise serializers.ValidationError({
+                    'service_locations': (
+                        f"This replacement would delete {len(implicit)} existing service location(s) "
+                        "that the request does not name for removal. No rows were changed. Include "
+                        "them (by id) in service_locations to keep them, or list their ids in "
+                        "remove_service_location_ids to delete them. If you are using the CRM "
+                        "website, reload the page and try again."
+                    )
+                })
+
+    def _upsert_service_locations(self, contract, locations_data, *, replace=False, remove_ids=()):
+        """Apply ID-aware partial updates. Rows are deleted only when named in remove_ids."""
 
         existing = {
             str(location.id): location
@@ -1155,8 +1251,8 @@ class ContractSerializer(serializers.ModelSerializer):
 
             seen_ids.add(str(location.id))
 
-        if replace:
-            contract.service_locations.exclude(id__in=seen_ids).delete()
+        if remove_ids:
+            contract.service_locations.filter(id__in=list(remove_ids)).exclude(id__in=seen_ids).delete()
 
     @staticmethod
     def _validate_service_location_pricing(contract):

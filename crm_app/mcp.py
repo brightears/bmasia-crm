@@ -114,9 +114,11 @@ to recover the raw PDF. On failure returns `{"error": "..."}`.
   A normal contract update is an ID-aware partial upsert and preserves omitted
   rows. To replace the complete list atomically, call `update_record` once for
   the contract with `replace_service_locations: true`, the complete intended
-  `service_locations` array, and any matching pricing fields such as `value`.
-  Existing rows omitted from that complete list are deleted only in this explicit
-  mode, and the whole update rolls back if pricing validation fails.
+  `service_locations` array (existing rows by `id`), and any matching pricing
+  fields such as `value`. A row is deleted only when its id is listed in
+  `remove_service_location_ids`; a replacement that would drop an existing row
+  not named there is refused and nothing changes. The whole update rolls back if
+  pricing validation fails.
 - Contract numbers are auto-generated (read-only).
 """)
 
@@ -525,6 +527,9 @@ def _persisted_field(collection, instance, serializer, key, fields, keep_json=Tr
         # This is a write-only operation mode, not a model attribute. Echo the
         # accepted value so the caller can verify which semantics were applied.
         return bool(fields[key])
+    if collection == 'contract' and key == 'remove_service_location_ids':
+        # Write-only: echo the ids the caller named; they no longer exist.
+        return [str(v) for v in (fields[key] or [])]
     src = serializer.fields[key].source or key
     val = getattr(instance, src, None)
     if keep_json and isinstance(val, (list, dict)):
@@ -586,7 +591,7 @@ _GUARDED_CONTRACT_PRICING_FIELDS = frozenset({
     'value', 'tax_rate', 'tax_amount', 'total_value', 'currency',
     'billing_entity', 'discount_percentage', 'price_per_zone',
     'billing_frequency', 'line_items', 'service_locations',
-    'replace_service_locations',
+    'replace_service_locations', 'remove_service_location_ids',
 })
 _GUARDED_PRICED_CONTRACT_STATUSES = frozenset({'Sent', 'Active'})
 # A Sent-contract date correction may carry ordinary wording edits in the same
@@ -1187,9 +1192,11 @@ def update_record(
         data: JSON string with fields to update (partial update — only include
               fields you want to change). For an atomic full replacement of a
               contract's service locations, include replace_service_locations=true,
-              the complete intended service_locations array, and matching pricing
-              fields in this one update. Without that flag, omitted locations are
-              preserved.
+              the complete intended service_locations array, the ids of rows to
+              delete in remove_service_location_ids, and matching pricing fields in
+              this one update. A replacement that would drop a row not listed in
+              remove_service_location_ids is refused. Without the replace flag,
+              omitted locations are preserved.
         expected_version: Exact current serializer `updated_at` for an
               optimistic-concurrency (guarded) update. Supplying it requires
               expected_values. A guarded update may change any writable field
@@ -2007,8 +2014,9 @@ def delete_record(collection: str, id: str) -> str:
     if collection == 'servicelocation':
         return (
             "Error: Standalone service-location deletion is blocked. "
-            "Use a contract update with replace_service_locations=true and the complete "
-            "intended row list so removal is explicit and pricing is revalidated atomically."
+            "Use a contract update with remove_service_location_ids (and, for a full "
+            "replacement, replace_service_locations=true with the complete intended row list) "
+            "so removal is explicit and pricing is revalidated atomically."
         )
 
     model, _ = _COLLECTION_MAP[collection]

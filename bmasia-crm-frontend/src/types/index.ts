@@ -383,6 +383,7 @@ export interface Contract {
   // Service Locations (replaces zone picker)
   service_locations?: ServiceLocation[];
   replace_service_locations?: boolean;
+  remove_service_location_ids?: string[];
   created_at: string;
   updated_at: string;
 }
