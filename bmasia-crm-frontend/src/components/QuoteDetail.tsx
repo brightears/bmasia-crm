@@ -61,19 +61,23 @@ import {
 } from '@mui/icons-material';
 import { Quote, QuoteActivity, EmailLogEntry } from '../types';
 import ApiService from '../services/api';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 interface QuoteDetailProps {
   open: boolean;
   onClose: () => void;
   quote?: Quote | null;
   onQuoteUpdate: () => void;
+  /** 'page' renders the quote's content without the pop-up (the page supplies the header). */
+  variant?: 'dialog' | 'page';
 }
 
 const QuoteDetail: React.FC<QuoteDetailProps> = ({
   open,
   onClose,
   quote,
-  onQuoteUpdate
+  onQuoteUpdate,
+  variant = 'dialog',
 }) => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -207,16 +211,12 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
   };
 
   const formatCurrency = (value: number, currency: string = 'USD'): string => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency,
-      minimumFractionDigits: 2,
-    }).format(value);
+    return formatMoney(value, currency);
   };
 
   const formatDate = (dateString: string | null | undefined): string => {
     if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString();
+    return formatDisplayDate(dateString);
   };
 
   const getStatusColor = (status: string): string => {
@@ -262,119 +262,8 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
     return null;
   }
 
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
-      <DialogTitle sx={{ pb: 1 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Box>
-            <Typography variant="h5" component="span">
-              {quoteDetail?.quote_number || 'Loading...'}
-            </Typography>
-            {quoteDetail && (
-              <Chip
-                label={quoteDetail.status}
-                size="small"
-                sx={{
-                  ml: 2,
-                  backgroundColor: getStatusColor(quoteDetail.status),
-                  color: 'white',
-                  fontWeight: 600
-                }}
-              />
-            )}
-          </Box>
-          <Box>
-            {quoteDetail?.status === 'Draft' && (
-              <Button
-                variant="outlined"
-                startIcon={<Send />}
-                onClick={handleSendQuote}
-                sx={{ mr: 1 }}
-                disabled={loading}
-              >
-                Send Quote
-              </Button>
-            )}
-            {quoteDetail?.status === 'Sent' && (
-              <>
-                <Button
-                  variant="outlined"
-                  color="success"
-                  startIcon={<CheckCircle />}
-                  onClick={handleAcceptQuote}
-                  sx={{ mr: 1 }}
-                  disabled={loading}
-                >
-                  Accept
-                </Button>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  startIcon={<Cancel />}
-                  onClick={handleRejectQuote}
-                  sx={{ mr: 1 }}
-                  disabled={loading}
-                >
-                  Reject
-                </Button>
-              </>
-            )}
-            {quoteDetail?.status === 'Accepted' && (
-              <>
-                <Button
-                  variant="contained"
-                  startIcon={<Assignment />}
-                  onClick={handleConvertToContract}
-                  sx={{ mr: 1 }}
-                  disabled={loading}
-                >
-                  Convert to Contract
-                </Button>
-                <Button
-                  variant="outlined"
-                  startIcon={<Receipt />}
-                  onClick={() => {
-                    onClose();
-                    navigate(`/invoices?new=true&company=${quoteDetail.company}&quote=${quoteDetail.id}`);
-                  }}
-                  sx={{ mr: 1 }}
-                  disabled={loading}
-                >
-                  Create Invoice
-                </Button>
-              </>
-            )}
-            <Button
-              variant="outlined"
-              startIcon={<Visibility />}
-              onClick={handlePreviewPDF}
-              sx={{ mr: 1 }}
-              disabled={loading}
-            >
-              Preview
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<GetApp />}
-              onClick={handleDownloadPDF}
-              sx={{ mr: 1 }}
-              disabled={loading}
-            >
-              PDF
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<Print />}
-              onClick={handlePrintQuote}
-              disabled={loading}
-            >
-              Print
-            </Button>
-          </Box>
-        </Box>
-      </DialogTitle>
-
-      <DialogContent sx={{ pb: 1 }}>
+  const content = (
+    <>
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
             {error}
@@ -729,6 +618,127 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
             </Grid>
           </Grid>
         )}
+    </>
+  );
+
+  if (variant === 'page') {
+    return <Box>{content}</Box>;
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
+      <DialogTitle sx={{ pb: 1 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box>
+            <Typography variant="h5" component="span">
+              {quoteDetail?.quote_number || 'Loading...'}
+            </Typography>
+            {quoteDetail && (
+              <Chip
+                label={quoteDetail.status}
+                size="small"
+                sx={{
+                  ml: 2,
+                  backgroundColor: getStatusColor(quoteDetail.status),
+                  color: 'white',
+                  fontWeight: 600
+                }}
+              />
+            )}
+          </Box>
+          <Box>
+            {quoteDetail?.status === 'Draft' && (
+              <Button
+                variant="outlined"
+                startIcon={<Send />}
+                onClick={handleSendQuote}
+                sx={{ mr: 1 }}
+                disabled={loading}
+              >
+                Send Quote
+              </Button>
+            )}
+            {quoteDetail?.status === 'Sent' && (
+              <>
+                <Button
+                  variant="outlined"
+                  color="success"
+                  startIcon={<CheckCircle />}
+                  onClick={handleAcceptQuote}
+                  sx={{ mr: 1 }}
+                  disabled={loading}
+                >
+                  Accept
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  startIcon={<Cancel />}
+                  onClick={handleRejectQuote}
+                  sx={{ mr: 1 }}
+                  disabled={loading}
+                >
+                  Reject
+                </Button>
+              </>
+            )}
+            {quoteDetail?.status === 'Accepted' && (
+              <>
+                <Button
+                  variant="contained"
+                  startIcon={<Assignment />}
+                  onClick={handleConvertToContract}
+                  sx={{ mr: 1 }}
+                  disabled={loading}
+                >
+                  Convert to Contract
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<Receipt />}
+                  onClick={() => {
+                    onClose();
+                    navigate(`/invoices?new=true&company=${quoteDetail.company}&quote=${quoteDetail.id}`);
+                  }}
+                  sx={{ mr: 1 }}
+                  disabled={loading}
+                >
+                  Create Invoice
+                </Button>
+              </>
+            )}
+            <Button
+              variant="outlined"
+              startIcon={<Visibility />}
+              onClick={handlePreviewPDF}
+              sx={{ mr: 1 }}
+              disabled={loading}
+            >
+              Preview
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<GetApp />}
+              onClick={handleDownloadPDF}
+              sx={{ mr: 1 }}
+              disabled={loading}
+            >
+              PDF
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<Print />}
+              onClick={handlePrintQuote}
+              disabled={loading}
+            >
+              Print
+            </Button>
+          </Box>
+        </Box>
+      </DialogTitle>
+
+      <DialogContent sx={{ pb: 1 }}>
+        {content}
       </DialogContent>
 
       <DialogActions sx={{ px: 3, pb: 3 }}>

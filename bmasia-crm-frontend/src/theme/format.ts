@@ -2,11 +2,20 @@
  * Display formats (no effect on stored data).
  * Dates read the same in every country: "14 Nov 2026".
  */
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 export const formatDate = (value?: string | Date | null): string => {
   if (!value) return '—';
-  const date = value instanceof Date ? value : new Date(value);
+  let date: Date;
+  if (value instanceof Date) {
+    date = value;
+  } else {
+    // A plain "2026-11-14" is a calendar date: read it in local time so it never shifts a day.
+    const plain = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    date = plain ? new Date(Number(plain[1]), Number(plain[2]) - 1, Number(plain[3])) : new Date(value);
+  }
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  return `${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
 };
 
 /** "THB 108,000" / "USD 4,450": currency code first, no decimals for whole amounts. */
@@ -19,6 +28,23 @@ export const formatMoney = (amount?: number | string | null, currency: string = 
     minimumFractionDigits: hasCents ? 2 : 0,
     maximumFractionDigits: 2,
   })}`;
+};
+
+/**
+ * Adds amounts per currency and never across currencies.
+ * Returns [currency, total] pairs sorted by currency code, e.g. [["THB", 108000], ["USD", 4450]].
+ */
+export const totalsByCurrency = (
+  items: { amount?: number | string | null; currency?: string | null }[]
+): [string, number][] => {
+  const totals: Record<string, number> = {};
+  items.forEach(({ amount, currency }) => {
+    const n = Number(amount || 0);
+    if (Number.isNaN(n)) return;
+    const cur = currency || 'USD';
+    totals[cur] = (totals[cur] || 0) + n;
+  });
+  return Object.entries(totals).sort(([a], [b]) => a.localeCompare(b));
 };
 
 /**

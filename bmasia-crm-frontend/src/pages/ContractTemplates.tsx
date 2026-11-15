@@ -44,6 +44,7 @@ import { useSearchParams } from 'react-router-dom';
 import { ContractTemplate, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import ContractTemplateForm from '../components/ContractTemplateForm';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 const ContractTemplates: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -204,11 +205,7 @@ const ContractTemplates: React.FC = () => {
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+    return formatDisplayDate(dateString);
   };
 
   return (

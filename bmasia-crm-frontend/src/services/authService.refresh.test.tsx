@@ -18,6 +18,9 @@ jest.mock('axios', () => {
       if (G.__refresh === 'network') {
         return Promise.reject(new actual.AxiosError('Network Error', 'ERR_NETWORK', config, {}));
       }
+      if (G.__refresh === '500') return Promise.reject(fail(500, '<html>Server Error</html>'));
+      if (G.__refresh === '403-token') return Promise.reject(fail(403, { detail: 'Token is invalid or expired', code: 'token_not_valid' }));
+      if (G.__refresh === 'noaccess') return Promise.resolve(respond(200, '<html>proxy page</html>'));
       // 'expired' and 'revoked' both come back as 401 from the server
       return new Promise((_res, rej) => setTimeout(() => rej(fail(401, { detail: 'Token is invalid or expired' })), 5));
     }
@@ -64,14 +67,18 @@ const wait = (ms: number) => act(() => new Promise<void>((r) => setTimeout(r, ms
 const refreshCalls = () => G.__calls.filter((c: string) => c.includes('/auth/refresh/')).length;
 
 let redirects = 0;
+let onLoginPage = false;
 beforeEach(() => {
   G.__calls = [];
   G.__newAccess = fakeJwt(3600, 'refreshed');
   localStorage.clear();
   sessionStorage.clear();
   redirects = 0;
+  onLoginPage = false;
   AuthService.redirectAfterExpiredSession = () => {
+    if (onLoginPage) return false;
     redirects += 1;
+    return true;
   };
   (AuthService as any).sessionExpiredHandled = false;
   state = { loading: true, isAuthenticated: false };
@@ -99,13 +106,28 @@ describe('on app start, with an expired access token', () => {
     expect(localStorage.getItem('bmasia_refresh_token')).toBeNull();
   });
 
-  it('network failure on refresh: one call, signed out, no loop', async () => {
-    G.__refresh = 'network';
+  it.each(['network', '500', 'noaccess'])(
+    'refresh fails without a rejection (%s): one call, saved session kept, still signed in',
+    async (mode) => {
+      G.__refresh = mode;
+      storeSession(-60, 6 * 86400);
+      const savedRefresh = localStorage.getItem('bmasia_refresh_token');
+      render(<AuthProvider><Probe /></AuthProvider>);
+      await wait(300);
+      expect(refreshCalls()).toBe(1);
+      expect(state).toEqual({ loading: false, isAuthenticated: true });
+      expect(localStorage.getItem('bmasia_refresh_token')).toBe(savedRefresh);
+      expect(localStorage.getItem('bmasia_access_token')).not.toBe('undefined');
+    }
+  );
+
+  it('403 token_not_valid counts as a rejection: session cleared, signed out', async () => {
+    G.__refresh = '403-token';
     storeSession(-60, 6 * 86400);
     render(<AuthProvider><Probe /></AuthProvider>);
     await wait(300);
-    expect(refreshCalls()).toBe(1);
     expect(state).toEqual({ loading: false, isAuthenticated: false });
+    expect(localStorage.getItem('bmasia_refresh_token')).toBeNull();
   });
 
   it('valid refresh token: one refresh call, signed in with the new access token', async () => {
@@ -137,6 +159,72 @@ describe('during use, when an API call gets 401', () => {
     const results = await Promise.allSettled([api().get('/companies/'), api().get('/companies/')]);
     expect(results.every((r) => r.status === 'rejected')).toBe(true);
     expect(refreshCalls()).toBe(2); // one per failing call, never a refresh of a refresh
+    expect(localStorage.getItem('bmasia_refresh_token')).toBeNull();
+    expect(redirects).toBe(1);
+  });
+});
+
+describe('during use, when the refresh fails without a rejection', () => {
+  const api = () => (AuthService as any).api;
+
+  it.each(['network', '500', 'noaccess'])('%s: the call fails, the saved session stays, no reload', async (mode) => {
+    G.__refresh = mode;
+    storeSession(3600, 6 * 86400);
+    const savedRefresh = localStorage.getItem('bmasia_refresh_token');
+    await expect(api().get('/companies/')).rejects.toBeTruthy();
+    expect(refreshCalls()).toBe(1);
+    expect(localStorage.getItem('bmasia_refresh_token')).toBe(savedRefresh);
+    expect(redirects).toBe(0);
+  });
+});
+
+describe('the one-reload guard', () => {
+  const api = () => (AuthService as any).api;
+
+  it('is not used up on the sign-in page, and is reset by signing in', async () => {
+    G.__refresh = 'revoked';
+    onLoginPage = true;
+    storeSession(3600, 6 * 86400);
+    await expect(api().get('/companies/')).rejects.toBeTruthy();
+    expect(redirects).toBe(0); // no reload on /login, guard not used up
+
+    onLoginPage = false;
+    storeSession(3600, 6 * 86400);
+    await expect(api().get('/companies/')).rejects.toBeTruthy();
+    expect(redirects).toBe(1);
+
+    // A sign-in resets the guard, so a later expiry reloads again.
+    const realPost = (AuthService as any).api.post;
+    (AuthService as any).api.post = jest.fn().mockResolvedValue({
+      data: { access: fakeJwt(3600, 'new'), refresh: fakeJwt(86400, 'new'), user },
+    });
+    try {
+      await AuthService.login({ username: 'u', password: 'p', remember_me: true } as any);
+    } finally {
+      (AuthService as any).api.post = realPost;
+    }
+    storeSession(3600, 6 * 86400);
+    await expect(api().get('/companies/')).rejects.toBeTruthy();
+    expect(redirects).toBe(2);
+  });
+});
+
+describe('the scheduled refresh (about 5 minutes before the access token expires)', () => {
+  it('keeps the session when the refresh fails without a rejection', async () => {
+    G.__refresh = 'network';
+    storeSession(301, 6 * 86400); // timer fires after about 1 s
+    AuthService.scheduleTokenRefresh();
+    await wait(1600);
+    expect(refreshCalls()).toBe(1);
+    expect(localStorage.getItem('bmasia_refresh_token')).not.toBeNull();
+    expect(redirects).toBe(0);
+  });
+
+  it('clears the session and reloads once when the server rejects the refresh', async () => {
+    G.__refresh = 'revoked';
+    storeSession(301, 6 * 86400);
+    AuthService.scheduleTokenRefresh();
+    await wait(1600);
     expect(localStorage.getItem('bmasia_refresh_token')).toBeNull();
     expect(redirects).toBe(1);
   });
