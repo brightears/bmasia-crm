@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { AuthContextType, AuthState, LoginCredentials } from '../types';
-import AuthService from '../services/authService';
+import AuthService, { isSessionRejected } from '../services/authService';
 import { hasPermission, hasRole } from '../utils/permissions';
 
 
@@ -78,8 +78,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               AuthService.scheduleTokenRefresh();
             } catch (error) {
               console.error('Token refresh failed during initialization:', error);
-              AuthService.clearAuthData();
-              setAuthState(prev => ({ ...prev, loading: false }));
+              if (isSessionRejected(error)) {
+                // The server refused the saved session: sign in again.
+                AuthService.clearAuthData();
+                setAuthState(prev => ({ ...prev, loading: false }));
+              } else {
+                // Network trouble or a server error: keep the saved session (remember-me
+                // included). Calls fail until the server is reachable; the next one retries
+                // the refresh.
+                setAuthState({
+                  user: storedUser,
+                  accessToken,
+                  refreshToken,
+                  isAuthenticated: true,
+                  loading: false,
+                  tokenExpiry: AuthService.getTokenExpiry(),
+                });
+              }
             }
           } else {
             // Token is still valid
