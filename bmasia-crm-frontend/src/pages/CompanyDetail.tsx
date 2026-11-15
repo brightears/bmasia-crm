@@ -40,7 +40,7 @@ import {
   SupportAgent,
   ChevronRight,
 } from '@mui/icons-material';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Company, Contact, Opportunity, Contract, Zone, Ticket } from '../types';
 import ApiService from '../services/api';
 import CompanyForm from '../components/CompanyForm';
@@ -106,6 +106,10 @@ function a11yProps(index: number) {
 const CompanyDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const routerLocation = useLocation();
+  // Back to the Companies list as it was left, when opened from there.
+  const companiesListSearch: string = (routerLocation.state as any)?.listSearch || '';
+  const companiesListTo = companiesListSearch ? `/companies?${companiesListSearch}` : '/companies';
   const [company, setCompany] = useState<Company | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -313,7 +317,7 @@ const CompanyDetail: React.FC = () => {
     <Box sx={{ flexGrow: 1 }}>
       {/* Record header */}
       <PageHeader
-        breadcrumbs={[{ label: 'Companies', to: '/companies' }, { label: company.name }]}
+        breadcrumbs={[{ label: 'Companies', to: companiesListTo }, { label: company.name }]}
         avatar={
           <Avatar variant="rounded" sx={{ width: 52, height: 52, fontSize: '1.125rem', borderRadius: 2 }}>
             {initialsOf(company.name)}
