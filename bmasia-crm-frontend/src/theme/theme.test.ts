@@ -1,4 +1,4 @@
-import { createAppTheme, formatDate, formatMoney, humanize, initialsOf, statusTone } from '.';
+import { createAppTheme, formatDate, formatMoney, humanize, initialsOf, statusTone, totalsByCurrency } from '.';
 
 describe('statusTone', () => {
   it('maps statuses to one colour language regardless of case or spacing', () => {
@@ -37,6 +37,23 @@ describe('display formats', () => {
     expect(formatMoney(108000, 'THB')).toBe('THB 108,000');
     expect(formatMoney('720.50', 'USD')).toBe('USD 720.50');
     expect(formatMoney(undefined)).toBe('—');
+  });
+});
+
+describe('totalsByCurrency', () => {
+  it('never adds different currencies together', () => {
+    expect(
+      totalsByCurrency([
+        { amount: 108000, currency: 'THB' },
+        { amount: '4450.50', currency: 'USD' },
+        { amount: 2000, currency: 'THB' },
+        { amount: 100, currency: null },
+      ])
+    ).toEqual([
+      ['THB', 110000],
+      ['USD', 4550.5],
+    ]);
+    expect(totalsByCurrency([])).toEqual([]);
   });
 });
 
