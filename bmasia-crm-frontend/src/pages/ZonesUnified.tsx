@@ -51,6 +51,8 @@ import {
 import { useNavigate } from 'react-router-dom';
 import apiService from '../services/api';
 import { Zone, Company } from '../types';
+import { useListState, idFromList } from '../hooks/useListState';
+import { useListSearchBox } from '../hooks/useListSearchBox';
 
 type StatusFilter = 'all' | 'online' | 'offline' | 'no_device' | 'pending' | 'orphaned';
 
@@ -114,12 +116,27 @@ const ZonesUnified: React.FC = () => {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [companyFilter, setCompanyFilter] = useState<string>('all');
-  const [platformFilter, setPlatformFilter] = useState<string>('all');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
+  // Search, filters, sort and page live in the address, so Back returns to the same view.
+  const list = useListState(
+    { q: '', status: 'all' as StatusFilter, company: 'all' as string, platform: 'all' as string, page: 0, size: 25 },
+    {
+      status: ['all', 'online', 'offline', 'no_device', 'pending', 'orphaned'],
+      company: idFromList(companies, 'all'),
+      platform: ['all', 'soundtrack', 'beatbreeze'],
+    },
+    companies.length
+  );
+  const [searchQuery, setSearchQuery] = list.bind('q');
+  const [statusFilter, setStatusFilter] = list.bind('status');
+  const [companyFilter, setCompanyFilter] = list.bind('company');
+  const [platformFilter, setPlatformFilter] = list.bind('platform');
+  const [page, setPage] = list.bind('page');
+  const [rowsPerPage, setRowsPerPage] = list.bind('size');
+  // The box's own text, written to the address shortly after typing stops.
+  const searchBox = useListSearchBox(searchQuery, (text) => {
+    setSearchQuery(text);
+    setPage(0);
+  });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [zoneToDelete, setZoneToDelete] = useState<Zone | null>(null);
 
@@ -315,7 +332,7 @@ const ZonesUnified: React.FC = () => {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
-          <Card sx={{ borderLeft: 4, borderColor: 'success.main' }}>
+          <Card sx={{ borderLeft: 4, borderLeftColor: 'success.main' }}>
             <CardContent>
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 Online
@@ -325,7 +342,7 @@ const ZonesUnified: React.FC = () => {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
-          <Card sx={{ borderLeft: 4, borderColor: 'error.main' }}>
+          <Card sx={{ borderLeft: 4, borderLeftColor: 'error.main' }}>
             <CardContent>
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 Offline
@@ -335,7 +352,7 @@ const ZonesUnified: React.FC = () => {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
-          <Card sx={{ borderLeft: 4, borderColor: 'grey.400' }}>
+          <Card sx={{ borderLeft: 4, borderLeftColor: 'grey.400' }}>
             <CardContent>
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 No Device
@@ -345,7 +362,7 @@ const ZonesUnified: React.FC = () => {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
-          <Card sx={{ borderLeft: 4, borderColor: 'warning.main' }}>
+          <Card sx={{ borderLeft: 4, borderLeftColor: 'warning.main' }}>
             <CardContent>
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 Pending
@@ -355,7 +372,7 @@ const ZonesUnified: React.FC = () => {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
-          <Card sx={{ borderLeft: 4, borderColor: 'error.dark' }}>
+          <Card sx={{ borderLeft: 4, borderLeftColor: 'error.dark' }}>
             <CardContent>
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 Orphaned
@@ -365,7 +382,7 @@ const ZonesUnified: React.FC = () => {
           </Card>
         </Grid>
         <Grid item xs={12} sm={6} md={2}>
-          <Card sx={{ borderLeft: 4, borderColor: stats.syncHealth >= 80 ? 'info.main' : 'warning.main' }}>
+          <Card sx={{ borderLeft: 4, borderLeftColor: stats.syncHealth >= 80 ? 'info.main' : 'warning.main' }}>
             <CardContent>
               <Typography variant="body2" color="text.secondary" gutterBottom>
                 Sync Health
@@ -431,8 +448,8 @@ const ZonesUnified: React.FC = () => {
                 fullWidth
                 size="small"
                 placeholder="Search zones or companies..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                value={searchBox.value}
+                onChange={(e) => searchBox.onChange(e.target.value)}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">

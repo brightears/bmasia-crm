@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useLocation, Navigate } from 'react-router-dom';
 import {
   Box,
   Paper,
@@ -7,18 +7,20 @@ import {
   Button,
   Typography,
   Alert,
-  Container,
-  Avatar,
   CssBaseline,
   FormControlLabel,
   Checkbox,
 } from '@mui/material';
-import { LockOutlined } from '@mui/icons-material';
+import { alpha } from '@mui/material/styles';
 import { useAuth } from '../contexts/AuthContext';
+import { getDailyQuote } from '../constants/quotes';
+import { brand } from '../theme';
+import { safeReturnPath } from '../utils/returnPath';
+
+const HOME = '/today';
 
 const Login: React.FC = () => {
-  const { login, loading } = useAuth();
-  const navigate = useNavigate();
+  const { login, loading, isAuthenticated } = useAuth();
   const location = useLocation();
   const [credentials, setCredentials] = useState({
     username: '',
@@ -26,6 +28,15 @@ const Login: React.FC = () => {
     remember_me: true,
   });
   const [error, setError] = useState('');
+
+  // Where to go after sign-in: the page the user asked for (same-app paths only), else Today,
+  // the home page for everyone.
+  const target = safeReturnPath((location.state as any)?.from, HOME);
+
+  // Someone who is already signed in is sent on to that page.
+  if (isAuthenticated && !loading) {
+    return <Navigate to={target} replace />;
+  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
@@ -42,12 +53,8 @@ const Login: React.FC = () => {
     try {
       await login(credentials);
 
-      // Get the intended destination from location state, or default to /dashboard
-      const from = (location.state as any)?.from?.pathname || '/dashboard';
-      console.log('Login successful, navigating to:', from);
-
-      // Navigate to the intended destination
-      navigate(from, { replace: true });
+      // Nothing else to do: once signed in, this page re-renders and the redirect above
+      // sends the user on (single place for post-sign-in routing).
     } catch (err: any) {
       console.error('Login component error:', err);
       // Get error message from the thrown Error object
@@ -55,34 +62,50 @@ const Login: React.FC = () => {
     }
   };
 
+  const quote = getDailyQuote();
+
   return (
-    <Container component="main" maxWidth="xs">
+    <Box component="main" sx={{ minHeight: '100vh', display: 'flex', bgcolor: 'background.default' }}>
       <CssBaseline />
+      {/* Brand panel (hidden on phones) */}
       <Box
         sx={{
-          marginTop: 8,
-          display: 'flex',
+          display: { xs: 'none', md: 'flex' },
+          flex: '0 0 44%',
+          maxWidth: 620,
           flexDirection: 'column',
-          alignItems: 'center',
+          justifyContent: 'space-between',
+          p: 6,
+          color: '#E8EDF2',
+          background: `radial-gradient(120% 80% at 0% 100%, ${alpha(brand.amber, 0.28)} 0%, rgba(239,166,52,0) 55%), ${brand.navy}`,
         }}
       >
-        <Paper
-          elevation={3}
-          sx={{
-            padding: 4,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            width: '100%',
-          }}
-        >
-          <Avatar sx={{ m: 1, bgcolor: 'primary.main' }}>
-            <LockOutlined />
-          </Avatar>
-          <Typography component="h1" variant="h5">
-            BMAsia CRM Login
+        <Box component="img" src="/brand/bmasia-logo-on-dark.svg" alt="BMAsia" sx={{ height: 44, width: 'auto', alignSelf: 'flex-start' }} />
+        <Box>
+          <Typography sx={{ fontSize: '2rem', fontWeight: 700, lineHeight: 1.2, letterSpacing: '-0.02em', mb: 2, maxWidth: 440 }}>
+            Every customer, contract and renewal in one place.
           </Typography>
-          <Box component="form" onSubmit={handleSubmit} sx={{ mt: 1, width: '100%' }}>
+          <Typography sx={{ color: '#9AA6B2', maxWidth: 420 }}>
+            The BMAsia CRM for sales, support and finance.
+          </Typography>
+        </Box>
+        <Box sx={{ borderLeft: `2px solid ${brand.amber}`, pl: 2, maxWidth: 440 }}>
+          <Typography sx={{ fontStyle: 'italic', color: '#C9D3DC' }}>&ldquo;{quote.text}&rdquo;</Typography>
+          <Typography sx={{ color: '#9AA6B2', fontSize: '0.8125rem', mt: 0.5 }}>{quote.author}</Typography>
+        </Box>
+      </Box>
+
+      {/* Sign-in form */}
+      <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', p: { xs: 2, sm: 4 } }}>
+        <Box sx={{ width: '100%', maxWidth: 380 }}>
+          <Box component="img" src="/brand/bmasia-logo.svg" alt="BMAsia" sx={{ height: 40, width: 'auto', display: 'block', mb: 4 }} />
+          <Typography component="h1" variant="h4" sx={{ mb: 0.5 }}>
+            Sign in
+          </Typography>
+          <Typography color="text.secondary" sx={{ mb: 3 }}>
+            Use your BMAsia CRM username and password.
+          </Typography>
+          <Box component="form" onSubmit={handleSubmit} sx={{ width: '100%' }}>
             {error && (
               <Alert severity="error" sx={{ mb: 2 }}>
                 {error}
@@ -92,6 +115,7 @@ const Login: React.FC = () => {
               margin="normal"
               required
               fullWidth
+              size="medium"
               id="username"
               label="Username"
               name="username"
@@ -104,6 +128,7 @@ const Login: React.FC = () => {
               margin="normal"
               required
               fullWidth
+              size="medium"
               name="password"
               label="Password"
               type="password"
@@ -127,16 +152,17 @@ const Login: React.FC = () => {
             <Button
               type="submit"
               fullWidth
+              size="large"
               variant="contained"
-              sx={{ mt: 3, mb: 2 }}
+              sx={{ mt: 2, mb: 2 }}
               disabled={loading}
             >
               {loading ? 'Signing In...' : 'Sign In'}
             </Button>
           </Box>
-        </Paper>
+        </Box>
       </Box>
-    </Container>
+    </Box>
   );
 };
 

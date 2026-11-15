@@ -46,6 +46,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { OpportunityActivity } from '../types';
 import ApiService from '../services/api';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 interface ActivityTimelineProps {
   opportunityId?: string;
@@ -190,7 +191,7 @@ const ActivityTimeline: React.FC<ActivityTimelineProps> = ({
     } else if (diffDays < 7) {
       return `${diffDays} days ago`;
     } else {
-      return date.toLocaleDateString();
+      return formatDisplayDate(date);
     }
   };
 
@@ -455,7 +456,7 @@ const ActivityTimeline: React.FC<ActivityTimelineProps> = ({
 
                               {activity.next_action_date && (
                                 <Chip
-                                  label={`Follow-up: ${new Date(activity.next_action_date).toLocaleDateString()}`}
+                                  label={`Follow-up: ${formatDisplayDate(activity.next_action_date)}`}
                                   size="small"
                                   color="warning"
                                   variant="outlined"
