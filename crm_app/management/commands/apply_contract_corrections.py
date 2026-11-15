@@ -3,10 +3,11 @@
 The file lists contracts whose status the CRM has wrong, with the state each
 one is expected to be in now. Three classes of correction exist:
 
-  A  mark renewed      an Active contract whose renewal successor is already
-                       Active on the same company becomes Renewed.
+  A  mark renewed      an Active or Expired contract whose renewal successor is
+                       already Active on the same company, and linked to it by
+                       renewed_from, becomes Renewed.
   B  activate + renew  a pair: the successor (Sent or Draft) becomes Active and
-                       the old term (Active) becomes Renewed.
+                       the old term (Active or Expired) becomes Renewed.
   C  activate          a Sent contract becomes Active.
 
 SAFETY MODEL
@@ -15,8 +16,10 @@ SAFETY MODEL
     transaction, with the rows locked (select_for_update). A group is refused,
     with a named reason, when any contract is missing; when its status, start
     date, end date or updated_at differ from the file (timestamps compared as
-    instants); when the transition is not Sent->Active, Draft->Active or
-    Active->Renewed; when the contracts are on different companies; when a
+    instants); when the transition is not Sent->Active, Draft->Active,
+    Active->Renewed or Expired->Renewed; when the contracts are on different
+    companies; when an Expired old term ends on or after the day its successor
+    starts (terms_overlap); when a
     contract id appears more than once in the file; or when the write would
     change a contract that is not in the group.
   * Re-running after an execute is a no-op: a group whose contracts are all in
@@ -40,11 +43,20 @@ WRITE PATH
     - sent_date is left as it is (a normal activation leaves it too; a Draft
       activated this way keeps sent_date empty);
     - signed_date is set only when the file gives one and the field is empty;
+    - set_value {"from", "to"} changes the value of the activated contract in
+      the same step, only when its current value equals "from"; tax_amount and
+      total_value are recomputed from its own tax_rate, as ContractSerializer
+      does. Refused when the contract has line items (value_has_line_items) or
+      when its priced service-location rows would no longer add up to the new
+      value (value_contradicts_location_prices). Currency is never changed;
     - set_renewed_from links the successor to the old term of its pair only
       when the successor has no link yet (a different link refuses the group);
     - the lifecycle rule close_renewed_predecessor() is then called exactly
       once. In a B pair it must close the old term of the pair; in class C it
       must not close anything (a group where it would is refused up front).
+  An Expired old term is closed exactly like an Active one: status only, its
+  dates are not changed, and the lifecycle rule (which closes Active and
+  Expired predecessors) does the zone-link hand-over as it would anywhere.
   Mark renewed (class A) calls the same lifecycle rule for the existing Active
   successor, so the old term is closed by the same code (queryset update of
   status/is_active, updated_at bump, AuditLog row). The rule also hands over
@@ -79,6 +91,7 @@ FILE FORMAT v1 (JSON, ids and values only; unknown keys are rejected)
           "target_status": "Active" | "Renewed",
           "signed_date": "YYYY-MM-DD" | null,                 (optional, Active only)
           "set_renewed_from": "<uuid>" | null,                (optional, Active only)
+          "set_value": {"from": "1200.00", "to": "1000.00"},  (optional, Active only)
           "evidence": "<short reference, e.g. sheet / tab / row N>"
         }
       ]
@@ -95,6 +108,8 @@ JOURNAL AND REVERT
   --revert <journal> (dry-run by default, --execute to write) restores the
   before values, group by group, only where every contract of the group still
   matches the journal's after values; anything else is reported as skipped.
+  A value set with set_value is journalled with tax_amount and total_value and
+  restored by --revert.
   A final contract number minted on activation is kept on revert: a final
   number is never handed back (Drafts holding a final number are a normal
   state), and the old DRAFT- number may since have been reused.
@@ -115,6 +130,7 @@ import uuid
 from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from django.contrib.auth import get_user_model
@@ -133,21 +149,24 @@ COMMAND = 'apply_contract_corrections'
 FILE_FORMAT = 'contract-corrections/v1'
 JOURNAL_FORMAT = 'contract-corrections-journal/v1'
 CLASSES = ('A', 'B', 'C')
-ALLOWED_TRANSITIONS = {('Sent', 'Active'), ('Draft', 'Active'), ('Active', 'Renewed')}
+ALLOWED_TRANSITIONS = {('Sent', 'Active'), ('Draft', 'Active'), ('Active', 'Renewed'), ('Expired', 'Renewed')}
 TARGET_STATUSES = {'Active', 'Renewed'}
 STATUSES = {value for value, _ in Contract.CONTRACT_STATUS_CHOICES}
 
 _TOP_KEYS = {'format', 'source_pulled_at', 'entries'}
 _ENTRY_REQUIRED = {'contract_id', 'class', 'group', 'expected', 'target_status', 'evidence'}
-_ENTRY_OPTIONAL = {'signed_date', 'set_renewed_from'}
+_ENTRY_OPTIONAL = {'signed_date', 'set_renewed_from', 'set_value'}
 _EXPECTED_KEYS = {'status', 'start_date', 'end_date', 'updated_at'}
 _GROUP_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9:._-]{0,79}')
 _EVIDENCE_MAX = 300
 
 # Fields this command may change, as recorded in the journal.
-JOURNAL_FIELDS = ('status', 'is_active', 'contract_number', 'sent_date', 'signed_date', 'renewed_from')
+JOURNAL_FIELDS = ('status', 'is_active', 'contract_number', 'sent_date', 'signed_date', 'renewed_from',
+                  'value', 'tax_amount', 'total_value')
 # Fields a revert restores. contract_number is deliberately absent (see docstring).
-REVERT_FIELDS = ('status', 'is_active', 'sent_date', 'signed_date', 'renewed_from')
+REVERT_FIELDS = ('status', 'is_active', 'sent_date', 'signed_date', 'renewed_from',
+                 'value', 'tax_amount', 'total_value')
+MONEY_FIELDS = ('value', 'tax_amount', 'total_value')
 
 
 class _Refused(Exception):
@@ -172,6 +191,8 @@ class Entry:
     signed_date: Optional[date]
     set_renewed_from: Optional[str]
     evidence: str
+    value_from: Optional[Decimal] = None
+    value_to: Optional[Decimal] = None
 
 
 # --------------------------------------------------------------------------
@@ -210,6 +231,19 @@ def _instant(value, where):
     if parsed.tzinfo is None:
         raise _malformed(f'{where}: timestamp has no UTC offset')
     return parsed
+
+
+def _money(value, where):
+    if not isinstance(value, str):
+        raise _malformed(f'{where}: want a decimal string such as "1200.00"')
+    try:
+        parsed = Decimal(value)
+    except InvalidOperation:
+        raise _malformed(f'{where}: want a decimal string such as "1200.00"')
+    if not parsed.is_finite() or parsed < 0 or parsed != parsed.quantize(Decimal('0.01')) \
+            or parsed >= Decimal('1e10'):
+        raise _malformed(f'{where}: want a non-negative amount with at most 2 decimals')
+    return parsed.quantize(Decimal('0.01'))
 
 
 def parse_corrections(data):
@@ -255,8 +289,17 @@ def parse_corrections(data):
         set_renewed_from = raw.get('set_renewed_from')
         if set_renewed_from is not None:
             set_renewed_from = _uuid(set_renewed_from, f'{where} set_renewed_from')
-        if target != 'Active' and (signed_date or set_renewed_from):
-            raise _malformed(f'{where}: signed_date and set_renewed_from apply to Active targets only')
+        if target != 'Active' and (signed_date or set_renewed_from or 'set_value' in raw):
+            raise _malformed(f'{where}: signed_date, set_renewed_from and set_value apply to Active targets only')
+        value_from = value_to = None
+        if 'set_value' in raw:
+            sv = raw['set_value']
+            if not isinstance(sv, dict) or set(sv) != {'from', 'to'}:
+                raise _malformed(f'{where}: set_value must have exactly ["from", "to"]')
+            value_from = _money(sv['from'], f'{where} set_value.from')
+            value_to = _money(sv['to'], f'{where} set_value.to')
+            if value_from == value_to:
+                raise _malformed(f'{where}: set_value.from and set_value.to are equal')
         evidence = raw['evidence']
         if (not isinstance(evidence, str) or not evidence.strip() or len(evidence) > _EVIDENCE_MAX
                 or any(ord(ch) < 32 for ch in evidence)):
@@ -268,7 +311,7 @@ def parse_corrections(data):
             exp_end=_date(expected['end_date'], f'{where} expected.end_date', nullable=True),
             exp_updated_at=_instant(expected['updated_at'], f'{where} expected.updated_at'),
             target=target, signed_date=signed_date, set_renewed_from=set_renewed_from,
-            evidence=evidence,
+            evidence=evidence, value_from=value_from, value_to=value_to,
         ))
 
     for group, members in group_entries(entries).items():
@@ -319,8 +362,21 @@ def snapshot(contract):
         'sent_date': _json_value(contract.sent_date),
         'signed_date': _json_value(contract.signed_date),
         'renewed_from': _json_value(contract.renewed_from_id),
+        'value': _money_text(contract.value),
+        'tax_amount': _money_text(contract.tax_amount),
+        'total_value': _money_text(contract.total_value),
         'updated_at': _json_value(contract.updated_at),
     }
+
+
+def _money_text(value):
+    return None if value is None else str(Decimal(value).quantize(Decimal('0.01')))
+
+
+def _tax(value, tax_rate):
+    """tax_amount and total_value for a value, as ContractSerializer computes them."""
+    tax_amount = (value * (tax_rate or Decimal('0')) / Decimal('100')).quantize(Decimal('0.01'))
+    return tax_amount, value + tax_amount
 
 
 def _changes(before, after):
@@ -532,16 +588,22 @@ class Command(BaseCommand):
             c = locked[e.contract_id]
             dates_ok = c.start_date == e.exp_start and c.end_date == e.exp_end
             link_ok = not e.set_renewed_from or str(c.renewed_from_id) == e.set_renewed_from
+            value_now = Decimal(c.value).quantize(Decimal('0.01')) if c.value is not None else None
             if c.status == e.exp_status and dates_ok and c.updated_at == e.exp_updated_at:
+                if e.value_from is not None and value_now != e.value_from:
+                    raise _Refused('value_changed')
                 states.append('expected')
-            elif c.status == e.target and dates_ok and link_ok:
+            elif c.status == e.target and dates_ok and link_ok \
+                    and (e.value_to is None or value_now == e.value_to):
                 states.append('target')
             elif c.status not in (e.exp_status, e.target):
                 raise _Refused('status_changed')
             elif not dates_ok:
                 raise _Refused('dates_changed')
-            elif c.status == e.target:
+            elif c.status == e.target and not link_ok:
                 raise _Refused('renewed_from_conflict')
+            elif c.status == e.target:
+                raise _Refused('value_changed')
             else:
                 raise _Refused('updated_at_changed')
         if all(s == 'target' for s in states):
@@ -581,11 +643,28 @@ class Command(BaseCommand):
                 notes.append('renewed_from set to old term')
             if not s.is_active:
                 notes.append('is_active False -> True')
+            if activation.value_to is not None:
+                if s.line_items.exists():
+                    raise _Refused('value_has_line_items')
+                from crm_app.services.contract_service_locations import service_location_pricing_mismatch
+                kept_value = s.value
+                s.value = activation.value_to
+                try:
+                    mismatch = service_location_pricing_mismatch(s)
+                finally:
+                    s.value = kept_value
+                if mismatch:
+                    raise _Refused('value_contradicts_location_prices')
+                tax_amount, total = _tax(activation.value_to, s.tax_rate)
+                notes.append(f'value {activation.value_from} -> {activation.value_to} '
+                             f'(tax {tax_amount}, total {total}; currency {s.currency} unchanged)')
             plan['details'][activation.contract_id] = '; '.join(notes)
 
         if renewal:
             o = locked[renewal.contract_id]
             if activation:
+                if o.status == 'Expired' and o.end_date and o.end_date >= locked[activation.contract_id].start_date:
+                    raise _Refused('terms_overlap')
                 plan['details'][renewal.contract_id] = 'closed by the lifecycle rule when its successor goes Active'
             else:
                 successor = (
@@ -596,6 +675,8 @@ class Command(BaseCommand):
                 )
                 if successor is None:
                     raise _Refused('no_active_successor')
+                if o.status == 'Expired' and o.end_date and o.end_date >= successor.start_date:
+                    raise _Refused('terms_overlap')
                 plan['successor_for_a'] = successor
                 plan['details'][renewal.contract_id] = (
                     f'closed by the lifecycle rule for Active successor {successor.pk} {successor.contract_number}')
@@ -625,9 +706,12 @@ class Command(BaseCommand):
                 s.signed_date = activation.signed_date
             if activation.set_renewed_from and s.renewed_from_id is None:
                 s.renewed_from_id = uuid.UUID(activation.set_renewed_from)
+            if activation.value_to is not None:
+                s.value = activation.value_to
+                s.tax_amount, s.total_value = _tax(activation.value_to, s.tax_rate)
             s.save(update_fields=[
                 'status', 'is_active', 'contract_number', 'sent_date', 'signed_date', 'renewed_from',
-                'updated_at'])
+                'value', 'tax_amount', 'total_value', 'updated_at'])
             s.refresh_from_db()
             after = snapshot(s)
             AuditLog.objects.create(
@@ -755,6 +839,8 @@ class Command(BaseCommand):
                             update['renewed_from_id'] = value
                         elif field in ('sent_date', 'signed_date'):
                             update[field] = date.fromisoformat(value) if value else None
+                        elif field in MONEY_FIELDS:
+                            update[field] = Decimal(value) if value is not None else None
                         else:
                             update[field] = value
                     Contract.objects.filter(pk=c.pk).update(**update, updated_at=timezone.now())
