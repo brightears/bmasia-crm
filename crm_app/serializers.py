@@ -237,6 +237,7 @@ class CompanySerializer(serializers.ModelSerializer):
     subscription_summary = serializers.SerializerMethodField()
     primary_contact = serializers.SerializerMethodField()
     total_contract_value = serializers.ReadOnlyField()
+    active_contract_value_by_currency = serializers.ReadOnlyField()
     full_address = serializers.ReadOnlyField()
     avg_zones_per_location = serializers.ReadOnlyField()
     opportunities_count = serializers.SerializerMethodField()
@@ -257,7 +258,8 @@ class CompanySerializer(serializers.ModelSerializer):
             'soundtrack_offline_alerts_enabled', 'notes', 'it_notes',
             'address_line1', 'address_line2', 'city', 'state', 'postal_code',
             'phone', 'email', 'tax_id', 'branch',
-            'billing_entity', 'full_address', 'total_contract_value', 'contacts', 'zones', 'zones_summary',
+            'billing_entity', 'full_address', 'total_contract_value', 'active_contract_value_by_currency',
+            'contacts', 'zones', 'zones_summary',
             'subscription_summary', 'primary_contact', 'opportunities_count',
             'active_contracts_count',
             # Corporate structure
