@@ -40,14 +40,16 @@ import {
   SupportAgent,
   ChevronRight,
 } from '@mui/icons-material';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Company, Contact, Opportunity, Contract, Zone, Ticket } from '../types';
 import ApiService from '../services/api';
 import CompanyForm from '../components/CompanyForm';
 import ContactForm from '../components/ContactForm';
+import ContactDetail from '../components/ContactDetail';
 import OpportunityForm from '../components/OpportunityForm';
 import { PageHeader, SectionCard, EmptyState, DetailField, ProductChip } from '../components/ui';
-import { statusTone, humanize, formatDate, initialsOf, visuallyHidden } from '../theme';
+import { statusTone, humanize, formatDate, formatMoney, initialsOf, totalsByCurrency, visuallyHidden } from '../theme';
+import { currencyForEntity } from '../constants/entities';
 
 const tabLabel = (label: string, count: number) => (
   <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
@@ -104,6 +106,10 @@ function a11yProps(index: number) {
 const CompanyDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const routerLocation = useLocation();
+  // Back to the Companies list as it was left, when opened from there.
+  const companiesListSearch: string = (routerLocation.state as any)?.listSearch || '';
+  const companiesListTo = companiesListSearch ? `/companies?${companiesListSearch}` : '/companies';
   const [company, setCompany] = useState<Company | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -115,6 +121,9 @@ const CompanyDetail: React.FC = () => {
   const [tabValue, setTabValue] = useState(0);
   const [editFormOpen, setEditFormOpen] = useState(false);
   const [contactFormOpen, setContactFormOpen] = useState(false);
+  // Contacts open in the same side panel the Contacts page uses (there is no contact page).
+  const [viewContact, setViewContact] = useState<Contact | null>(null);
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [opportunityFormOpen, setOpportunityFormOpen] = useState(false);
 
   useEffect(() => {
@@ -138,7 +147,8 @@ const CompanyDetail: React.FC = () => {
       const [contactsResponse, opportunitiesResponse, contractsResponse, zonesResponse, ticketsResponse] = await Promise.all([
         ApiService.getContacts({ company: id }),
         ApiService.getOpportunities({ company: id }),
-        ApiService.getContracts({ company: id }),
+        // All of this company's contracts (not just the first page), so the per-currency totals are complete.
+        ApiService.getContracts({ company: id, page_size: 1000 }),
         ApiService.getZonesByCompany(id),
         ApiService.getTickets({ company: id, page_size: 100 }),
       ]);
@@ -173,13 +183,6 @@ const CompanyDetail: React.FC = () => {
   const handleOpportunitySave = () => {
     setOpportunityFormOpen(false);
     loadCompanyData();
-  };
-
-  const formatCurrency = (amount: number, currency: string = 'USD') => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: currency,
-    }).format(amount);
   };
 
   const getStatusColor = (status: string) => {
@@ -227,13 +230,34 @@ const CompanyDetail: React.FC = () => {
   const openTickets = tickets.filter(t => !['resolved', 'closed'].includes(t.status));
   const location = [company.city, company.country].filter(Boolean).join(', ');
 
+  // Never add different currencies together: one total per currency, over active contracts
+  // (the same contracts the server's total_contract_value counts).
+  const activeTotals = totalsByCurrency(
+    contracts.filter((c) => c.is_active).map((c) => ({ amount: c.value, currency: c.currency }))
+  );
+  const opportunityCurrency = currencyForEntity(company.billing_entity);
+
   const facts = [
     { label: 'Contacts', value: contacts.length, tab: 0 },
     { label: 'Opportunities', value: opportunities.length, tab: 1 },
     { label: 'Contracts', value: contracts.length, tab: 2 },
     { label: 'Music zones', value: zones.length, tab: 3 },
     { label: 'Open tickets', value: openTickets.length, tab: 4 },
-    { label: 'Total contract value', value: formatCurrency(company.total_contract_value || 0) },
+    {
+      label: 'Active contract value',
+      value:
+        activeTotals.length === 0 ? (
+          '—'
+        ) : (
+          <>
+            {activeTotals.map(([cur, total]) => (
+              <Box component="span" key={cur} sx={{ display: 'block' }}>
+                {formatMoney(total, cur)}
+              </Box>
+            ))}
+          </>
+        ),
+    },
   ];
 
   const zoneCard = (zone: Zone, inactive: boolean) => (
@@ -293,7 +317,7 @@ const CompanyDetail: React.FC = () => {
     <Box sx={{ flexGrow: 1 }}>
       {/* Record header */}
       <PageHeader
-        breadcrumbs={[{ label: 'Companies', to: '/companies' }, { label: company.name }]}
+        breadcrumbs={[{ label: 'Companies', to: companiesListTo }, { label: company.name }]}
         avatar={
           <Avatar variant="rounded" sx={{ width: 52, height: 52, fontSize: '1.125rem', borderRadius: 2 }}>
             {initialsOf(company.name)}
@@ -336,7 +360,7 @@ const CompanyDetail: React.FC = () => {
             <Tooltip title="Create Task">
               <IconButton
                 aria-label="Create Task"
-                onClick={() => navigate(`/tasks/new?company=${company.id}`)}
+                onClick={() => navigate(`/tasks?new=true&company=${company.id}`)}
                 sx={{ border: 1, borderColor: 'divider' }}
               >
                 <PlaylistAdd fontSize="small" />
@@ -502,7 +526,7 @@ const CompanyDetail: React.FC = () => {
                                 <IconButton
                                   size="small"
                                   aria-label={`View ${contact.name}`}
-                                  onClick={() => navigate(`/contacts/${contact.id}`)}
+                                  onClick={() => setViewContact(contact)}
                                 >
                                   <ChevronRight fontSize="small" />
                                 </IconButton>
@@ -556,7 +580,7 @@ const CompanyDetail: React.FC = () => {
                             <Chip label={opportunity.stage} size="small" color={statusTone(opportunity.stage)} />
                           </TableCell>
                           <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                            {opportunity.expected_value ? formatCurrency(opportunity.expected_value) : '—'}
+                            {opportunity.expected_value ? formatMoney(opportunity.expected_value, opportunityCurrency) : '—'}
                           </TableCell>
                           <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' } }} align="right">{opportunity.probability}%</TableCell>
                           <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>{opportunity.owner_name}</TableCell>
@@ -624,7 +648,7 @@ const CompanyDetail: React.FC = () => {
                             <Chip label={contract.status} size="small" color={statusTone(contract.status)} />
                           </TableCell>
                           <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                            {formatCurrency(contract.value, contract.currency || 'USD')}
+                            {formatMoney(contract.value, contract.currency || 'USD')}
                           </TableCell>
                           <TableCell sx={{ display: { xs: 'none', sm: 'table-cell' }, whiteSpace: 'nowrap' }}>
                             {formatDate(contract.start_date)} – {formatDate(contract.end_date)}
@@ -834,10 +858,21 @@ const CompanyDetail: React.FC = () => {
 
       <ContactForm
         open={contactFormOpen}
-        onClose={() => setContactFormOpen(false)}
-        onSave={handleContactSave}
-        contact={null}
+        onClose={() => { setContactFormOpen(false); setEditingContact(null); }}
+        onSave={() => { setEditingContact(null); handleContactSave(); }}
+        contact={editingContact}
         companies={[company]}
+      />
+
+      <ContactDetail
+        open={Boolean(viewContact)}
+        onClose={() => setViewContact(null)}
+        contact={viewContact}
+        onEdit={() => {
+          setEditingContact(viewContact);
+          setViewContact(null);
+          setContactFormOpen(true);
+        }}
       />
 
       <OpportunityForm

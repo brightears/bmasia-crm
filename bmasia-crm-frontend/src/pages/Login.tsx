@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation, Navigate } from 'react-router-dom';
+import { useLocation, Navigate } from 'react-router-dom';
 import {
   Box,
   Paper,
@@ -17,9 +17,10 @@ import { getDailyQuote } from '../constants/quotes';
 import { brand } from '../theme';
 import { safeReturnPath } from '../utils/returnPath';
 
+const HOME = '/today';
+
 const Login: React.FC = () => {
   const { login, loading, isAuthenticated } = useAuth();
-  const navigate = useNavigate();
   const location = useLocation();
   const [credentials, setCredentials] = useState({
     username: '',
@@ -28,8 +29,9 @@ const Login: React.FC = () => {
   });
   const [error, setError] = useState('');
 
-  // Where to go after sign-in: the page the user asked for (same-app paths only), else the default.
-  const target = safeReturnPath((location.state as any)?.from, '/dashboard');
+  // Where to go after sign-in: the page the user asked for (same-app paths only), else Today,
+  // the home page for everyone.
+  const target = safeReturnPath((location.state as any)?.from, HOME);
 
   // Someone who is already signed in is sent on to that page.
   if (isAuthenticated && !loading) {
@@ -51,8 +53,8 @@ const Login: React.FC = () => {
     try {
       await login(credentials);
 
-      // Navigate to the intended destination (checked by safeReturnPath above)
-      navigate(target, { replace: true });
+      // Nothing else to do: once signed in, this page re-renders and the redirect above
+      // sends the user on (single place for post-sign-in routing).
     } catch (err: any) {
       console.error('Login component error:', err);
       // Get error message from the thrown Error object
@@ -78,10 +80,7 @@ const Login: React.FC = () => {
           background: `radial-gradient(120% 80% at 0% 100%, ${alpha(brand.amber, 0.28)} 0%, rgba(239,166,52,0) 55%), ${brand.navy}`,
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Box component="img" src="/bmasia-mark.png" alt="" sx={{ width: 40, height: 40 }} />
-          <Typography sx={{ fontWeight: 600, fontSize: '1.125rem', letterSpacing: '-0.01em' }}>BMAsia</Typography>
-        </Box>
+        <Box component="img" src="/brand/bmasia-logo-on-dark.svg" alt="BMAsia" sx={{ height: 44, width: 'auto', alignSelf: 'flex-start' }} />
         <Box>
           <Typography sx={{ fontSize: '2rem', fontWeight: 700, lineHeight: 1.2, letterSpacing: '-0.02em', mb: 2, maxWidth: 440 }}>
             Every customer, contract and renewal in one place.
@@ -99,7 +98,7 @@ const Login: React.FC = () => {
       {/* Sign-in form */}
       <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', p: { xs: 2, sm: 4 } }}>
         <Box sx={{ width: '100%', maxWidth: 380 }}>
-          <Box component="img" src="/bmasia-logo.png" alt="BMAsia" sx={{ height: 40, display: 'block', mb: 4 }} />
+          <Box component="img" src="/brand/bmasia-logo.svg" alt="BMAsia" sx={{ height: 40, width: 'auto', display: 'block', mb: 4 }} />
           <Typography component="h1" variant="h4" sx={{ mb: 0.5 }}>
             Sign in
           </Typography>

@@ -62,6 +62,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Invoice, EmailLogEntry, Contact } from '../types';
 import ApiService from '../services/api';
 import EmailSendDialog, { EmailSendData } from './EmailSendDialog';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 interface InvoiceDetailProps {
   open: boolean;
@@ -321,17 +322,10 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
     setPaymentNotes('');
   };
 
-  const formatCurrency = (value: number): string => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-    }).format(value);
-  };
+  // Amounts use the invoice's own currency (was always shown in dollars).
+  const formatCurrency = (value: number): string => formatMoney(value, invoice?.currency || 'USD');
 
-  const formatDate = (dateString: string): string => {
-    return new Date(dateString).toLocaleDateString();
-  };
+  const formatDate = (dateString: string): string => formatDisplayDate(dateString);
 
   const getStatusColor = (status: string): string => {
     const colors: { [key: string]: string } = {

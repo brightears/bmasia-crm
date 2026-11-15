@@ -183,8 +183,8 @@ const TaskListView: React.FC<TaskListViewProps> = ({
     const date = parseISO(dueDate);
     if (isToday(date)) return 'Today';
     if (isTomorrow(date)) return 'Tomorrow';
-    if (isPast(date)) return `${format(date, 'MMM d')} (Overdue)`;
-    return format(date, 'MMM d, yyyy');
+    if (isPast(date)) return `${format(date, 'd MMM')} (Overdue)`;
+    return format(date, 'd MMM yyyy');
   };
 
   const getDueDateColor = (dueDate?: string) => {
@@ -438,7 +438,7 @@ const TaskListView: React.FC<TaskListViewProps> = ({
                   {/* Created */}
                   <TableCell>
                     <Typography variant="body2" color="text.secondary">
-                      {format(parseISO(task.created_at), 'MMM d')}
+                      {format(parseISO(task.created_at), 'd MMM')}
                     </Typography>
                   </TableCell>
 
