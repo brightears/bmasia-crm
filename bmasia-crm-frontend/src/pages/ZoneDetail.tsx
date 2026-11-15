@@ -387,7 +387,7 @@ const ZoneDetail: React.FC = () => {
                             {formatDistanceToNow(new Date(zone.last_api_sync), { addSuffix: true })}
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
-                            {format(new Date(zone.last_api_sync), 'MMM dd, yyyy HH:mm')}
+                            {format(new Date(zone.last_api_sync), 'd MMM yyyy HH:mm')}
                           </Typography>
                         </Box>
                       ) : (

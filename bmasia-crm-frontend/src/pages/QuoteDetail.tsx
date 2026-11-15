@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -7,7 +7,7 @@ import {
   Paper,
   Alert,
   CircularProgress,
-  Breadcrumbs,
+  Chip,
   Link,
 } from '@mui/material';
 import {
@@ -19,14 +19,21 @@ import {
   Cancel,
   Assignment,
   Print,
+  Receipt,
+  Visibility,
 } from '@mui/icons-material';
 import { Quote } from '../types';
 import ApiService from '../services/api';
 import { QuoteDetail as QuoteDetailComponent } from '../components';
+import { PageHeader } from '../components/ui';
+import { statusTone } from '../theme';
+import { useListReturnPath } from '../hooks/listReturn';
 
 const QuoteDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  // The list view the user came from, when a list passed one along; otherwise the plain list.
+  const listPath = useListReturnPath('/quotes');
   const [quote, setQuote] = useState<Quote | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -118,22 +125,25 @@ const QuoteDetailPage: React.FC = () => {
     }
   };
 
-  const handleConvertToContract = async () => {
+  // As in the quote pop-up: open the contract form pre-filled from this quote, to check and
+  // change before anything is saved. (The Quotes list's Convert creates the contract directly.)
+  const handleConvertToContract = () => {
     if (!quote) return;
+    navigate(`/contracts?new=true&company=${quote.company}&quote=${quote.id}`);
+  };
 
-    if (!window.confirm('Are you sure you want to convert this quote to a contract?')) {
-      return;
-    }
+  const handleCreateInvoice = () => {
+    if (!quote) return;
+    navigate(`/invoices?new=true&company=${quote.company}&quote=${quote.id}`);
+  };
 
+  const handlePreviewPDF = async () => {
+    if (!quote) return;
     try {
-      setLoading(true);
-      await ApiService.convertQuoteToContract(quote.id);
-      setSuccess('Quote converted to contract successfully');
-      loadQuote();
+      const blob = await ApiService.previewQuotePDF(quote.id);
+      window.open(window.URL.createObjectURL(blob), '_blank');
     } catch (err) {
-      setError('Failed to convert quote to contract');
-    } finally {
-      setLoading(false);
+      setError('Failed to preview PDF');
     }
   };
 
@@ -163,36 +173,21 @@ const QuoteDetailPage: React.FC = () => {
 
   return (
     <Box>
-      {/* Breadcrumbs */}
-      <Breadcrumbs sx={{ mb: 3 }}>
-        <Link
-          component="button"
-          variant="body2"
-          onClick={() => navigate('/quotes')}
-          sx={{ textDecoration: 'none' }}
-        >
-          Quotes
-        </Link>
-        <Typography variant="body2" color="text.primary">
-          {quote.quote_number}
-        </Typography>
-      </Breadcrumbs>
-
-      {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Box>
-          <Button
-            startIcon={<ArrowBack />}
-            onClick={() => navigate('/quotes')}
-            sx={{ mb: 1 }}
-          >
-            Back to Quotes
-          </Button>
-          <Typography variant="h4" component="h1">
-            Quote Details
-          </Typography>
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+      <PageHeader
+        breadcrumbs={[{ label: 'Quotes', to: listPath }, { label: quote.quote_number }]}
+        title={quote.quote_number}
+        subtitle={
+          quote.company ? (
+            <Link component={RouterLink} to={`/companies/${quote.company}`} underline="hover" sx={{ fontWeight: 600 }}>
+              {quote.company_name}
+            </Link>
+          ) : (
+            quote.company_name
+          )
+        }
+        meta={<Chip label={quote.status} size="small" color={statusTone(quote.status)} />}
+        actions={
+          <>
           {quote.status === 'Draft' && (
             <Button
               variant="outlined"
@@ -226,21 +221,29 @@ const QuoteDetailPage: React.FC = () => {
             </>
           )}
           {quote.status === 'Accepted' && (
-            <Button
-              variant="contained"
-              startIcon={<Assignment />}
-              onClick={handleConvertToContract}
-              disabled={loading}
-            >
-              Convert to Contract
-            </Button>
+            <>
+              <Button
+                variant="contained"
+                startIcon={<Assignment />}
+                onClick={handleConvertToContract}
+                disabled={loading}
+              >
+                Convert to Contract
+              </Button>
+              <Button variant="outlined" startIcon={<Receipt />} onClick={handleCreateInvoice} disabled={loading}>
+                Create Invoice
+              </Button>
+            </>
           )}
           <Button
             variant="outlined"
             startIcon={<Edit />}
-            onClick={() => navigate(`/quotes?edit=${quote.id}`)}
+            onClick={() => navigate(`${listPath}${listPath.includes('?') ? '&' : '?'}edit=${quote.id}`)}
           >
             Edit
+          </Button>
+          <Button variant="outlined" startIcon={<Visibility />} onClick={handlePreviewPDF}>
+            Preview
           </Button>
           <Button
             variant="outlined"
@@ -256,8 +259,9 @@ const QuoteDetailPage: React.FC = () => {
           >
             Print
           </Button>
-        </Box>
-      </Box>
+          </>
+        }
+      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
@@ -271,15 +275,14 @@ const QuoteDetailPage: React.FC = () => {
         </Alert>
       )}
 
-      {/* Quote Detail Component - using the component directly in page layout */}
-      <Paper sx={{ p: 3 }}>
-        <QuoteDetailComponent
-          open={true}
-          onClose={() => navigate('/quotes')}
-          quote={quote}
-          onQuoteUpdate={loadQuote}
-        />
-      </Paper>
+      {/* The quote's content, as a page (it used to open as a pop-up over this page) */}
+      <QuoteDetailComponent
+        variant="page"
+        open={true}
+        onClose={() => navigate('/quotes')}
+        quote={quote}
+        onQuoteUpdate={loadQuote}
+      />
     </Box>
   );
 };
