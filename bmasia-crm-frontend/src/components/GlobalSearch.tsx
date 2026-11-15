@@ -28,18 +28,20 @@ import {
 import { useNavigate } from 'react-router-dom';
 import ApiService from '../services/api';
 import { formatMoney } from '../theme';
-import { buildNavGroups } from './navigation';
+import { buildNavGroups, filterNavForRole } from './navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { canAccessModule } from '../utils/permissions';
 
-// Menu pages, searchable by their current name and by the name they had before the redesign.
-const PAGES = buildNavGroups(0).flatMap((g) =>
-  g.items.map((item) => ({ ...item, groupTitle: g.title || 'Home' }))
-);
+// Menu pages the user's menu shows, searchable by their current name and by the name they had
+// before the redesign.
+const pagesFor = (role?: string | null) =>
+  filterNavForRole(buildNavGroups(0), role).flatMap((g) =>
+    g.items.map((item) => ({ ...item, groupTitle: g.title || 'Home' }))
+  );
 
-const matchPages = (q: string): SearchResult[] => {
+const matchPages = (q: string, role?: string | null): SearchResult[] => {
   const needle = q.toLowerCase();
-  return PAGES.filter(
+  return pagesFor(role).filter(
     (p) => p.text.toLowerCase().includes(needle) || (p.formerly || '').toLowerCase().includes(needle)
   )
     .slice(0, PER_GROUP)
@@ -194,7 +196,7 @@ const GlobalSearch: React.FC = () => {
       const params = { search: q, page_size: PER_GROUP };
       // Only record types whose pages this user may open are searched.
       const allowed = SOURCES.filter((src) => canAccessModule(user, src.module));
-      const pages = matchPages(q);
+      const pages = matchPages(q, role);
 
       setResultsFor(q);
       setActive(0);
@@ -414,9 +416,11 @@ const GlobalSearch: React.FC = () => {
               ))}
             </List>
           )}
-          {q.length >= MIN_CHARS && failedGroups.length > 0 && !allFailed && (
+          {q.length >= MIN_CHARS && failedGroups.length > 0 && (!allFailed || results.length > 0) && (
             <Typography color="error" sx={{ px: 3, py: 1.5, fontSize: '0.8125rem' }} role="status">
-              Could not search {failedGroups.map((g) => g.toLowerCase()).join(', ')}.
+              {allFailed
+                ? 'Search failed for companies, contacts and documents; only CRM pages are shown. Check your connection and try again.'
+                : `Could not search ${failedGroups.map((g) => g.toLowerCase()).join(', ')}.`}
             </Typography>
           )}
         </Box>

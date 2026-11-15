@@ -159,3 +159,21 @@ it('leaves Ctrl/Cmd+K to rich-text editors', async () => {
   expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   editor.remove();
 });
+
+it('does not offer pages the role menu hides', async () => {
+  mockUser = { id: 'x', role: 'Sales', is_active: true, permissions: [] };
+  renderSearch();
+  await openAndType('balance');
+  await waitFor(() => expect(api.getCompanies).toHaveBeenCalled());
+  expect(screen.queryByText('Balance sheet')).not.toBeInTheDocument();
+});
+
+it('still says that search failed when every type failed but a menu page matched', async () => {
+  for (const k of ['getCompanies', 'getContacts', 'getContracts', 'getQuotes', 'getInvoices']) {
+    api[k].mockRejectedValue(new Error('offline'));
+  }
+  renderSearch();
+  await openAndType('templates');
+  expect(await screen.findByText(/only CRM pages are shown/i)).toBeInTheDocument();
+  expect(screen.getByText('Contract templates')).toBeInTheDocument();
+});
