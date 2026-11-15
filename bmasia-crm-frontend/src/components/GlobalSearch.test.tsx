@@ -167,3 +167,13 @@ it('does not offer pages the role menu hides', async () => {
   await waitFor(() => expect(api.getCompanies).toHaveBeenCalled());
   expect(screen.queryByText('Balance sheet')).not.toBeInTheDocument();
 });
+
+it('still says that search failed when every type failed but a menu page matched', async () => {
+  for (const k of ['getCompanies', 'getContacts', 'getContracts', 'getQuotes', 'getInvoices']) {
+    api[k].mockRejectedValue(new Error('offline'));
+  }
+  renderSearch();
+  await openAndType('templates');
+  expect(await screen.findByText(/only CRM pages are shown/i)).toBeInTheDocument();
+  expect(screen.getByText('Contract templates')).toBeInTheDocument();
+});
