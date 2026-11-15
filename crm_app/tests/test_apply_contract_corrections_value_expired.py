@@ -212,14 +212,14 @@ def test_set_value_on_class_c(tmp_path):
 
 
 @pytest.mark.parametrize('set_value, message', [
-    ({'from': '1.00'}, 'exactly'),
-    ({'from': '1.00', 'to': '2.00', 'x': 1}, 'exactly'),
+    ({'from': '1.00'}, 'must have'),
+    ({'from': '1.00', 'to': '2.00', 'x': 1}, 'must have'),
     ({'from': 1, 'to': '2.00'}, 'decimal string'),
-    ({'from': '1.00', 'to': 'abc'}, 'decimal string'),
+    ({'from': '1.00', 'to': 'abc'}, 'digits only'),
     ({'from': '1.00', 'to': '-2.00'}, 'non-negative'),
     ({'from': '1.00', 'to': '2.001'}, 'at most 2 decimals'),
     ({'from': '1.00', 'to': '1.00'}, 'equal'),
-    ('2.00', 'exactly'),
+    ('2.00', 'must have'),
 ])
 def test_malformed_set_value(tmp_path, set_value, message):
     entry = _valid_entry()
@@ -233,4 +233,67 @@ def test_set_value_on_renewed_target_is_malformed(tmp_path):
     entry.update(target_status='Renewed', set_value=SET, expected={**entry['expected'], 'status': 'Active'})
     entry['class'] = 'A'
     with pytest.raises(CommandError, match='Active targets only'):
+        _run('--file', _file(tmp_path, [entry]))
+
+
+# --- follow-up: currency guard, Expired without end date, rounding, revert guard, strict amounts --------------------
+
+def test_set_value_with_matching_currency_applies(tmp_path):
+    old, new = _value_pair()
+    out, _ = _execute(tmp_path, _file(tmp_path, _b(old, new, set_value={**SET, 'currency': 'THB'})))
+    assert out.count('[APPLIED]') == 2
+    assert _values(new)[0] == Decimal('21000.00')
+
+
+def test_set_value_refused_when_currency_differs(tmp_path):
+    old, new = _value_pair()
+    out = _refusal(tmp_path, _b(old, new, set_value={**SET, 'currency': 'USD'}))
+    assert '[SKIPPED:currency_differs]' in out
+    assert _values(new)[0] == Decimal('26000.00') and _status(new) == 'Sent'
+
+
+@pytest.mark.parametrize('kind', ['A', 'B'])
+def test_expired_old_term_without_end_date_is_refused(tmp_path, kind):
+    company = _company()
+    old = _contract(company, status='Expired', start=date(2025, 1, 1), end_date=None, is_active=False)
+    new = _contract(company, status='Active' if kind == 'A' else 'Sent', start=date(2026, 9, 15), renewed_from=old)
+    entries = _a(old) if kind == 'A' else _b(old, new)
+    assert '[SKIPPED:expired_term_has_no_end_date]' in _refusal(tmp_path, entries)
+    assert _status(old) == 'Expired'
+
+
+@pytest.mark.parametrize('to, tax, total', [
+    ('1251.50', '87.60', '1339.10'),   # 87.605 -> half even rounds down to 87.60 (half up would give 87.61)
+    ('1250.50', '87.54', '1338.04'),   # 87.535 -> 87.54
+])
+def test_set_value_tax_rounds_half_even_like_the_serializer(tmp_path, to, tax, total):
+    old, new = _value_pair()
+    _execute(tmp_path, _file(tmp_path, _b(old, new, set_value={'from': '26000.00', 'to': to})))
+    assert _values(new) == (Decimal(to), Decimal(tax), Decimal(total))
+
+
+def test_revert_skips_when_value_was_edited_without_updated_at_changing(tmp_path):
+    from crm_app.models import Contract
+    old, new = _value_pair()
+    _, journal = _execute(tmp_path, _file(tmp_path, _b(old, new, set_value=SET)))
+    Contract.objects.filter(pk=new.pk).update(value=Decimal('19999.00'))  # updated_at left as it is
+    out = _run('--revert', journal, '--execute')
+    assert '[SKIPPED:changed_since_apply]' in out
+    assert _values(new)[0] == Decimal('19999.00')
+    assert _status(new) == 'Active' and _status(old) == 'Renewed'
+
+
+@pytest.mark.parametrize('amount', ['1e3', ' 5', '5 ', '-0', '+5', '1,000.00', '5.', '.5'])
+def test_set_value_amount_must_be_plain_digits(tmp_path, amount):
+    entry = _valid_entry()
+    entry['set_value'] = {'from': '1.00', 'to': amount}
+    with pytest.raises(CommandError, match='digits only|decimal string'):
+        _run('--file', _file(tmp_path, [entry]))
+
+
+@pytest.mark.parametrize('currency', ['thb', 'TH', 'THBB', 7])
+def test_set_value_currency_must_be_a_code(tmp_path, currency):
+    entry = _valid_entry()
+    entry['set_value'] = {'from': '1.00', 'to': '2.00', 'currency': currency}
+    with pytest.raises(CommandError, match='3-letter code'):
         _run('--file', _file(tmp_path, [entry]))

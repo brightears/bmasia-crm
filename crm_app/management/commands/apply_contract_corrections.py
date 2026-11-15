@@ -19,7 +19,8 @@ SAFETY MODEL
     instants); when the transition is not Sent->Active, Draft->Active,
     Active->Renewed or Expired->Renewed; when the contracts are on different
     companies; when an Expired old term ends on or after the day its successor
-    starts (terms_overlap); when a
+    starts (terms_overlap) or has no end date (expired_term_has_no_end_date);
+    when a
     contract id appears more than once in the file; or when the write would
     change a contract that is not in the group.
   * Re-running after an execute is a no-op: a group whose contracts are all in
@@ -43,12 +44,14 @@ WRITE PATH
     - sent_date is left as it is (a normal activation leaves it too; a Draft
       activated this way keeps sent_date empty);
     - signed_date is set only when the file gives one and the field is empty;
-    - set_value {"from", "to"} changes the value of the activated contract in
-      the same step, only when its current value equals "from"; tax_amount and
-      total_value are recomputed from its own tax_rate, as ContractSerializer
-      does. Refused when the contract has line items (value_has_line_items) or
+    - set_value {"from", "to"[, "currency"]} changes the value of the activated
+      contract in the same step, only when its current value equals "from";
+      tax_amount and total_value are recomputed from its own tax_rate, as
+      ContractSerializer does. Refused when the contract has line items (value_has_line_items) or
       when its priced service-location rows would no longer add up to the new
-      value (value_contradicts_location_prices). Currency is never changed;
+      value (value_contradicts_location_prices). When "currency" is given it
+      must equal the contract's currency (currency_differs); the amounts are
+      before tax. Currency is never changed;
     - set_renewed_from links the successor to the old term of its pair only
       when the successor has no link yet (a different link refuses the group);
     - the lifecycle rule close_renewed_predecessor() is then called exactly
@@ -91,7 +94,8 @@ FILE FORMAT v1 (JSON, ids and values only; unknown keys are rejected)
           "target_status": "Active" | "Renewed",
           "signed_date": "YYYY-MM-DD" | null,                 (optional, Active only)
           "set_renewed_from": "<uuid>" | null,                (optional, Active only)
-          "set_value": {"from": "1200.00", "to": "1000.00"},  (optional, Active only)
+          "set_value": {"from": "1200.00", "to": "1000.00", "currency": "USD"},
+                                                      (optional, Active only; currency optional)
           "evidence": "<short reference, e.g. sheet / tab / row N>"
         }
       ]
@@ -193,6 +197,7 @@ class Entry:
     evidence: str
     value_from: Optional[Decimal] = None
     value_to: Optional[Decimal] = None
+    value_currency: Optional[str] = None
 
 
 # --------------------------------------------------------------------------
@@ -233,17 +238,20 @@ def _instant(value, where):
     return parsed
 
 
+_MONEY_RE = re.compile(r'\d{1,10}(\.\d{1,2})?')
+_CURRENCY_RE = re.compile(r'[A-Z]{3}')
+
+
 def _money(value, where):
+    """A plain non-negative amount: digits, optionally a point and one or two decimals (no sign, exponent or spaces)."""
     if not isinstance(value, str):
         raise _malformed(f'{where}: want a decimal string such as "1200.00"')
+    if not _MONEY_RE.fullmatch(value):
+        raise _malformed(f'{where}: want a non-negative amount with at most 2 decimals, digits only')
     try:
-        parsed = Decimal(value)
+        return Decimal(value).quantize(Decimal('0.01'))
     except InvalidOperation:
         raise _malformed(f'{where}: want a decimal string such as "1200.00"')
-    if not parsed.is_finite() or parsed < 0 or parsed != parsed.quantize(Decimal('0.01')) \
-            or parsed >= Decimal('1e10'):
-        raise _malformed(f'{where}: want a non-negative amount with at most 2 decimals')
-    return parsed.quantize(Decimal('0.01'))
 
 
 def parse_corrections(data):
@@ -291,11 +299,14 @@ def parse_corrections(data):
             set_renewed_from = _uuid(set_renewed_from, f'{where} set_renewed_from')
         if target != 'Active' and (signed_date or set_renewed_from or 'set_value' in raw):
             raise _malformed(f'{where}: signed_date, set_renewed_from and set_value apply to Active targets only')
-        value_from = value_to = None
+        value_from = value_to = value_currency = None
         if 'set_value' in raw:
             sv = raw['set_value']
-            if not isinstance(sv, dict) or set(sv) != {'from', 'to'}:
-                raise _malformed(f'{where}: set_value must have exactly ["from", "to"]')
+            if not isinstance(sv, dict) or not {'from', 'to'} <= set(sv) <= {'from', 'to', 'currency'}:
+                raise _malformed(f'{where}: set_value must have "from" and "to", and may have "currency"')
+            value_currency = sv.get('currency')
+            if value_currency is not None and (not isinstance(value_currency, str) or not _CURRENCY_RE.fullmatch(value_currency)):
+                raise _malformed(f'{where}: set_value.currency must be a 3-letter code such as "THB"')
             value_from = _money(sv['from'], f'{where} set_value.from')
             value_to = _money(sv['to'], f'{where} set_value.to')
             if value_from == value_to:
@@ -311,7 +322,7 @@ def parse_corrections(data):
             exp_end=_date(expected['end_date'], f'{where} expected.end_date', nullable=True),
             exp_updated_at=_instant(expected['updated_at'], f'{where} expected.updated_at'),
             target=target, signed_date=signed_date, set_renewed_from=set_renewed_from,
-            evidence=evidence, value_from=value_from, value_to=value_to,
+            evidence=evidence, value_from=value_from, value_to=value_to, value_currency=value_currency,
         ))
 
     for group, members in group_entries(entries).items():
@@ -644,6 +655,8 @@ class Command(BaseCommand):
             if not s.is_active:
                 notes.append('is_active False -> True')
             if activation.value_to is not None:
+                if activation.value_currency is not None and activation.value_currency != s.currency:
+                    raise _Refused('currency_differs')
                 if s.line_items.exists():
                     raise _Refused('value_has_line_items')
                 from crm_app.services.contract_service_locations import service_location_pricing_mismatch
@@ -663,7 +676,9 @@ class Command(BaseCommand):
         if renewal:
             o = locked[renewal.contract_id]
             if activation:
-                if o.status == 'Expired' and o.end_date and o.end_date >= locked[activation.contract_id].start_date:
+                if o.status == 'Expired' and o.end_date is None:
+                    raise _Refused('expired_term_has_no_end_date')
+                if o.status == 'Expired' and o.end_date >= locked[activation.contract_id].start_date:
                     raise _Refused('terms_overlap')
                 plan['details'][renewal.contract_id] = 'closed by the lifecycle rule when its successor goes Active'
             else:
@@ -675,7 +690,9 @@ class Command(BaseCommand):
                 )
                 if successor is None:
                     raise _Refused('no_active_successor')
-                if o.status == 'Expired' and o.end_date and o.end_date >= successor.start_date:
+                if o.status == 'Expired' and o.end_date is None:
+                    raise _Refused('expired_term_has_no_end_date')
+                if o.status == 'Expired' and o.end_date >= successor.start_date:
                     raise _Refused('terms_overlap')
                 plan['successor_for_a'] = successor
                 plan['details'][renewal.contract_id] = (
