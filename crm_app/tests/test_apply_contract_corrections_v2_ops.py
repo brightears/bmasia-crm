@@ -508,3 +508,100 @@ def test_new_ops_send_nothing_and_call_nothing(tmp_path):
 
     assert mail.outbox == []
     sync_zones.assert_not_called()
+
+
+# --- review follow-ups ------------------------------------------------------------------------
+
+@pytest.mark.parametrize('old_status', ['Expired', 'Active'])
+def test_mark_renewed_refuses_a_successor_that_does_not_renew_it(tmp_path, old_status):
+    company = _company()
+    old = _contract(company, status=old_status, start=date(2023, 1, 1), is_active=old_status == 'Active')
+    later = _contract(company, status='Active', start=date(2026, 1, 1))  # no renewed_from, no link in the group
+    out, _ = _execute(tmp_path, _file(tmp_path, [_renewed(old, later)]))
+    assert '[SKIPPED:successor_not_linked]' in out
+    assert _status(old) == old_status
+
+
+def test_mark_renewed_accepts_a_successor_already_linked(tmp_path):
+    company = _company()
+    old = _contract(company, status='Expired', start=date(2025, 1, 1), is_active=False)
+    current = _contract(company, status='Active', start=date(2026, 1, 1), renewed_from=old)
+    out, _ = _execute(tmp_path, _file(tmp_path, [_renewed(old, current)]))
+    assert '[APPLIED]' in out
+    assert _status(old) == 'Renewed'
+
+
+@pytest.mark.parametrize('renewal_status', ['Renewed', 'Expired'])
+def test_mark_expired_refuses_a_term_with_a_closed_renewal(tmp_path, renewal_status):
+    c = _ended_term()
+    _contract(c.company, status=renewal_status, start=timezone.localdate() - timedelta(days=34),
+              renewed_from=c, is_active=False)
+    out, _ = _execute(tmp_path, _file(tmp_path, [_expire(c)]))
+    assert '[SKIPPED:renewal_exists]' in out
+    assert _status(c) == 'Active'
+
+
+def test_mark_expired_refuses_when_a_later_active_contract_exists(tmp_path):
+    c = _ended_term()
+    _contract(c.company, status='Active', start=timezone.localdate() - timedelta(days=34))  # not linked
+    out, _ = _execute(tmp_path, _file(tmp_path, [_expire(c)]))
+    assert '[SKIPPED:later_active_contract]' in out
+    assert _status(c) == 'Active'
+
+
+def test_mark_expired_ignores_an_earlier_active_contract_of_the_company(tmp_path):
+    c = _ended_term()
+    _contract(c.company, status='Active', start=c.start_date - timedelta(days=30))
+    out, _ = _execute(tmp_path, _file(tmp_path, [_expire(c)]))
+    assert '[APPLIED]' in out
+
+
+@pytest.mark.parametrize('text', ['line separator', 'next\x85line', 'para graph', 'del\x7fchar'])
+def test_add_note_refuses_line_separators(tmp_path, text):
+    c = _contract(_company())
+    entry = _note(c)
+    entry['text'] = text
+    with pytest.raises(CommandError, match='text'):
+        _run('--file', _file(tmp_path, [entry]))
+
+
+def test_add_note_revert_is_skipped_when_notes_changed_without_updated_at(tmp_path):
+    c = _contract(_company(), notes='Existing')
+    _, journal_path = _execute(tmp_path, _file(tmp_path, [_note(c, 'Added')]))
+    Contract.objects.filter(pk=c.pk).update(notes='Existing\nAdded\nAnother line')  # updated_at left as it is
+    assert '[SKIPPED:changed_since_apply]' in _run('--revert', journal_path, '--execute')
+    c.refresh_from_db()
+    assert c.notes == 'Existing\nAdded\nAnother line'
+
+
+def test_create_contract_rerun_needs_the_same_value(tmp_path):
+    company = _company()
+    _contract(company, status='Active', start=date(2026, 3, 1), end=date(2027, 2, 28), value=Decimal('950.00'))
+    out = _run('--file', _file(tmp_path, [_create_new(company)]))   # file value 900.00
+    assert '[ALREADY-APPLIED]' not in out
+    assert '[SKIPPED:overlapping_contract]' in out
+
+
+def test_create_contract_pricing_mismatch_is_refused_in_the_dry_run_too(tmp_path):
+    company = _company()
+    out = _run('--file', _file(tmp_path, [_create_new(company, value='1000.00')]))
+    assert '[SKIPPED:service_location_pricing_mismatch]' in out
+    assert '[WOULD-APPLY]' not in out
+
+
+def test_create_contract_revert_notices_a_company_change(tmp_path):
+    company, other = _company(), _company()
+    _, journal_path = _execute(tmp_path, _file(tmp_path, [_create_new(company)]))
+    new = _created_on(company)
+    Contract.objects.filter(pk=new.pk).update(company=other)  # updated_at left as it is
+    out = _run('--revert', journal_path, '--execute')
+    assert '[SKIPPED:created_contract_touched]' in out
+    assert Contract.objects.filter(pk=new.pk).exists()
+
+
+def test_dry_run_says_groups_are_judged_on_current_data(tmp_path):
+    c = _contract(_company())
+    out = _run('--file', _file(tmp_path, [_note(c)]))
+    assert 'in a dry-run every group is judged on the current data' in out
+    out, _ = _execute(tmp_path, _file(tmp_path, [_note(c)], 'b.json'))
+    assert 'in a dry-run every group is judged' not in out

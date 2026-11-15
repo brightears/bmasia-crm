@@ -23,18 +23,26 @@ OPERATIONS (one per entry, ``op``)
                      the handler did exactly that, and journals every link and
                      zone so --revert can restore them.
   mark_renewed       Active or Expired -> Renewed, is_active False, status
-                     only, for a contract whose later term already exists and
-                     is Active on the same company (``successor_id``). Same
-                     write as the lifecycle rule (queryset update, no save side
-                     effects); zone links are not touched.
+                     only, for a contract whose later term already exists, is
+                     Active on the same company (``successor_id``) and renews
+                     it: the successor's renewed_from is this contract, or a
+                     set_renewed_from entry in the same group sets it
+                     (otherwise successor_not_linked). Same write as the
+                     lifecycle rule (queryset update, no save side effects);
+                     zone links are not touched.
   mark_expired       Active -> Expired, is_active False, status only, for a
                      term whose end_date has passed (before today's local
-                     date) and that has no Draft/Sent/Active renewal. Queryset
+                     date), that no contract renews (any status but
+                     Cancelled; renewal_exists) and that has no later Active
+                     contract on the same company (later_active_contract: an
+                     unlinked later term may be its renewal, and Expired means
+                     lapsed with no successor). Queryset
                      update (no save(), no signals). Zone links are NOT
                      touched: an expired term's links stay as they are, for a
                      later renewal to take over or a human to close.
   add_note           Appends ``text`` (one line, 1-500 characters, no control
-                     characters) to the contract's notes, on a new line when
+                     characters or line separators such as U+0085/U+2028) to
+                     the contract's notes, on a new line when
                      the notes are not empty. Any status. Queryset update of
                      notes and updated_at only. Re-run: notes that already
                      hold ``text`` as a line are already applied.
@@ -116,8 +124,11 @@ REFUSALS (named reasons; nothing in the group is written)
   the renewal already has an ended link to the zone starting on its start date,
   so a new link cannot be stored; a human decides which link is right),
   term_not_ended (mark_expired: end_date is today or later),
-  renewal_exists (mark_expired: a Draft/Sent/Active contract renews it;
-  mark_expired also refuses no_end_date),
+  renewal_exists (mark_expired: a contract that is not Cancelled renews it),
+  later_active_contract (mark_expired: a later Active contract of the same
+  company exists; mark_expired also refuses no_end_date),
+  successor_not_linked (mark_renewed: the successor does not renew this
+  contract and no set_renewed_from in the group links it),
   missing_company (create_contract: company_id does not exist).
   create_contract also refuses missing_twin_company, overlapping_contract,
   service_location_pricing_mismatch, billing_entity_unresolved,
@@ -170,8 +181,11 @@ CREATE (create_contract)
     defaults: billing_entity '' (inherits the company's issuer; refused as
       billing_entity_unresolved when the company has none), property_name '',
       tax_rate as ContractSerializer sets it for a new contract without an
-      instructed rate (7.00 for THB, else 0.00; tax_amount and total_value
-      computed from it), contract_type, contract_category,
+      instructed rate: 7.00 for THB, else 0.00 (tax_amount and total_value
+      computed from it). The rate follows the currency, not the billing
+      entity, exactly as the serializer does: a THB contract on the Hong Kong
+      entity gets 7%, a USD contract on the Thailand entity 0%, so a file
+      should state the entity's usual currency; contract_type, contract_category,
       renewal_period_months, send_renewal_reminders and
       show_zone_pricing_detail = the model defaults;
     fixed: status Active, is_active True, lifecycle_type 'new'
@@ -263,7 +277,6 @@ CREATE_OPS = ('create_successor', 'create_contract')
 CANCELLABLE = {'Draft', 'Sent', 'Active'}
 CREATE_FROM = {'Active', 'Expired'}
 RENEW_FROM = {'Active', 'Expired'}
-OPEN_RENEWAL = ('Draft', 'Sent', 'Active')
 STATUSES = {value for value, _ in Contract.CONTRACT_STATUS_CHOICES}
 SERVICE_TYPES = {value for value, _ in Contract.SERVICE_TYPE_CHOICES}
 PLATFORMS = {value for value, _ in ContractServiceLocation.PLATFORM_CHOICES}
@@ -412,7 +425,8 @@ def _money(value, where, nullable=False):
 def _text(value, where, maximum, single_line=True, allow_empty=False):
     if not isinstance(value, str) or (not allow_empty and not value.strip()) or len(value) > maximum:
         raise _malformed(f'{where}: want a string of {0 if allow_empty else 1}-{maximum} characters')
-    bad = [ch for ch in value if ord(ch) < 32 and (single_line or ch not in '\n')]
+    bad = [ch for ch in value if (ord(ch) < 32 and (single_line or ch not in '\n'))
+           or ch in '\x7f\x85\u2028\u2029']
     if bad:
         raise _malformed(f'{where}: control characters are not allowed')
     return value
@@ -754,6 +768,10 @@ class V2Runner:
         self.out.write(
             f'{cmd.COMMAND_NAME} [{cmd.mode}] batch {cmd.batch_id}: {len(entries)} entries in '
             f'{len(groups)} groups ({FILE_FORMAT_V2}); classes {"/".join(sorted(selected))}')
+        if not cmd.execute_mode:
+            self.out.write('  note: in a dry-run every group is judged on the current data; on --execute a later '
+                           'group sees the changes of earlier groups in this file, so a refusal that depends on '
+                           'another group (e.g. an overlap) can differ.')
 
         tally = OrderedDict()
         uncertain = set()
@@ -926,6 +944,9 @@ class V2Runner:
                               and m.renewed_from_id == e.contract_id for m in members)
         if s.renewed_from_id and str(s.renewed_from_id) != e.contract_id and not linked_in_group:
             raise Refused('successor_renews_other_contract')
+        if not s.renewed_from_id and not linked_in_group:
+            # The later term must renew this one: already linked, or linked by a set_renewed_from in this group.
+            raise Refused('successor_not_linked')
         plan['detail'] = (f'{c.status} -> Renewed (status only); later term {s.pk} {s.contract_number}'
                           f'{" linked in this group" if linked_in_group else ""}')
         return plan
@@ -1057,8 +1078,14 @@ class V2Runner:
             raise Refused('no_end_date')
         if c.end_date >= timezone.localdate():
             raise Refused('term_not_ended')
-        if Contract.objects.filter(renewed_from_id=c.pk, status__in=OPEN_RENEWAL).exists():
+        if Contract.objects.filter(renewed_from_id=c.pk).exclude(status='Cancelled').exists():
             raise Refused('renewal_exists')
+        later = Contract.objects.filter(company_id=c.company_id, status='Active', start_date__gt=c.start_date) \
+            .exclude(pk=c.pk)
+        if later.exists():
+            # A later Active term of the same company without a link may well be this term's renewal; Expired
+            # means lapsed with no successor, so a human links it (and marks this Renewed) instead.
+            raise Refused('later_active_contract')
         plan['detail'] = (f'Active -> Expired (status only, ended {c.end_date.isoformat()}); '
                           f'is_active {c.is_active} -> False; zone links untouched')
         return plan
