@@ -151,7 +151,7 @@ def test_rest_patch_activation_rolls_back_closure_if_request_fails(monkeypatch):
     assert not _closure_audits(predecessor).exists()
 
 
-@pytest.mark.parametrize('status', ['Draft', 'Sent', 'Expired', 'Cancelled'])
+@pytest.mark.parametrize('status', ['Draft', 'Sent', 'Cancelled'])
 def test_predecessor_in_other_status_is_untouched(status):
     predecessor, successor = _pair(predecessor_status=status)
     before_updated_at = predecessor.updated_at
@@ -243,15 +243,15 @@ def test_mcp_plain_update_record_activation_closes_predecessor():
 
 
 def test_mcp_update_record_reports_untouched_predecessor():
-    predecessor, successor = _pair(predecessor_status='Expired')
+    predecessor, successor = _pair(predecessor_status='Cancelled')
 
     result = json.loads(update_record('contract', str(successor.pk), json.dumps({'status': 'Active'})))
 
     assert result['updated'] is True, result
     assert result['predecessor_lifecycle']['outcome'] == 'predecessor_not_active'
-    assert result['predecessor_lifecycle']['predecessor_status'] == 'Expired'
+    assert result['predecessor_lifecycle']['predecessor_status'] == 'Cancelled'
     predecessor.refresh_from_db()
-    assert predecessor.status == 'Expired'
+    assert predecessor.status == 'Cancelled'
 
 
 def test_mcp_guarded_update_record_activation_closes_predecessor():
@@ -604,3 +604,23 @@ def test_renewal_enrollment_skips_contract_with_renewal_in_flight():
     assert enrolled == 1
     ids = set(SequenceEnrollment.objects.values_list('trigger_entity_id', flat=True))
     assert ids == {str(plain.pk)}
+
+
+def test_expired_predecessor_becomes_renewed_when_its_renewal_goes_active():
+    """Widened with the zone hand-over: a term that has a successor is Renewed."""
+    predecessor, successor = _pair(predecessor_status='Expired')
+
+    response = _rest_patch(successor, {'status': 'Active'})
+
+    assert response.status_code == 200, response.data
+    predecessor.refresh_from_db()
+    assert predecessor.status == 'Renewed' and predecessor.is_active is False
+    audit = _closure_audits(predecessor).get()
+    assert audit.changes['status'] == {'old': 'Expired', 'new': 'Renewed'}
+
+
+def test_expired_predecessor_of_another_company_is_untouched():
+    predecessor, successor = _pair(predecessor_status='Expired', successor_company=_company('Other expired company'))
+    assert _rest_patch(successor, {'status': 'Active'}).status_code == 200
+    predecessor.refresh_from_db()
+    assert predecessor.status == 'Expired'

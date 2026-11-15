@@ -166,14 +166,39 @@ def _manager_count(manager):
         return 0
 
 
+ENDED_TERM_STATUSES = ('Renewed', 'Cancelled', 'Expired')
+
+
+def _uses_term_zones(contract):
+    return getattr(contract, 'status', None) in ENDED_TERM_STATUSES and hasattr(contract, 'get_term_zones')
+
+
+def _document_zones(contract):
+    """Zones a document shows when the contract has no service-location rows.
+
+    A term that has ended (Renewed, Cancelled, Expired) shows the zones linked
+    during its term (Contract.get_term_zones), so a Renewed term whose links were
+    handed over, or a Cancelled term, still lists what it covered. A live
+    contract shows the links open today, as before."""
+    if _uses_term_zones(contract):
+        return contract.get_term_zones()
+    getter = getattr(contract, 'get_active_zones', None)
+    return getter() if getter else Zone.objects.none()
+
+
+def _document_zone_count(contract):
+    if _uses_term_zones(contract):
+        return int(contract.get_term_zone_count())
+    getter = getattr(contract, 'get_zone_count', None)
+    return int(getter()) if getter else 0
+
+
 def _contract_zone_count(contract):
     service_locations = getattr(contract, 'service_locations', None)
     service_location_count = _manager_count(service_locations)
     if service_location_count:
         return service_location_count
-    if hasattr(contract, 'get_zone_count'):
-        return contract.get_zone_count()
-    return 0
+    return _document_zone_count(contract)
 
 
 def _contract_line_items_cover_full_term(contract, duration_months, line_items=None):
@@ -1792,8 +1817,7 @@ class ContractViewSet(BaseModelViewSet):
         if locations:
             sources = locations
         else:
-            get_active_zones = getattr(contract, 'get_active_zones', None)
-            sources = list(get_active_zones()) if get_active_zones else []
+            sources = list(_document_zones(contract))
 
         labels = []
         for source in sources:
@@ -1821,8 +1845,7 @@ class ContractViewSet(BaseModelViewSet):
                 len([name for name in str(getattr(loc, 'location_name', '')).splitlines() if name.strip()]) or 1
                 for loc in locations
             )
-        get_zone_count = getattr(contract, 'get_zone_count', None)
-        return int(get_zone_count()) if get_zone_count else 0
+        return _document_zone_count(contract)
 
     @staticmethod
     def _hilton_attachment_b(contract):
@@ -2101,9 +2124,9 @@ class ContractViewSet(BaseModelViewSet):
             venue_names = ', '.join([loc.location_name for loc in service_locs])
             zone_count_str = str(self._template_zone_count(contract))
         else:
-            zones = contract.get_active_zones()
+            zones = _document_zones(contract)
             venue_names = ', '.join([z.name for z in zones]) if zones.exists() else ''
-            zone_count_str = str(contract.get_zone_count())
+            zone_count_str = str(_document_zone_count(contract))
 
         service_labels = self._template_service_labels(contract)
 
@@ -3154,7 +3177,7 @@ class ContractViewSet(BaseModelViewSet):
                     'error': 'The blank Hilton witness layout cannot replace stored customer signatory authority.',
                     'code': 'HILTON_WITNESS_LAYOUT_SIGNER_DATA_CONFLICT',
                 }, status=409)
-            zones = contract.get_active_zones()
+            zones = _document_zones(contract)
             has_locations = contract.service_locations.exists() or zones.exists()
             escape_template_values = self._is_hilton_full_template(contract)
 
@@ -3384,7 +3407,7 @@ and<br/><br/>
             clause_num += 1
 
             # Clause 2: Locations for provision of services (Zones)
-            zones = contract.get_active_zones()
+            zones = _document_zones(contract)
             zone_table = self._build_zones_table(contract, zones)
             if zone_table:
                 heading_para = Paragraph(
@@ -3549,7 +3572,7 @@ and<br/><br/>
                 ))
             else:
                 # Legacy: flat value with zone count (prefer service_locations over ContractZones)
-                zone_count = contract.service_locations.count() or contract.get_zone_count()
+                zone_count = contract.service_locations.count() or _document_zone_count(contract)
                 if tax_rate > 0:
                     cost_text = f"<b>{clause_num}.</b> Total cost{per_year_label}: {contract.currency} {total_before_tax:,.2f} for {zone_count} zone{'s' if zone_count != 1 else ''} + {tax_rate:.0f}% VAT ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}{per_year_label}</b>"
                 else:
@@ -4412,7 +4435,7 @@ and<br/><br/>
 
         # Zones Covered — prefer service_locations, fall back to legacy zones
         service_locs = contract.service_locations.all()
-        zones = contract.get_active_zones()
+        zones = _document_zones(contract)
         if service_locs.exists() or zones.exists():
             elements.append(Paragraph("ZONES COVERED BY THIS AGREEMENT", heading_style))
 
@@ -4761,7 +4784,7 @@ and<br/><br/>
 
         # Get zones and list them — prefer service_locations
         service_locs = contract.service_locations.all()
-        zones = contract.get_active_zones()
+        zones = _document_zones(contract)
         if service_locs.exists():
             zone_items = []
             for idx, loc in enumerate(service_locs, 1):
@@ -5299,7 +5322,7 @@ and<br/><br/>
 
         # Get zones and list them — prefer service_locations
         service_locs = contract.service_locations.all()
-        zones = contract.get_active_zones()
+        zones = _document_zones(contract)
         if service_locs.exists():
             zone_items = []
             for idx, loc in enumerate(service_locs, 1):

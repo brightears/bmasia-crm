@@ -210,7 +210,7 @@ class ZoneSerializer(serializers.ModelSerializer):
 
     def get_current_contract(self, obj):
         """Get the currently active contract for this zone"""
-        active_link = obj.zone_contracts.filter(is_active=True).select_related('contract').first()
+        active_link = obj.get_current_link()
         if active_link:
             return {
                 'id': str(active_link.contract.id),
@@ -237,6 +237,7 @@ class CompanySerializer(serializers.ModelSerializer):
     subscription_summary = serializers.SerializerMethodField()
     primary_contact = serializers.SerializerMethodField()
     total_contract_value = serializers.ReadOnlyField()
+    active_contract_value_by_currency = serializers.ReadOnlyField()
     full_address = serializers.ReadOnlyField()
     avg_zones_per_location = serializers.ReadOnlyField()
     opportunities_count = serializers.SerializerMethodField()
@@ -257,7 +258,8 @@ class CompanySerializer(serializers.ModelSerializer):
             'soundtrack_offline_alerts_enabled', 'notes', 'it_notes',
             'address_line1', 'address_line2', 'city', 'state', 'postal_code',
             'phone', 'email', 'tax_id', 'branch',
-            'billing_entity', 'full_address', 'total_contract_value', 'contacts', 'zones', 'zones_summary',
+            'billing_entity', 'full_address', 'total_contract_value', 'active_contract_value_by_currency',
+            'contacts', 'zones', 'zones_summary',
             'subscription_summary', 'primary_contact', 'opportunities_count',
             'active_contracts_count',
             # Corporate structure
@@ -1021,7 +1023,7 @@ class ContractSerializer(serializers.ModelSerializer):
 
     def _close_renewed_predecessor(self, contract):
         """Lifecycle choke point for REST and MCP writes: a renewal going Active
-        closes its Active predecessor (same transaction, audited)."""
+        closes its Active or Expired predecessor (same transaction, audited)."""
         from crm_app.services.contract_lifecycle import close_renewed_predecessor
         request = self.context.get('request')
         user = getattr(request, 'user', None)

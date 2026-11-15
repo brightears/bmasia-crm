@@ -284,8 +284,9 @@ class ContractQuery(ModelQueryToolset):
         "or from Active (terminated after going live). "
         "service_type = product (Soundtrack / Beat Breeze). lifecycle_type: new/renewal/addon/churn. "
         "renewed_from links a renewal to the contract it replaced (renewal lineage). "
-        "When a renewal becomes Active, its Active predecessor on the same company is set to "
-        "Renewed automatically (audited); a predecessor in any other status is left alone. "
+        "When a renewal becomes Active, its Active or Expired predecessor on the same company is set to "
+        "Renewed automatically (audited) and hands its zone links over to the renewal for the zones the "
+        "renewal holds; a predecessor in any other status is left alone. "
         "signed_date is the customer's signature date: set it only from evidence, never guess. "
         "For a month's renewals use the renewal_book tool. $lookup with 'company' to join company details."
     )

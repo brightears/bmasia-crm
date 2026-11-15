@@ -164,7 +164,8 @@ def test_cancel_execute_releases_zones_and_journals_them(tmp_path, status):
     assert '[APPLIED] D mark_cancelled' in out
     _reload(c, zone, link)
     assert c.status == 'Cancelled' and c.is_active is False
-    assert link.is_active is False and link.end_date == timezone.now().date()
+    # the link ends on the earlier of today and the contract's end date
+    assert link.is_active is False and link.end_date == min(timezone.now().date(), c.end_date)
     assert zone.status == 'cancelled'
     audit = _audits(c.pk).get()
     assert audit.changes['status'] == {'old': status, 'new': 'Cancelled'}
@@ -646,16 +647,23 @@ def test_create_copies_the_old_contracts_active_zone_links(tmp_path):
     links = list(ContractZone.objects.filter(contract=new))
     assert sorted(l.zone_id for l in links) == sorted([z1.pk, z2.pk])
     assert all(l.start_date == date(2026, 3, 1) and l.is_active and l.end_date is None for l in links)
-    for link, active, end in ((l1, True, None), (l2, True, None), (l3, False, date(2025, 9, 1))):
+    # the old links to the copied zones are handed over: closed the day before the new term
+    for link, active, end in ((l1, False, date(2026, 2, 28)), (l2, False, date(2026, 2, 28)),
+                              (l3, False, date(2025, 9, 1))):
         link.refresh_from_db()
-        assert (link.is_active, link.end_date, link.contract_id) == (active, end, old.pk)  # old links untouched
+        assert (link.is_active, link.end_date, link.contract_id) == (active, end, old.pk)
     _reload(z1, z2)
     assert (z1.status, z2.status) == ('online', 'offline')
     audit = _audits(new.pk, 'CREATE').get()
     assert sorted(audit.additional_data['zone_links_copied']) == sorted([str(z1.pk), str(z2.pk)])
     assert audit.changes['zone_links'] == {'old': 0, 'new': 2}
-    created = json.loads(open(journal_path).read())['groups'][0]['ops'][0]['created']
+    op = json.loads(open(journal_path).read())['groups'][0]['ops'][0]
+    created = op['created']
     assert sorted(z['id'] for z in created['zone_links']) == sorted(str(l.pk) for l in links)
+    assert sorted(r['id'] for r in op['old_zone_links_closed']) == sorted([str(l1.pk), str(l2.pk)])
+    assert all(r['before'] == {'end_date': None, 'is_active': True} and
+               r['after'] == {'end_date': '2026-02-28', 'is_active': False} for r in op['old_zone_links_closed'])
+    assert sorted(audit.additional_data['old_zone_links_closed']) == sorted([str(l1.pk), str(l2.pk)])
 
 
 def test_revert_removes_the_copied_zone_links_only(tmp_path):
