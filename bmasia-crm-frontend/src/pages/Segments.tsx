@@ -39,6 +39,7 @@ import { useNavigate } from 'react-router-dom';
 import { CustomerSegment } from '../types';
 import ApiService from '../services/api';
 import EnrollSegmentDialog from '../components/EnrollSegmentDialog';
+import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 const Segments: React.FC = () => {
   const navigate = useNavigate();
@@ -80,13 +81,6 @@ const Segments: React.FC = () => {
   const handleMenuClose = () => {
     setAnchorEl(null);
     setSelectedSegment(null);
-  };
-
-  const handleViewMembers = () => {
-    if (selectedSegment) {
-      navigate(`/segments/${selectedSegment.id}/members`);
-    }
-    handleMenuClose();
   };
 
   const handleEdit = () => {
@@ -189,7 +183,7 @@ const Segments: React.FC = () => {
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'Never';
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return formatDisplayDate(date);
   };
 
   if (loading) {
@@ -331,10 +325,7 @@ const Segments: React.FC = () => {
         open={Boolean(anchorEl)}
         onClose={handleMenuClose}
       >
-        <MenuItem onClick={handleViewMembers}>
-          <Group fontSize="small" sx={{ mr: 1 }} />
-          View Members
-        </MenuItem>
+        {/* "View Members" removed: it linked to /segments/:id/members, a page that has never existed. */}
         <MenuItem onClick={handleEdit}>
           <Edit fontSize="small" sx={{ mr: 1 }} />
           Edit

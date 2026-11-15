@@ -12,6 +12,27 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://bmasia-crm.onrend
 console.log('Using API_BASE_URL:', API_BASE_URL);
 
 /**
+ * A failed token refresh. `sessionRejected` is true only when the server refused the refresh
+ * token (or there is none): then the saved session is useless and is cleared. Network errors,
+ * timeouts, 5xx and malformed answers keep the saved session.
+ */
+const refreshFailure = (message: string, sessionRejected: boolean): Error & { sessionRejected: boolean } =>
+  Object.assign(new Error(message), { sessionRejected });
+
+const isRejection = (error: any): boolean => {
+  const status = error?.response?.status;
+  if (status === 401) return true;
+  if (status === 400 || status === 403) {
+    const data = error.response?.data || {};
+    return data.code === 'token_not_valid' || /token/i.test(String(data.detail || data.error || ''));
+  }
+  return false;
+};
+
+export const isSessionRejected = (error: unknown): boolean =>
+  Boolean(error && (error as any).sessionRejected === true);
+
+/**
  * JWT Token Management Service
  * Handles secure storage and management of JWT tokens
  */
@@ -29,6 +50,31 @@ class AuthService {
     withCredentials: false, // Ensure we don't send credentials by default
     timeout: 10000, // 10 second timeout
   });
+
+  // Set once a refresh has failed during the session, so several failing requests
+  // only clear the session and redirect once.
+  private sessionExpiredHandled = false;
+
+  /**
+   * Called once when the session can no longer be refreshed during use. The saved session
+   * has already been cleared; reloading the current page sends the user to sign-in.
+   * Replaceable in tests.
+   */
+  redirectAfterExpiredSession = (): boolean => {
+    if (window.location.pathname !== '/login') {
+      window.location.reload();
+      return true;
+    }
+    return false;
+  };
+
+  private handleSessionExpired(): void {
+    if (this.sessionExpiredHandled) return;
+    // Only remember the reload when one was really started (not on the sign-in page).
+    if (this.redirectAfterExpiredSession()) {
+      this.sessionExpiredHandled = true;
+    }
+  }
 
   constructor() {
     console.log('=== AuthService Constructor ===');
@@ -68,8 +114,11 @@ class AuthService {
         console.error('API request failed:', error.response?.status ?? 'no response', error.config?.url?.split('?')[0]);
 
         const originalRequest = error.config;
+        // A failing refresh call must never start another refresh: with an expired or
+        // revoked refresh token that looped forever.
+        const isRefreshCall = String(originalRequest?.url || '').includes('/auth/refresh/');
 
-        if (error.response?.status === 401 && !originalRequest._retry) {
+        if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !isRefreshCall) {
           console.log('Attempting token refresh due to 401 error');
           originalRequest._retry = true;
 
@@ -82,9 +131,14 @@ class AuthService {
               return this.api(originalRequest);
             }
           } catch (refreshError) {
-            console.error('Token refresh failed, redirecting to login');
-            this.clearAuthData();
-            window.location.href = '/login';
+            if (isSessionRejected(refreshError)) {
+              console.error('Token refresh rejected, redirecting to login');
+              this.clearAuthData();
+              this.handleSessionExpired();
+            } else {
+              // Network trouble, timeout or server error: keep the saved session, fail this call.
+              console.error('Token refresh failed (session kept)');
+            }
             return Promise.reject(refreshError);
           }
         }
@@ -112,6 +166,9 @@ class AuthService {
       if (credentials.remember_me) {
         localStorage.setItem(this.REMEMBER_ME_KEY, 'true');
       }
+
+      // A new session: a later expiry may reload into sign-in again.
+      this.sessionExpiredHandled = false;
 
       return response.data;
     } catch (error: any) {
@@ -161,7 +218,7 @@ class AuthService {
   async refreshToken(): Promise<string> {
     const refreshToken = this.getRefreshToken();
     if (!refreshToken) {
-      throw new Error('No refresh token available');
+      throw refreshFailure('No refresh token available', true);
     }
 
     try {
@@ -169,13 +226,18 @@ class AuthService {
         refresh: refreshToken
       });
 
-      const { access } = response.data;
+      const access = (response.data as any)?.access;
+      if (typeof access !== 'string' || !access) {
+        // A 200 without a token (e.g. a proxy's HTML page): a failed refresh, not a rejection.
+        throw refreshFailure('Token refresh returned no access token', false);
+      }
       const storage = this.isRememberMeEnabled() ? localStorage : sessionStorage;
       storage.setItem(this.ACCESS_TOKEN_KEY, access);
 
       return access;
     } catch (error: any) {
-      throw new Error(error.response?.data?.detail || 'Token refresh failed');
+      if (error && typeof error.sessionRejected === 'boolean') throw error;
+      throw refreshFailure(error.response?.data?.detail || 'Token refresh failed', isRejection(error));
     }
   }
 
@@ -319,8 +381,11 @@ class AuthService {
           this.scheduleTokenRefresh(); // Schedule next refresh
         } catch (error) {
           console.error('Scheduled token refresh failed:', error);
-          this.clearAuthData();
-          window.location.href = '/login';
+          if (isSessionRejected(error)) {
+            this.clearAuthData();
+            this.handleSessionExpired();
+          }
+          // Otherwise keep the session: the next call that needs a fresh token tries again.
         }
       }, timeUntilRefresh);
     }
