@@ -210,7 +210,7 @@ class ZoneSerializer(serializers.ModelSerializer):
 
     def get_current_contract(self, obj):
         """Get the currently active contract for this zone"""
-        active_link = obj.zone_contracts.filter(is_active=True).select_related('contract').first()
+        active_link = obj.get_current_link()
         if active_link:
             return {
                 'id': str(active_link.contract.id),
@@ -237,6 +237,7 @@ class CompanySerializer(serializers.ModelSerializer):
     subscription_summary = serializers.SerializerMethodField()
     primary_contact = serializers.SerializerMethodField()
     total_contract_value = serializers.ReadOnlyField()
+    active_contract_value_by_currency = serializers.ReadOnlyField()
     full_address = serializers.ReadOnlyField()
     avg_zones_per_location = serializers.ReadOnlyField()
     opportunities_count = serializers.SerializerMethodField()
@@ -257,7 +258,8 @@ class CompanySerializer(serializers.ModelSerializer):
             'soundtrack_offline_alerts_enabled', 'notes', 'it_notes',
             'address_line1', 'address_line2', 'city', 'state', 'postal_code',
             'phone', 'email', 'tax_id', 'branch',
-            'billing_entity', 'full_address', 'total_contract_value', 'contacts', 'zones', 'zones_summary',
+            'billing_entity', 'full_address', 'total_contract_value', 'active_contract_value_by_currency',
+            'contacts', 'zones', 'zones_summary',
             'subscription_summary', 'primary_contact', 'opportunities_count',
             'active_contracts_count',
             # Corporate structure
@@ -1021,7 +1023,7 @@ class ContractSerializer(serializers.ModelSerializer):
 
     def _close_renewed_predecessor(self, contract):
         """Lifecycle choke point for REST and MCP writes: a renewal going Active
-        closes its Active predecessor (same transaction, audited)."""
+        closes its Active or Expired predecessor (same transaction, audited)."""
         from crm_app.services.contract_lifecycle import close_renewed_predecessor
         request = self.context.get('request')
         user = getattr(request, 'user', None)
@@ -1347,6 +1349,18 @@ class DashboardStatsSerializer(serializers.Serializer):
     churned_revenue = serializers.DecimalField(max_digits=12, decimal_places=2, default=0)
     churned_count = serializers.IntegerField(default=0)
     net_revenue = serializers.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    # The money totals above, per currency: [{'currency': 'THB', 'total': '108000.00'}, ...].
+    # The fields above add every currency together and are kept as they are for existing readers.
+    contracts_value_by_currency = serializers.ListField(default=list)
+    monthly_revenue_by_currency = serializers.ListField(default=list)
+    previous_month_revenue_by_currency = serializers.ListField(default=list)
+    total_overdue_amount_by_currency = serializers.ListField(default=list)
+    pending_renewal_value_by_currency = serializers.ListField(default=list)
+    new_revenue_by_currency = serializers.ListField(default=list)
+    renewal_revenue_by_currency = serializers.ListField(default=list)
+    churned_revenue_by_currency = serializers.ListField(default=list)
+    net_revenue_by_currency = serializers.ListField(default=list)
 
 
 class BulkOperationSerializer(serializers.Serializer):

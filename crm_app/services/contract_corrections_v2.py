@@ -13,7 +13,9 @@ OPERATIONS (one per entry, ``op``)
                      change takes, so the Contract post_save handler
                      ``handle_contract_termination`` runs. That handler closes
                      every active ContractZone link of the contract (end_date
-                     today, is_active False) and sets each linked Zone's status
+                     the earlier of today and the contract's end_date, never
+                     before the link's start; is_active False) and sets each
+                     linked Zone's status
                      to 'cancelled' (Zone.save(update_fields=['status'])). It
                      sends nothing and calls no external service. The command
                      predicts that set before writing, refuses if a zone is
@@ -34,6 +36,26 @@ OPERATIONS (one per entry, ``op``)
                      Renewed: through the lifecycle rule close_renewed_predecessor
                      when it is Active, or with the same write when it is
                      Expired. See CREATE below.
+  hand_over_zone_links
+                     Link-only repair, no contract field changes. For a Renewed
+                     contract (``contract_id``) and its Active renewal
+                     (``successor_id``: renewed_from = contract_id, same
+                     company), closes the contract's active links to every zone
+                     the renewal actively holds, exactly as the lifecycle rule
+                     does when a renewal goes Active (end_date = the earlier
+                     of the day before the renewal starts and the contract's
+                     own end date, never before the link's start). With
+                     ``copy_missing_links: true`` the contract's other active
+                     zones are first linked to the renewal (start_date = the
+                     renewal's start), so every zone moves over; refused when
+                     such a zone is actively linked to another live contract
+                     (zone_shared_with_live_contract). Zones not moved stay open
+                     and are reported. Zone status is not touched.
+  redate_zone_link_end
+                     Link-only repair for a Cancelled contract: every closed
+                     link whose end_date equals ``closed_on`` and lies after the
+                     contract's end_date gets end_date = the contract's end_date
+                     (never before the link's start). Nothing else changes.
 
 GROUPS
   Entries sharing a ``group`` are applied together or not at all, in one
@@ -70,7 +92,11 @@ REFUSALS (named reasons; nothing in the group is written)
   missing_twin_company, service_location_pricing_mismatch,
   (new_term_not_later: the new term starts before the old one; the same start
   is allowed, for a placeholder whose real term is a longer one),
-  number_reservation_failed, rule_did_not_close_old_term(<outcome>).
+  number_reservation_failed, rule_did_not_close_old_term(<outcome>),
+  no_end_date (redate_zone_link_end on a contract without an end date),
+  renewal_has_ended_link_to_zone (hand_over_zone_links with copy_missing_links:
+  the renewal already has an ended link to the zone starting on its start date,
+  so a new link cannot be stored; a human decides which link is right).
 
 CREATE (create_successor)
   The new contract takes:
@@ -90,8 +116,12 @@ CREATE (create_successor)
   Zone links: every zone the old contract actively covers gets a new
   ContractZone link on the new contract (start_date = the new term's start,
   is_active True), as ContractViewSet.duplicate_for_renewal does. The old
-  contract's links are left as they are. A zone that is also linked to another
-  live contract is not a refusal here (nothing is released).
+  contract's links to those zones are then handed over: closed with end_date =
+  the earlier of the day before the new term starts and the old term's end date
+  (never before the link's start), by the
+  lifecycle rule for an Active old contract and by the same helper for an
+  Expired one, and journalled. A zone that is also linked to another live
+  contract is not a refusal here (the zone stays covered by the new term).
   Never copied: contacts, signatories, custom terms, template selections and
   their custom text, payment terms/schedule, discount, quote, opportunity,
   line items, service items.
@@ -117,6 +147,12 @@ REVERT
                      links of an already-Cancelled contract) are recorded in
                      the journal and do not block the revert.
     mark_renewed / set_renewed_from   restore the journalled fields.
+    hand_over_zone_links   reopens the closed links and deletes the links it
+                     created, only while every one of them still holds the
+                     journal's after values and no other link has become active
+                     on those zones; otherwise changed_since_apply.
+    redate_zone_link_end   restores the journalled end dates while the links
+                     still hold the after values.
     create_successor DELETES the created contract (and its service-location
                      rows) and restores the old contract, but only while the
                      created contract is untouched: same updated_at, same
@@ -124,7 +160,14 @@ REVERT
                      and no other row of any kind pointing at it (invoices,
                      documents, other zone links, renewals, tasks, emails,
                      ...). Deleting it removes the copied links with it; the
-                     old contract's links were never changed. A touched contract is never deleted
+                     old contract's handed-over links are reopened (journals
+                     written before the hand-over existed have none). If one of
+                     those links changed since, or its zone gained a new active
+                     link, the group is changed_since_apply. For a journal
+                     written before the hand-over existed, the group is
+                     zone_links_handed_over_since_apply when a later repair
+                     (hand_over_zone_links) closed the old term's links to the
+                     copied zones: revert that repair journal first. A touched contract is never deleted
                      and never auto-cancelled: the group is skipped as
                      created_contract_touched for a human to decide. The final
                      number is not handed back (a gap in the sequence).
@@ -144,11 +187,16 @@ from django.utils import timezone
 from crm_app.models import (
     AuditLog, Company, Contract, ContractServiceLocation, ContractZone, Zone,
 )
-from crm_app.services.contract_lifecycle import CLOSED, close_renewed_predecessor
+from crm_app.services.contract_lifecycle import (
+    CLOSED, close_renewed_predecessor, hand_over_zone_links, handed_over_links_state,
+    audit_rows, handover_end_date, reopen_handed_over_links,
+)
 
 FILE_FORMAT_V2 = 'contract-corrections/v2'
 JOURNAL_FORMAT_V2 = 'contract-corrections-journal/v2'
-OPS = ('mark_cancelled', 'mark_renewed', 'set_renewed_from', 'create_successor')
+OPS = ('mark_cancelled', 'mark_renewed', 'set_renewed_from', 'create_successor',
+       'hand_over_zone_links', 'redate_zone_link_end')
+LINK_OPS = ('hand_over_zone_links', 'redate_zone_link_end')
 CANCELLABLE = {'Draft', 'Sent', 'Active'}
 CREATE_FROM = {'Active', 'Expired'}
 STATUSES = {value for value, _ in Contract.CONTRACT_STATUS_CHOICES}
@@ -162,6 +210,9 @@ _OP_KEYS = {
     'mark_renewed': ({'contract_id', 'expected', 'successor_id', 'successor_expected'}, set()),
     'set_renewed_from': ({'contract_id', 'expected', 'renewed_from_id', 'renewed_from_expected'}, set()),
     'create_successor': ({'old_contract_id', 'old_expected', 'new'}, {'twin_company_ids'}),
+    'hand_over_zone_links': ({'contract_id', 'expected', 'successor_id', 'successor_expected'},
+                             {'copy_missing_links'}),
+    'redate_zone_link_end': ({'contract_id', 'expected', 'closed_on'}, set()),
 }
 _EXPECTED_KEYS = {'status', 'start_date', 'end_date', 'updated_at'}
 _NEW_REQUIRED = {'status', 'start_date', 'end_date', 'value', 'currency', 'service_locations', 'notes'}
@@ -223,6 +274,8 @@ class EntryV2:
     renewed_from_expected: Optional[Expected] = None
     twin_company_ids: list = field(default_factory=list)
     new: Optional[NewTerm] = None
+    copy_missing_links: bool = False
+    closed_on: Optional[date] = None
 
     @property
     def referenced_ids(self):
@@ -414,9 +467,15 @@ def parse_v2(data):
             contract_id = _uuid(raw['contract_id'], f'{where} contract_id')
             entry = EntryV2(**common, contract_id=contract_id,
                             expected=_expected(raw['expected'], f'{where} expected'))
-            if op == 'mark_renewed':
+            if op in ('mark_renewed', 'hand_over_zone_links'):
                 entry.successor_id = _uuid(raw['successor_id'], f'{where} successor_id')
                 entry.successor_expected = _expected(raw['successor_expected'], f'{where} successor_expected')
+                copy = raw.get('copy_missing_links', False)
+                if not isinstance(copy, bool):
+                    raise _malformed(f'{where} copy_missing_links: want true or false')
+                entry.copy_missing_links = copy
+            elif op == 'redate_zone_link_end':
+                entry.closed_on = _date(raw['closed_on'], f'{where} closed_on')
             elif op == 'set_renewed_from':
                 entry.renewed_from_id = _uuid(raw['renewed_from_id'], f'{where} renewed_from_id')
                 entry.renewed_from_expected = _expected(raw['renewed_from_expected'], f'{where} renewed_from_expected')
@@ -650,6 +709,10 @@ class V2Runner:
                 return 'transition_not_allowed', rows()
             if e.op == 'create_successor' and e.expected.status not in CREATE_FROM:
                 return 'transition_not_allowed', rows()
+            if e.op == 'hand_over_zone_links' and e.expected.status != 'Renewed':
+                return 'transition_not_allowed', rows()
+            if e.op == 'redate_zone_link_end' and e.expected.status != 'Cancelled':
+                return 'transition_not_allowed', rows()
         try:
             with transaction.atomic():
                 locked = {str(c.pk): c for c in
@@ -823,7 +886,60 @@ class V2Runner:
             f'{c.status} -> Renewed ({closure}); creates Active {new.start.isoformat()}..{new.end.isoformat()} '
             f'with {len(new.locations)} service location(s) '
             f'({", ".join(f"{k} {v}" for k, v in sorted(platforms.items()))})'
-            f'{"; copies " + str(links) + " active zone link(s) to the new term" if links else ""}')
+            f'{"; copies " + str(links) + " active zone link(s) to the new term" if links else ""}'
+            f'{"; hands them over (old links end " + handover_end_date(None, new.start, c.end_date).isoformat() + ")" if links else ""}')
+        return plan
+
+    def _check_hand_over_zone_links(self, e, c, locked, members):
+        _check_expected(c, e.expected, lambda x: False)
+        s = locked.get(e.successor_id)
+        if s is None:
+            raise Refused('missing_successor')
+        try:
+            _check_expected(s, e.successor_expected, lambda x: False)
+        except Refused:
+            raise Refused('successor_changed')
+        if s.company_id != c.company_id:
+            raise Refused('successor_other_company')
+        if str(s.renewed_from_id) != e.contract_id:
+            raise Refused('successor_renews_other_contract')
+        if s.status != 'Active':
+            raise Refused('successor_not_active')
+        links = list(ContractZone.objects.select_for_update().filter(contract=c, is_active=True).order_by('pk'))
+        held = set(ContractZone.objects.filter(contract=s, is_active=True).values_list('zone_id', flat=True))
+        to_close = [l for l in links if l.zone_id in held]
+        missing = sorted({l.zone_id for l in links if l.zone_id not in held}, key=str)
+        to_copy = missing if e.copy_missing_links else []
+        if to_copy and ContractZone.objects.filter(contract=s, zone_id__in=to_copy, start_date=s.start_date).exists():
+            # The renewal already has an ended link to such a zone starting on its own start date;
+            # a second link with the same start cannot be stored. A human decides which link is right.
+            raise Refused('renewal_has_ended_link_to_zone')
+        if to_copy and ContractZone.objects.filter(zone_id__in=to_copy, is_active=True) \
+                .exclude(contract_id__in=[c.pk, s.pk]).filter(contract__status__in=('Active', 'Sent', 'Draft')).exists():
+            raise Refused('zone_shared_with_live_contract')
+        plan = {'state': 'expected' if (to_close or to_copy) else 'target', 'detail': ''}
+        if plan['state'] == 'expected':
+            end = handover_end_date(None, s.start_date, c.end_date).isoformat()
+            kept = len(missing) - len(to_copy)
+            plan['detail'] = (
+                f'renewal {s.pk} {s.contract_number}: '
+                f'{"links " + str(len(to_copy)) + " zone(s) to the renewal (start " + s.start_date.isoformat() + "); " if to_copy else ""}'
+                f'closes {len(to_close) + len(to_copy)} link(s) of this contract (end {end})'
+                f'{"; " + str(kept) + " zone(s) not held by the renewal stay open" if kept else ""}')
+        return plan
+
+    def _check_redate_zone_link_end(self, e, c, locked, members):
+        _check_expected(c, e.expected, lambda x: False)
+        if c.end_date is None:
+            raise Refused('no_end_date')
+        links = list(ContractZone.objects.select_for_update().filter(
+            contract=c, is_active=False, end_date=e.closed_on, end_date__gt=c.end_date).order_by('pk'))
+        moves = [(l, max(c.end_date, l.start_date)) for l in links]
+        moves = [(l, d) for l, d in moves if d != l.end_date]
+        plan = {'state': 'expected' if moves else 'target', 'detail': '', 'moves': moves}
+        if moves:
+            plan['detail'] = (f'{len(moves)} closed link(s) end {e.closed_on.isoformat()} -> '
+                              f'{", ".join(sorted({d.isoformat() for _, d in moves}))}')
         return plan
 
     @staticmethod
@@ -989,15 +1105,24 @@ class V2Runner:
             closure = close_renewed_predecessor(contract, user=self.cmd.actor, source=self.cmd.COMMAND_NAME)
             if not (closure.outcome == CLOSED and closure.predecessor_id == str(old.pk)):
                 raise Refused(f'rule_did_not_close_old_term({closure.outcome})')
+            handed_over = list(closure.zone_links_closed)
             row = AuditLog.objects.get(pk=closure.audit_log_id)
             row.additional_data = {**(row.additional_data or {}), **self._meta(group, e)}
             row.save(update_fields=['additional_data'])
             old.refresh_from_db()
             old_after = contract_state(old)
         else:
+            # The same hand-over the lifecycle rule performs for an Active predecessor.
+            rows_closed, kept = hand_over_zone_links(old, contract)
+            handed_over = list(rows_closed)
             _, old_after = self._close_as_renewed(
                 old, group, e, 'Correction: Expired -> Renewed (current term created)',
-                {'successor_id': str(contract.pk), 'successor_contract_number': contract.contract_number})
+                {'successor_id': str(contract.pk), 'successor_contract_number': contract.contract_number,
+                 'zone_links_closed': audit_rows(handed_over),
+                 'zones_not_taken_over': list(kept)})
+        new_zone_ids = list(ContractZone.objects.filter(contract=contract, is_active=True).values_list('zone_id', flat=True))
+        if ContractZone.objects.filter(contract=old, is_active=True, zone_id__in=new_zone_ids).exists():
+            raise Refused('unexpected_side_effect')  # the old term still holds a zone the new term covers
 
         contract.refresh_from_db()
         locations = list(contract.service_locations.order_by('sort_order', 'pk'))
@@ -1011,7 +1136,8 @@ class V2Runner:
             'service_locations': {'old': 0, 'new': len(locations)},
             'zone_links': {'old': 0, 'new': len(links)},
         }, group, e, {'action': 'Correction: current term created as renewal', 'renews_contract_id': str(old.pk),
-                      'zone_links_copied': [str(l.zone_id) for l in links]})
+                      'zone_links_copied': [str(l.zone_id) for l in links],
+                      'old_zone_links_closed': [r['id'] for r in handed_over]})
         return {
             'op': e.op, 'class': e.cls, 'evidence': e.evidence, 'contract_id': e.contract_id,
             'before': old_before, 'after': old_after,
@@ -1023,7 +1149,55 @@ class V2Runner:
                 'zone_links': [{'id': str(l.pk), 'zone_id': str(l.zone_id), 'start_date': _iso(l.start_date)}
                                for l in links],
             },
+            'old_zone_links_closed': handed_over,
         }
+
+    def _write_hand_over_zone_links(self, group, e, c, locked, plan):
+        s = locked[e.successor_id]
+        state = contract_state(c)
+        active_before = ContractZone.objects.filter(contract=c, is_active=True).count()
+        created = []
+        if e.copy_missing_links:
+            held = set(ContractZone.objects.filter(contract=s, is_active=True).values_list('zone_id', flat=True))
+            zone_ids = sorted({str(z) for z in ContractZone.objects.filter(contract=c, is_active=True)
+                               .values_list('zone_id', flat=True) if z not in held})
+            for zone_id in zone_ids:
+                created.append(ContractZone.objects.create(contract=s, zone_id=zone_id, start_date=s.start_date,
+                                                           is_active=True))
+        rows_closed, kept = hand_over_zone_links(c, s)
+        if not rows_closed:
+            raise Refused('unexpected_side_effect')
+        created_rows = [{'id': str(l.pk), 'zone_id': str(l.zone_id), 'start_date': _iso(l.start_date)} for l in created]
+        self._audit('UPDATE', c.pk, {'zone_links_active': {
+            'old': active_before, 'new': ContractZone.objects.filter(contract=c, is_active=True).count()}}, group, e, {
+            'action': f'Correction: zone links handed over to renewal {s.contract_number}',
+            'successor_id': str(s.pk), 'successor_contract_number': s.contract_number,
+            'zone_links_closed': audit_rows(rows_closed),
+            'zone_links_created_on_successor': created_rows,
+            'zones_not_taken_over': list(kept),
+        })
+        return {'op': e.op, 'class': e.cls, 'evidence': e.evidence, 'contract_id': e.contract_id,
+                'successor_id': e.successor_id, 'before': state, 'after': state,
+                'zone_links': list(rows_closed), 'links_created': created_rows, 'zones_not_taken_over': list(kept)}
+
+    def _write_redate_zone_link_end(self, group, e, c, locked, plan):
+        state = contract_state(c)
+        rows = []
+        for link, new_end in plan['moves']:
+            updated = ContractZone.objects.filter(pk=link.pk, is_active=False, end_date=link.end_date).update(
+                end_date=new_end, updated_at=timezone.now())
+            if updated != 1:
+                raise Refused('unexpected_side_effect')
+            rows.append({'id': str(link.pk), 'zone_id': str(link.zone_id),
+                         'before': {'end_date': _iso(link.end_date), 'is_active': False},
+                         'after': {'end_date': new_end.isoformat(), 'is_active': False}})
+        self._audit('UPDATE', c.pk, {}, group, e, {
+            'action': 'Correction: closed zone links re-dated to the contract end date',
+            'zone_links_redated': [{'id': r['id'], 'zone_id': r['zone_id'], 'old_end_date': r['before']['end_date'],
+                                    'new_end_date': r['after']['end_date']} for r in rows],
+        })
+        return {'op': e.op, 'class': e.cls, 'evidence': e.evidence, 'contract_id': e.contract_id,
+                'before': state, 'after': state, 'zone_links': rows}
 
     # ---- revert ------------------------------------------------------------
 
@@ -1076,9 +1250,40 @@ class V2Runner:
         if c is None:
             return 'changed'
         restorable = {k: v for k, v in op['before'].items() if k != 'updated_at'}
+        if op['op'] == 'hand_over_zone_links':
+            links = handed_over_links_state(op['zone_links'])
+            made = op.get('links_created', [])
+            present = {str(l.pk): (str(l.zone_id), _iso(l.start_date), l.is_active, l.end_date)
+                       for l in ContractZone.objects.filter(pk__in=[z['id'] for z in made])}
+            if links == 'after' and present == {z['id']: (z['zone_id'], z['start_date'], True, None) for z in made}:
+                return 'after'
+            if links == 'before' and not present:
+                return 'before'
+            return 'changed'
+        if op['op'] == 'redate_zone_link_end':
+            current = {str(l.pk): (_iso(l.end_date), l.is_active)
+                       for l in ContractZone.objects.filter(pk__in=[r['id'] for r in op['zone_links']])}
+            for side in ('after', 'before'):
+                if all(current.get(r['id']) == (r[side]['end_date'], r[side]['is_active']) for r in op['zone_links']):
+                    return side
+            return 'changed'
         if op['op'] == 'create_successor':
             created = op['created']
             exists = Contract.objects.filter(pk=created['contract_id']).first()
+            handed = handed_over_links_state(op.get('old_zone_links_closed', []))
+            if self._contract_matches(c, op['after']) and exists is not None and handed != 'after':
+                return 'changed'  # a handed-over link of the old term changed, or its zone was linked anew
+            if 'old_zone_links_closed' not in op and self._contract_matches(c, op['after']) and exists is not None:
+                # A journal written before the hand-over existed: the old term's links were left
+                # open then. If a later repair (hand_over_zone_links) closed them, deleting the
+                # created term would leave those zones with no active link at all.
+                copied = {z['zone_id'] for z in op['created'].get('zone_links', [])}
+                still_open = {str(z) for z in ContractZone.objects.filter(
+                    contract=c, zone_id__in=list(copied), is_active=True).values_list('zone_id', flat=True)}
+                if copied - still_open:
+                    return 'handed_over_since'
+            if exists is None and op.get('old_zone_links_closed') and handed != 'before':
+                return 'changed'
             if self._contract_matches(c, op['after']) and exists is not None:
                 if exists.updated_at != _instant(created['updated_at'], 'journal updated_at') \
                         or str(exists.renewed_from_id) != created['renewed_from'] or exists.status != created['status']:
@@ -1127,6 +1332,16 @@ class V2Runner:
                 locked = {str(c.pk): c for c in
                           Contract.objects.select_for_update().filter(pk__in=ids).order_by('pk')}
                 states = [self._op_state(op, locked) for op in ops]
+                if 'handed_over_since' in states:
+                    for op, state in zip(ops, states):
+                        if state == 'handed_over_since':
+                            batches = sorted({a.additional_data.get('batch_id') for a in AuditLog.objects.filter(
+                                model_name='Contract', record_id=op['contract_id'],
+                                additional_data__op='hand_over_zone_links') if a.additional_data.get('batch_id')})
+                            notes[op['contract_id']] = (
+                                "the old term's zone links were handed over to the new term after this run; "
+                                'revert the zone-link repair first (batch ' + (', '.join(batches) or 'unknown') + ')')
+                    return 'zone_links_handed_over_since_apply', notes
                 if all(s == 'before' for s in states):
                     return 'already_reverted', notes
                 if 'touched' in states:
@@ -1150,6 +1365,25 @@ class V2Runner:
 
     def _revert_op(self, group, cls, op, locked, reverted_batch):
         note = ''
+        if op['op'] in LINK_OPS:
+            if op['op'] == 'hand_over_zone_links':
+                made = [z['id'] for z in op.get('links_created', [])]
+                ContractZone.objects.filter(pk__in=made).delete()
+                reopen_handed_over_links(op['zone_links'])
+                note = f'{len(op["zone_links"])} zone link(s) reopened' + (
+                    f'; {len(made)} link(s) on the renewal removed' if made else '')
+            else:
+                for r in op['zone_links']:
+                    ContractZone.objects.filter(pk=r['id']).update(
+                        end_date=date.fromisoformat(r['before']['end_date']), updated_at=timezone.now())
+                note = f'{len(op["zone_links"])} zone link end date(s) restored'
+            AuditLog.objects.create(
+                user=self.cmd.actor, action='UPDATE', model_name='Contract', record_id=op['contract_id'],
+                changes={}, additional_data={
+                    **self._revert_meta(group, cls, op, reverted_batch, f'Correction reverted: {op["op"]}'),
+                    'zone_links': [r['id'] for r in op['zone_links']],
+                    'links_removed': [z['id'] for z in op.get('links_created', [])]})
+            return note
         if op['op'] == 'create_successor':
             created = Contract.objects.get(pk=op['created']['contract_id'])
             AuditLog.objects.create(
@@ -1160,7 +1394,10 @@ class V2Runner:
             )
             copied = len(op['created'].get('zone_links', []))
             created.delete()  # cascades to its service-location rows and its copied zone links
-            note = 'final number not reused' + (f'; {copied} copied zone link(s) removed' if copied else '')
+            handed = op.get('old_zone_links_closed', [])
+            reopen_handed_over_links(handed)
+            note = 'final number not reused' + (f'; {copied} copied zone link(s) removed' if copied else '') + (
+                f'; {len(handed)} old zone link(s) reopened' if handed else '')
         if op['op'] == 'mark_cancelled':
             for link in op['zone_links']:
                 ContractZone.objects.filter(pk=link['id']).update(
