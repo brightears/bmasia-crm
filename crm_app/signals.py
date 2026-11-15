@@ -29,7 +29,8 @@ def sync_soundtrack_zones_on_save(sender, instance, created, **kwargs):
 def handle_contract_termination(sender, instance, created, **kwargs):
     """
     When a contract is 'Cancelled', automatically:
-    1. Close all active ContractZone relationships (set end_date, is_active=False)
+    1. Close all active ContractZone relationships (end_date = the earlier of today
+       and the contract's end_date, is_active=False)
     2. Mark all zones as 'cancelled'
 
     Fix 2026-07-02: gate was 'Terminated', which is NOT a valid Contract status
@@ -45,14 +46,19 @@ def handle_contract_termination(sender, instance, created, **kwargs):
     if instance.status != 'Cancelled':
         return
 
-    today = timezone.now().date()
+    # A link ends on the earlier of today and the contract's end date: a term that
+    # ended months ago and is cancelled now did not cover its zones until today.
+    # Never before the link's own start.
+    end = timezone.now().date()
+    if instance.end_date and instance.end_date < end:
+        end = instance.end_date
 
     # Get all active ContractZone links for this contract
     active_links = instance.contract_zones.filter(is_active=True)
 
     for link in active_links:
         # Close the ContractZone relationship
-        link.end_date = today
+        link.end_date = max(end, link.start_date) if link.start_date else end
         link.is_active = False
         link.save(update_fields=['end_date', 'is_active'])
 
