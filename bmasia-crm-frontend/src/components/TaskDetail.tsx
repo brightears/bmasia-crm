@@ -142,7 +142,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
 
     const date = parseISO(dueDate);
     const distance = formatDistanceToNow(date, { addSuffix: true });
-    const formatted = format(date, 'MMM d, yyyy');
+    const formatted = format(date, 'd MMM yyyy');
 
     return `${formatted} (${distance})`;
   };
@@ -426,7 +426,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
                       </ListItemIcon>
                       <ListItemText
                         primary="Created"
-                        secondary={format(parseISO(task.created_at), 'MMM d, yyyy')}
+                        secondary={format(parseISO(task.created_at), 'd MMM yyyy')}
                       />
                     </ListItem>
 
@@ -437,7 +437,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
                         </ListItemIcon>
                         <ListItemText
                           primary="Completed"
-                          secondary={format(parseISO(task.completed_at), 'MMM d, yyyy')}
+                          secondary={format(parseISO(task.completed_at), 'd MMM yyyy')}
                         />
                       </ListItem>
                     )}
