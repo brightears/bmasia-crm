@@ -41,7 +41,7 @@ import ApiService from '../services/api';
 import { useThemeContext } from '../contexts/ThemeContext';
 import MobileBottomNav from './MobileBottomNav';
 import GlobalSearch from './GlobalSearch';
-import { buildNavGroups, findNavLocation, isActivePath, NavGroup } from './navigation';
+import { buildNavGroups, filterNavForRole, findNavLocation, isActivePath, NavGroup } from './navigation';
 import { layout } from '../theme';
 
 const drawerWidth = layout.sidebarWidth;
@@ -248,7 +248,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     }
   };
 
-  const navGroups = buildNavGroups(aiDraftsPendingCount);
+  // The menu shows what the user's role needs (display only; permissions are unchanged).
+  const navGroups = filterNavForRole(buildNavGroups(aiDraftsPendingCount), user?.role);
   const { group: currentGroup, item: currentItem } = findNavLocation(navGroups, location.pathname);
 
   // Make sure the group of the page being shown is open.
@@ -319,18 +320,16 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           sx={{ borderRadius: 1, display: 'flex', alignItems: 'center', gap: 1.25 }}
         >
           {collapsed ? (
-            <Box component="img" src="/bmasia-mark.png" alt="BMAsia" sx={{ height: 32, width: 32 }} />
+            <Box component="img" src="/brand/bmasia-symbol.svg" alt="BMAsia" sx={{ height: 32, width: 'auto', display: 'block' }} />
           ) : (
             <>
-              {darkMode ? (
-                // The grey wordmark is hard to read on dark backgrounds; use the mark plus white text.
-                <>
-                  <Box component="img" src="/bmasia-mark.png" alt="" sx={{ height: 28, width: 28 }} />
-                  <Typography sx={{ fontWeight: 600, fontSize: '1.0625rem', color: 'text.primary' }}>BMAsia</Typography>
-                </>
-              ) : (
-                <Box component="img" src="/bmasia-logo.png" alt="BMAsia" sx={{ height: 30, display: 'block' }} />
-              )}
+              {/* Full logo; on dark backgrounds the version with a white wordmark. */}
+              <Box
+                component="img"
+                src={darkMode ? '/brand/bmasia-logo-on-dark.svg' : '/brand/bmasia-logo.svg'}
+                alt="BMAsia"
+                sx={{ height: 30, display: 'block' }}
+              />
               <Box
                 component="span"
                 sx={{
@@ -409,9 +408,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </IconButton>
           <Box
             component="img"
-            src="/bmasia-mark.png"
+            src="/brand/bmasia-symbol.svg"
             alt=""
-            sx={{ display: { xs: 'block', md: 'none' }, height: 28, width: 28 }}
+            sx={{ display: { xs: 'block', md: 'none' }, height: 28, width: 'auto' }}
           />
 
           {/* Where am I */}

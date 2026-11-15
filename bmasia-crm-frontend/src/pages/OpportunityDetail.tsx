@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   Typography,
   Box,
@@ -25,13 +25,13 @@ import {
   DialogContent,
   DialogActions,
   GridLegacy as Grid,
+  Link,
 } from '@mui/material';
 import {
   ArrowBack,
   Edit,
   Delete,
   Person,
-  Business,
   Add,
   Pause,
   PlayArrow,
@@ -49,6 +49,9 @@ import ActivityTimeline from '../components/ActivityTimeline';
 import ActivityForm from '../components/ActivityForm';
 import { formatCurrency, getServiceLabel } from '../constants/entities';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { PageHeader, ProductChip } from '../components/ui';
+import { useListReturnPath } from '../hooks/listReturn';
+import { statusTone, status } from '../theme';
 
 const stageConfig = [
   { id: 'Contacted', label: 'Contacted', color: '#2196f3' },
@@ -61,6 +64,8 @@ const stageConfig = [
 const OpportunityDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  // The list view the user came from (search, filters, page), for the breadcrumb and after delete.
+  const listPath = useListReturnPath('/opportunities');
 
   const [opportunity, setOpportunity] = useState<Opportunity | null>(null);
   const [activities, setActivities] = useState<OpportunityActivity[]>([]);
@@ -141,7 +146,7 @@ const OpportunityDetail: React.FC = () => {
   const handleDelete = async () => {
     try {
       await ApiService.deleteOpportunity(id!);
-      navigate('/opportunities');
+      navigate(listPath);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to delete opportunity');
     }
@@ -157,9 +162,6 @@ const OpportunityDetail: React.FC = () => {
     return formatDisplayDate(dateString);
   };
 
-  const getStageColor = (stage: string) => {
-    return stageConfig.find(s => s.id === stage)?.color || '#757575';
-  };
 
   const getActiveStep = (stage: string) => {
     const idx = stageConfig.findIndex(s => s.id === stage);
@@ -178,7 +180,7 @@ const OpportunityDetail: React.FC = () => {
     return (
       <Box>
         <Alert severity="error">{error || 'Opportunity not found'}</Alert>
-        <Button startIcon={<ArrowBack />} onClick={() => navigate('/opportunities')} sx={{ mt: 2 }}>
+        <Button startIcon={<ArrowBack />} onClick={() => navigate(listPath)} sx={{ mt: 2 }}>
           Back to Opportunities
         </Button>
       </Box>
@@ -187,105 +189,68 @@ const OpportunityDetail: React.FC = () => {
 
   return (
     <Box>
-      {/* Header */}
-      <Box display="flex" alignItems="center" gap={2} mb={3} flexWrap="wrap">
-        <IconButton onClick={() => navigate('/opportunities')}>
-          <ArrowBack />
-        </IconButton>
-        <Box flex={1} minWidth={200}>
-          <Box display="flex" alignItems="center" gap={2} mb={0.5} flexWrap="wrap">
-            <Typography variant="h4" component="h1">
-              {opportunity.name}
-            </Typography>
-            <Chip
-              label={opportunity.stage}
-              sx={{
-                backgroundColor: getStageColor(opportunity.stage),
-                color: 'white',
-                fontWeight: 600,
-              }}
-            />
-            {opportunity.service_type && (
-              <Chip
-                label={getServiceLabel(opportunity.service_type)}
-                size="small"
-                variant="outlined"
-                sx={{ fontWeight: 500 }}
-              />
+      <PageHeader
+        breadcrumbs={[{ label: 'Opportunities', to: listPath }, { label: opportunity.name }]}
+        title={opportunity.name}
+        subtitle={
+          <Box component="span" sx={{ display: 'inline-flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'center' }}>
+            <Link component={RouterLink} to={`/companies/${opportunity.company}`} underline="hover" sx={{ fontWeight: 600 }}>
+              {opportunity.company_name}
+            </Link>
+            {opportunity.owner_name && (
+              <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                <Person sx={{ fontSize: 16 }} />
+                {opportunity.owner_name}
+              </Box>
             )}
           </Box>
-          <Box display="flex" alignItems="center" gap={3} flexWrap="wrap">
-            <Box
-              display="flex"
-              alignItems="center"
-              gap={0.5}
-              sx={{ cursor: 'pointer' }}
-              onClick={() => navigate(`/companies/${opportunity.company}`)}
-            >
-              <Business fontSize="small" color="action" />
-              <Typography variant="body2" color="primary">
-                {opportunity.company_name}
-              </Typography>
-            </Box>
-            <Box display="flex" alignItems="center" gap={0.5}>
-              <Person fontSize="small" color="action" />
-              <Typography variant="body2" color="text.secondary">
-                {opportunity.owner_name}
-              </Typography>
-            </Box>
-          </Box>
-        </Box>
-        <Button variant="outlined" startIcon={<Edit />} onClick={() => setEditDialogOpen(true)}>
-          Edit
-        </Button>
-        <Button variant="outlined" color="error" startIcon={<Delete />} onClick={() => setDeleteDialogOpen(true)}>
-          Delete
-        </Button>
-      </Box>
+        }
+        meta={
+          <>
+            <Chip label={opportunity.stage} size="small" color={statusTone(opportunity.stage)} />
+            {opportunity.service_type && <ProductChip value={opportunity.service_type} />}
+          </>
+        }
+        actions={
+          <>
+            <Button variant="outlined" color="error" startIcon={<Delete />} onClick={() => setDeleteDialogOpen(true)}>
+              Delete
+            </Button>
+            <Button variant="contained" startIcon={<Edit />} onClick={() => setEditDialogOpen(true)}>
+              Edit
+            </Button>
+          </>
+        }
+      />
 
-      {/* KPI Cards */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Paper sx={{ p: 2, borderRadius: 2 }}>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-              Expected Value
+      {/* Key facts */}
+      <Paper sx={{ mb: 3, display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' } }}>
+        {[
+          { label: 'Expected value', value: formatCurrency(opportunity.expected_value || 0, opportunity?.company_billing_entity) },
+          { label: 'Weighted value', value: formatCurrency(opportunity.weighted_value || 0, opportunity?.company_billing_entity) },
+          { label: 'Probability', value: `${opportunity.probability}%` },
+          { label: 'Days in stage', value: `${opportunity.days_in_stage} days` },
+        ].map((fact, i) => (
+          <Box
+            key={fact.label}
+            sx={{
+              px: 2.5,
+              py: 2,
+              borderLeft: { md: i === 0 ? 0 : 1 },
+              borderTop: { xs: i < 2 ? 0 : 1, md: 0 },
+              // Responsive so it comes after the responsive borders above in the CSS.
+              borderColor: { xs: 'divider', md: 'divider' },
+            }}
+          >
+            <Typography variant="caption" color="text.secondary" component="div">
+              {fact.label}
             </Typography>
-            <Typography variant="h5" fontWeight="bold">
-              {formatCurrency(opportunity.expected_value || 0, opportunity?.company_billing_entity)}
+            <Typography sx={{ fontSize: '1.25rem', fontWeight: 600, fontVariantNumeric: 'tabular-nums', mt: 0.25 }}>
+              {fact.value}
             </Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Paper sx={{ p: 2, borderRadius: 2 }}>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-              Weighted Value
-            </Typography>
-            <Typography variant="h5" fontWeight="bold">
-              {formatCurrency(opportunity.weighted_value || 0, opportunity?.company_billing_entity)}
-            </Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Paper sx={{ p: 2, borderRadius: 2 }}>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-              Probability
-            </Typography>
-            <Typography variant="h5" fontWeight="bold">
-              {opportunity.probability}%
-            </Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Paper sx={{ p: 2, borderRadius: 2 }}>
-            <Typography variant="body2" color="text.secondary" gutterBottom>
-              Days in Stage
-            </Typography>
-            <Typography variant="h5" fontWeight="bold">
-              {opportunity.days_in_stage} days
-            </Typography>
-          </Paper>
-        </Grid>
-      </Grid>
+          </Box>
+        ))}
+      </Paper>
 
       {/* Stage Stepper */}
       <Paper sx={{ p: 3, mb: 3, borderRadius: 2 }}>
@@ -299,8 +264,8 @@ const OpportunityDetail: React.FC = () => {
               <StepLabel
                 StepIconProps={{
                   sx: {
-                    ...(opportunity.stage === 'Won' && stage.id === 'Won' ? { color: '#4caf50 !important' } : {}),
-                    ...(opportunity.stage === 'Lost' && stage.id === 'Lost' ? { color: '#f44336 !important' } : {}),
+                    ...(opportunity.stage === 'Won' && stage.id === 'Won' ? { color: `${status.success.main} !important` } : {}),
+                    ...(opportunity.stage === 'Lost' && stage.id === 'Lost' ? { color: `${status.error.main} !important` } : {}),
                   },
                 }}
               >
