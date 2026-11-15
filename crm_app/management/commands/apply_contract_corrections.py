@@ -71,8 +71,10 @@ WRITE PATH
 FORMAT v2
   A file whose "format" is "contract-corrections/v2" is handled by
   crm_app/services/contract_corrections_v2.py: operations mark_cancelled,
-  mark_renewed (status only), set_renewed_from and create_successor, with the
-  same safety model (dry-run default, groups all-or-nothing, expected state,
+  mark_renewed (status only, from Active or Expired), mark_expired (status
+  only), set_renewed_from, create_successor, create_contract (a new term with
+  no predecessor), add_note, hand_over_zone_links and redate_zone_link_end,
+  with the same safety model (dry-run default, groups all-or-nothing, expected state,
   audit rows, journal, revert, idempotent re-run). Its docstring documents the
   file shape, every refusal and the revert rules. v1 files below are unchanged.
 

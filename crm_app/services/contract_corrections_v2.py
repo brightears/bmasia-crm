@@ -1,5 +1,5 @@
 """Contract-corrections file format v2: cancellations, status-only closures,
-renewed_from links and created successor terms.
+renewed_from links, created terms, zone-link repairs and notes lines.
 
 Used by the ``apply_contract_corrections`` management command when the file's
 ``format`` is ``contract-corrections/v2`` (and by ``--revert`` for a v2
@@ -22,10 +22,22 @@ OPERATIONS (one per entry, ``op``)
                      also actively linked to a contract that stays live, checks
                      the handler did exactly that, and journals every link and
                      zone so --revert can restore them.
-  mark_renewed       Active -> Renewed, is_active False, status only, for a
-                     contract whose later term already exists and is Active on
-                     the same company (``successor_id``). Same write as the
-                     lifecycle rule (queryset update, no save side effects).
+  mark_renewed       Active or Expired -> Renewed, is_active False, status
+                     only, for a contract whose later term already exists and
+                     is Active on the same company (``successor_id``). Same
+                     write as the lifecycle rule (queryset update, no save side
+                     effects); zone links are not touched.
+  mark_expired       Active -> Expired, is_active False, status only, for a
+                     term whose end_date has passed (before today's local
+                     date) and that has no Draft/Sent/Active renewal. Queryset
+                     update (no save(), no signals). Zone links are NOT
+                     touched: an expired term's links stay as they are, for a
+                     later renewal to take over or a human to close.
+  add_note           Appends ``text`` (one line, 1-500 characters, no control
+                     characters) to the contract's notes, on a new line when
+                     the notes are not empty. Any status. Queryset update of
+                     notes and updated_at only. Re-run: notes that already
+                     hold ``text`` as a line are already applied.
   set_renewed_from   Sets the missing ``renewed_from`` link of an existing
                      contract to an earlier contract of the same company
                      (``renewed_from_id``, whose state the entry states in
@@ -56,6 +68,11 @@ OPERATIONS (one per entry, ``op``)
                      link whose end_date equals ``closed_on`` and lies after the
                      contract's end_date gets end_date = the contract's end_date
                      (never before the link's start). Nothing else changes.
+  create_contract    Creates a NEW Active contract for ``company_id`` with no
+                     predecessor (no old contract exists). Keys: company_id,
+                     new (same shape as create_successor's), optional
+                     twin_company_ids; no ``expected`` (the company row is
+                     locked instead). See CREATE below.
 
 GROUPS
   Entries sharing a ``group`` are applied together or not at all, in one
@@ -66,9 +83,10 @@ GROUPS
     * a contract may be changed by at most one entry (duplicate_contract_id);
     * a contract that one group changes or relies on may not appear in any
       other group (contract_in_two_groups);
-    * the new terms planned by create_successor entries may not overlap each
-      other for the same company, or a company and a twin listed by either
-      entry, whether in one group or in two (planned_terms_overlap).
+    * the new terms planned by create_successor and create_contract entries
+      may not overlap each other for the same company, or a company and a
+      twin listed by either entry, whether in one group or in two
+      (planned_terms_overlap).
   The journal entry of a group is written inside the group's transaction,
   before commit, so a crash cannot leave applied changes without revert data.
   When COMMIT itself raises a database error, the server may still have
@@ -96,7 +114,14 @@ REFUSALS (named reasons; nothing in the group is written)
   no_end_date (redate_zone_link_end on a contract without an end date),
   renewal_has_ended_link_to_zone (hand_over_zone_links with copy_missing_links:
   the renewal already has an ended link to the zone starting on its start date,
-  so a new link cannot be stored; a human decides which link is right).
+  so a new link cannot be stored; a human decides which link is right),
+  term_not_ended (mark_expired: end_date is today or later),
+  renewal_exists (mark_expired: a Draft/Sent/Active contract renews it;
+  mark_expired also refuses no_end_date),
+  missing_company (create_contract: company_id does not exist).
+  create_contract also refuses missing_twin_company, overlapping_contract,
+  service_location_pricing_mismatch, billing_entity_unresolved,
+  number_reservation_failed and planned_terms_overlap.
 
 CREATE (create_successor)
   The new contract takes:
@@ -133,6 +158,30 @@ CREATE (create_successor)
   Re-run: an old contract that is Renewed with an Active renewal holding the
   file's dates is reported as already applied.
 
+CREATE (create_contract)
+  As create_successor, minus everything about an old contract: no
+  renewed_from, nothing closed, no zone links (there are none to copy). The
+  new contract takes:
+    from the file: company (company_id), currency (a Contract currency),
+      start_date, end_date, value, signed_date, billing_frequency, auto_renew
+      and service_type (null = the model default), price_per_zone, notes, and
+      the service-location rows (same PDF pricing guard, judged with the model
+      default show_zone_pricing_detail);
+    defaults: billing_entity '' (inherits the company's issuer; refused as
+      billing_entity_unresolved when the company has none), property_name '',
+      tax_rate as ContractSerializer sets it for a new contract without an
+      instructed rate (7.00 for THB, else 0.00; tax_amount and total_value
+      computed from it), contract_type, contract_category,
+      renewal_period_months, send_renewal_reminders and
+      show_zone_pricing_detail = the model defaults;
+    fixed: status Active, is_active True, lifecycle_type 'new'
+      (lifecycle_type_manually_set True), a final HK-CT/TH-CT number from the
+      collision-safe reservation helper.
+  Refused when the company is missing, a listed twin is missing, or any
+  non-Cancelled contract of the company or a listed twin overlaps the term.
+  Re-run: an Active contract of the company with exactly the file's start
+  date, end date and value is reported as already applied.
+
 REVERT
   Per group, only when every contract (and every zone link) still holds the
   journal's after values; otherwise the group is skipped.
@@ -146,7 +195,20 @@ REVERT
                      were already active on the zone before the run (stale
                      links of an already-Cancelled contract) are recorded in
                      the journal and do not block the revert.
-    mark_renewed / set_renewed_from   restore the journalled fields.
+    mark_renewed / mark_expired / set_renewed_from   restore the journalled
+                     status, is_active and renewed_from, while the contract
+                     still holds the journal's after values (incl. updated_at).
+    add_note         restores the notes from before the run, only while the
+                     notes and updated_at still equal the after values;
+                     otherwise changed_since_apply.
+    create_contract  DELETES the created contract (and its service-location
+                     rows) under the same conditions as create_successor:
+                     same updated_at and status, still no renewed_from, same
+                     service-location rows and no other row of any kind
+                     pointing at it; otherwise created_contract_touched. A
+                     created contract that no longer exists (or never
+                     committed) is already reverted. The final number is not
+                     handed back.
     hand_over_zone_links   reopens the closed links and deletes the links it
                      created, only while every one of them still holds the
                      journal's after values and no other link has become active
@@ -195,10 +257,13 @@ from crm_app.services.contract_lifecycle import (
 FILE_FORMAT_V2 = 'contract-corrections/v2'
 JOURNAL_FORMAT_V2 = 'contract-corrections-journal/v2'
 OPS = ('mark_cancelled', 'mark_renewed', 'set_renewed_from', 'create_successor',
-       'hand_over_zone_links', 'redate_zone_link_end')
+       'hand_over_zone_links', 'redate_zone_link_end', 'mark_expired', 'add_note', 'create_contract')
 LINK_OPS = ('hand_over_zone_links', 'redate_zone_link_end')
+CREATE_OPS = ('create_successor', 'create_contract')
 CANCELLABLE = {'Draft', 'Sent', 'Active'}
 CREATE_FROM = {'Active', 'Expired'}
+RENEW_FROM = {'Active', 'Expired'}
+OPEN_RENEWAL = ('Draft', 'Sent', 'Active')
 STATUSES = {value for value, _ in Contract.CONTRACT_STATUS_CHOICES}
 SERVICE_TYPES = {value for value, _ in Contract.SERVICE_TYPE_CHOICES}
 PLATFORMS = {value for value, _ in ContractServiceLocation.PLATFORM_CHOICES}
@@ -213,6 +278,9 @@ _OP_KEYS = {
     'hand_over_zone_links': ({'contract_id', 'expected', 'successor_id', 'successor_expected'},
                              {'copy_missing_links'}),
     'redate_zone_link_end': ({'contract_id', 'expected', 'closed_on'}, set()),
+    'mark_expired': ({'contract_id', 'expected'}, set()),
+    'add_note': ({'contract_id', 'expected', 'text'}, set()),
+    'create_contract': ({'company_id', 'new'}, {'twin_company_ids'}),
 }
 _EXPECTED_KEYS = {'status', 'start_date', 'end_date', 'updated_at'}
 _NEW_REQUIRED = {'status', 'start_date', 'end_date', 'value', 'currency', 'service_locations', 'notes'}
@@ -223,6 +291,7 @@ _GROUP_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9:._-]{0,79}')
 _CLASS_RE = re.compile(r'[A-Z][A-Za-z0-9]{0,7}')
 _EVIDENCE_MAX = 300
 _NOTES_MAX = 1000
+_NOTE_LINE_MAX = 500
 _MAX_LOCATIONS = 200
 
 # Fields journalled for an existing contract.
@@ -266,8 +335,8 @@ class EntryV2:
     cls: str
     group: str
     evidence: str
-    contract_id: str                     # the contract this entry changes
-    expected: Expected
+    contract_id: Optional[str]           # the contract this entry changes (None for create_contract)
+    expected: Optional[Expected]         # None for create_contract
     successor_id: Optional[str] = None
     successor_expected: Optional[Expected] = None
     renewed_from_id: Optional[str] = None
@@ -276,6 +345,12 @@ class EntryV2:
     new: Optional[NewTerm] = None
     copy_missing_links: bool = False
     closed_on: Optional[date] = None
+    company_id: Optional[str] = None     # create_contract only
+    text: Optional[str] = None           # add_note only
+
+    @property
+    def label_id(self):
+        return self.contract_id or f'company:{self.company_id}'
 
     @property
     def referenced_ids(self):
@@ -450,7 +525,19 @@ def parse_v2(data):
             raise _malformed(f'{where}: group must match {_GROUP_RE.pattern}')
         evidence = _text(raw['evidence'], f'{where} evidence', _EVIDENCE_MAX)
         common = dict(index=index, op=op, cls=raw['class'], group=raw['group'], evidence=evidence)
-        if op == 'create_successor':
+        if op == 'create_contract':
+            twins = raw.get('twin_company_ids', [])
+            if not isinstance(twins, list):
+                raise _malformed(f'{where} twin_company_ids: want a list of UUIDs')
+            company_id = _uuid(raw['company_id'], f'{where} company_id')
+            entry = EntryV2(
+                **common, contract_id=None, expected=None, company_id=company_id,
+                twin_company_ids=sorted({_uuid(t, f'{where} twin_company_ids') for t in twins}),
+                new=_new_term(raw['new'], f'{where} new'),
+            )
+            if company_id in entry.twin_company_ids:
+                raise _malformed(f'{where}: a company cannot be its own twin')
+        elif op == 'create_successor':
             contract_id = _uuid(raw['old_contract_id'], f'{where} old_contract_id')
             twins = raw.get('twin_company_ids', [])
             if not isinstance(twins, list):
@@ -476,6 +563,8 @@ def parse_v2(data):
                 entry.copy_missing_links = copy
             elif op == 'redate_zone_link_end':
                 entry.closed_on = _date(raw['closed_on'], f'{where} closed_on')
+            elif op == 'add_note':
+                entry.text = _text(raw['text'], f'{where} text', _NOTE_LINE_MAX)
             elif op == 'set_renewed_from':
                 entry.renewed_from_id = _uuid(raw['renewed_from_id'], f'{where} renewed_from_id')
                 entry.renewed_from_expected = _expected(raw['renewed_from_expected'], f'{where} renewed_from_expected')
@@ -493,14 +582,15 @@ def parse_v2(data):
 def file_conflicts(entries):
     """{group: reason} for groups refused because of another entry in the file."""
     refused = {}
-    changed = Counter(e.contract_id for e in entries)
+    changed = Counter(e.contract_id for e in entries if e.contract_id)
     for e in entries:
-        if changed[e.contract_id] > 1:
+        if e.contract_id and changed[e.contract_id] > 1:
             refused[e.group] = 'duplicate_contract_id'
     seen = {}
     for e in entries:
         for cid in (e.contract_id, *e.referenced_ids):
-            seen.setdefault(cid, set()).add(e.group)
+            if cid:
+                seen.setdefault(cid, set()).add(e.group)
     for cid, groups in seen.items():
         if len(groups) > 1:
             for g in groups:
@@ -586,6 +676,18 @@ def _matching_successor(old, new):
     ).order_by('created_at', 'id').first())
 
 
+def _matching_new_contract(company_id, new):
+    """An Active contract of the company holding exactly the planned term (create_contract re-run)."""
+    return (Contract.objects.filter(
+        company_id=company_id, status='Active', start_date=new.start, end_date=new.end, value=new.value,
+    ).order_by('created_at', 'id').first())
+
+
+def _new_contract_tax_rate(currency):
+    """ContractSerializer's rate for a new contract without an instructed rate."""
+    return Decimal('7.00') if currency == 'THB' else Decimal('0.00')
+
+
 def _inbound_rows(contract, own_links=()):
     """Names of relations, other than service locations and the zone links this
     command created (``own_links``), that point at the contract."""
@@ -631,11 +733,12 @@ class V2Runner:
         cmd = self.cmd
         groups = group_entries(entries)
         selected = set(opts.get('only_class') or []) or {e.cls for e in entries}
-        creates = [e for e in entries if e.op == 'create_successor']
+        creates = [e for e in entries if e.op in CREATE_OPS]
         old_company = {str(pk): str(co) for pk, co in Contract.objects.filter(
-            pk__in=[e.contract_id for e in creates]).values_list('pk', 'company_id')}
+            pk__in=[e.contract_id for e in creates if e.contract_id]).values_list('pk', 'company_id')}
         for g in planned_overlaps([
-                (e.group, {old_company.get(e.contract_id, e.contract_id), *e.twin_company_ids}, e.new.start, e.new.end)
+                (e.group, {e.company_id or old_company.get(e.contract_id, e.contract_id), *e.twin_company_ids},
+                 e.new.start, e.new.end)
                 for e in creates]):
             conflicts.setdefault(g, 'planned_terms_overlap')
 
@@ -668,7 +771,7 @@ class V2Runner:
                     label = f'COMMIT-UNCERTAIN:{outcome}'
                     uncertain.add(group)
                 self.out.write(
-                    f'  [{label}] {cls} {entry.op} {entry.contract_id} {number or "-"}'
+                    f'  [{label}] {cls} {entry.op} {entry.label_id} {number or "-"}'
                     f'{": " + detail if detail else ""}')
                 key = (outcome if outcome in ('would_apply', 'applied', 'already_applied')
                        else 'commit_uncertain' if outcome.startswith('commit_uncertain') else f'skipped:{outcome}')
@@ -698,14 +801,17 @@ class V2Runner:
             details = details or {}
             return [(e, numbers.get(e.contract_id), details.get(e.index, '')) for e in members]
 
-        ids = sorted({e.contract_id for e in members} | {i for e in members for i in e.referenced_ids})
+        ids = sorted({e.contract_id for e in members if e.contract_id} |
+                     {i for e in members for i in e.referenced_ids})
         numbers.update({str(pk): n for pk, n in Contract.objects.filter(pk__in=ids).values_list('pk', 'contract_number')})
         if conflict:
             return conflict, rows()
         for e in members:
             if e.op == 'mark_cancelled' and e.expected.status not in CANCELLABLE:
                 return 'transition_not_allowed', rows()
-            if e.op == 'mark_renewed' and e.expected.status != 'Active':
+            if e.op == 'mark_renewed' and e.expected.status not in RENEW_FROM:
+                return 'transition_not_allowed', rows()
+            if e.op == 'mark_expired' and e.expected.status != 'Active':
                 return 'transition_not_allowed', rows()
             if e.op == 'create_successor' and e.expected.status not in CREATE_FROM:
                 return 'transition_not_allowed', rows()
@@ -717,7 +823,7 @@ class V2Runner:
             with transaction.atomic():
                 locked = {str(c.pk): c for c in
                           Contract.objects.select_for_update().filter(pk__in=ids).order_by('pk')}
-                if any(e.contract_id not in locked for e in members):
+                if any(e.contract_id and e.contract_id not in locked for e in members):
                     raise Refused('missing_contract')
                 plans = self._check_group(members, locked)
                 if all(p['state'] == 'target' for p in plans.values()):
@@ -731,7 +837,7 @@ class V2Runner:
                 for e in members:
                     journal_ops.append(self._write(group, e, locked, plans[e.index]))
                 for e in members:
-                    if e.op == 'create_successor':
+                    if e.op in CREATE_OPS:
                         created = journal_ops[members.index(e)]['created']
                         details[e.index] = f'created {created["contract_id"]} {created["contract_number"]}; ' + details[e.index]
                 # Journal before commit: a crash after this point leaves either
@@ -762,7 +868,7 @@ class V2Runner:
         plans = {}
         for e in members:
             check = getattr(self, f'_check_{e.op}')
-            plans[e.index] = check(e, locked[e.contract_id], locked, members)
+            plans[e.index] = check(e, locked.get(e.contract_id), locked, members)
         # Lifecycle consistency: an Active contract must not end up renewing an
         # Active predecessor that the group leaves Active.
         renewed_in_group = {e.contract_id for e in members if e.op == 'mark_renewed'}
@@ -772,8 +878,8 @@ class V2Runner:
                 if c.status == 'Active' and target.status == 'Active' and str(target.pk) not in renewed_in_group:
                     raise Refused('predecessor_left_active')
         # Planned new terms of this group must not overlap each other.
-        creates = [e for e in members if e.op == 'create_successor' and plans[e.index]['state'] == 'expected']
-        if planned_overlaps([(e.index, {str(locked[e.contract_id].company_id), *e.twin_company_ids},
+        creates = [e for e in members if e.op in CREATE_OPS and plans[e.index]['state'] == 'expected']
+        if planned_overlaps([(e.index, {e.company_id or str(locked[e.contract_id].company_id), *e.twin_company_ids},
                               e.new.start, e.new.end) for e in creates]):
             raise Refused('planned_terms_overlap')
         # A zone may be released only if no contract that stays live holds it.
@@ -820,7 +926,7 @@ class V2Runner:
                               and m.renewed_from_id == e.contract_id for m in members)
         if s.renewed_from_id and str(s.renewed_from_id) != e.contract_id and not linked_in_group:
             raise Refused('successor_renews_other_contract')
-        plan['detail'] = (f'Active -> Renewed (status only); later term {s.pk} {s.contract_number}'
+        plan['detail'] = (f'{c.status} -> Renewed (status only); later term {s.pk} {s.contract_number}'
                           f'{" linked in this group" if linked_in_group else ""}')
         return plan
 
@@ -942,6 +1048,63 @@ class V2Runner:
                               f'{", ".join(sorted({d.isoformat() for _, d in moves}))}')
         return plan
 
+    def _check_mark_expired(self, e, c, locked, members):
+        state = _check_expected(c, e.expected, lambda x: x.status == 'Expired')
+        plan = {'state': state, 'detail': ''}
+        if state != 'expected':
+            return plan
+        if c.end_date is None:
+            raise Refused('no_end_date')
+        if c.end_date >= timezone.localdate():
+            raise Refused('term_not_ended')
+        if Contract.objects.filter(renewed_from_id=c.pk, status__in=OPEN_RENEWAL).exists():
+            raise Refused('renewal_exists')
+        plan['detail'] = (f'Active -> Expired (status only, ended {c.end_date.isoformat()}); '
+                          f'is_active {c.is_active} -> False; zone links untouched')
+        return plan
+
+    def _check_add_note(self, e, c, locked, members):
+        def in_target(x):
+            return e.text in (x.notes or '').splitlines()
+
+        state = _check_expected(c, e.expected, in_target)
+        if state == 'expected' and in_target(c):
+            state = 'target'  # the line is there already; never add it twice
+        plan = {'state': state, 'detail': ''}
+        if state == 'expected':
+            plan['detail'] = (f'appends a {len(e.text)}-character line to notes '
+                              f'({"after " + str(len(c.notes.splitlines())) + " line(s)" if c.notes else "notes were empty"}); '
+                              f'status stays {c.status}')
+        return plan
+
+    def _check_create_contract(self, e, c, locked, members):
+        new = e.new
+        company = Company.objects.select_for_update().filter(pk=e.company_id).first()
+        if company is None:
+            raise Refused('missing_company')
+        if _matching_new_contract(e.company_id, new) is not None:
+            return {'state': 'target', 'detail': ''}
+        from crm_app.services.document_context import document_region
+        planned = Contract(company=company, billing_entity='', currency=new.currency)
+        try:
+            region = document_region(planned)
+        except ValueError:
+            raise Refused('billing_entity_unresolved')
+        if e.twin_company_ids and \
+                Company.objects.filter(pk__in=e.twin_company_ids).count() != len(e.twin_company_ids):
+            raise Refused('missing_twin_company')
+        if _overlapping([company.pk, *e.twin_company_ids], new.start, new.end, []).exists():
+            raise Refused('overlapping_contract')
+        if self._pricing_mismatch(new, planned):
+            raise Refused('service_location_pricing_mismatch')
+        platforms = Counter(loc['platform'] for loc in new.locations)
+        plan = {'state': 'expected', 'detail': (
+            f'creates Active {new.start.isoformat()}..{new.end.isoformat()} ({region}-CT number, no predecessor, '
+            f'tax {_new_contract_tax_rate(new.currency)}%) '
+            f'with {len(new.locations)} service location(s) '
+            f'({", ".join(f"{k} {v}" for k, v in sorted(platforms.items()))})')}
+        return plan
+
     @staticmethod
     def _pricing_mismatch(new, old):
         """The PDF guard (service_location_pricing_mismatch) run on the planned contract."""
@@ -950,8 +1113,8 @@ class V2Runner:
         rows = [SimpleNamespace(price=loc['price']) for loc in new.locations]
         planned = SimpleNamespace(
             service_locations=SimpleNamespace(all=lambda: rows),
-            show_zone_pricing_detail=old.show_zone_pricing_detail,  # copied from the old contract
-            line_items=None,                    # a created successor has no line items
+            show_zone_pricing_detail=old.show_zone_pricing_detail,  # copied from the old contract (model default for create_contract)
+            line_items=None,                    # a created contract has no line items
             discount_percentage=Decimal('0'),   # not copied
             price_per_zone=new.price_per_zone,
             value=new.value,
@@ -976,7 +1139,7 @@ class V2Runner:
         }
 
     def _write(self, group, e, locked, plan):
-        return getattr(self, f'_write_{e.op}')(group, e, locked[e.contract_id], locked, plan)
+        return getattr(self, f'_write_{e.op}')(group, e, locked.get(e.contract_id), locked, plan)
 
     def _write_mark_cancelled(self, group, e, c, locked, plan):
         before = contract_state(c)
@@ -1035,7 +1198,7 @@ class V2Runner:
 
     def _write_mark_renewed(self, group, e, c, locked, plan):
         before, after = self._close_as_renewed(
-            c, group, e, 'Correction: Active -> Renewed (later term exists)', {'later_term_id': e.successor_id})
+            c, group, e, f'Correction: {c.status} -> Renewed (later term exists)', {'later_term_id': e.successor_id})
         return {'op': e.op, 'class': e.cls, 'evidence': e.evidence, 'contract_id': e.contract_id,
                 'before': before, 'after': after}
 
@@ -1152,6 +1315,100 @@ class V2Runner:
             'old_zone_links_closed': handed_over,
         }
 
+    def _write_mark_expired(self, group, e, c, locked, plan):
+        before = contract_state(c)
+        # Status only, as the lifecycle rule writes: no save(), no signals; zone links are not touched.
+        Contract.objects.filter(pk=c.pk).update(status='Expired', is_active=False, updated_at=timezone.now())
+        c.refresh_from_db()
+        after = contract_state(c)
+        self._audit('UPDATE', c.pk, _changes(before, after), group, e, {
+            'action': f'Correction: {before["status"]} -> Expired (term ended {c.end_date.isoformat()})'})
+        return {'op': e.op, 'class': e.cls, 'evidence': e.evidence, 'contract_id': e.contract_id,
+                'before': before, 'after': after}
+
+    def _write_add_note(self, group, e, c, locked, plan):
+        old_notes = c.notes or ''
+        before = {**contract_state(c), 'notes': old_notes}
+        new_notes = old_notes + ('\n' if old_notes else '') + e.text
+        Contract.objects.filter(pk=c.pk).update(notes=new_notes, updated_at=timezone.now())
+        c.refresh_from_db()
+        after = {**contract_state(c), 'notes': c.notes}
+        self._audit('UPDATE', c.pk, {'notes': {'old': old_notes, 'new': c.notes}}, group, e,
+                    {'action': 'Correction: line added to notes', 'note_added': e.text})
+        return {'op': e.op, 'class': e.cls, 'evidence': e.evidence, 'contract_id': e.contract_id,
+                'before': before, 'after': after}
+
+    def _write_create_contract(self, group, e, _none, locked, plan):
+        from crm_app.services.rene_phase2 import RenePhase2Error, _reserve_final_contract_number
+        new = e.new
+        company = Company.objects.get(pk=e.company_id)
+        tax_rate = _new_contract_tax_rate(new.currency)
+        tax_amount, total_value = _tax(new.value, tax_rate)
+        optional = {name: value for name, value in (
+            ('billing_frequency', new.billing_frequency), ('auto_renew', new.auto_renew),
+            ('service_type', new.service_type)) if value is not None}  # null = the model default
+        # Everything not set here (contract_type, contract_category, renewal_period_months,
+        # send_renewal_reminders, show_zone_pricing_detail, ...) takes the model default.
+        contract = Contract(
+            company=company,
+            billing_entity='',          # inherits the company's issuer
+            currency=new.currency,
+            tax_rate=tax_rate,
+            tax_amount=tax_amount,
+            total_value=total_value,
+            value=new.value,
+            property_name='',
+            status='Active',
+            is_active=True,
+            start_date=new.start,
+            end_date=new.end,
+            signed_date=new.signed_date,
+            price_per_zone=new.price_per_zone,
+            notes=new.notes,
+            renewed_from=None,
+            lifecycle_type='new',
+            lifecycle_type_manually_set=True,
+            **optional,
+        )
+        try:
+            contract.contract_number = _reserve_final_contract_number(contract)
+        except RenePhase2Error:
+            raise Refused('number_reservation_failed')
+        contract.save()
+        ContractServiceLocation.objects.bulk_create([
+            ContractServiceLocation(contract=contract, **loc) for loc in new.locations])
+        from crm_app.services.contract_service_locations import service_location_pricing_mismatch
+        if service_location_pricing_mismatch(contract):
+            raise Refused('service_location_pricing_mismatch')
+
+        contract.refresh_from_db()
+        locations = list(contract.service_locations.order_by('sort_order', 'pk'))
+        self._audit('CREATE', contract.pk, {
+            'status': {'old': None, 'new': 'Active'},
+            'start_date': {'old': None, 'new': new.start.isoformat()},
+            'end_date': {'old': None, 'new': new.end.isoformat()},
+            'value': {'old': None, 'new': str(new.value)},
+            'currency': {'old': None, 'new': new.currency},
+            'tax_rate': {'old': None, 'new': str(tax_rate)},
+            'service_locations': {'old': 0, 'new': len(locations)},
+        }, group, e, {'action': 'Correction: current term created (no predecessor)',
+                      'company_id': e.company_id, 'twin_company_ids': e.twin_company_ids})
+        state = contract_state(contract)
+        return {
+            'op': e.op, 'class': e.cls, 'evidence': e.evidence,
+            # The created contract; there is no existing contract to restore.
+            'contract_id': str(contract.pk), 'company_id': e.company_id,
+            'before': {'status': None, 'is_active': None, 'renewed_from': None, 'updated_at': None},
+            'after': state,
+            'created': {
+                'contract_id': str(contract.pk), 'contract_number': contract.contract_number,
+                'company_id': str(contract.company_id), 'renewed_from': None, 'status': contract.status,
+                'updated_at': _iso(contract.updated_at),
+                'service_locations': [{'id': str(l.pk), 'updated_at': _iso(l.updated_at)} for l in locations],
+                'zone_links': [],
+            },
+        }
+
     def _write_hand_over_zone_links(self, group, e, c, locked, plan):
         s = locked[e.successor_id]
         state = contract_state(c)
@@ -1225,9 +1482,10 @@ class V2Runner:
                 created = op.get('created')
                 extra = f'; deletes created {created["contract_id"]} {created["contract_number"]}' if created else ''
                 note = notes.get(op['contract_id'], '')
+                before_status = op['before']['status'] if op['op'] != 'create_contract' else '(none)'
                 self.out.write(
                     f'  [{label}] {cls} {op["op"]} {op["contract_id"]}: {op["after"]["status"]} -> '
-                    f'{op["before"]["status"]}{extra}{"; " + note if note else ""}')
+                    f'{before_status}{extra}{"; " + note if note else ""}')
                 key = outcome if outcome in ('would_revert', 'reverted', 'already_reverted') else f'skipped:{outcome}'
                 tally[f'{cls}/{op["op"]}:{key}'] += 1
         self.out.write(f'\nsummary revert [{cmd.mode}] batch {cmd.batch_id}')
@@ -1244,10 +1502,40 @@ class V2Runner:
                 return False
         return True
 
+    @staticmethod
+    def _created_touched(exists, created):
+        """True when a contract this command created is no longer exactly as it was created."""
+        if exists.updated_at != _instant(created['updated_at'], 'journal updated_at') \
+                or (str(exists.renewed_from_id) if exists.renewed_from_id else None) != created['renewed_from'] \
+                or exists.status != created['status']:
+            return True
+        rows = {str(l.pk): l.updated_at for l in exists.service_locations.all()}
+        want = {r['id']: _instant(r['updated_at'], 'journal updated_at') for r in created['service_locations']}
+        own = created.get('zone_links', [])
+        links = {str(l.pk): (str(l.zone_id), _iso(l.start_date), l.is_active, l.end_date)
+                 for l in ContractZone.objects.filter(pk__in=[z['id'] for z in own])}
+        if links != {z['id']: (z['zone_id'], z['start_date'], True, None) for z in own}:
+            return True
+        return rows != want or bool(_inbound_rows(exists, [z['id'] for z in own]))
+
     def _op_state(self, op, locked):
         """'after' | 'before' | 'changed' for one journalled op."""
+        if op['op'] == 'create_contract':
+            created = op['created']
+            exists = locked.get(created['contract_id'])
+            if exists is None:
+                return 'before'  # deleted, or never committed
+            if str(exists.company_id) != created['company_id'] or self._created_touched(exists, created):
+                return 'touched'
+            return 'after'
         c = locked.get(op['contract_id'])
         if c is None:
+            return 'changed'
+        if op['op'] == 'add_note':
+            if c.notes == op['after']['notes'] and self._contract_matches(c, {'updated_at': op['after']['updated_at']}):
+                return 'after'
+            if c.notes == op['before']['notes']:
+                return 'before'
             return 'changed'
         restorable = {k: v for k, v in op['before'].items() if k != 'updated_at'}
         if op['op'] == 'hand_over_zone_links':
@@ -1285,19 +1573,7 @@ class V2Runner:
             if exists is None and op.get('old_zone_links_closed') and handed != 'before':
                 return 'changed'
             if self._contract_matches(c, op['after']) and exists is not None:
-                if exists.updated_at != _instant(created['updated_at'], 'journal updated_at') \
-                        or str(exists.renewed_from_id) != created['renewed_from'] or exists.status != created['status']:
-                    return 'touched'
-                rows = {str(l.pk): l.updated_at for l in exists.service_locations.all()}
-                want = {r['id']: _instant(r['updated_at'], 'journal updated_at') for r in created['service_locations']}
-                own = created.get('zone_links', [])
-                links = {str(l.pk): (str(l.zone_id), _iso(l.start_date), l.is_active, l.end_date)
-                         for l in ContractZone.objects.filter(pk__in=[z['id'] for z in own])}
-                if links != {z['id']: (z['zone_id'], z['start_date'], True, None) for z in own}:
-                    return 'touched'
-                if rows != want or _inbound_rows(exists, [z['id'] for z in own]):
-                    return 'touched'
-                return 'after'
+                return 'touched' if self._created_touched(exists, created) else 'after'
             if exists is None and self._contract_matches(c, restorable):
                 return 'before'
             return 'touched' if exists is not None else 'changed'
@@ -1365,6 +1641,26 @@ class V2Runner:
 
     def _revert_op(self, group, cls, op, locked, reverted_batch):
         note = ''
+        if op['op'] == 'create_contract':
+            created = locked[op['created']['contract_id']]
+            AuditLog.objects.create(
+                user=self.cmd.actor, action='DELETE', model_name='Contract', record_id=str(created.pk),
+                changes={'contract_number': {'old': created.contract_number, 'new': None}},
+                additional_data=self._revert_meta(group, cls, op, reverted_batch,
+                                                  'Correction reverted: created contract deleted'),
+            )
+            created.delete()  # cascades to its service-location rows
+            return 'final number not reused'
+        if op['op'] == 'add_note':
+            c = locked[op['contract_id']]
+            Contract.objects.filter(pk=c.pk).update(notes=op['before']['notes'], updated_at=timezone.now())
+            AuditLog.objects.create(
+                user=self.cmd.actor, action='UPDATE', model_name='Contract', record_id=str(c.pk),
+                changes={'notes': {'old': op['after']['notes'], 'new': op['before']['notes']}},
+                additional_data=self._revert_meta(group, cls, op, reverted_batch,
+                                                  'Correction reverted: added notes line removed'),
+            )
+            return 'notes restored'
         if op['op'] in LINK_OPS:
             if op['op'] == 'hand_over_zone_links':
                 made = [z['id'] for z in op.get('links_created', [])]
