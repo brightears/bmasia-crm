@@ -31,6 +31,8 @@ import {
   DialogContent,
   DialogActions,
   Snackbar,
+  Skeleton,
+  Tooltip,
 } from '@mui/material';
 import {
   Add,
@@ -43,8 +45,7 @@ import {
   Payment,
   MoreVert,
   Receipt,
-  Business,
-  Schedule,
+  ReceiptLong,
   AccountBalance,
   Warning,
   CheckCircle,
@@ -55,7 +56,10 @@ import { Invoice, ApiResponse, Company, Contract } from '../types';
 import ApiService from '../services/api';
 import InvoiceForm from '../components/InvoiceForm';
 import InvoiceDetail from '../components/InvoiceDetail';
-import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { formatDate as formatDisplayDate, formatMoney, statusTone, visuallyHidden } from '../theme';
+import { PageHeader, EmptyState } from '../components/ui';
+import { useListState, optionValues, idFromList } from '../hooks/useListState';
+import { useListSearchBox } from '../hooks/useListSearchBox';
 
 const statusOptions = [
   { value: '', label: 'All Status' },
@@ -93,16 +97,32 @@ const Invoices: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(25);
   const [totalCount, setTotalCount] = useState(0);
 
-  // Filters
-  const [statusFilter, setStatusFilter] = useState('');
-  const [companyFilter, setCompanyFilter] = useState('');
-  const [paymentMethodFilter, setPaymentMethodFilter] = useState('');
-  const [sortBy, setSortBy] = useState('-issue_date');
+  // Search, filters, sort and page live in the address, so a filtered list can be shared as a
+  // link and a reload keeps the view. Unknown values in the address fall back to the defaults.
+  const list = useListState(
+    { q: '', status: '', company: '', payment: '', sort: '-issue_date', page: 0, size: 25 },
+    {
+      status: optionValues(statusOptions),
+      company: idFromList(companies),
+      payment: optionValues(paymentMethods),
+      sort: optionValues(sortOptions),
+    },
+    companies.length
+  );
+  const [search, setSearch] = list.bind('q');
+  const [statusFilter, setStatusFilter] = list.bind('status');
+  const [companyFilter, setCompanyFilter] = list.bind('company');
+  const [paymentMethodFilter, setPaymentMethodFilter] = list.bind('payment');
+  const [sortBy, setSortBy] = list.bind('sort');
+  const [page, setPage] = list.bind('page');
+  const [rowsPerPage, setRowsPerPage] = list.bind('size');
+  // The box's own text, written to the address shortly after typing stops.
+  const searchBox = useListSearchBox(search, (text) => {
+    setSearch(text);
+    setPage(0);
+  });
 
   // Form state
   const [formOpen, setFormOpen] = useState(false);
@@ -197,14 +217,14 @@ const Invoices: React.FC = () => {
       setFormMode('create');
       setSelectedInvoice(null);
       setFormOpen(true);
-      // Clear query params to prevent re-opening on navigation
-      setSearchParams({}, { replace: true });
+      // Clear these query params to prevent re-opening on navigation (the list's own view stays)
+      ['new', 'company', 'contract', 'quote'].forEach((key) => searchParams.delete(key));
+      setSearchParams(searchParams, { replace: true });
     }
   }, [searchParams, setSearchParams]);
 
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(event.target.value);
-    setPage(0);
+    searchBox.onChange(event.target.value);
   };
 
   const handleSortChange = (event: any) => {
@@ -433,39 +453,28 @@ const Invoices: React.FC = () => {
     return formatDisplayDate(dateString);
   };
 
-  const getStatusColor = (status: string): string => {
-    return statusOptions.find(s => s.value === status)?.color || '#2196f3';
-  };
+  const filtersActive = Boolean(search || statusFilter || companyFilter || paymentMethodFilter);
+  const hideBelowSm = { display: { xs: 'none', sm: 'table-cell' } };
+  const hideBelowMd = { display: { xs: 'none', md: 'table-cell' } };
+  const hideBelowLg = { display: { xs: 'none', lg: 'table-cell' } };
+  const cellHide = [undefined, undefined, undefined, hideBelowMd, hideBelowSm, undefined, hideBelowLg, undefined];
 
   return (
     <Box>
-      {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" component="h1">
-          Invoices
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <Button
-            variant="outlined"
-            startIcon={<GetApp />}
-            onClick={() => setQbExportOpen(true)}
-            sx={{
-              borderColor: '#FFA500',
-              color: '#FFA500',
-              '&:hover': { borderColor: '#FF8C00', bgcolor: 'rgba(255, 165, 0, 0.08)' },
-            }}
-          >
-            Export to QuickBooks
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={handleCreateInvoice}
-          >
-            New Invoice
-          </Button>
-        </Box>
-      </Box>
+      <PageHeader
+        title="Invoices"
+        subtitle="Bills sent to customers, their payment status and receipts. Invoice numbers come from QuickBooks."
+        actions={
+          <>
+            <Button variant="outlined" startIcon={<GetApp />} onClick={() => setQbExportOpen(true)}>
+              Export to QuickBooks
+            </Button>
+            <Button variant="contained" startIcon={<Add />} onClick={handleCreateInvoice}>
+              New Invoice
+            </Button>
+          </>
+        }
+      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
@@ -473,13 +482,14 @@ const Invoices: React.FC = () => {
         </Alert>
       )}
 
-      {/* Search and Filters */}
-      <Paper sx={{ mb: 2 }}>
-        <Box sx={{ p: 2, display: 'flex', gap: 2, alignItems: 'center' }}>
+      {/* Filters and table in one card */}
+      <Paper sx={{ overflow: 'hidden' }}>
+        <Box sx={{ p: 2, display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: 1, borderColor: 'divider' }}>
           <TextField
-            fullWidth
-            placeholder="Search invoices..."
-            value={search}
+            sx={{ flex: '1 1 240px', maxWidth: { md: 340 } }}
+            inputProps={{ 'aria-label': 'Search invoices' }}
+            placeholder="Search by invoice number or company"
+            value={searchBox.value}
             onChange={handleSearchChange}
             InputProps={{
               startAdornment: (
@@ -490,8 +500,9 @@ const Invoices: React.FC = () => {
             }}
           />
           <FormControl size="small" sx={{ minWidth: 140 }}>
-            <InputLabel>Status</InputLabel>
+            <InputLabel id="invoices-status-label">Status</InputLabel>
             <Select
+              labelId="invoices-status-label"
               value={statusFilter}
               onChange={(e) => { setStatusFilter(e.target.value); setPage(0); }}
               label="Status"
@@ -500,7 +511,7 @@ const Invoices: React.FC = () => {
                 <MenuItem key={status.value} value={status.value}>
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     {status.value && (
-                      <Box sx={{ mr: 1, color: status.color }}>
+                      <Box sx={{ mr: 1, display: 'flex', color: statusTone(status.value) === 'default' ? 'text.secondary' : `${statusTone(status.value)}.main` }}>
                         {status.icon}
                       </Box>
                     )}
@@ -511,8 +522,9 @@ const Invoices: React.FC = () => {
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 180 }}>
-            <InputLabel>Company</InputLabel>
+            <InputLabel id="invoices-company-label">Company</InputLabel>
             <Select
+              labelId="invoices-company-label"
               value={companyFilter}
               onChange={(e) => { setCompanyFilter(e.target.value); setPage(0); }}
               label="Company"
@@ -525,9 +537,10 @@ const Invoices: React.FC = () => {
               ))}
             </Select>
           </FormControl>
-          <FormControl size="small" sx={{ minWidth: 180 }}>
-            <InputLabel>Payment</InputLabel>
+          <FormControl size="small" sx={{ minWidth: 170 }}>
+            <InputLabel id="invoices-payment-label">Payment</InputLabel>
             <Select
+              labelId="invoices-payment-label"
               value={paymentMethodFilter}
               onChange={(e) => { setPaymentMethodFilter(e.target.value); setPage(0); }}
               label="Payment"
@@ -543,6 +556,7 @@ const Invoices: React.FC = () => {
             <Select
               value={sortBy}
               onChange={handleSortChange}
+              inputProps={{ 'aria-label': 'Sort invoices' }}
               startAdornment={<Sort sx={{ mr: 0.5, ml: -0.5, color: 'text.secondary', fontSize: 20 }} />}
               sx={{ '& .MuiSelect-select': { display: 'flex', alignItems: 'center' } }}
             >
@@ -554,125 +568,99 @@ const Invoices: React.FC = () => {
             </Select>
           </FormControl>
         </Box>
-      </Paper>
 
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Invoice Number</TableCell>
-              <TableCell>Company</TableCell>
-              <TableCell>Amount</TableCell>
-              <TableCell>Issue Date</TableCell>
-              <TableCell>Due Date</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Payment Method</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {loading ? (
+        <TableContainer sx={{ borderRadius: 0, position: 'relative' }}>
+          <Table aria-label="Invoices">
+            <TableHead>
               <TableRow>
-                <TableCell colSpan={8} align="center">
-                  <CircularProgress />
-                </TableCell>
+                <TableCell>Invoice</TableCell>
+                <TableCell>Company</TableCell>
+                <TableCell align="right">Amount</TableCell>
+                <TableCell sx={hideBelowMd}>Issued</TableCell>
+                <TableCell sx={hideBelowSm}>Due</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell sx={hideBelowLg}>Payment</TableCell>
+                <TableCell align="right"><Box component="span" sx={visuallyHidden}>Actions</Box></TableCell>
               </TableRow>
-            ) : invoices.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} align="center">
-                  <Box sx={{ py: 4 }}>
-                    <Receipt sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                    <Typography variant="h6" color="text.secondary">
-                      No invoices found
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {search || statusFilter || companyFilter || paymentMethodFilter ?
-                        'Try adjusting your filters' :
-                        'Start by creating your first invoice'
-                      }
-                    </Typography>
-                  </Box>
-                </TableCell>
-              </TableRow>
-            ) : (
-              invoices.map((invoice) => (
-                <TableRow key={invoice.id} hover sx={{ cursor: 'pointer' }} onClick={() => handleViewInvoice(invoice)}>
-                  <TableCell>
-                    <Typography variant="body2" fontWeight="medium">
-                      {invoice.invoice_number}
-                    </Typography>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                Array.from({ length: 6 }).map((_, i) => (
+                  <TableRow key={`skeleton-${i}`}>
+                    {cellHide.map((hide, j) => (
+                      <TableCell key={j} sx={hide}>
+                        <Skeleton width={j === 7 ? 24 : '70%'} />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : invoices.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8}>
+                    <EmptyState
+                      icon={<ReceiptLong />}
+                      title={filtersActive ? 'No invoices match these filters' : 'No invoices yet'}
+                      description={filtersActive ? 'Try a different search or clear the filters.' : 'Create the first invoice, or start one from a contract.'}
+                    />
                   </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Business sx={{ mr: 1, color: 'text.secondary', fontSize: 16 }} />
-                      <Typography variant="body2">
+                </TableRow>
+              ) : (
+                invoices.map((invoice) => (
+                  <TableRow key={invoice.id} hover sx={{ cursor: 'pointer' }} onClick={() => handleViewInvoice(invoice)}>
+                    <TableCell>
+                      <Typography sx={{ fontWeight: 600, fontSize: '0.875rem', whiteSpace: 'nowrap' }}>
+                        {invoice.invoice_number}
+                      </Typography>
+                    </TableCell>
+                    <TableCell sx={{ maxWidth: 260 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>
                         {invoice.company_name}
                       </Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
+                    </TableCell>
+                    <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
                       {formatCurrency(invoice.total_amount, invoice.currency)}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Schedule sx={{ fontSize: 16, color: 'text.secondary', mr: 0.5 }} />
-                      <Typography variant="body2">
-                        {formatDate(invoice.issue_date)}
+                    </TableCell>
+                    <TableCell sx={{ ...hideBelowMd, whiteSpace: 'nowrap' }}>{formatDate(invoice.issue_date)}</TableCell>
+                    <TableCell sx={{ ...hideBelowSm, whiteSpace: 'nowrap' }}>
+                      <Typography variant="body2" sx={{ color: invoice.is_overdue ? 'error.main' : 'text.primary' }}>
+                        {formatDate(invoice.due_date)}
                       </Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" sx={{
-                      color: invoice.is_overdue ? 'error.main' : 'text.primary'
-                    }}>
-                      {formatDate(invoice.due_date)}
                       {invoice.is_overdue && (
                         <Typography variant="caption" sx={{ color: 'error.main', display: 'block' }}>
                           {invoice.days_overdue} days overdue
                         </Typography>
                       )}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Chip
-                      label={invoice.status}
-                      size="small"
-                      sx={{
-                        backgroundColor: getStatusColor(invoice.status),
-                        color: 'white',
-                        fontWeight: 600
-                      }}
-                    />
-                    {invoice.status === 'Paid' && invoice.receipt_number && (
-                      <Typography
-                        variant="caption"
-                        display="block"
-                        sx={{ mt: 0.5, color: invoice.receipt_sent ? 'success.main' : 'text.secondary' }}
-                      >
-                        {invoice.receipt_sent ? 'Receipt sent' : 'Receipt pending'}
-                      </Typography>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2">
-                      {invoice.payment_method || '-'}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <IconButton
-                      size="small"
-                      onClick={(e) => { e.stopPropagation(); handleActionMenuOpen(e, invoice); }}
-                    >
-                      <MoreVert />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+                    </TableCell>
+                    <TableCell>
+                      <Chip label={invoice.status} size="small" color={statusTone(invoice.status)} />
+                      {invoice.status === 'Paid' && invoice.receipt_number && (
+                        <Typography
+                          variant="caption"
+                          display="block"
+                          sx={{ mt: 0.5, color: invoice.receipt_sent ? 'success.main' : 'text.secondary' }}
+                        >
+                          {invoice.receipt_sent ? 'Receipt sent' : 'Receipt pending'}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell sx={hideBelowLg}>{invoice.payment_method || '—'}</TableCell>
+                    <TableCell align="right">
+                      <Tooltip title="More actions">
+                        <IconButton
+                          size="small"
+                          aria-label={`More actions for invoice ${invoice.invoice_number}`}
+                          onClick={(e) => { e.stopPropagation(); handleActionMenuOpen(e, invoice); }}
+                        >
+                          <MoreVert fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
         <TablePagination
           rowsPerPageOptions={[10, 25, 50, 100]}
           component="div"
@@ -682,7 +670,7 @@ const Invoices: React.FC = () => {
           onPageChange={handleChangePage}
           onRowsPerPageChange={handleChangeRowsPerPage}
         />
-      </TableContainer>
+      </Paper>
 
       {/* Action Menu */}
       <Menu
@@ -750,7 +738,7 @@ const Invoices: React.FC = () => {
             setActionMenuAnchor(null);
           }}>
             <ListItemIcon>
-              <Receipt fontSize="small" sx={{ color: '#4CAF50' }} />
+              <Receipt fontSize="small" sx={{ color: 'success.main' }} />
             </ListItemIcon>
             <ListItemText>Download Receipt</ListItemText>
           </MenuItem>
