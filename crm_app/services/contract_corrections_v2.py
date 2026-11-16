@@ -51,6 +51,25 @@ OPERATIONS (one per entry, ``op``)
                      (``renewed_from_id``, whose state the entry states in
                      ``renewed_from_expected``). No status change; queryset
                      update.
+  clear_renewed_from Removes a wrong ``renewed_from`` link: a contract that
+                     does not actually renew the contract it points at (for
+                     example an add-on linked to the main term). Keys:
+                     contract_id, expected, renewed_from_id (the link the
+                     contract holds NOW; the file must name it). Any status.
+                     Queryset update of renewed_from (to null) and updated_at
+                     only: status, dates, value, zone links and every other
+                     field stay as they are, and the lifecycle rule is never
+                     called (a link that stays would let it close the
+                     "predecessor" as Renewed once both are Active). The
+                     former predecessor is only named, not locked or checked:
+                     it is not part of the entry's contracts, so another group
+                     may act on it; on --execute that group then sees the
+                     link gone, in a dry-run it still sees the link. Refused
+                     when the contract has no link (no_renewed_from) or a
+                     different one (renewed_from_differs), and when another
+                     entry of the group names the contract as its successor
+                     (successor_link_cleared). Re-run: a contract with no link
+                     and the file's dates is already applied.
   create_successor   Creates the current term as a NEW Active contract renewing
                      ``old_contract_id``, then closes the old contract as
                      Renewed: through the lifecycle rule close_renewed_predecessor
@@ -129,6 +148,10 @@ REFUSALS (named reasons; nothing in the group is written)
   company exists; mark_expired also refuses no_end_date),
   successor_not_linked (mark_renewed: the successor does not renew this
   contract and no set_renewed_from in the group links it),
+  no_renewed_from, renewed_from_differs (clear_renewed_from: the contract has
+  no link, or a link to another contract than the file's renewed_from_id),
+  successor_link_cleared (an entry of the group uses as successor_id a
+  contract whose link a clear_renewed_from in the same group removes),
   missing_company (create_contract: company_id does not exist).
   create_contract also refuses missing_twin_company, overlapping_contract,
   service_location_pricing_mismatch, billing_entity_unresolved,
@@ -212,6 +235,11 @@ REVERT
     mark_renewed / mark_expired / set_renewed_from   restore the journalled
                      status, is_active and renewed_from, while the contract
                      still holds the journal's after values (incl. updated_at).
+    clear_renewed_from   restores the journalled renewed_from link the same
+                     way (queryset update; the lifecycle rule is not called),
+                     while the contract still holds the journal's after values
+                     (incl. updated_at) and the former predecessor still
+                     exists; otherwise changed_since_apply.
     add_note         restores the notes from before the run, only while the
                      notes and updated_at still equal the after values;
                      otherwise changed_since_apply.
@@ -271,7 +299,8 @@ from crm_app.services.contract_lifecycle import (
 FILE_FORMAT_V2 = 'contract-corrections/v2'
 JOURNAL_FORMAT_V2 = 'contract-corrections-journal/v2'
 OPS = ('mark_cancelled', 'mark_renewed', 'set_renewed_from', 'create_successor',
-       'hand_over_zone_links', 'redate_zone_link_end', 'mark_expired', 'add_note', 'create_contract')
+       'hand_over_zone_links', 'redate_zone_link_end', 'mark_expired', 'add_note', 'create_contract',
+       'clear_renewed_from')
 LINK_OPS = ('hand_over_zone_links', 'redate_zone_link_end')
 CREATE_OPS = ('create_successor', 'create_contract')
 CANCELLABLE = {'Draft', 'Sent', 'Active'}
@@ -287,6 +316,7 @@ _OP_KEYS = {
     'mark_cancelled': ({'contract_id', 'expected'}, set()),
     'mark_renewed': ({'contract_id', 'expected', 'successor_id', 'successor_expected'}, set()),
     'set_renewed_from': ({'contract_id', 'expected', 'renewed_from_id', 'renewed_from_expected'}, set()),
+    'clear_renewed_from': ({'contract_id', 'expected', 'renewed_from_id'}, set()),
     'create_successor': ({'old_contract_id', 'old_expected', 'new'}, {'twin_company_ids'}),
     'hand_over_zone_links': ({'contract_id', 'expected', 'successor_id', 'successor_expected'},
                              {'copy_missing_links'}),
@@ -360,6 +390,9 @@ class EntryV2:
     closed_on: Optional[date] = None
     company_id: Optional[str] = None     # create_contract only
     text: Optional[str] = None           # add_note only
+    # clear_renewed_from only: the link the contract holds now. Deliberately not a
+    # referenced id: the former predecessor is neither locked nor checked.
+    clearing_renewed_from_id: Optional[str] = None
 
     @property
     def label_id(self):
@@ -582,6 +615,10 @@ def parse_v2(data):
             elif op == 'set_renewed_from':
                 entry.renewed_from_id = _uuid(raw['renewed_from_id'], f'{where} renewed_from_id')
                 entry.renewed_from_expected = _expected(raw['renewed_from_expected'], f'{where} renewed_from_expected')
+            elif op == 'clear_renewed_from':
+                entry.clearing_renewed_from_id = _uuid(raw['renewed_from_id'], f'{where} renewed_from_id')
+                if entry.clearing_renewed_from_id == contract_id:
+                    raise _malformed(f'{where}: a contract cannot reference itself')
             if contract_id in entry.referenced_ids:
                 raise _malformed(f'{where}: a contract cannot reference itself')
         entries.append(entry)
@@ -895,6 +932,10 @@ class V2Runner:
                 c, target = locked[e.contract_id], locked[e.renewed_from_id]
                 if c.status == 'Active' and target.status == 'Active' and str(target.pk) not in renewed_in_group:
                     raise Refused('predecessor_left_active')
+        # A contract whose link this group clears cannot also serve as a successor in it.
+        cleared_in_group = {e.contract_id for e in members if e.op == 'clear_renewed_from'}
+        if any(e.successor_id in cleared_in_group for e in members if e.successor_id):
+            raise Refused('successor_link_cleared')
         # Planned new terms of this group must not overlap each other.
         creates = [e for e in members if e.op in CREATE_OPS and plans[e.index]['state'] == 'expected']
         if planned_overlaps([(e.index, {e.company_id or str(locked[e.contract_id].company_id), *e.twin_company_ids},
@@ -972,6 +1013,20 @@ class V2Runner:
         if Contract.objects.filter(renewed_from_id=target.pk).exclude(pk=c.pk).exclude(status='Cancelled').exists():
             raise Refused('predecessor_renewed_by_other')
         plan['detail'] = f'renewed_from set to {target.pk} {target.contract_number}; status stays {c.status}'
+        return plan
+
+    def _check_clear_renewed_from(self, e, c, locked, members):
+        state = _check_expected(c, e.expected, lambda x: x.renewed_from_id is None)
+        plan = {'state': state, 'detail': ''}
+        if state != 'expected':
+            return plan
+        if c.renewed_from_id is None:
+            raise Refused('no_renewed_from')
+        if str(c.renewed_from_id) != e.clearing_renewed_from_id:
+            raise Refused('renewed_from_differs')
+        former = Contract.objects.filter(pk=c.renewed_from_id).values('contract_number', 'status').first()
+        plan['detail'] = (f'clear renewed_from (was {former["contract_number"]}); status stays {c.status}; '
+                          f'{former["contract_number"]} ({former["status"]}) is not changed')
         return plan
 
     def _check_create_successor(self, e, c, locked, members):
@@ -1236,6 +1291,24 @@ class V2Runner:
         after = contract_state(c)
         self._audit('UPDATE', c.pk, _changes(before, after), group, e,
                     {'action': 'Correction: renewed_from link set'})
+        return {'op': e.op, 'class': e.cls, 'evidence': e.evidence, 'contract_id': e.contract_id,
+                'before': before, 'after': after}
+
+    def _write_clear_renewed_from(self, group, e, c, locked, plan):
+        before = contract_state(c)
+        former = Contract.objects.filter(pk=c.renewed_from_id).values_list('contract_number', flat=True).first()
+        # Link only, as a queryset update: no save() (number minting, signals) and never the
+        # lifecycle rule; status, dates, value and zone links are not touched.
+        updated = Contract.objects.filter(pk=c.pk, renewed_from_id=e.clearing_renewed_from_id).update(
+            renewed_from=None, updated_at=timezone.now())
+        if updated != 1:
+            raise Refused('unexpected_side_effect')
+        c.refresh_from_db()
+        after = contract_state(c)
+        self._audit('UPDATE', c.pk, _changes(before, after), group, e, {
+            'action': 'Correction: wrong renewed_from link cleared',
+            'former_renewed_from_id': e.clearing_renewed_from_id,
+            'former_renewed_from_contract_number': former})
         return {'op': e.op, 'class': e.cls, 'evidence': e.evidence, 'contract_id': e.contract_id,
                 'before': before, 'after': after}
 
@@ -1604,6 +1677,14 @@ class V2Runner:
             if exists is None and self._contract_matches(c, restorable):
                 return 'before'
             return 'touched' if exists is not None else 'changed'
+        if op['op'] == 'clear_renewed_from':
+            if self._contract_matches(c, op['after']):
+                # Restoring a link to a contract that no longer exists is impossible.
+                former = op['before'].get('renewed_from')
+                return 'after' if former and Contract.objects.filter(pk=former).exists() else 'changed'
+            if self._contract_matches(c, restorable):
+                return 'before'
+            return 'changed'
         if op['op'] == 'mark_cancelled':
             if self._contract_matches(c, op['after']):
                 known = [link['id'] for link in op['zone_links']]
@@ -1737,6 +1818,8 @@ class V2Runner:
             note = f'{len(op["zone_links"])} zone link(s) restored'
             if left:
                 note += f'; {len(left)} zone status(es) changed since apply, left as they are: {", ".join(left)}'
+        if op['op'] == 'clear_renewed_from':
+            note = f'renewed_from restored to {op["before"]["renewed_from"]}'
         c = locked[op['contract_id']]
         before = contract_state(c)
         restore = op['before']
