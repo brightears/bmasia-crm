@@ -294,7 +294,8 @@ class ContractQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     fields = [
         'id', 'contract_number', 'company', 'contract_type', 'service_type', 'status',
         'lifecycle_type', 'start_date', 'end_date', 'value', 'currency',
-        'total_value', 'billing_entity', 'billing_frequency', 'payment_terms', 'payment_schedule', 'auto_renew',
+        'total_value', 'tax_rate', 'tax_amount', 'discount_percentage',
+        'billing_entity', 'billing_frequency', 'payment_terms', 'payment_schedule', 'auto_renew',
         'renewal_period_months', 'renewed_from', 'renewal_notice_sent', 'sent_date', 'signed_date',
         'first_followup_sent', 'second_followup_sent',
         'contract_category', 'is_active', 'master_contract', 'notes',
@@ -342,7 +343,7 @@ class InvoiceQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     fields = [
         'id', 'invoice_number', 'company', 'contract', 'status',
         'issue_date', 'due_date', 'paid_date', 'amount', 'tax_amount',
-        'total_amount', 'currency', 'billing_entity', 'payment_terms', 'payment_terms_text',
+        'discount_amount', 'total_amount', 'currency', 'billing_entity', 'payment_terms', 'payment_terms_text',
         'property_name', 'service_period_start', 'service_period_end', 'notes', 'created_at', 'updated_at',
     ]
     search_fields = ['invoice_number', 'notes']
@@ -357,7 +358,7 @@ class QuoteQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = Quote
     fields = [
         'id', 'quote_number', 'company', 'contact', 'opportunity', 'status', 'quote_type',
-        'valid_from', 'valid_until', 'subtotal', 'total_value', 'currency',
+        'valid_from', 'valid_until', 'subtotal', 'tax_amount', 'discount_amount', 'total_value', 'currency',
         'billing_entity', 'billing_frequency', 'contract_duration_months', 'payment_schedule',
         'terms_conditions', 'notes', 'created_at', 'updated_at',
     ]

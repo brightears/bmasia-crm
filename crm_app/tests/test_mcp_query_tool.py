@@ -136,9 +136,10 @@ def test_newly_published_fields_are_in_the_schema():
                     'receives_seasonal_emails', 'receives_payment_emails', 'receives_quarterly_emails',
                     'receives_soundtrack_alerts', 'receives_quote_emails', 'receives_contract_emails',
                     'receives_invoice_emails'},
-        'invoice': {'issue_date'},
+        'contract': {'tax_rate', 'tax_amount', 'discount_percentage'},
+        'invoice': {'issue_date', 'discount_amount'},
         'opportunity': {'expected_value'},
-        'quote': {'contact'},
+        'quote': {'contact', 'tax_amount', 'discount_amount'},
         'task': {'related_contact', 'related_contract', 'related_opportunity'},
         'zone': {'status', 'platform', 'is_orphaned', 'device', 'device_name', 'last_seen_online'},
     }
@@ -289,6 +290,8 @@ VALID_PIPELINES = [
     ('contract', [{'$match': {'status': 'NoSuchStatus'}}]),
     ('zone', [{'$match': {'company__name': 'Query Riverside Hotel'}}]),
     ('contact', [{'$match': {'is_active': True}}]),
+    ('quote', [{'$match': {'quote_number': 'TH-QT-QUERY-1'}}]),
+    ('invoice', [{'$match': {'status': 'Sent'}}]),
 ]
 
 

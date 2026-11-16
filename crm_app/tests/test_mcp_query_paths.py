@@ -118,3 +118,25 @@ def test_contact_email_preferences_are_published(data):
     row = run('contact', [{'$match': {'name': 'Pat Example'}}])[0]
     assert set(EMAIL_PREFERENCES) <= set(row)
     assert 'unsubscribe_token' not in row and 'mobile' not in row
+
+
+# ------------------------------------------------------------------ tax and discount fields
+
+
+def test_contract_tax_rate_can_be_filtered_and_projected(data):
+    rows = run('contract', [{'$match': {'tax_rate': {'$gte': 5}}},
+                            {'$project': {'contract_number': 1, 'tax_rate': 1, 'discount_percentage': 1}}])
+    assert rows == [{'contract_number': 'HK-CT-PATH-1', 'tax_rate': 7.0, 'discount_percentage': 0.0}]
+    assert run('contract', [{'$match': {'tax_rate': {'$lt': 5}}}]) == []
+
+
+def test_quote_discount_amount_can_be_filtered_and_projected(data):
+    from crm_app.models import Quote
+
+    Quote.objects.create(company=data['company'], quote_number='HK-QT-PATH-1', valid_from=date(2026, 11, 1),
+                         valid_until=date(2026, 12, 1), discount_amount=Decimal('25.00'))
+    rows = run('quote', [{'$match': {'discount_amount': {'$gt': 0}}},
+                         {'$project': {'quote_number': 1, 'discount_amount': 1, 'tax_amount': 1}}])
+    assert len(rows) == 1
+    assert rows[0]['quote_number'] == 'HK-QT-PATH-1' and rows[0]['discount_amount'] == 25.0
+    assert 'tax_amount' in rows[0]
