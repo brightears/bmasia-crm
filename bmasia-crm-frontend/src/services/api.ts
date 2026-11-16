@@ -10,7 +10,8 @@ import {
   Vendor, ExpenseCategory, RecurringExpense, ExpenseEntry,
   APAgingReport, APAgingSummary, OverdueExpense, MonthlyExpenseSummary,
   PLStatement, PLComparative, PLTrendData,
-  EmailLogEntry
+  EmailLogEntry,
+  CareTouch
 } from '../types';
 import { authApi } from './authService';
 import { MockApiService } from './mockData';
@@ -116,6 +117,12 @@ class ApiService {
     }
 
     const response = await authApi.get<Company>(`/companies/${id}/`);
+    return response.data;
+  }
+
+  /** Read-only: the 20 most recent client-care touches for one company. */
+  async getCompanyCareTouches(companyId: string): Promise<CareTouch[]> {
+    const response = await authApi.get<CareTouch[]>(`/companies/${companyId}/care-touches/`);
     return response.data;
   }
 

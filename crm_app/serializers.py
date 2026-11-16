@@ -265,9 +265,14 @@ class CompanySerializer(serializers.ModelSerializer):
             # Corporate structure
             'parent_company', 'parent_company_name', 'is_corporate_parent',
             'is_subsidiary', 'child_companies_count',
+            # Client-care summary: written only by the Cara bearer endpoint.
+            'care_summary', 'care_summary_updated_at', 'care_summary_updated_by',
             'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'created_at', 'updated_at',
+            'care_summary', 'care_summary_updated_at', 'care_summary_updated_by',
+        ]
 
     def to_representation(self, instance):
         """Override to handle errors in nested serializers gracefully"""

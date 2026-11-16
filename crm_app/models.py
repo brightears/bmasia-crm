@@ -276,6 +276,12 @@ class Company(TimestampedModel):
         help_text="True if this is a corporate HQ that manages multiple venues"
     )
 
+    # Client-care summary, written only through the Cara bearer endpoint
+    # (crm_app/cara_care_writes.py). Read-only on the website and MCP.
+    care_summary = models.TextField(blank=True, default='')
+    care_summary_updated_at = models.DateTimeField(null=True, blank=True)
+    care_summary_updated_by = models.CharField(max_length=40, blank=True, default='')
+
     class Meta:
         verbose_name_plural = 'Companies'
         ordering = ['name']
@@ -5717,3 +5723,73 @@ class QuoteSendReceiptUse(models.Model):
 
     def __str__(self):
         return f"{self.quote_number} sent {self.sent_date} ({self.mailbox})"
+
+
+# Client-care touch record (Cara). Choices are module-level so they are easy to change.
+CARE_TOUCH_KIND_CHOICES = [
+    ('check_in', 'Check-in'),
+    ('client_reply', 'Client reply'),
+    ('hand_off', 'Hand-off'),
+    ('other', 'Other'),
+]
+CARE_TOUCH_OUTCOME_CHOICES = [
+    ('none', 'None'),
+    ('all_good', 'All good'),
+    ('request', 'Request'),
+    ('issue', 'Issue'),
+    ('handed_off', 'Handed off'),
+    ('bounced', 'Bounced'),
+    ('unsubscribe_request', 'Unsubscribe request'),
+]
+CARE_TOUCH_SOURCE_CHOICES = [
+    ('send', 'Send'),
+    ('gmail_backfill', 'Gmail backfill'),
+]
+
+
+class CareTouch(models.Model):
+    """Append-only record of one client-care touch (sent or received message).
+
+    Written only through the Cara bearer endpoint ``POST /api/v1/cara/touches/``.
+    ``summary`` is a short line, never an email body. The optional contact
+    ``last_contacted`` side effect is recorded in ``updated_last_contacted`` and
+    ``previous_last_contacted`` so it can be audited and reverted.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='care_touches')
+    contact = models.ForeignKey(
+        Contact, on_delete=models.SET_NULL, null=True, blank=True, related_name='care_touches',
+    )
+    mailbox = models.EmailField(help_text='BMAsia mailbox that sent or received the message')
+    gmail_thread_id = models.CharField(max_length=64, blank=True)
+    gmail_message_id = models.CharField(max_length=255, blank=True)
+    occurred_at = models.DateTimeField(help_text='When the message was sent or received')
+    kind = models.CharField(max_length=20, choices=CARE_TOUCH_KIND_CHOICES)
+    outcome = models.CharField(max_length=24, choices=CARE_TOUCH_OUTCOME_CHOICES, default='none')
+    summary = models.CharField(max_length=500, blank=True, help_text='Short line; never an email body')
+    source = models.CharField(max_length=20, choices=CARE_TOUCH_SOURCE_CHOICES)
+    backfill_batch = models.CharField(max_length=64, blank=True)
+    idempotency_key = models.CharField(max_length=200, unique=True)
+    recorded_by = models.CharField(max_length=40)
+    payload_sha256 = models.CharField(max_length=64)
+    updated_last_contacted = models.BooleanField(default=False)
+    previous_last_contacted = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-occurred_at']
+        indexes = [
+            models.Index(fields=['company', '-occurred_at']),
+            models.Index(fields=['source', 'backfill_batch']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['mailbox', 'gmail_message_id'],
+                condition=~models.Q(gmail_message_id=''),
+                name='caretouch_unique_gmail_message',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.kind} {self.occurred_at:%Y-%m-%d} ({self.source})"

@@ -6,6 +6,7 @@ only records callers that are listed agent principals. Never blocks or alters th
 response. Field names are not captured here (the parsed body lives on DRF's
 request object); the MCP tools are the intended agent write path.
 """
+from crm_app.cara_api import CaraPrincipal
 from crm_app.services import agent_gate
 
 _REST_VERBS = {'POST': 'create', 'PUT': 'update', 'PATCH': 'update', 'DELETE': 'delete'}
@@ -28,6 +29,11 @@ class AgentGateRestObserverMiddleware:
         verb = _REST_VERBS.get(request.method)
         if verb and request.path.startswith('/api/v1/'):
             user = getattr(request, 'user', None)
+            # The dedicated Cara bearer endpoints (crm_app/cara_care_writes.py) carry
+            # their own exact allow-list and AuditLog rows; recording them here would
+            # add misleading would_deny rows to the Stage A data.
+            if isinstance(user, CaraPrincipal):
+                return response
             if user is not None and getattr(user, 'is_authenticated', False):
                 match = getattr(request, 'resolver_match', None)
                 url_name = getattr(match, 'url_name', '') or ''

@@ -326,6 +326,9 @@ PROSPECT_IMAP_HOST = config('PROSPECT_IMAP_HOST', default='imap.gmail.com')
 CARA_CUSTOMER_CARE_TOKEN_SHA256 = config('CARA_CUSTOMER_CARE_TOKEN_SHA256', default='')
 CARA_CUSTOMER_CARE_TOKEN_EXPIRES_AT = config('CARA_CUSTOMER_CARE_TOKEN_EXPIRES_AT', default='')
 CARA_QUARTERLY_OWNER = config('CARA_QUARTERLY_OWNER', default='legacy')
+# Cara care-touch and care-summary write endpoints (crm_app/cara_care_writes.py).
+# Off by default; reads are unaffected by this switch.
+CARA_CARE_WRITES_ENABLED = config('CARA_CARE_WRITES_ENABLED', default=False, cast=bool)
 
 # Phase 1 agent gate (docs/agent-gate-phase1-design.md). 'observe' records what
 # crm_app/agent_policy.py would refuse without changing any write; 'off' disables

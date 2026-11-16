@@ -47,6 +47,7 @@ import CompanyForm from '../components/CompanyForm';
 import ContactForm from '../components/ContactForm';
 import ContactDetail from '../components/ContactDetail';
 import OpportunityForm from '../components/OpportunityForm';
+import CompanyCareCard from '../components/CompanyCareCard';
 import { PageHeader, SectionCard, EmptyState, DetailField, ProductChip } from '../components/ui';
 import { statusTone, humanize, formatDate, formatMoney, initialsOf, totalsByCurrency, visuallyHidden } from '../theme';
 import { currencyForEntity } from '../constants/entities';
@@ -443,6 +444,7 @@ const CompanyDetail: React.FC = () => {
               )}
             </Box>
           </SectionCard>
+          <Box sx={{ mt: 3 }}><CompanyCareCard company={company} /></Box>
         </Grid>
 
         {/* Right: related records */}

@@ -82,6 +82,7 @@ def test_capability_is_dedicated_exact_and_no_store():
     assert response.data["allowed_paths"] == [api.CAPABILITY_PATH, api.BOOK_PATH]
     assert response.data["maximum_page_size"] == 50
     assert response.data["permissions"] == [api.PERMISSION]
+    assert response.data["care_writes_enabled"] is False
     assert response["Cache-Control"] == "no-store, private"
     assert TOKEN not in str(response.data)
 

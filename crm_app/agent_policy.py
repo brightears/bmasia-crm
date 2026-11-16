@@ -109,9 +109,11 @@ PRINCIPALS = {
     'nina': Principal(name='nina', update={'zone': Rule(frozenset({'notes'}))},
                       note='music design; zone programme notes only'),
     # Cara: client care. Reads use her separate Cara bearer; any Django-token
-    # writes are limited to contact metadata (care feedback activity arrives later).
+    # writes are limited to contact metadata. Care touches and the company care
+    # summary are written through the Cara bearer endpoints
+    # (crm_app/cara_care_writes.py), not through MCP.
     'cara': Principal(name='cara', update={'contact': _CONTACT_METADATA},
-                      note='client care; care-feedback activities in a later stage'),
+                      note='client care; care touches and care summary via the Cara bearer endpoints, not MCP'),
     # BMAsia Sales agent: full lead/pipeline authority, never existing customers.
     # Its CRM username is not yet confirmed; Stage A observe data will show it.
     'sales': Principal(
