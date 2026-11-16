@@ -288,14 +288,29 @@ VALID_PIPELINES = [
 ]
 
 
+def _rows(result):
+    return json.loads(result[0].text) if result else []
+
+
 @pytest.mark.parametrize('collection, pipeline', VALID_PIPELINES)
-def test_valid_queries_return_exactly_what_the_library_returns(data, collection, pipeline):
-    """The error wrapper must not change any result of a valid query."""
+def test_valid_queries_return_the_published_projection_of_the_library_result(data, collection, pipeline):
+    """Same rows as the unwrapped library; output limited to published fields."""
+    from crm_app.mcp_query_help import boundary_for
+
     original = _QueryExecutor.query.__wrapped__
-    executor = _QueryExecutor(published_collections(), context=None, request=None)
-    wrapped = _QueryExecutor.query(executor, collection, json.loads(json.dumps(pipeline)))
-    unwrapped = original(executor, collection, json.loads(json.dumps(pipeline)))
-    assert [getattr(item, 'text', item) for item in wrapped] == [getattr(item, 'text', item) for item in unwrapped]
+    collections = published_collections()
+    executor = _QueryExecutor(collections, context=None, request=None)
+    wrapped = _rows(_QueryExecutor.query(executor, collection, json.loads(json.dumps(pipeline))))
+    unwrapped = _rows(original(executor, collection, json.loads(json.dumps(pipeline))))
+    explicit = any('$project' in stage or '$group' in stage for stage in pipeline)
+    if explicit:
+        assert wrapped == unwrapped
+    else:
+        columns = boundary_for(collections).output_columns(collection)
+        assert wrapped == [{key: value for key, value in row.items() if key in columns} for row in unwrapped]
+        assert all(list(row) == columns for row in wrapped)
+    if 'NoSuchStatus' not in json.dumps(pipeline):
+        assert wrapped
 
 
 # ------------------------------------------------------------------ errors
