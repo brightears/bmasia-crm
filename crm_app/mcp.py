@@ -239,10 +239,11 @@ class RenePhase2MCPToolset(MCPToolset):
 # ============================================================
 # Query Toolsets (read — MongoDB-style aggregation pipeline)
 # ============================================================
-# Every name in `fields` must be a concrete model field: the library silently
-# drops anything else from the published schema (guarded by
-# crm_app/tests/test_mcp_query_tool.py). Unknown-field and unknown-collection
-# errors are reworded by crm_app/mcp_query_help.py (installed in apps.ready()).
+# `fields` is the access boundary: query_data_collections returns, filters,
+# sorts and groups only on these fields, and follows a relation only when it is
+# listed here and its target is another collection below (crm_app/mcp_query_help.py,
+# installed in apps.ready()). Every name must be a concrete model field and must
+# not match the never-publish rule (guarded by crm_app/tests/test_mcp_query_*.py).
 
 
 class _CaseInsensitiveFilters:
@@ -289,6 +290,7 @@ class ContractQuery(_CaseInsensitiveFilters, ModelQueryToolset):
         'lifecycle_type', 'start_date', 'end_date', 'value', 'currency',
         'total_value', 'billing_entity', 'billing_frequency', 'payment_terms', 'payment_schedule', 'auto_renew',
         'renewal_period_months', 'renewed_from', 'renewal_notice_sent', 'sent_date', 'signed_date',
+        'first_followup_sent', 'second_followup_sent',
         'contract_category', 'is_active', 'master_contract', 'notes',
         'preamble_template', 'preamble_custom', 'payment_template', 'payment_custom',
         'activation_template', 'activation_custom', 'custom_terms', 'custom_service_items',
@@ -335,7 +337,7 @@ class InvoiceQuery(_CaseInsensitiveFilters, ModelQueryToolset):
         'id', 'invoice_number', 'company', 'contract', 'status',
         'issue_date', 'due_date', 'paid_date', 'amount', 'tax_amount',
         'total_amount', 'currency', 'billing_entity', 'payment_terms', 'payment_terms_text',
-        'property_name', 'service_period_start', 'service_period_end', 'notes', 'created_at',
+        'property_name', 'service_period_start', 'service_period_end', 'notes', 'created_at', 'updated_at',
     ]
     search_fields = ['invoice_number', 'notes']
     extra_instructions = (
@@ -351,7 +353,7 @@ class QuoteQuery(_CaseInsensitiveFilters, ModelQueryToolset):
         'id', 'quote_number', 'company', 'contact', 'opportunity', 'status', 'quote_type',
         'valid_from', 'valid_until', 'subtotal', 'total_value', 'currency',
         'billing_entity', 'billing_frequency', 'contract_duration_months', 'payment_schedule',
-        'terms_conditions', 'notes', 'created_at',
+        'terms_conditions', 'notes', 'created_at', 'updated_at',
     ]
     search_fields = ['quote_number', 'notes']
     extra_instructions = ("Use convert_quote_to_contract to turn an accepted quote into a Draft contract "
@@ -377,8 +379,8 @@ class TaskQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = Task
     fields = [
         'id', 'title', 'description', 'status', 'priority', 'due_date',
-        'assigned_to', 'company', 'related_contact', 'related_contract', 'related_opportunity',
-        'created_at',
+        'company', 'related_contact', 'related_contract', 'related_opportunity',
+        'created_at', 'updated_at',
     ]
     search_fields = ['title', 'description']
     extra_instructions = "Status: pending, in_progress, completed, cancelled. Priority: low, medium, high, urgent."
@@ -409,7 +411,7 @@ class ClientTechDetailQuery(_CaseInsensitiveFilters, ModelQueryToolset):
         'system_type', 'soundcard_channel', 'bms_license', 'additional_hardware',
         'install_date', 'commencement_date', 'activation_date', 'expiry_date',
         'pc_name', 'pc_make', 'pc_model', 'operating_system', 'os_type',
-        'ram', 'cpu_type', 'cpu_speed', 'created_at',
+        'ram', 'cpu_type', 'cpu_speed', 'created_at', 'updated_at',
     ]
     search_fields = ['outlet_name', 'anydesk_id', 'teamviewer_id', 'ultraviewer_id', 'pc_name', 'bms_license']
     extra_instructions = (
@@ -421,7 +423,7 @@ class ClientTechDetailQuery(_CaseInsensitiveFilters, ModelQueryToolset):
 
 class DeviceQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = Device
-    fields = ['id', 'company', 'name', 'device_type', 'model_info', 'notes', 'created_at']
+    fields = ['id', 'company', 'name', 'device_type', 'model_info', 'notes', 'created_at', 'updated_at']
     search_fields = ['name', 'model_info', 'notes']
     extra_instructions = "Devices (PCs, tablets, players) that run music zones. One device can serve multiple zones."
 
@@ -430,7 +432,7 @@ class TicketQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = Ticket
     fields = [
         'id', 'ticket_number', 'subject', 'description', 'status', 'priority',
-        'category', 'company', 'contact', 'assigned_to', 'created_at', 'updated_at',
+        'category', 'company', 'contact', 'created_at', 'updated_at',
     ]
     search_fields = ['ticket_number', 'subject', 'description']
     extra_instructions = (
@@ -443,7 +445,7 @@ class KBArticleQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = KBArticle
     fields = [
         'id', 'article_number', 'title', 'content', 'excerpt', 'status',
-        'visibility', 'category', 'created_at', 'updated_at',
+        'visibility', 'created_at', 'updated_at',
     ]
     search_fields = ['title', 'content', 'excerpt', 'article_number']
     extra_instructions = "Knowledge base articles for tech support. Search by keyword to find solutions."

@@ -1,23 +1,97 @@
-"""Clearer errors and a schema view for the MCP ``query_data_collections`` tool.
+"""Published-field boundary, clearer errors and a schema view for ``query_data_collections``.
 
-The tool comes from django-mcp-server (``mcp_server.query_tool``). When a query
-names a field or collection that does not exist, the library passes Django's
-error through, and Django's ``FieldError`` lists every model field, including
-ones the CRM does not publish. ``install()`` wraps the library's query method
-so such errors become one line that names the bad field, suggests a published
-one, and lists only published fields. Every other error, and every successful
-result, is passed through unchanged.
+The tool comes from django-mcp-server (``mcp_server.query_tool``). On its own
+the library uses a toolset's ``fields`` only to write the schema text: it
+returns every column when a query has no ``$project`` and follows any ``__``
+path in ``$match``, ``$project``, ``$sort`` and ``$group``. ``install()`` wraps
+the library's query method so that the published fields become the boundary:
 
-``describe_collection()`` returns the published schema of one collection, built
-with the library's own ``generate_json_schema`` so it matches what the query
-tool publishes.
+* Before anything runs, every field path in the pipeline must resolve step by
+  step through published fields of published collections (``Boundary.validate``).
+  A relation step is allowed only when the relation is published and its target
+  is a published collection. Anything else is refused with the same one-line
+  "Unknown field ..." error whether or not the name exists on the model.
+* The output is limited to published fields: a query without an effective
+  ``$project`` gets one appended that lists the collection's published columns
+  (``Boundary.restrict_output``), so the library itself builds
+  ``values(<published columns>)``.
+* Some fields are never published, whatever a toolset lists (``never_publish_reason``).
+
+If the wrapper cannot be installed (for example after a library upgrade),
+``install()`` logs one error and the query tool refuses every call instead of
+running unchecked; see ``boundary_active()`` and ``crm_app.mcp_query_guard``.
+
+``describe_collection()`` returns the published schema of one collection.
 """
 import difflib
+import fnmatch
 import json
+import logging
 import re
 
 from django.core.exceptions import FieldDoesNotExist, FieldError
 
+logger = logging.getLogger(__name__)
+
+# The wrapper is written against this exact library version. Any other version
+# leaves the query tool refusing every call until the wrapper is re-verified.
+SUPPORTED_LIBRARY = ('django-mcp-server', '0.5.7')
+
+QUERY_UNAVAILABLE_MESSAGE = (
+    'query_data_collections is unavailable: its published-field checks are not active on this server. '
+    'Use get_commercial_document_context or the REST API, and report this to the CRM maintainers.'
+)
+
+_STATE = {'installed': False}
+
+
+# ------------------------------------------------------------------ never publish
+
+NEVER_PUBLISH_NAMES = frozenset({
+    'password', 'token', 'secret', 'api_key', 'unsubscribe_token', 'tracking_token',
+})
+NEVER_PUBLISH_PATTERNS = ('*_password', '*_token', '*_secret', 'smtp_*')
+
+
+def protected_models():
+    """Models that are never a query target: the user model and the API token models."""
+    from django.contrib.auth import get_user_model
+
+    models = {get_user_model()}
+    try:
+        from rest_framework.authtoken.models import Token
+        models.add(Token)
+    except Exception:  # pragma: no cover - authtoken is installed in this project
+        pass
+    return models
+
+
+def is_protected_model(model):
+    concrete = getattr(model._meta, 'concrete_model', model)
+    return any(concrete is protected._meta.concrete_model for protected in protected_models())
+
+
+def _is_encrypted(field):
+    field_type = type(field)
+    return 'encrypted' in field_type.__module__.lower() or field_type.__name__.startswith('Encrypted')
+
+
+def never_publish_reason(model, field):
+    """Why a field may never be published or traversed, or None."""
+    if is_protected_model(model):
+        return 'protected model'
+    name = field.name
+    if name in NEVER_PUBLISH_NAMES or any(fnmatch.fnmatchcase(name, p) for p in NEVER_PUBLISH_PATTERNS):
+        return 'protected name'
+    if _is_encrypted(field):
+        return 'encrypted field'
+    related = getattr(field, 'related_model', None)
+    if field.is_relation and related is not None and is_protected_model(related):
+        return 'relation to a protected model'
+    return None
+
+
+# ------------------------------------------------------------------ aliases and messages
 
 # Names agents commonly try, keyed by (collection, name); '*' matches any
 # collection. ('field', target) suggests a published field and is used only
@@ -48,37 +122,6 @@ COLLECTION_ALIASES = {
     'servicelocation': 'contractservicelocation',
     'template': 'contracttemplate',
 }
-
-# Library ValueErrors that are about a field reference (query_tool.py).
-_FIELD_VALUE_ERRORS = ('Invalid field path', 'Invalid localField', 'Unknown match key')
-
-
-# ------------------------------------------------------------------ registry
-
-
-def published_collections():
-    """Collections of the global MCP server, keyed like query_data_collections."""
-    from mcp_server.djangomcp import global_mcp_server
-    from mcp_server.query_tool import ModelQueryToolsetMeta
-
-    return {
-        cls.model._meta.model_name.lower(): cls
-        for cls in ModelQueryToolsetMeta.registry.values()
-        if cls.model is not None and cls.mcp_server in (None, global_mcp_server)
-    }
-
-
-def collection_schema(cls):
-    from mcp_server.query_tool import generate_json_schema
-
-    return generate_json_schema(cls.model, fields=cls.fields, exclude=cls.get_excluded_fields())
-
-
-def published_fields(cls):
-    return list(collection_schema(cls)['$jsonSchema']['properties'])
-
-
-# ------------------------------------------------------------------ messages
 
 
 def _normalise(name):
@@ -120,7 +163,7 @@ def field_alias(collection, name, published):
 
 
 def suggest_field(collection, name, published):
-    """('field', name), ('hint', text) or None. Only published names are suggested."""
+    """('field', name), ('hint', text) or None. Depends only on the name and published fields."""
     alias = field_alias(collection, name, published)
     if alias:
         return alias
@@ -129,6 +172,7 @@ def suggest_field(collection, name, published):
 
 
 def unknown_field_message(name, collection, published, on_collection=True):
+    name = str(name)
     suggestion = suggest_field(collection, name, published)
     where = 'on' if on_collection else 'in query on'
     text = f"Unknown field '{name}' {where} collection '{collection}'."
@@ -141,74 +185,29 @@ def unknown_field_message(name, collection, published, on_collection=True):
     return text
 
 
-# ------------------------------------------------------------------ locating a bad field
+# ------------------------------------------------------------------ the boundary
 
 
-def _match_refs(match):
-    if not isinstance(match, dict):
-        return
-    for key, value in match.items():
-        if key in ('$and', '$or', '$nor') and isinstance(value, list):
-            for cond in value:
-                yield from _match_refs(cond)
-        elif not key.startswith('$'):
-            yield key
+def published_collections():
+    """Collections of the global MCP server, keyed like query_data_collections."""
+    from mcp_server.djangomcp import global_mcp_server
+    from mcp_server.query_tool import ModelQueryToolsetMeta
+
+    return {
+        cls.model._meta.model_name.lower(): cls
+        for cls in ModelQueryToolsetMeta.registry.values()
+        if cls.model is not None and cls.mcp_server in (None, global_mcp_server)
+    }
 
 
-def _group_refs(group):
-    for key, value in group.items():
-        if key == '_id':
-            values = value.values() if isinstance(value, dict) else [value]
-        elif isinstance(value, dict):
-            values = value.values()
-        else:
-            continue
-        for ref in values:
-            if isinstance(ref, str) and ref.startswith('$'):
-                yield ref[1:]
+def collection_schema(cls):
+    from mcp_server.query_tool import generate_json_schema
 
-
-def _field_refs(pipeline):
-    """Every field path the pipeline names, as written by the caller."""
-    for stage in pipeline if isinstance(pipeline, list) else []:
-        if not isinstance(stage, dict):
-            continue
-        for op, body in stage.items():
-            if op == '$lookup' and isinstance(body, dict) and isinstance(body.get('localField'), str):
-                yield body['localField']
-            elif op == '$match':
-                yield from _match_refs(body)
-            elif op == '$sort' and isinstance(body, dict):
-                yield from body.keys()
-            elif op == '$project' and isinstance(body, dict):
-                for key, spec in body.items():
-                    if isinstance(spec, str) and spec.startswith('$'):
-                        yield spec[1:]
-                    elif spec:
-                        yield key
-            elif op == '$group' and isinstance(body, dict):
-                yield from _group_refs(body)
-
-
-def _lookup_aliases(pipeline):
-    """The alias map the library builds from $lookup stages (same rules)."""
-    from mcp_server.query_tool import _translate_field
-
-    aliases = {}
-    for stage in pipeline if isinstance(pipeline, list) else []:
-        lookup = stage.get('$lookup') if isinstance(stage, dict) else None
-        if not isinstance(lookup, dict):
-            continue
-        try:
-            local_field = _translate_field(lookup['localField'], aliases)
-            aliases[lookup['as']] = {'prefix': local_field.replace('_id', ''), 'foreign_field': None}
-        except (KeyError, TypeError, ValueError):
-            continue
-    return aliases
+    return generate_json_schema(cls.model, fields=cls.fields, exclude=cls.get_excluded_fields())
 
 
 def _is_lookup(field, name):
-    """True when name is a lookup or transform Django accepts after a relation (e.g. company__in)."""
+    """True when name is a lookup or transform Django applies to this field (e.g. company__in)."""
     for getter in ('get_lookup', 'get_transform'):
         try:
             if getattr(field, getter)(name) is not None:
@@ -218,93 +217,295 @@ def _is_lookup(field, name):
     return False
 
 
-def _unknown_part(model, path):
-    """(model, name) for the first segment of a Django path that is not a field, else None."""
-    current, previous = model, None
-    for part in path.split('__'):
-        if part == 'pk':
-            return None
-        try:
-            field = current._meta.get_field(part)
-        except FieldDoesNotExist:
-            if previous is not None and _is_lookup(previous, part):
-                return None
-            return current, part
-        if not (field.is_relation and field.related_model is not None):
-            return None  # what follows is a lookup or transform on a plain field
-        current, previous = field.related_model, field
+# The library handles one operator per stage, the first of these it finds
+# (apply_json_mango_query's if/elif chain); other keys in that stage are ignored.
+_STAGE_ORDER = ('$match', '$search', '$sort', '$skip', '$limit', '$project', '$group', '$lookup')
+
+
+def _effective_op(stage):
+    for op in _STAGE_ORDER:
+        if op in stage:
+            return op
     return None
 
 
-def locate_unknown_field(base_cls, pipeline):
-    """One-line message for the first unknown field the pipeline names, or None."""
-    from mcp_server.query_tool import _translate_field
+class Boundary:
+    """The published fields of a set of collections, and the checks that enforce them."""
 
-    aliases = _lookup_aliases(pipeline)
+    def __init__(self, collections):
+        self.collections = dict(collections)
+        self.collection_of = {cls.model: name for name, cls in self.collections.items()}
+        self.fields = {}
+        for name, cls in self.collections.items():
+            keep = []
+            for field_name in collection_schema(cls)['$jsonSchema']['properties']:
+                field = cls.model._meta.get_field(field_name)
+                if never_publish_reason(cls.model, field):
+                    continue
+                if field.is_relation and (field.related_model not in self.collection_of
+                                          or is_protected_model(field.related_model)):
+                    continue
+                keep.append(field_name)
+            self.fields[name] = keep
+
+    def output_columns(self, collection):
+        """Published concrete columns in model order, keyed like queryset.values()."""
+        model = self.collections[collection].model
+        published = set(self.fields[collection])
+        return [f.attname for f in model._meta.concrete_fields if f.name in published]
+
+    def search_fields_published(self, collection):
+        searchable = self.collections[collection].get_text_search_fields() or ()
+        return set(searchable) <= set(self.fields[collection])
+
+    # -------------------------------------------------------------- paths
+
+    def _refuse(self, name, collection):
+        return ValueError(unknown_field_message(name, collection, self.fields[collection]))
+
+    def check_path(self, collection, path):
+        """Raise the one-line error unless a Django field path stays on published fields.
+
+        Each step must be a published concrete field of the current collection.
+        A relation moves to its target collection (always published, by
+        construction of self.fields). After a plain field the rest of the path
+        is lookups and transforms on that column, which Django validates and
+        which cannot join another table.
+        """
+        if not isinstance(path, str):
+            raise self._refuse(path, collection)
+        model = self.collections[collection].model
+        parts = path.split('__')
+        previous_relation = None
+        for index, part in enumerate(parts):
+            current = self.collection_of[model]
+            published = self.fields[current]
+            if part == 'pk':
+                field = model._meta.pk
+            else:
+                try:
+                    field = model._meta.get_field(part)
+                except FieldDoesNotExist:
+                    field = None
+            if field is None and previous_relation is not None and _is_lookup(previous_relation, part):
+                return  # a lookup on the relation's key, e.g. company__in
+            if field is None or not field.concrete or field.name not in published:
+                raise self._refuse(part, current)
+            if not field.is_relation:
+                return
+            rest = parts[index + 1:]
+            if part not in (field.name, 'pk') or not rest:
+                # The key value itself (company or company_id), optionally with one lookup.
+                if rest and not (len(rest) == 1 and _is_lookup(field, rest[0])):
+                    raise self._refuse(rest[0], self.collection_of[field.related_model])
+                return
+            model = field.related_model
+            previous_relation = field
+
+    def _translate(self, path, aliases):
+        from mcp_server.query_tool import _translate_field
+
+        return _translate_field(path, aliases)  # unknown alias: the library's own ValueError
+
+    def _check_match(self, collection, match, aliases, top):
+        if not isinstance(match, dict):
+            return
+        for key, condition in match.items():
+            if key in ('$and', '$or', '$nor'):
+                for cond in condition if isinstance(condition, list) else []:
+                    self._check_match(collection, cond, aliases, top=False)
+            elif key == '$text' and top:
+                self._check_search(collection)
+            else:
+                self.check_path(collection, self._translate(key, aliases))
+
+    def _check_search(self, collection):
+        if not self.search_fields_published(collection):
+            raise ValueError(f"Full text search is not available on collection '{collection}'.")
+
+    def _check_ref(self, collection, ref, aliases):
+        if isinstance(ref, str) and ref.startswith('$'):
+            path = ref[1:]
+            self.check_path(collection, 'pk' if path == '_id' else self._translate(path, aliases))
+
+    def validate(self, collection, pipeline):
+        """Check every field path in the pipeline before anything runs."""
+        if not isinstance(pipeline, list):
+            return
+        stages = [stage for stage in pipeline if isinstance(stage, dict)]
+        aliases = {}
+        # $lookup aliases, built in order exactly as the library builds them.
+        for stage in stages:
+            lookup = stage.get('$lookup')
+            if not isinstance(lookup, dict):
+                continue
+            local = lookup.get('localField')
+            if not isinstance(local, str):
+                continue
+            local_path = self._translate(local, aliases)
+            self.check_path(collection, local_path)
+            if isinstance(lookup.get('as'), str):
+                aliases[lookup['as']] = {'prefix': local_path.replace('_id', ''),
+                                         'foreign_field': lookup.get('foreignField')}
+        for stage in stages:
+            for op, body in stage.items():
+                if op == '$match':
+                    self._check_match(collection, body, aliases, top=True)
+                elif op == '$search':
+                    self._check_search(collection)
+                elif op == '$sort' and isinstance(body, dict):
+                    for key in body:  # the library passes $sort keys to order_by as written
+                        self.check_path(collection, key[1:] if isinstance(key, str) and key.startswith('-') else key)
+                elif op == '$project' and isinstance(body, dict):
+                    for key, spec in body.items():
+                        if isinstance(spec, str) and spec.startswith('$'):
+                            self._check_ref(collection, spec, aliases)
+                        elif spec:
+                            self._check_ref(collection, '$' + key, aliases)
+                elif op == '$group' and isinstance(body, dict):
+                    for key, value in body.items():
+                        refs = value.values() if isinstance(value, dict) else [value]
+                        if key != '_id' and not isinstance(value, dict):
+                            continue
+                        for ref in refs:
+                            self._check_ref(collection, ref, aliases)
+
+    # -------------------------------------------------------------- output
+
+    def restrict_output(self, collection, pipeline):
+        """The pipeline to run: unchanged when its output is already explicit, else with a
+        final $project of the published columns.
+
+        $group output is built only from validated paths. Otherwise the library
+        uses the last $project stage that includes at least one field, and falls
+        back to every column. Appending a $project makes the library itself
+        build values(<published columns>) for that fallback.
+        """
+        if not isinstance(pipeline, list):
+            return pipeline
+        effective = [(_effective_op(stage), stage) for stage in pipeline if isinstance(stage, dict)]
+        if any(op == '$group' for op, _ in effective):
+            return pipeline
+        last = None
+        for op, stage in effective:
+            if op == '$project':
+                last = stage['$project']
+        if isinstance(last, dict) and any(bool(spec) for spec in last.values()):
+            return pipeline
+        return list(pipeline) + [{'$project': {column: 1 for column in self.output_columns(collection)}}]
+
+
+_BOUNDARIES = {}
+
+
+def boundary_for(collections):
+    key = tuple(sorted((name, id(cls)) for name, cls in collections.items()))
+    boundary = _BOUNDARIES.get(key)
+    if boundary is None:
+        boundary = _BOUNDARIES[key] = Boundary(collections)
+    return boundary
+
+
+def published_fields(cls):
+    """The published field names of one toolset class, in schema order."""
     collections = published_collections()
-    for ref in _field_refs(pipeline):
-        if not isinstance(ref, str) or ref == '_id':
-            continue
-        try:
-            path = _translate_field(ref, aliases)
-        except ValueError:
-            continue  # unknown $lookup alias: the library message already says so
-        found = _unknown_part(base_cls.model, path)
-        if found is None:
-            continue
-        model, name = found
-        collection = model._meta.model_name
-        cls = collections.get(collection)
-        return unknown_field_message(name, collection, published_fields(cls) if cls else [])
-    return None
+    name = cls.model._meta.model_name.lower()
+    if collections.get(name) is not cls:
+        collections = {name: cls}
+    return list(boundary_for(collections).fields[name])
 
 
-def field_error_message(base_cls, pipeline, exc):
+def field_error_message(boundary, collection, exc):
     """A one-line message for a Django FieldError that never lists unpublished fields."""
-    located = locate_unknown_field(base_cls, pipeline)
-    if located:
-        return located
-    collection = base_cls.model._meta.model_name
     text = ' '.join(str(exc).split())
+    published = boundary.fields[collection]
     keyword = re.search(r"Cannot resolve keyword '([^']+)' into field", text)
     if keyword:
-        return unknown_field_message(keyword.group(1), collection, published_fields(base_cls), on_collection=False)
+        return unknown_field_message(keyword.group(1), collection, published, on_collection=False)
     if 'Choices are' in text:
         # Django lists every model field after "Choices are"; drop it.
-        text = text.split('Choices are')[0].strip()
-        return f"{text} Published fields: {', '.join(published_fields(base_cls))}"
+        return f"{text.split('Choices are')[0].strip()} Published fields: {', '.join(published)}"
     return text
 
 
-# ------------------------------------------------------------------ the wrapper
+# ------------------------------------------------------------------ installation
 
 
-def install():
-    """Wrap the library's query method once. Results of valid queries are untouched."""
+def _library_version():
+    from importlib.metadata import version
+
+    return version(SUPPORTED_LIBRARY[0])
+
+
+def boundary_active():
+    """True only while the boundary wrapper is the library's query method."""
+    try:
+        from mcp_server import query_tool
+
+        return bool(_STATE['installed']) and getattr(query_tool._QueryExecutor.query, '_crm_boundary', False)
+    except Exception:
+        return False
+
+
+def _install():
+    found = _library_version()
+    if found != SUPPORTED_LIBRARY[1]:
+        raise RuntimeError(f'{SUPPORTED_LIBRARY[0]} {found} is not the verified {SUPPORTED_LIBRARY[1]}')
     from mcp_server import query_tool
 
+    for name in ('_QueryExecutor', 'ModelQueryToolsetMeta', 'generate_json_schema', '_translate_field'):
+        getattr(query_tool, name)
     original = query_tool._QueryExecutor.query
-    if getattr(original, '_crm_clear_errors', False):
+    if getattr(original, '_crm_boundary', False):
         return
 
     def query(self, collection: str, search_pipeline: list[dict] = []):
-        models = self.query_tool_models
-        if isinstance(collection, str) and collection.lower() not in models:
-            raise ValueError(unknown_collection_message(collection, models.keys()))
+        collections = self.query_tool_models
+        if not isinstance(collection, str) or collection.lower() not in collections:
+            raise ValueError(unknown_collection_message(collection, collections.keys()))
+        name = collection.lower()
+        boundary = boundary_for(collections)
+        boundary.validate(name, search_pipeline)
+        pipeline = boundary.restrict_output(name, search_pipeline)
         try:
-            return original(self, collection, search_pipeline)
+            return original(self, collection, pipeline)
         except FieldError as exc:
-            raise ValueError(field_error_message(models[collection.lower()], search_pipeline, exc)) from exc
-        except ValueError as exc:
-            if str(exc).startswith(_FIELD_VALUE_ERRORS):
-                located = locate_unknown_field(models[collection.lower()], search_pipeline)
-                if located:
-                    raise ValueError(located) from exc
-            raise
+            raise ValueError(field_error_message(boundary, name, exc)) from exc
 
-    query._crm_clear_errors = True
+    query._crm_boundary = True
     query.__wrapped__ = original
     query_tool._QueryExecutor.query = query
+
+
+def _refuse_registered_tool():
+    """Best effort: make the registered tool refuse in-process calls too."""
+    try:
+        from mcp_server.djangomcp import global_mcp_server
+
+        tool = global_mcp_server._tool_manager.get_tool('query_data_collections')
+        if tool is None:
+            return
+
+        async def refuse(*args, **kwargs):
+            raise ValueError(QUERY_UNAVAILABLE_MESSAGE)
+
+        tool.fn = refuse
+    except Exception:
+        pass
+
+
+def install():
+    """Install the boundary. Never raises: on failure the query tool refuses every call."""
+    try:
+        _install()
+    except Exception as exc:
+        _STATE['installed'] = False
+        logger.error('MCP query boundary not installed (%s: %s); query_data_collections will refuse every call.',
+                     type(exc).__name__, exc)
+        _refuse_registered_tool()
+        return False
+    _STATE['installed'] = True
+    return True
 
 
 # ------------------------------------------------------------------ describe_collection
@@ -327,15 +528,16 @@ def describe_collection(name):
     cls = collections.get(key)
     if cls is None:
         raise ValueError(unknown_collection_message(name, collections.keys()))
+    published = boundary_for(collections).fields[key]
     properties = collection_schema(cls)['$jsonSchema']['properties']
     fields = []
-    for field_name, prop in properties.items():
+    for field_name in published:
+        prop = properties[field_name]
         entry = {'name': field_name, 'type': prop.get('bsonType')}
         if 'enum' in prop:
             entry['choices'] = prop['enum']
         if 'ref' in prop:
-            ref_model = cls.model._meta.get_field(field_name).related_model
-            entry['ref'] = ref_model._meta.model_name
+            entry['ref'] = cls.model._meta.get_field(field_name).related_model._meta.model_name
         if prop.get('description'):
             entry['description'] = str(prop['description'])
         fields.append(entry)
@@ -345,5 +547,5 @@ def describe_collection(name):
         'text_search_fields': sorted(cls.get_text_search_fields()),
         'extra_operators': [f'${op}' for op in (cls.extra_filters or [])],
         'extra_instructions': cls.extra_instructions or '',
-        'alias_hints': collection_alias_hints(key, list(properties)),
+        'alias_hints': collection_alias_hints(key, published),
     })

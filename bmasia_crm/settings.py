@@ -102,6 +102,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'crm_app.agent_gate_middleware.AgentGateRestObserverMiddleware',  # Phase 1 Stage A (observe only)
     'crm_app.auth_observability.AuthObservabilityMiddleware',  # logs auth method per API request; never blocks
+    'crm_app.mcp_query_guard.MCPQueryGuardMiddleware',  # refuses query_data_collections if its field checks are off
 ]
 
 ROOT_URLCONF = 'bmasia_crm.urls'
