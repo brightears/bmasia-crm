@@ -348,9 +348,10 @@ def test_mark_renewed_refuses_a_changed_or_missing_successor(tmp_path):
     assert '[SKIPPED:missing_successor]' in _run('--file', _file(tmp_path, [entry], 'b.json'))
 
 
-def test_mark_renewed_from_expired_is_refused(tmp_path):
+def test_mark_renewed_from_cancelled_is_refused(tmp_path):
+    # An Expired old term is allowed since corrections v2 ops (see test_apply_contract_corrections_v2_ops).
     company = _company()
-    placeholder = _contract(company, status='Expired')
+    placeholder = _contract(company, status='Cancelled')
     current = _contract(company, start=date(2025, 6, 1))
     assert '[SKIPPED:transition_not_allowed]' in _run('--file', _file(tmp_path, [_renewed(placeholder, current)]))
 
