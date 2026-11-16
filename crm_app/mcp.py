@@ -56,8 +56,13 @@ across Thailand and Hong Kong.
 Use `query_data_collections` to search and filter any collection using MongoDB-style
 aggregation pipelines. Available collections: company, contact, contract, invoice,
 quote, opportunity, task, zone, clienttechdetail, device, ticket, kbarticle,
-quotelineitem, contractlineitem, servicelocation, invoicelineitem,
+quotelineitem, contractlineitem, contractservicelocation, invoicelineitem,
 contracttemplate.
+- `describe_collection(name)` returns one collection's published fields (type,
+  choices, related collection), text-search fields and naming hints.
+- Besides the operators listed in the query tool, `$match` accepts the
+  case-insensitive `$icontains`, `$iexact` and `$istartswith`, e.g.
+  `{"name": {"$icontains": "hotel"}}`.
 
 ### CRUD Tools (write)
 Use these 3 generic tools for all write operations:
@@ -234,14 +239,30 @@ class RenePhase2MCPToolset(MCPToolset):
 # ============================================================
 # Query Toolsets (read — MongoDB-style aggregation pipeline)
 # ============================================================
+# Every name in `fields` must be a concrete model field: the library silently
+# drops anything else from the published schema (guarded by
+# crm_app/tests/test_mcp_query_tool.py). Unknown-field and unknown-collection
+# errors are reworded by crm_app/mcp_query_help.py (installed in apps.ready()).
 
 
-class CompanyQuery(ModelQueryToolset):
+class _CaseInsensitiveFilters:
+    """Extra $match operators for every collection.
+
+    The library turns {"field": {"$<op>": value}} into the Django lookup
+    field__<op> for each op listed in extra_filters. This is a plain mixin, not a
+    ModelQueryToolset subclass: the library registers every such subclass as a
+    collection.
+    """
+    extra_filters = ['icontains', 'iexact', 'istartswith']
+
+
+class CompanyQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = Company
     fields = [
         'id', 'name', 'legal_entity_name', 'billing_entity', 'industry',
-        'phone', 'email', 'website', 'country', 'city', 'address',
-        'full_address', 'is_active', 'is_corporate_parent', 'parent_company',
+        'phone', 'email', 'website', 'country', 'city', 'address_line1',
+        'address_line2', 'state', 'postal_code', 'tax_id', 'branch',
+        'is_active', 'is_corporate_parent', 'parent_company',
         'contracted_product', 'contracted_zone_count', 'contracted_synced_at',
         'notes', 'created_at', 'updated_at',
     ]
@@ -251,17 +272,17 @@ class CompanyQuery(ModelQueryToolset):
                           "the corporate group. NOTE: is_active is unreliable — judge active status by contracts.")
 
 
-class ContactQuery(ModelQueryToolset):
+class ContactQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = Contact
     fields = [
         'id', 'name', 'email', 'phone', 'company', 'contact_type',
-        'is_primary', 'title', 'department', 'last_contacted', 'notes', 'created_at', 'updated_at',
+        'is_primary', 'is_active', 'title', 'department', 'last_contacted', 'notes', 'created_at', 'updated_at',
     ]
     search_fields = ['name', 'email', 'phone', 'title', 'notes']
     extra_instructions = "Contacts belong to companies. contact_type: Primary, Billing, Technical, Decision Maker, Other."
 
 
-class ContractQuery(ModelQueryToolset):
+class ContractQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = Contract
     fields = [
         'id', 'contract_number', 'company', 'contract_type', 'service_type', 'status',
@@ -288,11 +309,13 @@ class ContractQuery(ModelQueryToolset):
         "Renewed automatically (audited) and hands its zone links over to the renewal for the zones the "
         "renewal holds; a predecessor in any other status is left alone. "
         "signed_date is the customer's signature date: set it only from evidence, never guess. "
-        "For a month's renewals use the renewal_book tool. $lookup with 'company' to join company details."
+        "For a month's renewals use the renewal_book tool. $lookup with 'company' to join company details. "
+        "There is no stored PDF link: generate_contract_pdf(id) returns the PDF as base64, and "
+        "get_commercial_document_context('contract', id) returns the full record with no side effects."
     )
 
 
-class ContractTemplateQuery(ModelQueryToolset):
+class ContractTemplateQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = ContractTemplate
     fields = [
         'id', 'name', 'template_type', 'content', 'pdf_format',
@@ -306,35 +329,42 @@ class ContractTemplateQuery(ModelQueryToolset):
     )
 
 
-class InvoiceQuery(ModelQueryToolset):
+class InvoiceQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = Invoice
     fields = [
         'id', 'invoice_number', 'company', 'contract', 'status',
-        'invoice_date', 'due_date', 'paid_date', 'amount', 'tax_amount',
+        'issue_date', 'due_date', 'paid_date', 'amount', 'tax_amount',
         'total_amount', 'currency', 'billing_entity', 'payment_terms', 'payment_terms_text',
         'property_name', 'service_period_start', 'service_period_end', 'notes', 'created_at',
     ]
     search_fields = ['invoice_number', 'notes']
-    extra_instructions = "Status: Draft, Sent, Paid, Overdue, Void, Cancelled."
+    extra_instructions = (
+        "Status: Draft, Sent, Paid, Overdue, Void, Cancelled. issue_date is the invoice date. "
+        "There is no stored PDF link: generate_invoice_pdf(id) returns the PDF as base64, and "
+        "get_commercial_document_context('invoice', id) returns the full record with no side effects."
+    )
 
 
-class QuoteQuery(ModelQueryToolset):
+class QuoteQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = Quote
     fields = [
-        'id', 'quote_number', 'company', 'opportunity', 'status', 'quote_type',
+        'id', 'quote_number', 'company', 'contact', 'opportunity', 'status', 'quote_type',
         'valid_from', 'valid_until', 'subtotal', 'total_value', 'currency',
         'billing_entity', 'billing_frequency', 'contract_duration_months', 'payment_schedule',
         'terms_conditions', 'notes', 'created_at',
     ]
     search_fields = ['quote_number', 'notes']
     extra_instructions = ("Use convert_quote_to_contract to turn an accepted quote into a Draft contract "
-                          "(copies terms + line items, derives service locations).")
+                          "(copies terms + line items, derives service locations). "
+                          "There is no stored PDF link: generate_quote_pdf(id) returns the PDF as base64, and "
+                          "get_commercial_document_context('quote', id) returns the full record with no "
+                          "side effects.")
 
 
-class OpportunityQuery(ModelQueryToolset):
+class OpportunityQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = Opportunity
     fields = [
-        'id', 'name', 'company', 'contact', 'stage', 'value', 'currency',
+        'id', 'name', 'company', 'stage', 'expected_value',
         'probability', 'expected_close_date', 'lead_source', 'contact_method',
         'last_contact_date', 'follow_up_date', 'pain_points', 'decision_criteria',
         'notes', 'created_at', 'updated_at',
@@ -343,27 +373,35 @@ class OpportunityQuery(ModelQueryToolset):
     extra_instructions = "Stages: Contacted, Quotation Sent, Contract Sent, Won, Lost."
 
 
-class TaskQuery(ModelQueryToolset):
+class TaskQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = Task
     fields = [
         'id', 'title', 'description', 'status', 'priority', 'due_date',
-        'assigned_to', 'company', 'contact', 'created_at',
+        'assigned_to', 'company', 'related_contact', 'related_contract', 'related_opportunity',
+        'created_at',
     ]
     search_fields = ['title', 'description']
     extra_instructions = "Status: pending, in_progress, completed, cancelled. Priority: low, medium, high, urgent."
 
 
-class ZoneQuery(ModelQueryToolset):
+class ZoneQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = Zone
     fields = [
-        'id', 'name', 'company', 'soundtrack_zone_id', 'soundtrack_account_id',
-        'is_active', 'platform_type', 'notes', 'created_at', 'updated_at',
+        'id', 'name', 'company', 'soundtrack_zone_id', 'platform', 'status',
+        'is_orphaned', 'device', 'device_name', 'last_seen_online',
+        'notes', 'created_at', 'updated_at',
     ]
     search_fields = ['name', 'soundtrack_zone_id']
-    extra_instructions = "Zones represent physical music playback areas in hotel properties."
+    extra_instructions = (
+        "Zones represent physical music playback areas in hotel properties. "
+        "status: online, offline, no_device, expired, pending, cancelled (cancelled = terminated contract). "
+        "platform: soundtrack or beatbreeze. is_orphaned = true when the zone is no longer found in "
+        "the Soundtrack account. device links the Device record running the zone; device_name and "
+        "last_seen_online are tracked values. Filter live zones by status and is_orphaned."
+    )
 
 
-class ClientTechDetailQuery(ModelQueryToolset):
+class ClientTechDetailQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = ClientTechDetail
     fields = [
         'id', 'company', 'zone', 'outlet_name', 'platform_type', 'syb_account_type',
@@ -381,14 +419,14 @@ class ClientTechDetailQuery(ModelQueryToolset):
     )
 
 
-class DeviceQuery(ModelQueryToolset):
+class DeviceQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = Device
     fields = ['id', 'company', 'name', 'device_type', 'model_info', 'notes', 'created_at']
     search_fields = ['name', 'model_info', 'notes']
     extra_instructions = "Devices (PCs, tablets, players) that run music zones. One device can serve multiple zones."
 
 
-class TicketQuery(ModelQueryToolset):
+class TicketQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = Ticket
     fields = [
         'id', 'ticket_number', 'subject', 'description', 'status', 'priority',
@@ -401,7 +439,7 @@ class TicketQuery(ModelQueryToolset):
     )
 
 
-class KBArticleQuery(ModelQueryToolset):
+class KBArticleQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = KBArticle
     fields = [
         'id', 'article_number', 'title', 'content', 'excerpt', 'status',
@@ -411,7 +449,7 @@ class KBArticleQuery(ModelQueryToolset):
     extra_instructions = "Knowledge base articles for tech support. Search by keyword to find solutions."
 
 
-class QuoteLineItemQuery(ModelQueryToolset):
+class QuoteLineItemQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = QuoteLineItem
     fields = [
         'id', 'quote', 'product_service', 'description', 'quantity',
@@ -422,7 +460,7 @@ class QuoteLineItemQuery(ModelQueryToolset):
     extra_instructions = "Line items attached to quotes. Use to verify what's on a quote PDF or audit nested-write results."
 
 
-class ContractLineItemQuery(ModelQueryToolset):
+class ContractLineItemQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = ContractLineItem
     fields = [
         'id', 'contract', 'product_service', 'description', 'quantity',
@@ -433,7 +471,7 @@ class ContractLineItemQuery(ModelQueryToolset):
     extra_instructions = "Line items attached to contracts. Use to verify what's on a contract PDF or audit nested-write results."
 
 
-class ContractServiceLocationQuery(ModelQueryToolset):
+class ContractServiceLocationQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = ContractServiceLocation
     fields = [
         'id', 'contract', 'location_name', 'platform', 'custom_service_name',
@@ -447,7 +485,7 @@ class ContractServiceLocationQuery(ModelQueryToolset):
     )
 
 
-class InvoiceLineItemQuery(ModelQueryToolset):
+class InvoiceLineItemQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = InvoiceLineItem
     fields = [
         'id', 'invoice', 'product_service', 'description', 'quantity',
@@ -457,6 +495,20 @@ class InvoiceLineItemQuery(ModelQueryToolset):
     ]
     search_fields = ['description', 'product_service']
     extra_instructions = "Line items attached to invoices. Use to verify what's on an invoice PDF or audit nested-write results."
+
+
+@mcp_server.tool()
+def describe_collection(name: str) -> str:
+    """Describe one query_data_collections collection. Read-only.
+
+    Returns JSON: collection, fields (name, type, choices if any, ref = the
+    related collection for a relation, description), text_search_fields,
+    extra_operators, extra_instructions and alias_hints (names people often try
+    and what to use instead). An unknown name is an error that suggests the
+    closest collection.
+    """
+    from crm_app.mcp_query_help import describe_collection as _describe
+    return _describe(name)
 
 
 # ============================================================
