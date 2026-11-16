@@ -17,8 +17,9 @@ from django.utils import timezone
 
 from crm_app.models import Contract, ContractServiceLocation
 from crm_app.services import contract_corrections_v2 as v2
+from crm_app.models import ContractZone
 from crm_app.tests.test_apply_contract_corrections_v2 import (
-    _audits, _company, _contract, _create, _created_for, _execute, _expected, _file, _reload, _run,
+    _audits, _company, _contract, _create, _created_for, _execute, _expected, _file, _reload, _run, _zone_link,
 )
 from crm_app.tests.test_apply_contract_corrections_v2_ops import _create_new, _created_on, _note
 
@@ -101,6 +102,51 @@ def test_an_unlisted_overlap_is_still_refused_while_a_listed_one_is_allowed(tmp_
     out, _ = _execute(tmp_path, _file(tmp_path, [_successor(old, [may])]))
     assert '[SKIPPED:overlapping_contract]' in out
     assert _created_for(old) is None and _state(old)[0] == 'Expired'
+
+
+def test_a_zone_shared_with_an_allowed_contract_is_refused(tmp_path):
+    company = _company()
+    old, may = _march_old(company), _may_term(company)
+    zone, _ = _zone_link(old)
+    ContractZone.objects.create(contract=may, zone=zone, start_date=may.start_date)  # both hold the zone
+    out, _ = _execute(tmp_path, _file(tmp_path, [_successor(old, [may])]))
+    assert '[SKIPPED:overlap_allowed_shares_zone]' in out
+    assert _created_for(old) is None
+    assert ContractZone.objects.filter(zone=zone, is_active=True).count() == 2  # nothing moved
+
+
+def test_zones_not_shared_with_an_allowed_contract_are_copied(tmp_path):
+    company = _company()
+    old, may = _march_old(company), _may_term(company)
+    _zone_link(old)
+    _zone_link(may)  # the allowed contract holds another zone: no conflict
+    out, _ = _execute(tmp_path, _file(tmp_path, [_successor(old, [may])]))
+    assert '[APPLIED]' in out
+    new = _created_for(old)
+    assert ContractZone.objects.filter(contract=new, is_active=True).count() == 1
+
+
+def test_an_inactive_shared_zone_link_on_the_allowed_contract_is_not_a_conflict(tmp_path):
+    company = _company()
+    old, may = _march_old(company), _may_term(company)
+    zone, _ = _zone_link(old)
+    ContractZone.objects.create(contract=may, zone=zone, start_date=may.start_date, is_active=False,
+                                end_date=date(2025, 6, 30))
+    out, _ = _execute(tmp_path, _file(tmp_path, [_successor(old, [may])]))
+    assert '[APPLIED]' in out
+
+
+def test_more_than_twenty_allowed_items_stop_the_command(tmp_path):
+    company = _company()
+    old, may = _march_old(company), _may_term(company)
+    entry = _successor(old, [may])
+    entry['overlap_allowed'] = entry['overlap_allowed'] + [
+        {'contract_id': str(_contract(company, status='Active', start=date(2026, 4, 1)).pk),
+         'expected': {'status': 'Active', 'start_date': '2026-04-01', 'end_date': '2027-03-31',
+                      'updated_at': timezone.now().isoformat()}} for _ in range(20)]
+    with pytest.raises(CommandError, match='want a list of 1-20'):
+        _run('--file', _file(tmp_path, [entry]))
+    assert _created_for(old) is None
 
 
 @pytest.mark.parametrize('make', [

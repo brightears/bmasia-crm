@@ -162,7 +162,9 @@ REFUSALS (named reasons; nothing in the group is written)
   number_reservation_failed and planned_terms_overlap.
   overlap_allowed_missing, overlap_allowed_other_company,
   overlap_allowed_changed, overlap_allowed_not_overlapping (create_successor /
-  create_contract with overlap_allowed; see OVERLAP ALLOWED).
+  create_contract with overlap_allowed; see OVERLAP ALLOWED),
+  overlap_allowed_shares_zone (create_successor: a zone to be copied is
+  actively linked to a named contract).
 
 CREATE (create_successor)
   The new contract takes:
@@ -248,6 +250,9 @@ OVERLAP ALLOWED (create_successor and create_contract, optional)
   (overlap_allowed_changed) and really overlap the new term, i.e. not be
   Cancelled and share at least one day with it
   (overlap_allowed_not_overlapping): the file names only real overlaps.
+  create_successor also refuses overlap_allowed_shares_zone when a zone the
+  new term would copy from the old contract is actively linked to a named
+  contract: the zone would end with two active links.
   The overlap check then leaves out exactly those contracts; any other
   overlapping non-Cancelled contract still refuses overlapping_contract.
   planned_terms_overlap is unchanged: two new terms planned in one file for
@@ -1170,6 +1175,12 @@ class V2Runner:
                 Company.objects.filter(pk__in=e.twin_company_ids).count() != len(e.twin_company_ids):
             raise Refused('missing_twin_company')
         allowed = _check_overlap(e, c.company_id, [c.company_id, *e.twin_company_ids], locked, [c.pk])
+        # A zone the new term copies from the old one must not stay actively linked to an allowed
+        # contract: the zone would end with two active links (new term and allowed contract).
+        if e.overlap_allowed_ids and ContractZone.objects.filter(
+                contract_id__in=e.overlap_allowed_ids, is_active=True,
+                zone_id__in=ContractZone.objects.filter(contract=c, is_active=True).values('zone_id')).exists():
+            raise Refused('overlap_allowed_shares_zone')
         if self._pricing_mismatch(new, c):
             raise Refused('service_location_pricing_mismatch')
         links = ContractZone.objects.filter(contract=c, is_active=True).values('zone_id').distinct().count()
