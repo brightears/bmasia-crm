@@ -65,9 +65,7 @@ python manage.py shell -c "from crm_app.services.care_touches import revert_back
 The projection adds `care_summary`, `care_summary_updated_at`,
 `last_care_touch`, `last_care_check_in` per account and `current_by_date` per
 contract row. These fields are part of `evidence_sha256`, so a new touch or
-summary changes the account's evidence hash. Unlike the original read patch,
-this addition ships a migration (`0105_care_touch`: one new table and three
-nullable/defaulted company columns).
+summary changes the account's evidence hash.
 
 ## Reversible CRM quarterly handover
 
@@ -88,8 +86,10 @@ or accepted sends; never operate both owners concurrently.
 
 Run synthetic tests as described in `tests/cara_readonly/README.md`, review the
 exact diff, publish through the authorized owner Git/Render workflow, and
-verify the deployed commit plus a live Cara capability. No schema migration,
-dependency update, boot script change or customer-record mutation is included
-in this patch. The repository's existing deployment hooks still perform their
-normal migration/seed checks; confirm the live migration state before rollout.
+verify the deployed commit plus a live Cara capability. The original read
+patch had no schema migration. The care-write addition ships one additive
+migration, `0105_care_touch` (a new table and three nullable/defaulted company
+columns), applied by the normal deploy hooks; it adds no dependency or boot
+script change and mutates no existing customer record. Confirm the live
+migration state reaches 0105 before switching `CARA_CARE_WRITES_ENABLED` on.
 Do not equate a Git push or process-health check with a successful Cara read.

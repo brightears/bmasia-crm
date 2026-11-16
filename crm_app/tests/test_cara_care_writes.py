@@ -579,3 +579,24 @@ def test_revert_backfill_batch_dry_run_then_execute(company, contact):
     assert row.additional_data["count"] == 3
     with pytest.raises(ValueError):
         revert_backfill_batch("")
+
+
+# ------------------------------------------------------------- agent gate observer
+
+def test_cara_bearer_writes_are_not_recorded_by_the_gate(company):
+    from crm_app.models import AgentRequest
+    assert post(body(company)).status_code == 201
+    put = cara().put(summary_path(company.pk), {"care_summary": "x", "expected_updated_at": None}, format="json")
+    assert put.status_code == 200
+    assert AgentRequest.objects.count() == 0
+
+
+def test_agent_token_rest_write_is_still_recorded_by_the_gate(company):
+    from crm_app.models import AgentRequest
+    theo = _user("theo")
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION="Token " + Token.objects.create(user=theo).key)
+    response = client.patch(f"/api/v1/companies/{company.pk}/", {"city": "Example City"}, format="json")
+    assert response.status_code == 200
+    row = AgentRequest.objects.get()
+    assert (row.principal, row.verb, row.collection) == ("theo", "update", "company")
