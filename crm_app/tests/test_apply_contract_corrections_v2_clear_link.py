@@ -339,3 +339,18 @@ def test_clear_and_an_op_on_the_former_predecessor_in_another_group(tmp_path):
     assert out.count('[APPLIED]') == 2
     _reload(main, addon)
     assert (main.status, addon.renewed_from_id, addon.status) == ('Expired', None, 'Active')
+
+
+# --- review follow-up ----------------------------------------------------------------------
+
+def test_clear_never_calls_contract_save(tmp_path):
+    """The link is removed with a queryset update: Contract.save() (number minting, signals,
+    the post_save handlers) must not run for the cleared contract, nor for any other."""
+    main, addon = _addon_pair()
+    with mock.patch.object(Contract, 'save', autospec=True, side_effect=Contract.save) as save_spy:
+        out, _ = _execute(tmp_path, _file(tmp_path, [_clear(addon, main)]))
+    assert f'[APPLIED] L clear_renewed_from {addon.pk}' in out
+    addon.refresh_from_db()
+    assert addon.renewed_from_id is None
+    assert [call for call in save_spy.call_args_list if call.args[0].pk == addon.pk] == []
+    save_spy.assert_not_called()
