@@ -10,6 +10,7 @@ from django.db import transaction
 
 from crm_app.models import AuditLog, CareTouch
 
+
 def _iso(value):
     return value.isoformat() if value is not None else None
 
@@ -37,10 +38,28 @@ def touch_as_dict(touch: CareTouch) -> dict:
     }
 
 
+# Fields the website's CompanyCareCard shows. Mailbox, Gmail ids and the
+# idempotency key stay out of the website response.
+WEBSITE_TOUCH_FIELDS = ('id', 'occurred_at', 'kind', 'outcome', 'summary')
+
+
 def recent_touches(company_id, limit: int = 20) -> list[dict]:
-    """Most recent touches for one company, newest first."""
-    rows = CareTouch.objects.filter(company_id=company_id).order_by('-occurred_at', '-created_at')
-    return [touch_as_dict(touch) for touch in rows[:limit]]
+    """Most recent touches for one company, newest first, in the website's slim shape."""
+    rows = (
+        CareTouch.objects.filter(company_id=company_id)
+        .order_by('-occurred_at', '-created_at')
+        .values(*WEBSITE_TOUCH_FIELDS)[:limit]
+    )
+    return [
+        {
+            'id': str(row['id']),
+            'occurred_at': _iso(row['occurred_at']),
+            'kind': row['kind'],
+            'outcome': row['outcome'],
+            'summary': row['summary'],
+        }
+        for row in rows
+    ]
 
 
 def revert_backfill_batch(batch: str, execute: bool = False) -> dict:

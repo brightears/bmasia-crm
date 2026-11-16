@@ -353,6 +353,9 @@ class CaraTouchCreateView(CaraWriteView):
             with transaction.atomic():
                 updated = False
                 previous = None
+                # A check-in inside the future tolerance never moves the contact past now;
+                # the touch itself keeps the occurred_at it was sent with.
+                contacted_at = min(values["occurred_at"], timezone.now())
                 if touches_contact:
                     contact = (
                         Contact.objects.select_for_update()
@@ -360,7 +363,7 @@ class CaraTouchCreateView(CaraWriteView):
                         .get(pk=values["contact_id"])
                     )
                     previous = contact.last_contacted
-                    updated = previous is None or previous < values["occurred_at"]
+                    updated = previous is None or previous < contacted_at
                 touch = CareTouch.objects.create(
                     **values,
                     idempotency_key=key,
@@ -371,7 +374,7 @@ class CaraTouchCreateView(CaraWriteView):
                 )
                 if updated:
                     Contact.objects.filter(pk=values["contact_id"]).update(
-                        last_contacted=values["occurred_at"]
+                        last_contacted=contacted_at
                     )
                 _audit(
                     request,

@@ -157,25 +157,13 @@ export type CareTouchOutcome =
   | 'bounced'
   | 'unsubscribe_request';
 
-/** One client-care touch (read-only on the website). */
+/** One client-care touch as the website receives it (read-only). */
 export interface CareTouch {
   id: string;
-  company_id: string;
-  contact_id: string | null;
-  mailbox: string;
-  gmail_thread_id: string;
-  gmail_message_id: string;
   occurred_at: string;
   kind: CareTouchKind;
   outcome: CareTouchOutcome;
   summary: string;
-  source: 'send' | 'gmail_backfill';
-  backfill_batch: string;
-  idempotency_key: string;
-  recorded_by: string;
-  updated_last_contacted: boolean;
-  previous_last_contacted: string | null;
-  created_at: string;
 }
 
 export interface Contact {

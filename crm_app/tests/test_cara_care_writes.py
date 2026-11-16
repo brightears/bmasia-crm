@@ -471,7 +471,10 @@ def test_care_touches_action_for_logged_in_user(company):
     assert response.status_code == 200
     rows = response.json()
     assert len(rows) == 20
-    assert all(row["company_id"] == str(company.pk) for row in rows)
+    assert all(set(row) == {"id", "occurred_at", "kind", "outcome", "summary"} for row in rows)
+    mine = set(CareTouch.objects.filter(company=company).values_list("id", flat=True))
+    assert {row["id"] for row in rows} <= {str(pk) for pk in mine}
+    assert "@" not in json.dumps(rows)
     assert rows[0]["occurred_at"] > rows[-1]["occurred_at"]
     assert APIClient().get(f"/api/v1/companies/{company.pk}/care-touches/").status_code == 401
     assert client.post(f"/api/v1/companies/{company.pk}/care-touches/", {}, format="json").status_code == 405
@@ -600,3 +603,48 @@ def test_agent_token_rest_write_is_still_recorded_by_the_gate(company):
     assert response.status_code == 200
     row = AgentRequest.objects.get()
     assert (row.principal, row.verb, row.collection) == ("theo", "update", "company")
+
+
+# ------------------------------------------------------------- review follow-ups
+
+def test_current_by_date_uses_the_bangkok_calendar_day(company):
+    from datetime import datetime, timezone as dt_timezone
+    _active_contract(company, contract_number="EXAMPLE-ENDED",
+                     start_date=date(2025, 11, 16), end_date=date(2026, 11, 15))
+    _active_contract(company, contract_number="EXAMPLE-STARTS",
+                     start_date=date(2026, 11, 16), end_date=date(2027, 11, 15))
+    # 17:30 UTC on 15 Nov is 00:30 on 16 Nov in Bangkok.
+    fixed = datetime(2026, 11, 15, 17, 30, tzinfo=dt_timezone.utc)
+    with mock.patch("django.utils.timezone.now", return_value=fixed):
+        response = cara().get("/api/v1/cara/customer-care/")
+    assert response.status_code == 200
+    by_end = {row["end_date"]: row["current_by_date"]
+              for row in response.data["accounts"][0]["contracts"]}
+    assert by_end == {"2026-11-15": False, "2027-11-15": True}
+    assert response.data["accounts"][0]["account_state"] == "ACTIVE_CUSTOMER"
+
+
+def test_future_check_in_never_moves_last_contacted_past_now(company, contact):
+    occurred = timezone.now() + timedelta(minutes=5)
+    response = post(body(company, contact_id=str(contact.pk), occurred_at=occurred.isoformat()))
+    after = timezone.now()
+    assert response.status_code == 201
+    assert response.data["contact_last_contacted_updated"] is True
+    touch = CareTouch.objects.get()
+    assert touch.occurred_at == occurred
+    contact.refresh_from_db()
+    assert contact.last_contacted <= after
+    assert contact.last_contacted < occurred
+
+
+def test_future_check_in_compares_with_the_clamped_time(company, contact):
+    # A value already ahead of now (e.g. a manual edit) is not overtaken by a
+    # check-in whose clamped time is now.
+    ahead = timezone.now() + timedelta(minutes=2)
+    Contact.objects.filter(pk=contact.pk).update(last_contacted=ahead)
+    occurred = timezone.now() + timedelta(minutes=5)
+    response = post(body(company, contact_id=str(contact.pk), occurred_at=occurred.isoformat()))
+    assert response.status_code == 201
+    assert response.data["contact_last_contacted_updated"] is False
+    contact.refresh_from_db()
+    assert contact.last_contacted == ahead

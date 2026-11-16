@@ -282,7 +282,8 @@ def project_company(company, observed_at):
         .values("id", "sent_at", "status", "contact_id")
         .first()
     )
-    today = observed_at.date()
+    # Contract dates are calendar dates in the CRM's TIME_ZONE (Asia/Bangkok), not UTC.
+    today = timezone.localdate(observed_at)
     for row in contracts:
         row["current_by_date"] = _is_current_by_date(row, today)
     current_contracts = [row for row in contracts if row["current_by_date"]]
