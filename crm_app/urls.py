@@ -8,6 +8,7 @@ from . import views, admin_views
 from .login_throttle import ThrottledTokenObtainPairView, throttled_obtain_auth_token
 from .rene_views import ReneTokenCapabilitiesView
 from .cara_api import CaraCapabilitiesView, CaraCustomerCareView
+from .cara_care_writes import CaraCareSummaryView, CaraTouchCreateView
 
 # Create a router and register our viewsets
 router = DefaultRouter()
@@ -103,6 +104,13 @@ router.register(r'ai-email-drafts', views.AIEmailDraftViewSet, basename='ai-emai
 urlpatterns = [
     path('v1/cara/capabilities/', CaraCapabilitiesView.as_view(), name='cara-capabilities'),
     path('v1/cara/customer-care/', CaraCustomerCareView.as_view(), name='cara-customer-care'),
+    # Cara care writes: Cara bearer only, and only while CARA_CARE_WRITES_ENABLED is on.
+    path('v1/cara/touches/', CaraTouchCreateView.as_view(), name='cara-touches'),
+    path(
+        'v1/cara/companies/<uuid:company_id>/care-summary/',
+        CaraCareSummaryView.as_view(),
+        name='cara-care-summary',
+    ),
     # These exact paths precede the router. Rene's opaque credential is
     # accepted nowhere else and this surface allows GET only.
     path(

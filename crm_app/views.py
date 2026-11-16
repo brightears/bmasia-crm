@@ -724,6 +724,17 @@ class CompanyViewSet(BaseModelViewSet):
 
         return Response(list(companies))
 
+    @action(detail=True, methods=['get'], url_path='care-touches')
+    def care_touches(self, request, pk=None):
+        """Read-only: the 20 most recent client-care touches for this company.
+
+        Touches are written only through the Cara bearer endpoint; the website
+        never creates, edits or deletes them.
+        """
+        from crm_app.services.care_touches import recent_touches
+        company = self.get_object()
+        return Response(recent_touches(company.pk, limit=20))
+
     @action(detail=True, methods=['get'])
     def dashboard(self, request, pk=None):
         """Get company dashboard data"""

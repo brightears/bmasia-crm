@@ -139,8 +139,43 @@ export interface Company {
   is_corporate_parent?: boolean;
   is_subsidiary?: boolean;
   child_companies_count?: number;
+  // Client-care summary: read-only here, written by Cara through its own endpoint.
+  care_summary?: string;
+  care_summary_updated_at?: string | null;
+  care_summary_updated_by?: string;
   created_at: string;
   updated_at: string;
+}
+
+export type CareTouchKind = 'check_in' | 'client_reply' | 'hand_off' | 'other';
+export type CareTouchOutcome =
+  | 'none'
+  | 'all_good'
+  | 'request'
+  | 'issue'
+  | 'handed_off'
+  | 'bounced'
+  | 'unsubscribe_request';
+
+/** One client-care touch (read-only on the website). */
+export interface CareTouch {
+  id: string;
+  company_id: string;
+  contact_id: string | null;
+  mailbox: string;
+  gmail_thread_id: string;
+  gmail_message_id: string;
+  occurred_at: string;
+  kind: CareTouchKind;
+  outcome: CareTouchOutcome;
+  summary: string;
+  source: 'send' | 'gmail_backfill';
+  backfill_batch: string;
+  idempotency_key: string;
+  recorded_by: string;
+  updated_last_contacted: boolean;
+  previous_last_contacted: string | null;
+  created_at: string;
 }
 
 export interface Contact {

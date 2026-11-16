@@ -27,7 +27,8 @@ from .models import (
     CorporatePdfTemplate, ContractTemplate, ServicePackageItem, ContractDocument,
     SeasonalTriggerDate, ZoneOfflineAlert,
     ProspectSequence, ProspectSequenceStep, ProspectEnrollment, ProspectStepExecution, AIEmailDraft,
-    DocumentSequence, ReneRenewalPolicy, RenePreparedContract, ReneCiraRequest
+    DocumentSequence, ReneRenewalPolicy, RenePreparedContract, ReneCiraRequest,
+    CareTouch,
 )
 
 
@@ -1444,6 +1445,25 @@ class AgentRequestAdmin(admin.ModelAdmin):
     list_filter = ['decision', 'principal', 'verb', 'collection', 'mode']
     search_fields = ['username', 'principal', 'record_id', 'request_key']
     readonly_fields = [f.name for f in AgentRequest._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(CareTouch)
+class CareTouchAdmin(admin.ModelAdmin):
+    """Read-only view of client-care touches (written only by the Cara bearer endpoint)."""
+    list_display = ['occurred_at', 'company', 'kind', 'outcome', 'source', 'backfill_batch', 'recorded_by']
+    list_filter = ['kind', 'outcome', 'source']
+    list_select_related = ['company']
+    search_fields = ['company__name', 'backfill_batch', 'idempotency_key']
+    readonly_fields = [f.name for f in CareTouch._meta.fields]
 
     def has_add_permission(self, request):
         return False

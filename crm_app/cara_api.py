@@ -24,15 +24,30 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from crm_app.cara_ownership import quarterly_owner
-from crm_app.models import Company, EmailLog, RenePreparedContract, SequenceEnrollment
+from crm_app.models import (
+    CareTouch,
+    Company,
+    EmailLog,
+    RenePreparedContract,
+    SequenceEnrollment,
+)
 
 CAPABILITY_PATH = "/api/v1/cara/capabilities/"
 BOOK_PATH = "/api/v1/cara/customer-care/"
 PERMISSION = "customer_care.quarterly.read"
+TOUCHES_PATH = "/api/v1/cara/touches/"
+CARE_SUMMARY_PATH = "/api/v1/cara/companies/{company_id}/care-summary/"
+TOUCH_WRITE_PERMISSION = "customer_care.touch.write"
+SUMMARY_WRITE_PERMISSION = "customer_care.summary.write"
 MAX_ACCOUNTS = 50
 MAX_RELATED = 25
 TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{43,128}\Z")
 DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
+
+
+def care_writes_enabled():
+    """The CARA_CARE_WRITES_ENABLED switch; anything but a real True is off."""
+    return getattr(settings, "CARA_CARE_WRITES_ENABLED", False) is True
 
 
 def configured_credential():
@@ -106,15 +121,24 @@ class CaraCapabilitiesView(CaraReadView):
         if request.query_params:
             raise ValidationError("Query not allowed")
         digest, expiry = configured_credential()
+        writes = care_writes_enabled()
+        permissions = [PERMISSION]
+        methods = ["GET"]
+        paths = [CAPABILITY_PATH, BOOK_PATH]
+        if writes:
+            permissions += [TOUCH_WRITE_PERMISSION, SUMMARY_WRITE_PERMISSION]
+            methods += ["POST", "PUT"]
+            paths += [TOUCHES_PATH, CARE_SUMMARY_PATH]
         return Response(
             {
                 "schema": "bmasia.crm.cara.capabilities.v1",
                 "subject": "cara",
                 "token_fingerprint_sha256": digest,
                 "expires_at": expiry,
-                "permissions": [PERMISSION],
-                "allowed_methods": ["GET"],
-                "allowed_paths": [CAPABILITY_PATH, BOOK_PATH],
+                "permissions": permissions,
+                "allowed_methods": methods,
+                "allowed_paths": paths,
+                "care_writes_enabled": writes,
                 "maximum_page_size": MAX_ACCOUNTS,
                 "projection_schema": "bmasia.crm.cara.customer-care.v1",
                 "quarterly_owner": quarterly_owner(),
@@ -145,6 +169,39 @@ def _plain(rows):
         }
         for row in rows
     ]
+
+
+_TOUCH_PROJECTION_FIELDS = (
+    "id",
+    "occurred_at",
+    "kind",
+    "outcome",
+    "source",
+    "contact_id",
+    "mailbox",
+    "gmail_thread_id",
+    "summary",
+)
+
+
+def _latest_touch(company_id, kind=None):
+    rows = CareTouch.objects.filter(company_id=company_id)
+    if kind is not None:
+        rows = rows.filter(kind=kind)
+    row = (
+        rows.order_by("-occurred_at", "-created_at")
+        .values(*_TOUCH_PROJECTION_FIELDS)
+        .first()
+    )
+    return _plain([row])[0] if row else None
+
+
+def _is_current_by_date(row, today):
+    return (
+        row["contract_type"] != "One-time"
+        and row["start_date"] <= today
+        and (row["end_date"] is None or row["end_date"] >= today)
+    )
 
 
 def project_company(company, observed_at):
@@ -226,13 +283,9 @@ def project_company(company, observed_at):
         .first()
     )
     today = observed_at.date()
-    current_contracts = [
-        row
-        for row in contracts
-        if row["contract_type"] != "One-time"
-        and row["start_date"] <= today
-        and (row["end_date"] is None or row["end_date"] >= today)
-    ]
+    for row in contracts:
+        row["current_by_date"] = _is_current_by_date(row, today)
+    current_contracts = [row for row in contracts if row["current_by_date"]]
     # An explicitly flagged active primary wins. The legacy "Primary" contact
     # type counts only when no contact carries the flag.
     primaries = [row for row in contacts if row["is_active"] and row["is_primary"]] or [
@@ -300,6 +353,11 @@ def project_company(company, observed_at):
             "open_tickets_complete": tickets_complete,
         },
         "holds": holds,
+        # Written only through the Cara care-write endpoints (cara_care_writes.py).
+        "care_summary": company.care_summary or None,
+        "care_summary_updated_at": _iso(company.care_summary_updated_at),
+        "last_care_touch": _latest_touch(company.pk),
+        "last_care_check_in": _latest_touch(company.pk, kind="check_in"),
     }
     digest = hashlib.sha256(
         json.dumps(
