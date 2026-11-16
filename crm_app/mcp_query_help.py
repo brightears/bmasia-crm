@@ -42,6 +42,8 @@ QUERY_UNAVAILABLE_MESSAGE = (
     'Use get_commercial_document_context or the REST API, and report this to the CRM maintainers.'
 )
 
+PIPELINE_SHAPE_MESSAGE = 'search_pipeline must be a list of objects (pipeline stages); use [] for all rows.'
+
 _STATE = {'installed': False}
 
 
@@ -460,6 +462,9 @@ def _install():
         return
 
     def query(self, collection: str, search_pipeline: list[dict] = []):
+        # Checked first, so the field checks never depend on the library's argument model.
+        if not isinstance(search_pipeline, list) or not all(isinstance(s, dict) for s in search_pipeline):
+            raise ValueError(PIPELINE_SHAPE_MESSAGE)
         collections = self.query_tool_models
         if not isinstance(collection, str) or collection.lower() not in collections:
             raise ValueError(unknown_collection_message(collection, collections.keys()))

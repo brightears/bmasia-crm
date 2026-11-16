@@ -278,9 +278,15 @@ class ContactQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     fields = [
         'id', 'name', 'email', 'phone', 'company', 'contact_type',
         'is_primary', 'is_active', 'title', 'department', 'last_contacted', 'notes', 'created_at', 'updated_at',
+        'unsubscribed', 'receives_notifications', 'receives_renewal_emails', 'receives_seasonal_emails',
+        'receives_payment_emails', 'receives_quarterly_emails', 'receives_soundtrack_alerts',
+        'receives_quote_emails', 'receives_contract_emails', 'receives_invoice_emails',
     ]
     search_fields = ['name', 'email', 'phone', 'title', 'notes']
-    extra_instructions = "Contacts belong to companies. contact_type: Primary, Billing, Technical, Decision Maker, Other."
+    extra_instructions = (
+        "Contacts belong to companies. contact_type: Primary, Billing, Technical, Decision Maker, Other. "
+        "unsubscribed and the receives_* flags are the contact's email preferences."
+    )
 
 
 class ContractQuery(_CaseInsensitiveFilters, ModelQueryToolset):

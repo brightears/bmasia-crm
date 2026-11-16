@@ -132,7 +132,10 @@ def test_every_published_field_is_a_concrete_model_field():
 def test_newly_published_fields_are_in_the_schema():
     expected = {
         'company': {'address_line1', 'address_line2', 'state', 'postal_code', 'branch', 'tax_id'},
-        'contact': {'is_active'},
+        'contact': {'is_active', 'unsubscribed', 'receives_notifications', 'receives_renewal_emails',
+                    'receives_seasonal_emails', 'receives_payment_emails', 'receives_quarterly_emails',
+                    'receives_soundtrack_alerts', 'receives_quote_emails', 'receives_contract_emails',
+                    'receives_invoice_emails'},
         'invoice': {'issue_date'},
         'opportunity': {'expected_value'},
         'quote': {'contact'},
@@ -285,6 +288,7 @@ VALID_PIPELINES = [
     ('contract', [{'$match': {'status': {'$in': ['Active', 'Sent']}}}]),
     ('contract', [{'$match': {'status': 'NoSuchStatus'}}]),
     ('zone', [{'$match': {'company__name': 'Query Riverside Hotel'}}]),
+    ('contact', [{'$match': {'is_active': True}}]),
 ]
 
 
