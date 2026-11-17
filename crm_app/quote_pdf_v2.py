@@ -26,6 +26,7 @@ from crm_app.commercial_pdf import (
     quantity,
     PRODUCT_COLUMN_WIDTH,
     STANDARD_SERVICE_COPY,
+    section_block,
     section_start,
     payment_block,
 )
@@ -197,15 +198,17 @@ def build_quote_pdf_v2(
         styles,
     ))
 
-    story.extend(section_start("01", "Services and pricing", styles, minimum_following_height=125))
+    # The pricing section is collected first so section_block can measure it
+    # and keep it on one page whenever the whole block fits there.
+    pricing = []
     billing_markup = f"<b>Billing:</b> {escape(clean_text(billing_label))}"
     if show_contract_term:
         billing_markup += (
             " &nbsp;&nbsp;|&nbsp;&nbsp; <b>Contract term:</b> "
             f"{escape(clean_text(format_duration(duration_months)))}"
         )
-    story.append(Paragraph(billing_markup, styles["body"]))
-    story.append(Spacer(1, 7))
+    pricing.append(Paragraph(billing_markup, styles["body"]))
+    pricing.append(Spacer(1, 7))
 
     multi_zone = sum(
         (_decimal_value(getattr(item, "quantity", 0)) for item in line_items if is_subscription_product(getattr(item, "product_service", ""))),
@@ -284,12 +287,12 @@ def build_quote_pdf_v2(
         ))
 
     if show_shared_service_copy:
-        story.extend([
+        pricing.extend([
             Paragraph(html_text(STANDARD_SERVICE_COPY), styles["small"]),
             Spacer(1, 5),
         ])
 
-    story.extend(item_table(
+    pricing.extend(item_table(
         ["Service", "Zone / description", "Qty", "Unit price", "Amount"],
         rows,
         [PRODUCT_COLUMN_WIDTH, CONTENT_WIDTH - PRODUCT_COLUMN_WIDTH - 246, 42, 92, 112],
@@ -298,6 +301,9 @@ def build_quote_pdf_v2(
         amount_columns={3, 4},
         totals=totals,
         group_rows=group_rows,
+    ))
+    story.extend(section_block(
+        "01", "Services and pricing", pricing, styles, minimum_following_height=125,
     ))
 
     story.extend(section_start("02", "Payment and terms", styles, minimum_following_height=210))

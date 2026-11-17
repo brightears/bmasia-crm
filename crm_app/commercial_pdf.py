@@ -752,6 +752,43 @@ def section_start(number, title, styles, minimum_following_height=72):
     ]
 
 
+def _measured_block_height(flowables, width):
+    """Return the height a flowable sequence needs in one frame, or ``None``.
+
+    Space before and after each flowable is counted, which slightly
+    over-estimates (a frame drops the space before a flowable at its top and
+    the space after the last one). ``None`` means the sequence contains its own
+    page-break logic and must not be treated as one block.
+    """
+    total = 0
+    for flowable in flowables:
+        if isinstance(flowable, (CondPageBreak, KeepTogether)):
+            return None
+        _, height = flowable.wrap(width, PAGE_HEIGHT)
+        total += height + flowable.getSpaceBefore() + flowable.getSpaceAfter()
+    return total
+
+
+def section_block(number, title, body, styles, minimum_following_height=72):
+    """Start a section and keep it on one page when the whole of it fits.
+
+    The heading plus ``body`` is measured. If it fits one continuation frame,
+    the conditional break reserves that measured height: the block stays where
+    it is when the remaining space holds it, and otherwise moves to the next
+    page as one unit. A taller block behaves exactly like ``section_start``:
+    only ``minimum_following_height`` is reserved and the body splits as
+    before, so a long table is never moved wholesale.
+    """
+    flowables = [section_heading(number, title, styles), *body]
+    usable_height = PAGE_HEIGHT - CONTINUATION_PAGE_TOP - PAGE_BOTTOM
+    block_height = _measured_block_height(flowables, CONTENT_WIDTH)
+    if block_height is not None and block_height <= usable_height:
+        reserve = block_height
+    else:
+        reserve = minimum_following_height
+    return [CondPageBreak(reserve), *flowables]
+
+
 def totals_panel(rows, styles, width=300):
     parsed = []
     for index, (label, value) in enumerate(rows):
