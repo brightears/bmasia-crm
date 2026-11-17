@@ -26,11 +26,11 @@ import os
 import re
 import uuid
 from decimal import Decimal
-from xml.sax.saxutils import escape as xml_escape
 from crm_app.services.document_context import customer_legal_entity_name, effective_billing_entity
 from crm_app.services.document_entity_filters import filter_document_entity
 from crm_app.contract_pdf_v2 import (
-    clause_addition_markup, optional_clause_paragraph, split_clause_placements,
+    clause_addition_markup, optional_clause_paragraph, paragraph_markup, paragraph_text,
+    split_clause_placements,
 )
 
 logger = logging.getLogger(__name__)
@@ -278,8 +278,17 @@ def format_address_multiline(company):
     Builds line-by-line from individual fields to avoid splitting commas within values.
     Filters out 'Other' country (dropdown catch-all value).
     Deduplicates: skips city/state/postal/country if already in address lines."""
+    return '<br/>'.join(_address_lines(company))
+
+
+def paragraph_address_multiline(company):
+    """format_address_multiline with every stored line escaped for Paragraph markup."""
+    return '<br/>'.join(paragraph_text(line) for line in _address_lines(company))
+
+
+def _address_lines(company):
     if not company:
-        return ''
+        return []
     lines = []
     addr_text = ' '.join(filter(None, [company.address_line1, company.address_line2])).lower()
     if company.address_line1:
@@ -294,7 +303,7 @@ def format_address_multiline(company):
         lines.append(company.postal_code)
     if company.country and company.country != 'Other' and company.country.lower() not in addr_text:
         lines.append(company.country)
-    return '<br/>'.join(lines)
+    return lines
 
 
 class BaseModelViewSet(viewsets.ModelViewSet):
@@ -1884,7 +1893,7 @@ class ContractViewSet(BaseModelViewSet):
             content, _ = full_template_source(contract)
         except ContractTailoringClarification as exc:
             return [{'code': 'clarification_required', 'detail': str(exc), 'evidence': exc.payload()}]
-        rendered = self._substitute_template_variables(content, contract)
+        rendered = self._substitute_template_variables(content, contract, escape_for_paragraph=False)
         blockers = []
 
         def add(code, detail, evidence=None):
@@ -2121,8 +2130,12 @@ class ContractViewSet(BaseModelViewSet):
             })
         return self._hilton_template_blocked_response(contract, blockers)
 
-    def _substitute_template_variables(self, content, contract, *, escape_for_paragraph=False):
-        """Replace template variables with actual values"""
+    def _substitute_template_variables(self, content, contract, *, escape_for_paragraph=True):
+        """Replace template variables with actual values.
+
+        The result is Paragraph markup, so every value is escaped by default.
+        Pass escape_for_paragraph=False only for analysis that never renders.
+        """
         company = contract.company
         from crm_app.commercial_pdf import entity_profile_for
         issuer = entity_profile_for(effective_billing_entity(contract))
@@ -2231,7 +2244,7 @@ class ContractViewSet(BaseModelViewSet):
                 # while CRM values are plain text. Escape only the dynamic value
                 # so legal names such as "T&T" render literally without allowing
                 # customer data to be parsed as paragraph markup.
-                replacement = xml_escape(replacement)
+                replacement = paragraph_text(replacement)
             content = content.replace(var, replacement)
 
         # Existing Hilton template text places the numeric variable before a
@@ -2272,11 +2285,6 @@ class ContractViewSet(BaseModelViewSet):
             return None
 
         company = contract.company
-        escape_dynamic_values = self._is_hilton_full_template(contract)
-
-        def paragraph_text(value):
-            text = str(value or '')
-            return xml_escape(text) if escape_dynamic_values else text
         has_pricing = contract.show_zone_pricing_detail and contract.price_per_zone
 
         # Style for property name (enables word-wrap for long names)
@@ -2432,11 +2440,6 @@ class ContractViewSet(BaseModelViewSet):
         GRID_COLOR = '#E8E0D8'
 
         company = contract.company
-        escape_dynamic_values = self._is_hilton_full_template(contract)
-
-        def paragraph_text(value):
-            text = str(value or '')
-            return xml_escape(text) if escape_dynamic_values else text
         prop_style = ParagraphStyle('ZoneProp', fontName='DejaVuSans', fontSize=9, textColor=colors.HexColor(TEXT_DARK))
 
         platform_labels = {'soundtrack': 'Soundtrack Your Brand', 'beatbreeze': 'Beat Breeze'}
@@ -3112,16 +3115,11 @@ class ContractViewSet(BaseModelViewSet):
             ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#E8910C')),
         ]))
 
-        # Create card-style BILL TO section. Hilton values are plain CRM text,
-        # while Paragraph parses XML-like markup; preserve only our explicit
-        # line breaks and escape every dynamic line at this boundary.
-        bill_to_name = customer_legal_entity_name(company)
-        bill_to_address = format_address_multiline(company)
-        if self._is_hilton_full_template(contract):
-            bill_to_name = xml_escape(str(bill_to_name or ''))
-            bill_to_address = '<br/>'.join(
-                xml_escape(line) for line in bill_to_address.split('<br/>')
-            )
+        # Create card-style BILL TO section. Values are plain CRM text, while
+        # Paragraph parses XML-like markup; preserve only our explicit line
+        # breaks and escape every dynamic line at this boundary.
+        bill_to_name = paragraph_text(customer_legal_entity_name(company))
+        bill_to_address = paragraph_address_multiline(company)
         bill_to_content = Paragraph(f"""
             <b>{bill_to_name}</b><br/>
             {bill_to_address}
@@ -3162,7 +3160,8 @@ class ContractViewSet(BaseModelViewSet):
             try:
                 source_content, _ = full_template_source(contract)
                 template_source = tailored_template_content(
-                    contract, self._substitute_template_variables(source_content, contract))
+                    contract, self._substitute_template_variables(
+                        source_content, contract, escape_for_paragraph=False))
             except ContractTailoringClarification as exc:
                 return Response(exc.payload(), status=422)
             template_content = re.sub(
@@ -3190,7 +3189,6 @@ class ContractViewSet(BaseModelViewSet):
                 }, status=409)
             zones = _document_zones(contract)
             has_locations = contract.service_locations.exists() or zones.exists()
-            escape_template_values = self._is_hilton_full_template(contract)
 
             # Helper to render paragraph content, splitting on '---' for page breaks
             def render_paragraph(content):
@@ -3230,11 +3228,7 @@ class ContractViewSet(BaseModelViewSet):
                     # Process {{signature_blocks}} first
                     before_sig = segment[:sig_pos]
                     after_sig = segment[sig_match.end():]
-                    before = self._substitute_template_variables(
-                        before_sig,
-                        contract,
-                        escape_for_paragraph=escape_template_values,
-                    )
+                    before = self._substitute_template_variables(before_sig, contract)
                     before = before.rstrip()
                     while before.endswith('<br/>') or before.endswith('<br />'):
                         before = before[:-5].rstrip() if before.endswith('<br/>') else before[:-6].rstrip()
@@ -3254,11 +3248,7 @@ class ContractViewSet(BaseModelViewSet):
                 # Check for {{zones_table}}
                 if '{{zones_table}}' in segment:
                     parts = segment.split('{{zones_table}}', 1)
-                    before = self._substitute_template_variables(
-                        parts[0],
-                        contract,
-                        escape_for_paragraph=escape_template_values,
-                    )
+                    before = self._substitute_template_variables(parts[0], contract)
                     bulk_content, heading_content, force_page_break = self._split_template_zones_preamble(before)
 
                     if bulk_content.strip():
@@ -3303,11 +3293,7 @@ class ContractViewSet(BaseModelViewSet):
                     before_sig = segment[:sig_match.start()]
                     after_sig = segment[sig_match.end():]
                     # Render content before signature blocks
-                    before = self._substitute_template_variables(
-                        before_sig,
-                        contract,
-                        escape_for_paragraph=escape_template_values,
-                    )
+                    before = self._substitute_template_variables(before_sig, contract)
                     before = before.rstrip()
                     while before.endswith('<br/>') or before.endswith('<br />'):
                         before = before[:-5].rstrip() if before.endswith('<br/>') else before[:-6].rstrip()
@@ -3326,11 +3312,7 @@ class ContractViewSet(BaseModelViewSet):
                     return
 
                 # No special variables — render as paragraph(s) with page break support
-                content = self._substitute_template_variables(
-                    segment,
-                    contract,
-                    escape_for_paragraph=escape_template_values,
-                )
+                content = self._substitute_template_variables(segment, contract)
                 if content.strip():
                     render_paragraph(content)
 
@@ -3375,7 +3357,9 @@ class ContractViewSet(BaseModelViewSet):
         else:
             # NO TEMPLATE: Use default preamble and hardcoded clause structure
             if contract.preamble_custom:
-                preamble_text = contract.preamble_custom
+                # Stored wording is markup by design here (it replaces the
+                # default preamble, including its <b> and <br/>).
+                preamble_text = paragraph_markup(contract.preamble_custom)
             else:
                 # FIX 2026-05-05 (Lyra): product-aware Whereas clause.
                 # SYB contracts → "BMA is a certified legal reseller of Soundtrack Your Brand (SYB)..."
@@ -3396,7 +3380,7 @@ class ContractViewSet(BaseModelViewSet):
 This agreement is made on {contract.start_date.strftime('%d %B %Y') if contract.start_date else '[date]'} between:<br/><br/>
 <b>{entity_name}</b>, with registered address at {entity_address} (BMA),<br/><br/>
 and<br/><br/>
-<b>{customer_legal_entity_name(company)}</b>, with registered address at {self._format_company_address(company)} (Client).<br/><br/>
+<b>{paragraph_text(customer_legal_entity_name(company))}</b>, with registered address at {paragraph_text(self._format_company_address(company))} (Client).<br/><br/>
 (Together "The Parties")<br/><br/>
 {whereas_clause}
                 """
@@ -3475,17 +3459,17 @@ and<br/><br/>
 
             # Add M2M service items
             for item in contract.service_items.all():
-                service_items_list.append(f"• {item.name}")
+                service_items_list.append(f"• {paragraph_text(item.name)}")
                 if item.description:
-                    service_items_list.append(f"  {item.description}")
+                    service_items_list.append(f"  {paragraph_text(item.description)}")
 
             # Add custom service items from JSON
             if contract.custom_service_items:
                 for item in contract.custom_service_items:
                     if isinstance(item, dict):
-                        service_items_list.append(f"• {item.get('name', '')}")
+                        service_items_list.append(f"• {paragraph_text(item.get('name', ''))}")
                         if item.get('description'):
-                            service_items_list.append(f"  {item.get('description', '')}")
+                            service_items_list.append(f"  {paragraph_text(item.get('description', ''))}")
 
             # If no service items, add default — product-aware (SYB vs Beat Breeze vs Custom/LIM/MP3)
             # FIX 2026-05-05 (Lyra): platform-detection now handles 'custom' explicitly. Custom-product locations
@@ -3502,7 +3486,7 @@ and<br/><br/>
                     # Use only the part before any em-dash for cleaner display
                     custom_label = self._canonical_product_label(first_custom.split('—')[0].split('-')[0].strip()) or 'Beat Breeze'
                     service_items_list = [
-                        f"• Curation and content lease for the {custom_label} package",
+                        f"• Curation and content lease for the {paragraph_text(custom_label)} package",
                         "• Monthly refresh of music content",
                         "• Music design tailored to property brief",
                         "• Special event playlists as needed",
@@ -3573,7 +3557,7 @@ and<br/><br/>
                     qty = int(li.quantity) if li.quantity == int(li.quantity) else li.quantity
                     li_total = float(li.line_total)
                     elements.append(Paragraph(
-                        f"&nbsp;&nbsp;&nbsp;&nbsp;• {qty}× {li.product_service} @ {contract.currency} {float(li.unit_price):,.2f} = {contract.currency} {li_total:,.2f}",
+                        f"&nbsp;&nbsp;&nbsp;&nbsp;• {qty}× {paragraph_text(li.product_service)} @ {contract.currency} {float(li.unit_price):,.2f} = {contract.currency} {li_total:,.2f}",
                         clause_style
                     ))
                 vat_text = f" + {tax_label} ({contract.currency} {tax_amount:,.2f}) = <b>{contract.currency} {total_with_tax:,.2f}{per_year_label}</b>" if tax_amount > 0 else ""
@@ -3602,11 +3586,12 @@ and<br/><br/>
 
             clause_num += 1
 
-            # Clause 7: Terms of Payment
+            # Clause 7: Terms of Payment. Stored payment wording and template
+            # content are markup by design; their variables are escaped below.
             if contract.payment_custom:
-                payment_text = contract.payment_custom
+                payment_text = paragraph_markup(contract.payment_custom)
             elif contract.payment_template:
-                payment_text = contract.payment_template.content
+                payment_text = paragraph_markup(contract.payment_template.content)
             else:
                 payment_text = payment_terms_default
 
@@ -3699,9 +3684,9 @@ and<br/><br/>
 
             # Clause 8: Activation Date
             if contract.activation_custom:
-                activation_text = contract.activation_custom
+                activation_text = paragraph_markup(contract.activation_custom)
             elif contract.activation_template:
-                activation_text = contract.activation_template.content
+                activation_text = paragraph_markup(contract.activation_template.content)
             else:
                 activation_text = "Music service will be activated within 3 business days of receipt of payment and completion of account setup."
 
@@ -3748,17 +3733,17 @@ and<br/><br/>
                     customer_email = customer_email or primary.email
                     customer_title = customer_title or primary.title
 
-            contacts_text = f"<b>BMA:</b> {bmasia_contact}"
+            contacts_text = f"<b>BMA:</b> {paragraph_text(bmasia_contact)}"
             if bmasia_title:
-                contacts_text += f", {bmasia_title}"
-            contacts_text += f"<br/>E: {bmasia_email}<br/><br/>"
+                contacts_text += f", {paragraph_text(bmasia_title)}"
+            contacts_text += f"<br/>E: {paragraph_text(bmasia_email)}<br/><br/>"
 
             # Only print client block if we have a real contact — never leak literal placeholders
             if customer_contact and customer_email:
-                contacts_text += f"<b>Client:</b> {customer_contact}"
+                contacts_text += f"<b>Client:</b> {paragraph_text(customer_contact)}"
                 if customer_title:
-                    contacts_text += f", {customer_title}"
-                contacts_text += f"<br/>E: {customer_email}"
+                    contacts_text += f", {paragraph_text(customer_title)}"
+                contacts_text += f"<br/>E: {paragraph_text(customer_email)}"
 
             elements.append(Paragraph(contacts_text, body_style))
             elements.append(Spacer(1, 0.3*inch))
@@ -3847,8 +3832,8 @@ and<br/><br/>
             bmasia_sig_content.append(sig_stamp_table)
 
         bmasia_sig_content.append(Paragraph('_' * 35, sig_line_style))
-        bmasia_sig_content.append(Paragraph(f"<b>{bmasia_signatory}</b>", sig_name_style))
-        bmasia_sig_content.append(Paragraph(bmasia_title, sig_title_style))
+        bmasia_sig_content.append(Paragraph(f"<b>{paragraph_text(bmasia_signatory)}</b>", sig_name_style))
+        bmasia_sig_content.append(Paragraph(paragraph_text(bmasia_title), sig_title_style))
         bmasia_sig_content.append(Paragraph(f"<b>{entity_name}</b>", sig_company_style))
         bmasia_sig_content.append(Spacer(1, 0.1*inch))
         bmasia_sig_content.append(Paragraph(f'Date: <u>{bmasia_date}</u>', sig_date_style))
@@ -3860,10 +3845,10 @@ and<br/><br/>
         customer_sig_content.append(Spacer(1, 0.15*inch))  # Small top padding
         customer_sig_content.append(Paragraph('_' * 35, sig_line_style))
         # Avoid showing same text twice when signatory name equals title
-        customer_sig_content.append(Paragraph(f"<b>{customer_signatory}</b>", sig_name_style))
+        customer_sig_content.append(Paragraph(f"<b>{paragraph_text(customer_signatory)}</b>", sig_name_style))
         if customer_title and customer_title != customer_signatory:
-            customer_sig_content.append(Paragraph(customer_title, sig_title_style))
-        customer_sig_content.append(Paragraph(f"<b>{customer_legal_entity_name(company)}</b>", sig_company_style))
+            customer_sig_content.append(Paragraph(paragraph_text(customer_title), sig_title_style))
+        customer_sig_content.append(Paragraph(f"<b>{paragraph_text(customer_legal_entity_name(company))}</b>", sig_company_style))
         customer_sig_content.append(Spacer(1, 0.1*inch))
         customer_sig_content.append(Paragraph('Date: _________________', sig_date_style))
 
@@ -3876,9 +3861,9 @@ and<br/><br/>
                 customer_sig_content.append(Paragraph('_' * 35, sig_line_style))
                 if str(signatory.get('role', '')).strip().casefold() == 'witness':
                     customer_sig_content.append(Paragraph('<b>WITNESS</b>', sig_title_style))
-                customer_sig_content.append(Paragraph(f"<b>{signatory.get('name', 'Authorized Representative')}</b>", sig_name_style))
-                customer_sig_content.append(Paragraph(signatory.get('title', ''), sig_title_style))
-                customer_sig_content.append(Paragraph(f"<b>{customer_legal_entity_name(company)}</b>", sig_company_style))
+                customer_sig_content.append(Paragraph(f"<b>{paragraph_text(signatory.get('name', 'Authorized Representative'))}</b>", sig_name_style))
+                customer_sig_content.append(Paragraph(paragraph_text(signatory.get('title', '')), sig_title_style))
+                customer_sig_content.append(Paragraph(f"<b>{paragraph_text(customer_legal_entity_name(company))}</b>", sig_company_style))
                 customer_sig_content.append(Spacer(1, 0.1*inch))
                 customer_sig_content.append(Paragraph('Date: _________________', sig_date_style))
 
@@ -4089,8 +4074,8 @@ and<br/><br/>
                 {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
                 """, body_style),
                 Paragraph(f"""
-                <b>{customer_legal_entity_name(company)}</b><br/>
-                {format_address_multiline(company)}
+                <b>{paragraph_text(customer_legal_entity_name(company))}</b><br/>
+                {paragraph_address_multiline(company)}
                 """, body_style)
             ]
         ]
@@ -4113,7 +4098,7 @@ and<br/><br/>
         overview_text = f"<b>Service Type:</b> {contract.get_service_type_display() if contract.service_type else 'Professional Services'}<br/>"
         overview_text += f"<b>Contract Period:</b> {contract.start_date.strftime('%B %d, %Y')} to {contract.end_date.strftime('%B %d, %Y')}<br/>"
         if contract.billing_frequency:
-            overview_text += f"<b>Billing Frequency:</b> {contract.billing_frequency}<br/>"
+            overview_text += f"<b>Billing Frequency:</b> {paragraph_text(contract.billing_frequency)}<br/>"
         overview_text += f"<b>Auto-Renewal:</b> {'Yes' if contract.auto_renew else 'No'}"
 
         elements.append(Paragraph(overview_text, body_style))
@@ -4404,10 +4389,10 @@ and<br/><br/>
             elements.append(Paragraph("MASTER AGREEMENT REFERENCE", heading_style))
 
             master_ref_text = f"""
-            <b>Master Agreement Number:</b> {master_contract.contract_number}<br/>
+            <b>Master Agreement Number:</b> {paragraph_text(master_contract.contract_number)}<br/>
             <b>Master Agreement Date:</b> {master_contract.start_date.strftime('%B %d, %Y')}<br/>
-            <b>Corporate Parent:</b> {customer_legal_entity_name(master_contract.company)}<br/>
-            <b>Master Agreement Status:</b> {master_contract.status}
+            <b>Corporate Parent:</b> {paragraph_text(customer_legal_entity_name(master_contract.company))}<br/>
+            <b>Master Agreement Status:</b> {paragraph_text(master_contract.status)}
             """
             elements.append(Paragraph(master_ref_text, body_style))
             elements.append(Spacer(1, 0.2*inch))
@@ -4426,8 +4411,8 @@ and<br/><br/>
                 {f"<br/>Tax No.: {entity_tax}" if entity_tax else ""}
                 """, body_style),
                 Paragraph(f"""
-                <b>{customer_legal_entity_name(company)}</b><br/>
-                {format_address_multiline(company)}
+                <b>{paragraph_text(customer_legal_entity_name(company))}</b><br/>
+                {paragraph_address_multiline(company)}
                 """, body_style)
             ]
         ]
@@ -4799,13 +4784,13 @@ and<br/><br/>
         if service_locs.exists():
             zone_items = []
             for idx, loc in enumerate(service_locs, 1):
-                zone_items.append(f"<b>{self._number_to_roman(idx)}.</b> {loc.location_name}")
+                zone_items.append(f"<b>{self._number_to_roman(idx)}.</b> {paragraph_text(loc.location_name)}")
             zone_list = "<br/>".join(zone_items)
             elements.append(Paragraph(zone_list, att_body_style))
         elif zones.exists():
             zone_items = []
             for idx, zone in enumerate(zones, 1):
-                zone_items.append(f"<b>{self._number_to_roman(idx)}.</b> {zone.name}")
+                zone_items.append(f"<b>{self._number_to_roman(idx)}.</b> {paragraph_text(zone.name)}")
             zone_list = "<br/>".join(zone_items)
             elements.append(Paragraph(zone_list, att_body_style))
         else:
@@ -4883,7 +4868,7 @@ and<br/><br/>
 
         # 5. Ordering and Payment Terms
         elements.append(Paragraph("5. ORDERING AND PAYMENT TERMS:", att_heading_style))
-        payment_terms = contract.payment_terms if contract.payment_terms else "Payment due within 30 days of invoice date"
+        payment_terms = paragraph_text(contract.payment_terms) if contract.payment_terms else "Payment due within 30 days of invoice date"
         payment_text = f"""Services shall commence on the Effective Date. {payment_terms}.
             Invoices will be issued {invoice_frequency} and payment shall be made via bank transfer
             to Supplier's designated account."""
@@ -4920,7 +4905,8 @@ and<br/><br/>
             infringe upon any third-party intellectual property rights; (e) Supplier will comply with all applicable
             laws and regulations in the provision of Services."""
 
-        elements.append(Paragraph(warranty_text, att_body_style))
+        # Corporate clause text is markup by design.
+        elements.append(Paragraph(paragraph_markup(warranty_text), att_body_style))
         elements.append(Spacer(1, 0.3*inch))
 
         # 8. Products & Prices (Service Breakdown)
@@ -5017,7 +5003,7 @@ and<br/><br/>
         # Preamble
         preamble = f"""THIS HOTEL PARTICIPATION AGREEMENT (this "<b>Agreement</b>") is entered into as of
         {contract.start_date.strftime('%B %d, %Y')} (the "<b>Effective Date</b>") by and between {entity_name}
-        ("<b>Supplier</b>") and {customer_legal_entity_name(company)} ("<b>Hotel</b>").
+        ("<b>Supplier</b>") and {paragraph_text(customer_legal_entity_name(company))} ("<b>Hotel</b>").
         The Hotel and Supplier may be referred to herein individually as a "<b>Party</b>" and collectively as the "<b>Parties</b>"."""
 
         elements.append(Paragraph(preamble, exd_body_style))
@@ -5035,7 +5021,7 @@ and<br/><br/>
 
         # Legal sections - use custom if provided, otherwise use defaults
         if custom_legal_terms:
-            elements.append(Paragraph(custom_legal_terms, exd_body_style))
+            elements.append(Paragraph(paragraph_markup(custom_legal_terms), exd_body_style))
         else:
             # Default Hilton-style legal terms
             legal_sections = [

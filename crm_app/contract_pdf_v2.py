@@ -9,6 +9,7 @@ from copy import copy
 from io import BytesIO
 import re
 from html import unescape
+from xml.sax.saxutils import escape
 
 from reportlab.lib.enums import TA_CENTER
 from reportlab.platypus import CondPageBreak, HRFlowable, Image, KeepTogether, PageBreak, Paragraph, Spacer, Table, TableStyle
@@ -257,10 +258,40 @@ def tailored_template_content(contract, resolved_content=None):
     return content
 
 
+def paragraph_text(value):
+    """Escape one stored plain-text value for ReportLab Paragraph markup.
+
+    ReportLab parses Paragraph source as markup, so a stored "F&B" prints as
+    "F&B;" and "<Ops>" disappears. Every database value and template variable
+    that code places into Paragraph markup goes through this exactly once; the
+    tags the code adds around it (<b>, <br/>) keep working.
+    """
+    return '' if value is None else escape(str(value))
+
+
+# "&" that does not start a character or entity reference, and "<" that cannot
+# start a tag. Neither is valid markup; ReportLab misreads or rejects both.
+_BARE_AMPERSAND = re.compile(r'&(?!#[0-9]+;|#[xX][0-9a-fA-F]+;|[A-Za-z][A-Za-z0-9]*;)')
+_STRAY_LESS_THAN = re.compile(r'<(?![A-Za-z/!?][^<>]*>)')
+
+
+def paragraph_markup(value):
+    """Guard stored wording that is Paragraph markup by design.
+
+    Template bodies, corporate clause text, custom_terms and the standard
+    agreement's custom preamble/payment/activation wording may carry <b>, <br/>
+    or entities. Keep every tag and entity; escape only a bare "&" or a stray
+    "<", which cannot be intended markup. Idempotent: already escaped or
+    guarded text is returned unchanged, so it can never double-escape.
+    """
+    text = '' if value is None else str(value)
+    return _STRAY_LESS_THAN.sub('&lt;', _BARE_AMPERSAND.sub('&amp;', text))
+
+
 def _markup(text):
     # A pasted clause may carry Word font/color/size tags. Keep semantic inline
     # emphasis but let the document, not pasted formatting, own typography.
-    text = clean_text(text)
+    text = paragraph_markup(clean_text(text))
     text = re.sub(r'</?(?:font|span)\b[^>]*>', '', text, flags=re.I)
     return text
 
