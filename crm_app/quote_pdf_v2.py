@@ -37,6 +37,7 @@ from crm_app.quote_pdf import (
     derive_payment_schedule,
     quote_recurring_and_onetime_totals,
 )
+from crm_app.services.document_context import customer_legal_entity_name
 
 
 def _format_date(value):
@@ -174,10 +175,15 @@ def build_quote_pdf_v2(
         )
 
     company = quote.company
+    # Same identity as the contract's Prepared For card: legal name with the
+    # saved branch exactly once, then the address and the customer's Tax ID.
     customer_lines = [
-        getattr(company, "legal_entity_name", "") or company.name,
+        customer_legal_entity_name(company),
         _address_text(format_address_multiline, company),
     ]
+    tax_id = clean_text(getattr(company, "tax_id", "")).strip()
+    if tax_id:
+        customer_lines.append(f"Tax ID: {tax_id}")
     if quote.contact:
         customer_lines.append(f"Attention: {quote.contact.name}")
         if getattr(quote.contact, "email", ""):
