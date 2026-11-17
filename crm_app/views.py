@@ -6610,13 +6610,16 @@ class InvoiceViewSet(BaseModelViewSet):
         from reportlab.lib.pagesizes import letter
         from reportlab.lib import colors
         from reportlab.lib.units import inch
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, HRFlowable, KeepTogether
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Spacer, Image, HRFlowable, KeepTogether
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
         from io import BytesIO
         from django.conf import settings
         import os
         from decimal import Decimal
+        # Receipts still use this layout while COMMERCIAL_DOCUMENT_V2_RECEIPT_LIVE
+        # is off; a Thai bill-to name must not print as boxes here either.
+        from crm_app.pdf_thai import ThaiAwareParagraph as Paragraph
 
         company = invoice.company
 
