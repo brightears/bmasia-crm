@@ -75,7 +75,10 @@ FORMAT v2
   only), set_renewed_from, clear_renewed_from (removes a wrong renewal link,
   link only, never calls the lifecycle rule), create_successor, create_contract
   (a new term with no predecessor), add_note, hand_over_zone_links and
-  redate_zone_link_end,
+  redate_zone_link_end. create_successor and create_contract take an optional
+  overlap_allowed list ({"contract_id", "expected"} per item) naming contracts
+  of the same company that are separate subscriptions and may overlap the new
+  term; every other overlap is still refused,
   with the same safety model (dry-run default, groups all-or-nothing, expected state,
   audit rows, journal, revert, idempotent re-run). Its docstring documents the
   file shape, every refusal and the revert rules. v1 files below are unchanged.

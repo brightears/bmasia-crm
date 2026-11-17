@@ -74,7 +74,8 @@ OPERATIONS (one per entry, ``op``)
                      ``old_contract_id``, then closes the old contract as
                      Renewed: through the lifecycle rule close_renewed_predecessor
                      when it is Active, or with the same write when it is
-                     Expired. See CREATE below.
+                     Expired. Optional keys: twin_company_ids, overlap_allowed.
+                     See CREATE and OVERLAP ALLOWED below.
   hand_over_zone_links
                      Link-only repair, no contract field changes. For a Renewed
                      contract (``contract_id``) and its Active renewal
@@ -98,18 +99,21 @@ OPERATIONS (one per entry, ``op``)
   create_contract    Creates a NEW Active contract for ``company_id`` with no
                      predecessor (no old contract exists). Keys: company_id,
                      new (same shape as create_successor's), optional
-                     twin_company_ids; no ``expected`` (the company row is
-                     locked instead). See CREATE below.
+                     twin_company_ids and overlap_allowed; no ``expected``
+                     (the company row is locked instead). See CREATE and
+                     OVERLAP ALLOWED below.
 
 GROUPS
   Entries sharing a ``group`` are applied together or not at all, in one
   transaction, after every check of every entry passed. Contracts are locked
   with select_for_update in primary-key order, including every contract an
-  entry only refers to (successor_id, renewed_from_id), whose expected state is
-  re-checked under the lock. Across the whole file:
+  entry only refers to (successor_id, renewed_from_id, the overlap_allowed
+  contracts), whose expected state is re-checked under the lock. Across the
+  whole file:
     * a contract may be changed by at most one entry (duplicate_contract_id);
-    * a contract that one group changes or relies on may not appear in any
-      other group (contract_in_two_groups);
+    * a contract that one group changes or relies on (an overlap_allowed
+      contract included) may not appear in any other group
+      (contract_in_two_groups);
     * the new terms planned by create_successor and create_contract entries
       may not overlap each other for the same company, or a company and a
       twin listed by either entry, whether in one group or in two
@@ -156,6 +160,11 @@ REFUSALS (named reasons; nothing in the group is written)
   create_contract also refuses missing_twin_company, overlapping_contract,
   service_location_pricing_mismatch, billing_entity_unresolved,
   number_reservation_failed and planned_terms_overlap.
+  overlap_allowed_missing, overlap_allowed_other_company,
+  overlap_allowed_changed, overlap_allowed_not_overlapping (create_successor /
+  create_contract with overlap_allowed; see OVERLAP ALLOWED),
+  overlap_allowed_shares_zone (create_successor: a zone to be copied is
+  actively linked to a named contract).
 
 CREATE (create_successor)
   The new contract takes:
@@ -185,10 +194,11 @@ CREATE (create_successor)
   their custom text, payment terms/schedule, discount, quote, opportunity,
   line items, service items.
   Refused when another contract of the company, or of a listed twin company,
-  overlaps the new term (Cancelled contracts and the old contract itself
-  excepted), when the old contract has a Draft/Sent (or Active) renewal, when
-  the old contract changed since the file was made, or when the rows'
-  per-zone prices contradict the value (the PDF pricing guard).
+  overlaps the new term (Cancelled contracts, the old contract itself and the
+  contracts listed in overlap_allowed excepted), when the old contract has a
+  Draft/Sent (or Active) renewal, when the old contract changed since the
+  file was made, or when the rows' per-zone prices contradict the value (the
+  PDF pricing guard).
   Re-run: an old contract that is Renewed with an Active renewal holding the
   file's dates is reported as already applied.
 
@@ -215,9 +225,44 @@ CREATE (create_contract)
       (lifecycle_type_manually_set True), a final HK-CT/TH-CT number from the
       collision-safe reservation helper.
   Refused when the company is missing, a listed twin is missing, or any
-  non-Cancelled contract of the company or a listed twin overlaps the term.
+  non-Cancelled contract of the company or a listed twin overlaps the term
+  (contracts listed in overlap_allowed excepted).
   Re-run: an Active contract of the company with exactly the file's start
   date, end date and value is reported as already applied.
+
+OVERLAP ALLOWED (create_successor and create_contract, optional)
+  For a client that holds two separate subscriptions on one company record
+  with different yearly cycles (say one renewing every March, one every May,
+  plus an add-on), the next term of one cycle overlaps the other cycle's
+  contracts. ``overlap_allowed`` names those contracts:
+    "overlap_allowed": [
+      {"contract_id": "<uuid>",
+       "expected": {"status", "start_date", "end_date", "updated_at"}}, ...]
+  A list of 1-20 objects with exactly those keys; a contract may be named
+  once, and create_successor's own old contract cannot be named (malformed:
+  the command stops). Each named contract is locked with the group and
+  re-checked under the lock: it must exist (overlap_allowed_missing), belong
+  to the same company as the new term (create_successor: the old contract's
+  company; create_contract: company_id). A contract of a twin company is
+  refused (overlap_allowed_other_company): twins are duplicate records of one
+  client, where an overlap is exactly what the check guards against. It must
+  still hold the file's expected status, dates and updated_at
+  (overlap_allowed_changed) and really overlap the new term, i.e. not be
+  Cancelled and share at least one day with it
+  (overlap_allowed_not_overlapping): the file names only real overlaps.
+  create_successor also refuses overlap_allowed_shares_zone when a zone the
+  new term would copy from the old contract is actively linked to a named
+  contract: the zone would end with two active links.
+  The overlap check then leaves out exactly those contracts; any other
+  overlapping non-Cancelled contract still refuses overlapping_contract.
+  planned_terms_overlap is unchanged: two new terms planned in one file for
+  one company still may not overlap, whatever overlap_allowed says. The named
+  contracts count as contracts the group relies on, so they may not appear in
+  another group of the file (contract_in_two_groups); they are not changed.
+  The output line ends with "overlap allowed with <number> (<status>
+  <start>..<end>)" per named contract; the CREATE audit row's additional_data
+  and the journal op carry the same list under ``overlap_allowed`` (contract
+  id, number, status, start and end date). Revert is unchanged.
 
 REVERT
   Per group, only when every contract (and every zone link) still holds the
@@ -317,19 +362,21 @@ _OP_KEYS = {
     'mark_renewed': ({'contract_id', 'expected', 'successor_id', 'successor_expected'}, set()),
     'set_renewed_from': ({'contract_id', 'expected', 'renewed_from_id', 'renewed_from_expected'}, set()),
     'clear_renewed_from': ({'contract_id', 'expected', 'renewed_from_id'}, set()),
-    'create_successor': ({'old_contract_id', 'old_expected', 'new'}, {'twin_company_ids'}),
+    'create_successor': ({'old_contract_id', 'old_expected', 'new'}, {'twin_company_ids', 'overlap_allowed'}),
     'hand_over_zone_links': ({'contract_id', 'expected', 'successor_id', 'successor_expected'},
                              {'copy_missing_links'}),
     'redate_zone_link_end': ({'contract_id', 'expected', 'closed_on'}, set()),
     'mark_expired': ({'contract_id', 'expected'}, set()),
     'add_note': ({'contract_id', 'expected', 'text'}, set()),
-    'create_contract': ({'company_id', 'new'}, {'twin_company_ids'}),
+    'create_contract': ({'company_id', 'new'}, {'twin_company_ids', 'overlap_allowed'}),
 }
 _EXPECTED_KEYS = {'status', 'start_date', 'end_date', 'updated_at'}
 _NEW_REQUIRED = {'status', 'start_date', 'end_date', 'value', 'currency', 'service_locations', 'notes'}
 _NEW_OPTIONAL = {'signed_date', 'billing_frequency', 'auto_renew', 'service_type', 'price_per_zone'}
 _LOC_REQUIRED = {'location_name', 'platform'}
 _LOC_OPTIONAL = {'custom_service_name', 'price'}
+_OVERLAP_ALLOWED_KEYS = {'contract_id', 'expected'}
+_MAX_OVERLAP_ALLOWED = 20
 _GROUP_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9:._-]{0,79}')
 _CLASS_RE = re.compile(r'[A-Z][A-Za-z0-9]{0,7}')
 _EVIDENCE_MAX = 300
@@ -393,14 +440,23 @@ class EntryV2:
     # clear_renewed_from only: the link the contract holds now. Deliberately not a
     # referenced id: the former predecessor is neither locked nor checked.
     clearing_renewed_from_id: Optional[str] = None
+    # create_successor / create_contract only: [(contract_id, Expected)] of contracts of the same
+    # company that are separate subscriptions and may overlap the new term.
+    overlap_allowed: list = field(default_factory=list)
 
     @property
     def label_id(self):
         return self.contract_id or f'company:{self.company_id}'
 
     @property
+    def overlap_allowed_ids(self):
+        return [cid for cid, _ in self.overlap_allowed]
+
+    @property
     def referenced_ids(self):
-        return [i for i in (self.successor_id, self.renewed_from_id) if i]
+        # Allowed overlaps are relied on (their state is checked under the lock), so they are
+        # locked with the group and count for contract_in_two_groups like any referenced contract.
+        return [i for i in (self.successor_id, self.renewed_from_id, *self.overlap_allowed_ids) if i]
 
 
 # --------------------------------------------------------------------------
@@ -543,6 +599,25 @@ def _new_term(raw, where):
     )
 
 
+def _overlap_allowed(raw, where, own_id=None):
+    if not isinstance(raw, list) or not raw or len(raw) > _MAX_OVERLAP_ALLOWED:
+        raise _malformed(f'{where}: want a list of 1-{_MAX_OVERLAP_ALLOWED} objects '
+                         f'{{"contract_id", "expected"}}')
+    items, seen = [], set()
+    for n, item in enumerate(raw):
+        iwhere = f'{where}[{n}]'
+        if not isinstance(item, dict) or set(item) != _OVERLAP_ALLOWED_KEYS:
+            raise _malformed(f'{iwhere}: must have exactly {sorted(_OVERLAP_ALLOWED_KEYS)}')
+        cid = _uuid(item['contract_id'], f'{iwhere}.contract_id')
+        if cid in seen:
+            raise _malformed(f'{iwhere}.contract_id: named twice')
+        if cid == own_id:
+            raise _malformed(f'{iwhere}.contract_id: the old contract itself cannot be an allowed overlap')
+        seen.add(cid)
+        items.append((cid, _expected(item['expected'], f'{iwhere}.expected')))
+    return items
+
+
 def parse_v2(data):
     """Validate a decoded v2 file. Returns (entries, duplicate_contract_ids)."""
     if not isinstance(data, dict):
@@ -582,6 +657,8 @@ def parse_v2(data):
                 twin_company_ids=sorted({_uuid(t, f'{where} twin_company_ids') for t in twins}),
                 new=_new_term(raw['new'], f'{where} new'),
             )
+            if 'overlap_allowed' in raw:
+                entry.overlap_allowed = _overlap_allowed(raw['overlap_allowed'], f'{where} overlap_allowed')
             if company_id in entry.twin_company_ids:
                 raise _malformed(f'{where}: a company cannot be its own twin')
         elif op == 'create_successor':
@@ -595,6 +672,9 @@ def parse_v2(data):
                 twin_company_ids=sorted({_uuid(t, f'{where} twin_company_ids') for t in twins}),
                 new=_new_term(raw['new'], f'{where} new'),
             )
+            if 'overlap_allowed' in raw:
+                entry.overlap_allowed = _overlap_allowed(raw['overlap_allowed'], f'{where} overlap_allowed',
+                                                         own_id=contract_id)
             if entry.new.start < entry.expected.start:
                 raise _malformed(f'{where}: the new term must not start before the old term starts')
         else:
@@ -713,6 +793,44 @@ def _overlapping(company_ids, start, end, exclude_ids):
         .exclude(status='Cancelled')
         .exclude(pk__in=exclude_ids)
     )
+
+
+def _check_overlap(e, company_id, company_ids, locked, exclude_ids):
+    """Refuse overlapping_contract unless every overlap is listed in overlap_allowed.
+
+    Each listed contract must exist, belong to ``company_id`` itself (not a twin), still hold
+    the file's expected state and really overlap the new term. Returns one row per allowed
+    overlap for the output line, the audit row and the journal."""
+    new = e.new
+    rows = []
+    for cid, exp in e.overlap_allowed:
+        other = locked.get(cid)
+        if other is None:
+            raise Refused('overlap_allowed_missing')
+        if str(other.company_id) != str(company_id):
+            raise Refused('overlap_allowed_other_company')
+        try:
+            _check_expected(other, exp, lambda x: False)
+        except Refused:
+            raise Refused('overlap_allowed_changed')
+        if not _overlapping(company_ids, new.start, new.end, exclude_ids).filter(pk=other.pk).exists():
+            raise Refused('overlap_allowed_not_overlapping')
+        rows.append({'contract_id': cid, 'contract_number': other.contract_number, 'status': other.status,
+                     'start_date': _iso(other.start_date), 'end_date': _iso(other.end_date)})
+    if _overlapping(company_ids, new.start, new.end, [*exclude_ids, *e.overlap_allowed_ids]).exists():
+        raise Refused('overlapping_contract')
+    return rows
+
+
+def _overlap_detail(rows):
+    return ''.join(f'; overlap allowed with {r["contract_number"]} '
+                   f'({r["status"]} {r["start_date"]}..{r["end_date"] or "open"})' for r in rows)
+
+
+def _overlap_record(plan):
+    """The allowed overlaps for the audit row and the journal (absent when the file lists none)."""
+    rows = plan.get('overlap_allowed') or []
+    return {'overlap_allowed': rows} if rows else {}
 
 
 def _tax(value, tax_rate):
@@ -1056,9 +1174,13 @@ class V2Runner:
         if e.twin_company_ids and \
                 Company.objects.filter(pk__in=e.twin_company_ids).count() != len(e.twin_company_ids):
             raise Refused('missing_twin_company')
-        company_ids = [c.company_id, *e.twin_company_ids]
-        if _overlapping(company_ids, new.start, new.end, [c.pk]).exists():
-            raise Refused('overlapping_contract')
+        allowed = _check_overlap(e, c.company_id, [c.company_id, *e.twin_company_ids], locked, [c.pk])
+        # A zone the new term copies from the old one must not stay actively linked to an allowed
+        # contract: the zone would end with two active links (new term and allowed contract).
+        if e.overlap_allowed_ids and ContractZone.objects.filter(
+                contract_id__in=e.overlap_allowed_ids, is_active=True,
+                zone_id__in=ContractZone.objects.filter(contract=c, is_active=True).values('zone_id')).exists():
+            raise Refused('overlap_allowed_shares_zone')
         if self._pricing_mismatch(new, c):
             raise Refused('service_location_pricing_mismatch')
         links = ContractZone.objects.filter(contract=c, is_active=True).values('zone_id').distinct().count()
@@ -1069,7 +1191,9 @@ class V2Runner:
             f'with {len(new.locations)} service location(s) '
             f'({", ".join(f"{k} {v}" for k, v in sorted(platforms.items()))})'
             f'{"; copies " + str(links) + " active zone link(s) to the new term" if links else ""}'
-            f'{"; hands them over (old links end " + handover_end_date(None, new.start, c.end_date).isoformat() + ")" if links else ""}')
+            f'{"; hands them over (old links end " + handover_end_date(None, new.start, c.end_date).isoformat() + ")" if links else ""}'
+            f'{_overlap_detail(allowed)}')
+        plan['overlap_allowed'] = allowed
         return plan
 
     def _check_hand_over_zone_links(self, e, c, locked, members):
@@ -1175,8 +1299,7 @@ class V2Runner:
         if e.twin_company_ids and \
                 Company.objects.filter(pk__in=e.twin_company_ids).count() != len(e.twin_company_ids):
             raise Refused('missing_twin_company')
-        if _overlapping([company.pk, *e.twin_company_ids], new.start, new.end, []).exists():
-            raise Refused('overlapping_contract')
+        allowed = _check_overlap(e, company.pk, [company.pk, *e.twin_company_ids], locked, [])
         if self._pricing_mismatch(new, planned):
             raise Refused('service_location_pricing_mismatch')
         platforms = Counter(loc['platform'] for loc in new.locations)
@@ -1184,7 +1307,8 @@ class V2Runner:
             f'creates Active {new.start.isoformat()}..{new.end.isoformat()} ({region}-CT number, no predecessor, '
             f'tax {_new_contract_tax_rate(new.currency)}%) '
             f'with {len(new.locations)} service location(s) '
-            f'({", ".join(f"{k} {v}" for k, v in sorted(platforms.items()))})')}
+            f'({", ".join(f"{k} {v}" for k, v in sorted(platforms.items()))})'
+            f'{_overlap_detail(allowed)}'), 'overlap_allowed': allowed}
         return plan
 
     @staticmethod
@@ -1400,10 +1524,11 @@ class V2Runner:
             'zone_links': {'old': 0, 'new': len(links)},
         }, group, e, {'action': 'Correction: current term created as renewal', 'renews_contract_id': str(old.pk),
                       'zone_links_copied': [str(l.zone_id) for l in links],
-                      'old_zone_links_closed': [r['id'] for r in handed_over]})
+                      'old_zone_links_closed': [r['id'] for r in handed_over],
+                      **_overlap_record(plan)})
         return {
             'op': e.op, 'class': e.cls, 'evidence': e.evidence, 'contract_id': e.contract_id,
-            'before': old_before, 'after': old_after,
+            'before': old_before, 'after': old_after, **_overlap_record(plan),
             'created': {
                 'contract_id': str(contract.pk), 'contract_number': contract.contract_number,
                 'renewed_from': str(old.pk), 'status': contract.status,
@@ -1492,12 +1617,13 @@ class V2Runner:
             'tax_rate': {'old': None, 'new': str(tax_rate)},
             'service_locations': {'old': 0, 'new': len(locations)},
         }, group, e, {'action': 'Correction: current term created (no predecessor)',
-                      'company_id': e.company_id, 'twin_company_ids': e.twin_company_ids})
+                      'company_id': e.company_id, 'twin_company_ids': e.twin_company_ids,
+                      **_overlap_record(plan)})
         state = contract_state(contract)
         return {
             'op': e.op, 'class': e.cls, 'evidence': e.evidence,
             # The created contract; there is no existing contract to restore.
-            'contract_id': str(contract.pk), 'company_id': e.company_id,
+            'contract_id': str(contract.pk), 'company_id': e.company_id, **_overlap_record(plan),
             'before': {'status': None, 'is_active': None, 'renewed_from': None, 'updated_at': None},
             'after': state,
             'created': {
