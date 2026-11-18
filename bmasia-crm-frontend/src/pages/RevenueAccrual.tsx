@@ -56,6 +56,7 @@ import {
   ComposedChart,
 } from 'recharts';
 import apiService from '../services/api';
+import { formatMoney } from '../theme';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -80,15 +81,8 @@ const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'] as const;
 // Formatting helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-const formatCurrency = (amount: number, currency: string = 'THB') => {
-  const locale = currency === 'THB' ? 'th-TH' : 'en-US';
-  return new Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
-};
+// House money format, e.g. "THB 108,000" (was Intl with a currency symbol).
+const formatCurrency = (amount: number, currency: string = 'THB') => formatMoney(amount, currency);
 
 const formatPercent = (value: number) => `${value.toFixed(1)}%`;
 
@@ -179,7 +173,7 @@ interface RecognitionChartProps {
 }
 
 const RecognitionChart: React.FC<RecognitionChartProps> = ({ data, currency, product }) => {
-  const currencySymbol = currency === 'THB' ? '฿' : '$';
+  const currencySymbol = `${currency} `;
   const products = product && product !== '' ? [product] : ['SYB', 'LIM', 'SONOS', 'OTHER'];
 
   return (

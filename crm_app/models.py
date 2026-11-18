@@ -513,6 +513,27 @@ class Note(TimestampedModel):
         return f"{self.title or 'Note'} - {self.company.name}"
 
 
+# One definition of open and overdue tasks, used by Today, Needs fixing, the company
+# dashboard and Task.is_overdue. A task is open until it is Done or Cancelled (On Hold is
+# paused, not finished). It is overdue when it is open and its due date fell on an earlier
+# Bangkok calendar day than today: a task due later today, or earlier today, is due today.
+TASK_OPEN_STATUSES = ('To Do', 'In Progress', 'On Hold')
+
+
+def start_of_local_day(day):
+    """The first instant of a calendar day in the business time zone (Asia/Bangkok)."""
+    import datetime
+    return timezone.make_aware(datetime.datetime.combine(day, datetime.time.min))
+
+
+class TaskQuerySet(models.QuerySet):
+    def open(self):
+        return self.filter(status__in=TASK_OPEN_STATUSES)
+
+    def overdue(self, today=None):
+        return self.open().filter(due_date__lt=start_of_local_day(today or timezone.localdate()))
+
+
 class Task(TimestampedModel):
     """Task model for sales team task management"""
     PRIORITY_CHOICES = [
@@ -553,6 +574,8 @@ class Task(TimestampedModel):
     related_contract = models.ForeignKey('Contract', on_delete=models.SET_NULL, null=True, blank=True, related_name='tasks')
     related_contact = models.ForeignKey('Contact', on_delete=models.SET_NULL, null=True, blank=True, related_name='tasks')
 
+    objects = TaskQuerySet.as_manager()
+
     class Meta:
         ordering = ['-priority', 'due_date', '-created_at']
         indexes = [
@@ -566,8 +589,9 @@ class Task(TimestampedModel):
 
     @property
     def is_overdue(self):
-        """Check if task is overdue"""
-        return self.due_date and self.due_date < timezone.now() and self.status != 'Done'
+        """Open and due on an earlier Bangkok day than today (the TaskQuerySet.overdue rule)."""
+        return (self.due_date and self.status in TASK_OPEN_STATUSES
+                and self.due_date < start_of_local_day(timezone.localdate()))
 
     def save(self, *args, **kwargs):
         if self.status == 'Done' and not self.completed_at:

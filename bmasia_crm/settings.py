@@ -88,6 +88,7 @@ INSTALLED_APPS = [
 
     # Local apps
     'crm_app',
+    'agent_inbox',  # activity log and change-proposal review queue
 ]
 
 MIDDLEWARE = [
@@ -103,6 +104,7 @@ MIDDLEWARE = [
     'crm_app.agent_gate_middleware.AgentGateRestObserverMiddleware',  # Phase 1 Stage A (observe only)
     'crm_app.auth_observability.AuthObservabilityMiddleware',  # logs auth method per API request; never blocks
     'crm_app.mcp_query_guard.MCPQueryGuardMiddleware',  # refuses query_data_collections if its field checks are off
+    'agent_inbox.middleware.InboxProtectedDeleteMiddleware',  # 409 when activity history blocks a delete
 ]
 
 ROOT_URLCONF = 'bmasia_crm.urls'
@@ -330,6 +332,24 @@ CARA_QUARTERLY_OWNER = config('CARA_QUARTERLY_OWNER', default='legacy')
 # Cara care-touch and care-summary write endpoints (crm_app/cara_care_writes.py).
 # Off by default; reads are unaffected by this switch.
 CARA_CARE_WRITES_ENABLED = config('CARA_CARE_WRITES_ENABLED', default=False, cast=bool)
+
+# Activity log and change-proposal review queue (agent_inbox). Both write
+# surfaces are off by default; while off they answer "not enabled" and the
+# read endpoints still work. Accepting a proposal is always a person's click.
+AGENT_ACTIVITY_WRITES_ENABLED = config('AGENT_ACTIVITY_WRITES_ENABLED', default=False, cast=bool)
+CHANGE_PROPOSALS_ENABLED = config('CHANGE_PROPOSALS_ENABLED', default=False, cast=bool)
+# Read as text and parsed in agent_inbox/policy.py, so a malformed value falls
+# back to the default instead of stopping the server at boot.
+CHANGE_PROPOSAL_EXPIRY_DAYS = config('CHANGE_PROPOSAL_EXPIRY_DAYS', default='30')
+CHANGE_PROPOSALS_DAILY_CAP = config('CHANGE_PROPOSALS_DAILY_CAP', default='200')
+AGENT_ACTIVITY_DAILY_CAP = config('AGENT_ACTIVITY_DAILY_CAP', default='2000')
+# Extra CRM usernames treated as agent accounts (comma list), on top of the
+# principals in crm_app/agent_policy.py. Agent accounts cannot decide proposals.
+AGENT_INBOX_AGENT_USERNAMES = config('AGENT_INBOX_AGENT_USERNAMES', default='', cast=Csv())
+# Dotted path of the mail-capture app's "message purged" signal. When it exists,
+# activities and proposals citing a purged message are redacted
+# (agent_inbox/redaction.py); when it does not, nothing is connected.
+AGENT_INBOX_MAIL_PURGED_SIGNAL = config('AGENT_INBOX_MAIL_PURGED_SIGNAL', default='mail_capture.signals.mail_purged')
 
 # Phase 1 agent gate (docs/agent-gate-phase1-design.md). 'observe' records what
 # crm_app/agent_policy.py would refuse without changing any write; 'off' disables

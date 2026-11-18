@@ -36,7 +36,7 @@
 | Mar 6 | Fix email sequences cron crash: invalid Contact field names (is_primary_contact → is_primary) | `auto_enrollment_service.py` | `8b1ae239` |
 | Mar 3 | Fix contract PDF AnonymousUser crash + custom duration sync | `views.py`, `ContractForm.tsx` | `c5ffe0bd` |
 | Mar 2 | Paid invoice UX: receipt visibility, send/resend, status indicators | `InvoiceDetail.tsx`, `Invoices.tsx`, `EmailSendDialog.tsx` | `91eb7c1a` |
-| Mar 2 | Receipt/Tax Invoice: auto-generate on mark paid + PDF + email | `models.py`, `views.py`, `email_service.py`, `InvoiceDetail.tsx`, `0085` | `754ecc6c` |
+| Mar 2 | Receipt/Tax Invoice: auto-generate on mark paid + PDF + email (**superseded Nov 18, PR 62**: mark paid emails the receipt only when the request sends `send_receipt: true`; Paid is reached only through mark paid, `crm_app/services/invoice_payments.py`) | `models.py`, `views.py`, `email_service.py`, `InvoiceDetail.tsx`, `0085` | `754ecc6c` |
 | Mar 2 | Fix contract email PDF empty body (was using broken fallback) | `email_service.py` | `e8b87d3a` |
 | Mar 1 | Contact document preferences + CC field in EmailSendDialog | `ContactForm.tsx`, `EmailSendDialog.tsx`, `email_service.py`, `0084` | `9d290559` |
 | Feb 28 | Allow editing Active contracts (for date/term changes) | `Contracts.tsx`, `ContractDetail.tsx` | `c71d67a8` |
