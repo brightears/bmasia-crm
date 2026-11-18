@@ -1078,9 +1078,10 @@ const Renewals: React.FC = () => {
         {narrow ? cards : table}
       </Paper>
       <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 1.5 }}>
-        Draft contracts are not terms. The renewal state comes from the contracts linked to the term that start
-        between 90 days before and 60 days after its end, and their invoices. Placeholders closed by the November data
-        corrections are hidden unless shown. * zone count from the company's funnel figure.
+        Draft contracts are not terms. The renewal state comes from the contracts linked to the term and their invoices;
+        a linked contract that starts more than 90 days before the term ends is treated as a possible add-on, not the
+        renewal. Placeholders closed by the November data corrections are hidden unless shown. * zone count from the
+        company's funnel figure.
       </Typography>
     </Box>
   );
