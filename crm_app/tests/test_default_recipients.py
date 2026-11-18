@@ -149,6 +149,54 @@ def test_prospect_emails_skip_contacts_that_take_no_automated_email(company):
     assert recipients.prospect_contact(Contact.objects.filter(company=company)) == primary_off
 
 
+# ------------------------------------------------------------------ live effects named in the PR
+
+
+def test_mark_paid_says_why_the_receipt_was_not_emailed(company, caplog):
+    """Mark as paid with "email receipt" reads the invoice setting; nobody set means a clear reason, not an error."""
+    from datetime import date
+    from decimal import Decimal
+
+    from django.core import mail
+    from rest_framework.test import APIClient
+
+    from crm_app.models import Invoice, User
+
+    contact(company, 'accounts@example.test', contact_type='Billing', receives_invoice_emails=False)
+    invoice = Invoice.objects.create(company=company, invoice_number='INV-RECIP-2', status='Sent',
+                                     amount=Decimal('10'), total_amount=Decimal('10'), currency='THB',
+                                     issue_date=date(2026, 11, 1), due_date=date(2026, 12, 1))
+    operator = User.objects.create_user(username='recipient-tester', email='recipient-tester@example.test',
+                                        password='test-only-password', role='Admin', is_active=True)
+    client = APIClient()
+    client.force_authenticate(user=operator)
+    with caplog.at_level('ERROR'):
+        response = client.post(f'/api/v1/invoices/{invoice.pk}/mark_paid/',
+                               {'paid_date': '2026-11-10', 'send_receipt': True}, format='json')
+    assert response.status_code == 200
+    assert response.data['receipt_email_status'] == 'failed: ' + recipients.no_recipient_message(company, 'receipt')
+    assert mail.outbox == []
+    assert not [r for r in caplog.records if 'Receipt email failed' in r.getMessage()]
+    invoice.refresh_from_db()
+    assert invoice.status == 'Paid'
+
+
+def test_contact_types_set_off_by_the_0084_migration_lose_the_invoice_default(company):
+    """Migration 0084 switched invoices off for Decision Maker and Technical contacts, and quotes and contracts
+    off for Billing and Technical contacts; a company with only such contacts has no default for those kinds."""
+    decision_maker = contact(company, 'owner@example.test', contact_type='Decision Maker',
+                             receives_invoice_emails=False)
+    contact(company, 'it@example.test', contact_type='Technical', receives_invoice_emails=False,
+            receives_quote_emails=False, receives_contract_emails=False)
+    assert recipients.invoice_recipients(company) == []
+    assert recipients.receipt_recipients(company) == []
+    assert recipients.quote_recipients(company) == [decision_maker.email]
+    billing = contact(company, 'billing@example.test', contact_type='Billing', receives_quote_emails=False,
+                      receives_contract_emails=False)
+    assert recipients.invoice_recipients(company) == [billing.email]
+    assert recipients.contract_recipients(company) == [decision_maker.email]
+
+
 def test_a_contact_created_from_a_proposal_receives_nothing_by_default(company):
     new = contact(company, 'ap@lookalike.example.net', is_primary=False, **all_off())
     for resolver, _, _ in SENDERS.values():

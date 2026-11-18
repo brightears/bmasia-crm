@@ -113,6 +113,12 @@ test('describeMarkPaidResult says whether an email went out', () => {
     .toBe('Payment recorded. Receipt REC-TH-2026-0001. The receipt was emailed to the customer.');
   expect(describeMarkPaidResult({ ...result, receipt_email_status: 'failed: No recipients found' }))
     .toMatch(/receipt email failed/);
+  expect(describeMarkPaidResult({
+    ...result,
+    receipt_email_status: 'failed: No contact of Lotus Bay Hotel is set to receive receipt (invoice) emails. '
+      + 'Choose the recipients, or switch the email setting on for a contact.',
+  })).toBe('Payment recorded. Receipt REC-TH-2026-0001. The receipt was not emailed: No contact of Lotus Bay '
+    + 'Hotel is set to receive receipt (invoice) emails. Use Send Receipt to choose the recipients.');
 });
 
 test('"today" is the Bangkok date, which the server checks against', () => {
