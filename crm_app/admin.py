@@ -1254,8 +1254,27 @@ class InvoiceLineItemInline(admin.TabularInline):
     fields = ['description', 'quantity', 'unit_price', 'tax_rate', 'line_total']
 
 
+class InvoiceAdminForm(forms.ModelForm):
+    """Paid is reached only through mark_invoice_paid (the "Mark selected invoices as paid" action)."""
+
+    class Meta:
+        model = Invoice
+        fields = '__all__'
+
+    def clean_status(self):
+        value = self.cleaned_data.get('status')
+        current = self.instance.status if self.instance and self.instance.pk else None
+        if value == 'Paid' and current != 'Paid':
+            raise forms.ValidationError(
+                'Use the "Mark selected invoices as paid" action (or Mark as paid in the CRM): '
+                'it records the payment date and issues the receipt number.'
+            )
+        return value
+
+
 @admin.register(Invoice)
 class InvoiceAdmin(admin.ModelAdmin):
+    form = InvoiceAdminForm
     list_display = ['invoice_number', 'contract', 'status', 'issue_date', 'due_date', 'total_amount', 'days_overdue']
     list_filter = ['status', 'issue_date', 'due_date']
     list_select_related = ['contract', 'contract__company']
@@ -1294,19 +1313,22 @@ class InvoiceAdmin(admin.ModelAdmin):
     )
 
     def bulk_mark_paid(self, request, queryset):
-        """Mark selected invoices as paid"""
-        updated_count = 0
-        for invoice in queryset:
-            if invoice.status != 'Paid':
-                invoice.status = 'Paid'
-                invoice.paid_date = timezone.now().date()
-                invoice.save()
-                updated_count += 1
+        """Mark selected invoices as paid through the payment service (today's date, no email)."""
+        from crm_app.services.invoice_payments import InvoiceNotPayable, mark_invoice_paid
 
-        if updated_count > 0:
-            self.message_user(request, f'Successfully marked {updated_count} invoices as paid')
-        else:
-            self.message_user(request, 'No invoices were updated (already paid)', level='WARNING')
+        done, skipped = [], []
+        for invoice in queryset:
+            try:
+                invoice, _old, _receipt_only = mark_invoice_paid(invoice.pk, paid_date=timezone.localdate())
+            except (InvoiceNotPayable, ValueError) as refusal:
+                skipped.append(f'{invoice.invoice_number}: {getattr(refusal, "message", refusal)}')
+                continue
+            done.append(f'{invoice.invoice_number} ({invoice.receipt_number})')
+
+        if done:
+            self.message_user(request, f'Marked paid, no email sent: {", ".join(done)}')
+        if skipped:
+            self.message_user(request, f'Not changed: {"; ".join(skipped)}', level='WARNING')
     bulk_mark_paid.short_description = 'Mark selected invoices as paid'
 
     def bulk_mark_unpaid(self, request, queryset):

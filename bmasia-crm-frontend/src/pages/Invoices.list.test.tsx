@@ -140,3 +140,50 @@ it('an overdue invoice says how many days', async () => {
   renderAt('/invoices');
   expect(await screen.findByText('12 days overdue')).toBeInTheDocument();
 });
+
+it('"Mark as Paid" opens the record-payment dialog, which offers to record without sending', async () => {
+  api.getInvoices.mockResolvedValue({ results: [invoice({ status: 'Sent' })], count: 1 });
+  renderAt('/invoices');
+  fireEvent.click(await screen.findByRole('button', { name: /more actions for invoice INV-TEST-1/i }));
+  fireEvent.click(within(await screen.findByRole('menu')).getByText('Mark as Paid'));
+  const dialog = await screen.findByRole('dialog', { name: 'Record payment' });
+  expect(within(dialog).getByText(/THB 108,000/)).toBeInTheDocument();
+  expect(within(dialog).getByRole('button', { name: 'Record without sending' })).toBeInTheDocument();
+  expect(within(dialog).getByRole('button', { name: 'Record and email receipt' })).toBeInTheDocument();
+});
+
+it('"Send via Email" closes the menu at once and cannot be clicked again while sending', async () => {
+  api.sendInvoice = jest.fn(() => new Promise(() => {}));
+  renderAt('/invoices');
+  fireEvent.click(await screen.findByRole('button', { name: /more actions for invoice INV-TEST-1/i }));
+  fireEvent.click(within(await screen.findByRole('menu')).getByText('Send via Email'));
+  await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: /more actions for invoice INV-TEST-1/i }));
+  const item = within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Send via Email' });
+  expect(item).toHaveAttribute('aria-disabled', 'true');
+  fireEvent.click(item);
+  expect(api.sendInvoice).toHaveBeenCalledTimes(1);
+  delete api.sendInvoice;
+});
+
+it('a paid invoice without a receipt offers "Issue Receipt"', async () => {
+  api.getInvoices.mockResolvedValue({ results: [invoice({ status: 'Paid', receipt_number: null })], count: 1 });
+  renderAt('/invoices');
+  fireEvent.click(await screen.findByRole('button', { name: /more actions for invoice INV-TEST-1/i }));
+  fireEvent.click(within(await screen.findByRole('menu')).getByText('Issue Receipt'));
+  expect(await screen.findByRole('dialog', { name: 'Issue receipt' })).toBeInTheDocument();
+});
+
+it('after a 409 from "Mark as Paid" the list is loaded again', async () => {
+  api.markInvoicePaid = jest.fn(() => Promise.reject({ response: { status: 409, data: { error: 'Already paid.' } } }));
+  api.getInvoices.mockResolvedValue({ results: [invoice({ status: 'Sent' })], count: 1 });
+  renderAt('/invoices');
+  fireEvent.click(await screen.findByRole('button', { name: /more actions for invoice INV-TEST-1/i }));
+  fireEvent.click(within(await screen.findByRole('menu')).getByText('Mark as Paid'));
+  const dialog = await screen.findByRole('dialog', { name: 'Record payment' });
+  const loadsBefore = api.getInvoices.mock.calls.length;
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Record without sending' }));
+  await waitFor(() => expect(api.getInvoices.mock.calls.length).toBeGreaterThan(loadsBefore));
+  expect(await within(dialog).findByText(/Already paid\. Nothing was changed or sent\./)).toBeInTheDocument();
+  delete api.markInvoicePaid;
+});
