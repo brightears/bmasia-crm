@@ -25,7 +25,6 @@ import {
   CircularProgress,
   GridLegacy as Grid,
   InputAdornment,
-  Chip,
   Autocomplete,
 } from '@mui/material';
 import {
@@ -161,7 +160,6 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
   ]);
 
   const [filteredContacts, setFilteredContacts] = useState<Contact[]>([]);
-  const [attachments, setAttachments] = useState<File[]>([]);
   const [selectedCompanyCountry, setSelectedCompanyCountry] = useState<string>('');
   const [selectedTermsOption, setSelectedTermsOption] = useState<string>('30_days');
   const [isCustomDuration, setIsCustomDuration] = useState(false);
@@ -390,16 +388,6 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
     };
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files) {
-      setAttachments(prev => [...prev, ...Array.from(event.target.files!)]);
-    }
-  };
-
-  const removeAttachment = (index: number) => {
-    setAttachments(prev => prev.filter((_, i) => i !== index));
-  };
-
   const handleSubmit = async () => {
     try {
       setLoading(true);
@@ -447,17 +435,6 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
         savedQuote = await ApiService.createQuote(quoteData);
       }
 
-      // Upload attachments if any
-      if (attachments.length > 0 && savedQuote.id) {
-        for (const file of attachments) {
-          try {
-            await ApiService.addQuoteAttachment(savedQuote.id, file);
-          } catch (err) {
-            console.error('Failed to upload attachment:', err);
-          }
-        }
-      }
-
       onSave(savedQuote);
       onClose();
     } catch (err: any) {
@@ -497,7 +474,6 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
       tax_rate: 7,
       line_total: 50.00,
     }]);
-    setAttachments([]);
     setSelectedTermsOption('30_days');
     setSelectedCompanyCountry('');
     setError('');
@@ -1076,41 +1052,16 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
               />
             </Grid>
 
-            {/* Attachments */}
+            {/* Attachments: not offered until uploaded files have persistent storage */}
             <Grid item xs={12}>
-              <Box>
-                <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center' }}>
-                  <CloudUpload sx={{ mr: 1 }} />
-                  Attachments
-                </Typography>
-
-                <input
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
-                  style={{ display: 'none' }}
-                  id="attachment-upload"
-                  type="file"
-                  multiple
-                  onChange={handleFileUpload}
-                />
-                <label htmlFor="attachment-upload">
-                  <Button variant="outlined" component="span" startIcon={<CloudUpload />}>
-                    Upload Files
-                  </Button>
-                </label>
-
-                {attachments.length > 0 && (
-                  <Box sx={{ mt: 2 }}>
-                    {attachments.map((file, index) => (
-                      <Chip
-                        key={index}
-                        label={`${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`}
-                        onDelete={() => removeAttachment(index)}
-                        sx={{ mr: 1, mb: 1 }}
-                      />
-                    ))}
-                  </Box>
-                )}
-              </Box>
+              <Typography variant="h6" sx={{ mb: 1, display: 'flex', alignItems: 'center' }}>
+                <CloudUpload sx={{ mr: 1 }} />
+                Attachments
+              </Typography>
+              <Alert severity="info" data-testid="quote-attachments-unavailable">
+                File attachments for quotes are not available yet: the CRM cannot store uploaded
+                files permanently. Send any extra files to the customer by email.
+              </Alert>
             </Grid>
           </Grid>
         </DialogContent>
