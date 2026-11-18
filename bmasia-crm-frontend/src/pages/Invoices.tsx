@@ -56,6 +56,7 @@ import { Invoice, ApiResponse, Company, Contract } from '../types';
 import ApiService, { MarkInvoicePaidResult } from '../services/api';
 import InvoiceForm from '../components/InvoiceForm';
 import InvoiceDetail from '../components/InvoiceDetail';
+import RecipientFallback, { noRecipientMessage, sendErrorMessage } from '../components/RecipientFallback';
 import MarkPaidDialog, { describeMarkPaidResult } from '../components/MarkPaidDialog';
 import { formatDate as formatDisplayDate, formatMoney, statusTone, visuallyHidden } from '../theme';
 import { PageHeader, EmptyState } from '../components/ui';
@@ -143,6 +144,7 @@ const Invoices: React.FC = () => {
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   // A send in progress, so a second click on the menu cannot send the invoice twice
   const [sendingInvoiceId, setSendingInvoiceId] = useState<string | null>(null);
+  const [sendFallback, setSendFallback] = useState<{ invoice: Invoice; message: string } | null>(null);
 
   // QuickBooks export dialog
   const [qbExportOpen, setQbExportOpen] = useState(false);
@@ -300,7 +302,12 @@ const Invoices: React.FC = () => {
       setSuccess('Invoice sent successfully');
       loadInvoices();
     } catch (err) {
-      setError('Failed to send invoice');
+      const noRecipient = noRecipientMessage(err);
+      if (noRecipient) {
+        setSendFallback({ invoice, message: noRecipient });
+      } else {
+        setError(sendErrorMessage(err, 'Failed to send invoice'));
+      }
     } finally {
       setSendingInvoiceId(null);
     }
@@ -770,6 +777,21 @@ const Invoices: React.FC = () => {
           <ListItemText>Delete</ListItemText>
         </MenuItem>
       </Menu>
+
+      {sendFallback && (
+        <RecipientFallback
+          open
+          message={sendFallback.message}
+          documentType="invoice"
+          documentId={sendFallback.invoice.id}
+          documentNumber={sendFallback.invoice.invoice_number}
+          companyId={sendFallback.invoice.company}
+          companyName={sendFallback.invoice.company_name}
+          onClose={() => setSendFallback(null)}
+          onSendEmail={(data) => ApiService.sendInvoiceEmail(sendFallback.invoice.id, data)}
+          onSent={() => { setSendFallback(null); setSuccess('Invoice sent'); loadInvoices(); }}
+        />
+      )}
 
       {/* Invoice Form */}
       <InvoiceForm

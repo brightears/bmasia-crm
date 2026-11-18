@@ -24,6 +24,7 @@ import {
 } from '@mui/icons-material';
 import { Quote } from '../types';
 import ApiService from '../services/api';
+import RecipientFallback, { noRecipientMessage, sendErrorMessage } from '../components/RecipientFallback';
 import { QuoteDetail as QuoteDetailComponent } from '../components';
 import { PageHeader } from '../components/ui';
 import { statusTone } from '../theme';
@@ -38,6 +39,7 @@ const QuoteDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [sendFallback, setSendFallback] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -68,7 +70,12 @@ const QuoteDetailPage: React.FC = () => {
       setSuccess('Quote sent successfully');
       loadQuote();
     } catch (err) {
-      setError('Failed to send quote');
+      const noRecipient = noRecipientMessage(err);
+      if (noRecipient) {
+        setSendFallback(noRecipient);
+      } else {
+        setError(sendErrorMessage(err, 'Failed to send quote'));
+      }
     } finally {
       setLoading(false);
     }
@@ -283,6 +290,20 @@ const QuoteDetailPage: React.FC = () => {
         quote={quote}
         onQuoteUpdate={loadQuote}
       />
+      {quote && sendFallback && (
+        <RecipientFallback
+          open
+          message={sendFallback}
+          documentType="quote"
+          documentId={quote.id}
+          documentNumber={quote.quote_number}
+          companyId={quote.company}
+          companyName={quote.company_name}
+          onClose={() => setSendFallback(null)}
+          onSendEmail={(data) => ApiService.sendQuoteEmail(quote.id, data)}
+          onSent={() => { setSendFallback(null); setSuccess('Quote sent'); loadQuote(); }}
+        />
+      )}
     </Box>
   );
 };
