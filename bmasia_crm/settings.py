@@ -88,6 +88,7 @@ INSTALLED_APPS = [
 
     # Local apps
     'crm_app',
+    'mail_capture',  # Google Workspace mail capture; off unless GOOGLE_CAPTURE_ENABLED
 ]
 
 MIDDLEWARE = [
@@ -330,6 +331,16 @@ CARA_QUARTERLY_OWNER = config('CARA_QUARTERLY_OWNER', default='legacy')
 # Cara care-touch and care-summary write endpoints (crm_app/cara_care_writes.py).
 # Off by default; reads are unaffected by this switch.
 CARA_CARE_WRITES_ENABLED = config('CARA_CARE_WRITES_ENABLED', default=False, cast=bool)
+
+# Google Workspace mail capture (mail_capture app). Master switch, off by
+# default: while it is off every capture entry point returns "capture disabled"
+# without creating a Gmail client. CAPTURE_INTERNAL_DOMAINS lists the
+# company's own mail domains (comma-separated); CAPTURE_INTERNAL_ADDRESSES adds
+# single internal sending addresses on other domains. Capture also refuses to
+# run while CAPTURE_INTERNAL_DOMAINS is empty.
+GOOGLE_CAPTURE_ENABLED = config('GOOGLE_CAPTURE_ENABLED', default=False, cast=bool)
+CAPTURE_INTERNAL_DOMAINS = config('CAPTURE_INTERNAL_DOMAINS', default='', cast=Csv())
+CAPTURE_INTERNAL_ADDRESSES = config('CAPTURE_INTERNAL_ADDRESSES', default='', cast=Csv())
 
 # Phase 1 agent gate (docs/agent-gate-phase1-design.md). 'observe' records what
 # crm_app/agent_policy.py would refuse without changing any write; 'off' disables
