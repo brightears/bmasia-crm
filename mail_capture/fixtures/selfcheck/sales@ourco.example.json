@@ -1,0 +1,81 @@
+{
+  "history_id": "5000",
+  "labels": [
+    {
+      "id": "Label_9",
+      "name": "CRM private",
+      "type": "user"
+    }
+  ],
+  "messages": [
+    {
+      "eml": "01-contact-inbound.eml",
+      "id": "s01",
+      "threadId": "st1"
+    },
+    {
+      "eml": "02-internal.eml",
+      "id": "s02",
+      "threadId": "st2",
+      "labelIds": [
+        "SENT"
+      ]
+    },
+    {
+      "eml": "03-unknown.eml",
+      "id": "s03",
+      "threadId": "st3"
+    },
+    {
+      "eml": "04-shared-domain.eml",
+      "id": "s04",
+      "threadId": "st4"
+    },
+    {
+      "eml": "05-document-number.eml",
+      "id": "s05",
+      "threadId": "st5"
+    },
+    {
+      "eml": "06-list.eml",
+      "id": "s06",
+      "threadId": "st6"
+    },
+    {
+      "eml": "07-private.eml",
+      "id": "s07",
+      "threadId": "st7",
+      "labelIds": [
+        "INBOX",
+        "Label_9"
+      ]
+    },
+    {
+      "eml": "08-no-message-id-thai.eml",
+      "id": "s08",
+      "threadId": "st8"
+    },
+    {
+      "eml": "09-reply-sales.eml",
+      "id": "s09",
+      "threadId": "st1",
+      "labelIds": [
+        "SENT"
+      ]
+    }
+  ],
+  "history": [
+    {
+      "messagesAdded": [
+        "s09"
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "method": "get_message",
+      "status": 429,
+      "times": 1
+    }
+  ]
+}
