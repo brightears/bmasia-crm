@@ -5,6 +5,7 @@ import { NavigateNext } from '@mui/icons-material';
 import KBArticleForm from '../components/KBArticleForm';
 import { KBArticle } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 const KBArticleEdit: React.FC = () => {
   const navigate = useNavigate();
@@ -24,7 +25,7 @@ const KBArticleEdit: React.FC = () => {
       const data = await ApiService.getKBArticle(id!);
       setArticle(data);
     } catch (err: any) {
-      console.error('Failed to load article:', err);
+      logApiError('Failed to load article:', err);
       navigate('/knowledge-base');
     } finally {
       setLoading(false);

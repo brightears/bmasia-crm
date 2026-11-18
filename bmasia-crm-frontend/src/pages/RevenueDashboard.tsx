@@ -38,6 +38,7 @@ import {
 } from '@mui/icons-material';
 import { MonthlyRevenueData } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface KPICardProps {
   title: string;
@@ -135,7 +136,7 @@ const RevenueDashboard: React.FC = () => {
 
       setMonthlyData(transformedData);
     } catch (err: any) {
-      console.error('Revenue dashboard error:', err);
+      logApiError('Revenue dashboard error:', err);
       setError('Failed to load revenue data. Make sure to initialize the finance module first.');
     } finally {
       setLoading(false);

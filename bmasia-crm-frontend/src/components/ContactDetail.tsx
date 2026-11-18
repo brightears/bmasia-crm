@@ -50,6 +50,7 @@ import {
 import { Contact, Opportunity, Note } from '../types';
 import ApiService from '../services/api';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { logApiError } from '../utils/logApiError';
 
 interface ContactDetailProps {
   open: boolean;
@@ -112,7 +113,7 @@ const ContactDetail: React.FC<ContactDetailProps> = ({
       });
       setNotes(notesResponse.results);
     } catch (err: any) {
-      console.error('Failed to load related data:', err);
+      logApiError('Failed to load related data:', err);
       setError('Failed to load contact details');
     } finally {
       setLoading(false);

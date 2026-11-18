@@ -43,6 +43,7 @@ import MobileBottomNav from './MobileBottomNav';
 import GlobalSearch from './GlobalSearch';
 import { buildNavGroups, filterNavForRole, findNavLocation, isActivePath, NavGroup } from './navigation';
 import { layout } from '../theme';
+import { logApiError } from '../utils/logApiError';
 
 const drawerWidth = layout.sidebarWidth;
 const miniDrawerWidth = layout.sidebarCollapsedWidth;
@@ -243,7 +244,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       // Update user in auth context by reloading
       window.location.reload();
     } catch (err) {
-      console.error('Avatar upload failed:', err);
+      logApiError('Avatar upload failed:', err);
       alert('Failed to upload avatar. Please try again.');
     }
   };

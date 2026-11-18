@@ -45,6 +45,7 @@ import { ContractTemplate, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import ContractTemplateForm from '../components/ContractTemplateForm';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { logApiError } from '../utils/logApiError';
 
 const ContractTemplates: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -86,7 +87,7 @@ const ContractTemplates: React.FC = () => {
       setTemplates(response.results || []);
       setTotalCount(response.count || 0);
     } catch (err: any) {
-      console.error('Contract templates error:', err);
+      logApiError('Contract templates error:', err);
       setError(`Failed to load templates: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
       setTemplates([]);
       setTotalCount(0);

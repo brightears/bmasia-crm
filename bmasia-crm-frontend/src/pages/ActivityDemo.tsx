@@ -19,6 +19,7 @@ import ActivityForm from '../components/ActivityForm';
 import ActivityTimeline from '../components/ActivityTimeline';
 import QuickActivity from '../components/QuickActivity';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 const ActivityDemo: React.FC = () => {
   const [activityFormOpen, setActivityFormOpen] = useState(false);
@@ -49,7 +50,7 @@ const ActivityDemo: React.FC = () => {
         setSelectedOpportunity(opportunitiesResponse.results[0]);
       }
     } catch (err) {
-      console.error('Failed to load data:', err);
+      logApiError('Failed to load data:', err);
     } finally {
       setLoading(false);
     }

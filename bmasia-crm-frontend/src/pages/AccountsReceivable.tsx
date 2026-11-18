@@ -33,6 +33,7 @@ import {
   Receipt,
 } from '@mui/icons-material';
 import ApiService, { ARAgingReport, ARCompanyDetail } from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface KPICardProps {
   title: string;
@@ -103,7 +104,7 @@ const AccountsReceivable: React.FC = () => {
       const response = await ApiService.getARAgingReport(currency, billingEntity);
       setReport(response);
     } catch (err: any) {
-      console.error('AR Aging error:', err);
+      logApiError('AR Aging error:', err);
       setError('Failed to load AR aging data.');
     } finally {
       setLoading(false);

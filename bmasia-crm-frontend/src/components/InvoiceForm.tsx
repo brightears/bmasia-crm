@@ -44,6 +44,7 @@ import ApiService from '../services/api';
 import DocumentIssuerField from './DocumentIssuerField';
 import { DOCUMENT_BILLING_ENTITIES, effectiveBillingEntity, issuerPaymentTerms, documentValidationMessage } from '../utils/documentTailoring';
 import { documentZoneLinks } from '../utils/contractZones';
+import { logApiError } from '../utils/logApiError';
 
 interface InvoiceFormProps {
   open: boolean;
@@ -302,7 +303,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
       setInvoiceNumber(number);
     } catch (err) {
       // Fallback to client-generated number if API fails
-      console.error('Failed to get next invoice number:', err);
+      logApiError('Failed to get next invoice number:', err);
       const prefix = entity?.includes('Thailand') ? 'INV-TH' : 'INV-HK';
       const year = new Date().getFullYear();
       const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
@@ -590,7 +591,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         try {
           await ApiService.sendInvoice(savedInvoice.id);
         } catch (emailError) {
-          console.error('Failed to send invoice email:', emailError);
+          logApiError('Failed to send invoice email:', emailError);
           // Don't fail the entire operation if email fails
         }
       }

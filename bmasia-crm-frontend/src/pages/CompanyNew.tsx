@@ -23,6 +23,7 @@ import { Save, Cancel, ArrowBack, Business } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { Company } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface CompanyFormData {
   name: string;
@@ -184,7 +185,7 @@ const CompanyNew: React.FC = () => {
       const newCompany = await ApiService.createCompany(submitData);
       navigate(`/companies/${newCompany.id}`);
     } catch (err: any) {
-      console.error('Company save error:', err);
+      logApiError('Company save error:', err);
       if (err.response?.data) {
         if (typeof err.response.data === 'object') {
           const fieldErrors: Record<string, string> = {};

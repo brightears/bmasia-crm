@@ -51,6 +51,7 @@ import { EmailTemplate, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import EmailTemplateForm from '../components/EmailTemplateForm';
 import EmailTemplatePreview from '../components/EmailTemplatePreview';
+import { logApiError } from '../utils/logApiError';
 
 const EmailTemplates: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -112,7 +113,7 @@ const EmailTemplates: React.FC = () => {
       setTemplates(response.results || []);
       setTotalCount(response.count || 0);
     } catch (err: any) {
-      console.error('Email templates error:', err);
+      logApiError('Email templates error:', err);
       setError(`Failed to load email templates: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
       setTemplates([]);
       setTotalCount(0);
@@ -203,7 +204,7 @@ const EmailTemplates: React.FC = () => {
       setFormOpen(true);
       setInfo('Template duplicated. Change the template type to save.');
     } catch (err: any) {
-      console.error('Duplicate template error:', err);
+      logApiError('Duplicate template error:', err);
       setError(`Failed to duplicate template: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     }
     handleMenuClose();
@@ -226,7 +227,7 @@ const EmailTemplates: React.FC = () => {
       setDeleteDialogOpen(false);
       setDeletingTemplate(null);
     } catch (err: any) {
-      console.error('Delete template error:', err);
+      logApiError('Delete template error:', err);
       setError(`Failed to delete template: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     }
   };
@@ -281,7 +282,7 @@ const EmailTemplates: React.FC = () => {
       setSelected([]);
       loadTemplates();
     } catch (err: any) {
-      console.error('Bulk activate error:', err);
+      logApiError('Bulk activate error:', err);
       setError(`Failed to activate templates: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     } finally {
       setBulkLoading(false);
@@ -297,7 +298,7 @@ const EmailTemplates: React.FC = () => {
       setSelected([]);
       loadTemplates();
     } catch (err: any) {
-      console.error('Bulk deactivate error:', err);
+      logApiError('Bulk deactivate error:', err);
       setError(`Failed to deactivate templates: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     } finally {
       setBulkLoading(false);
@@ -318,7 +319,7 @@ const EmailTemplates: React.FC = () => {
       setBulkDeleteDialogOpen(false);
       loadTemplates();
     } catch (err: any) {
-      console.error('Bulk delete error:', err);
+      logApiError('Bulk delete error:', err);
       setError(`Failed to delete templates: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     } finally {
       setBulkLoading(false);

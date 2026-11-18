@@ -44,6 +44,7 @@ import {
 } from '@mui/icons-material';
 import { KBCategory, KBTag } from '../types';
 import api from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 // Preset tag colors
 const TAG_COLORS = [
@@ -97,7 +98,7 @@ const KBSettings: React.FC = () => {
       setCategories(data);
       setError(null);
     } catch (err: any) {
-      console.error('Failed to load categories:', err);
+      logApiError('Failed to load categories:', err);
       setError('Failed to load categories');
     } finally {
       setCategoriesLoading(false);
@@ -113,7 +114,7 @@ const KBSettings: React.FC = () => {
       setTags(data);
       setError(null);
     } catch (err: any) {
-      console.error('Failed to load tags:', err);
+      logApiError('Failed to load tags:', err);
       setError('Failed to load tags');
     } finally {
       setTagsLoading(false);
@@ -182,7 +183,7 @@ const KBSettings: React.FC = () => {
       await loadCategories();
       handleCloseCategoryDialog();
     } catch (err: any) {
-      console.error('Failed to save category:', err);
+      logApiError('Failed to save category:', err);
       setError(err.response?.data?.detail || 'Failed to save category');
     } finally {
       setSaving(false);
@@ -199,7 +200,7 @@ const KBSettings: React.FC = () => {
       await loadCategories();
       setDeletingCategory(null);
     } catch (err: any) {
-      console.error('Failed to delete category:', err);
+      logApiError('Failed to delete category:', err);
       setError(err.response?.data?.detail || 'Failed to delete category');
     } finally {
       setSaving(false);
@@ -211,7 +212,7 @@ const KBSettings: React.FC = () => {
       await api.updateKBCategory(category.id, { is_active: !category.is_active });
       await loadCategories();
     } catch (err: any) {
-      console.error('Failed to toggle category status:', err);
+      logApiError('Failed to toggle category status:', err);
       setError('Failed to update category status');
     }
   };
@@ -263,7 +264,7 @@ const KBSettings: React.FC = () => {
       await loadTags();
       handleCloseTagDialog();
     } catch (err: any) {
-      console.error('Failed to save tag:', err);
+      logApiError('Failed to save tag:', err);
       setError(err.response?.data?.detail || 'Failed to save tag');
     } finally {
       setSaving(false);
@@ -280,7 +281,7 @@ const KBSettings: React.FC = () => {
       await loadTags();
       setDeletingTag(null);
     } catch (err: any) {
-      console.error('Failed to delete tag:', err);
+      logApiError('Failed to delete tag:', err);
       setError(err.response?.data?.detail || 'Failed to delete tag');
     } finally {
       setSaving(false);

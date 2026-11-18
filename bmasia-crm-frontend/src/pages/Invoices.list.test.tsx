@@ -140,3 +140,17 @@ it('an overdue invoice says how many days', async () => {
   renderAt('/invoices');
   expect(await screen.findByText('12 days overdue')).toBeInTheDocument();
 });
+
+it('a refused delete shows the server\'s reason', async () => {
+  const reason = 'INV-TEST-1 cannot be deleted: it is Sent; only a Draft can be deleted.';
+  api.deleteInvoice = jest.fn(() => Promise.reject({ response: { status: 409, data: { error: reason } } }));
+  jest.spyOn(window, 'confirm').mockReturnValue(true);
+  jest.spyOn(console, 'error').mockImplementation(() => {});
+  api.getInvoices.mockResolvedValue({ results: [invoice({ status: 'Sent' })], count: 1 });
+  renderAt('/invoices');
+  fireEvent.click(await screen.findByRole('button', { name: /more actions for invoice INV-TEST-1/i }));
+  fireEvent.click(within(await screen.findByRole('menu')).getByText('Delete'));
+  expect(await screen.findByText(reason)).toBeInTheDocument();
+  delete api.deleteInvoice;
+  jest.restoreAllMocks();
+});

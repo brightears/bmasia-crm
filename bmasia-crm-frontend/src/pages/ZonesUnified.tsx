@@ -53,6 +53,7 @@ import apiService from '../services/api';
 import { Zone, Company } from '../types';
 import { useListState, idFromList } from '../hooks/useListState';
 import { useListSearchBox } from '../hooks/useListSearchBox';
+import { logApiError } from '../utils/logApiError';
 
 type StatusFilter = 'all' | 'online' | 'offline' | 'no_device' | 'pending' | 'orphaned';
 
@@ -151,7 +152,7 @@ const ZonesUnified: React.FC = () => {
       setZones(zonesResponse.results || []);
       setCompanies(companiesResponse as any[]);
     } catch (err: any) {
-      console.error('Error loading data:', err);
+      logApiError('Error loading data:', err);
       setError(err.message || 'Failed to load zones and companies');
     } finally {
       setLoading(false);
@@ -171,7 +172,7 @@ const ZonesUnified: React.FC = () => {
       setSuccessMessage(result.message || `Synced ${result.synced} zones successfully`);
       setTimeout(() => setSuccessMessage(null), 5000);
     } catch (err: any) {
-      console.error('Error syncing zones:', err);
+      logApiError('Error syncing zones:', err);
       setError(err.message || 'Failed to sync zones');
     } finally {
       setSyncing(false);
@@ -193,7 +194,7 @@ const ZonesUnified: React.FC = () => {
       setDeleteDialogOpen(false);
       setZoneToDelete(null);
     } catch (err: any) {
-      console.error('Error deleting zone:', err);
+      logApiError('Error deleting zone:', err);
       setError(err.message || 'Failed to delete zone');
       setDeleteDialogOpen(false);
       setZoneToDelete(null);

@@ -47,6 +47,7 @@ import { visuallyHidden } from '../theme/a11y';
 import { initialsOf } from '../theme';
 import { useListState, optionValues } from '../hooks/useListState';
 import { useListSearchBox } from '../hooks/useListSearchBox';
+import { apiErrorMessage, logApiError } from '../utils/logApiError';
 
 const companyInitials = initialsOf;
 
@@ -103,7 +104,7 @@ const Companies: React.FC = () => {
       setCompanies(response.results || []);
       setTotalCount(response.count || 0);
     } catch (err: any) {
-      console.error('Companies error:', err);
+      logApiError('Companies error:', err);
       setError(`Failed to load companies: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
       setCompanies([]);
       setTotalCount(0);
@@ -187,9 +188,9 @@ const Companies: React.FC = () => {
       setDeleteDialogOpen(false);
       setCompanyToDelete(null);
     } catch (err: any) {
-      console.error('Delete company error:', err);
+      logApiError('Delete company error:', err);
       // A company with contracts, invoices or quotes is refused (409) with an explanation in `error`.
-      setError(`Failed to delete company: ${err.response?.data?.error || err.response?.data?.detail || err.message || 'Unknown error'}`);
+      setError(apiErrorMessage(err, 'Failed to delete company.'));
     } finally {
       setDeleteLoading(false);
     }

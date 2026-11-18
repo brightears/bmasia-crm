@@ -15,6 +15,7 @@ import {
 } from '@mui/material';
 import { Close, TextFields, Code } from '@mui/icons-material';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface EmailTemplatePreviewProps {
   open: boolean;
@@ -56,7 +57,7 @@ const EmailTemplatePreview: React.FC<EmailTemplatePreviewProps> = ({
         setViewMode('text');
       }
     } catch (err: any) {
-      console.error('Preview error:', err);
+      logApiError('Preview error:', err);
       setError(`Failed to load preview: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);

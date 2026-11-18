@@ -35,6 +35,7 @@ import {
 } from '@mui/icons-material';
 import api from '../services/api';
 import { APAgingReport, APAgingSummary, APVendorDetail, APExpenseDetail } from '../types';
+import { logApiError } from '../utils/logApiError';
 
 // Format currency
 const formatCurrency = (amount: number, currency: string = 'THB') => {
@@ -302,7 +303,7 @@ const AccountsPayable: React.FC = () => {
       );
       setReport(data);
     } catch (err: any) {
-      console.error('Error loading AP aging report:', err);
+      logApiError('Error loading AP aging report:', err);
       setError(err.message || 'Failed to load AP aging report');
     } finally {
       setLoading(false);

@@ -28,6 +28,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import ApiService from '../services/api';
 import AudienceSelector from '../components/AudienceSelector';
 import { EmailTemplate } from '../types';
+import { logApiError } from '../utils/logApiError';
 
 const steps = ['Campaign Basics', 'Email Content', 'Select Audience', 'Schedule', 'Review & Send'];
 
@@ -60,7 +61,7 @@ const CampaignCreate: React.FC = () => {
         const response = await ApiService.getEmailTemplates({ is_active: true });
         setTemplates(response.results || []);
       } catch (error) {
-        console.error('Failed to load templates:', error);
+        logApiError('Failed to load templates:', error);
       } finally {
         setTemplatesLoading(false);
       }

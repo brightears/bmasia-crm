@@ -38,6 +38,7 @@ import { KBArticle } from '../types';
 import ApiService from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import KBVotingButtons from '../components/KBVotingButtons';
+import { logApiError } from '../utils/logApiError';
 
 const KnowledgeBaseArticle: React.FC = () => {
   const navigate = useNavigate();
@@ -63,10 +64,10 @@ const KnowledgeBaseArticle: React.FC = () => {
         await ApiService.recordArticleView(id);
       } catch (err) {
         // Silent fail - view tracking is not critical
-        console.error('Failed to record view:', err);
+        logApiError('Failed to record view:', err);
       }
     } catch (err: any) {
-      console.error('Failed to load article:', err);
+      logApiError('Failed to load article:', err);
       setError(`Failed to load article: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);

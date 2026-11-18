@@ -47,6 +47,7 @@ import DOMPurify from 'dompurify';
 import { Ticket, User } from '../types';
 import ApiService from '../services/api';
 import { formatDistanceToNow, format } from 'date-fns';
+import { logApiError } from '../utils/logApiError';
 
 const TicketDetail: React.FC = () => {
   const navigate = useNavigate();
@@ -74,7 +75,7 @@ const TicketDetail: React.FC = () => {
       const data = await ApiService.getTicket(id);
       setTicket(data);
     } catch (err: any) {
-      console.error('Failed to load ticket:', err);
+      logApiError('Failed to load ticket:', err);
       setError(`Failed to load ticket: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
@@ -86,7 +87,7 @@ const TicketDetail: React.FC = () => {
       const response = await ApiService.getUsers();
       setUsers(response.results || []);
     } catch (err: any) {
-      console.error('Failed to load users:', err);
+      logApiError('Failed to load users:', err);
     }
   }, []);
 
@@ -104,7 +105,7 @@ const TicketDetail: React.FC = () => {
       await loadTicket();
       setSuccessMessage(`Status changed to ${formatStatusLabel(newStatus)}`);
     } catch (err: any) {
-      console.error('Failed to change status:', err);
+      logApiError('Failed to change status:', err);
       setError(`Failed to change status: ${err.response?.data?.detail || err.message}`);
     } finally {
       setStatusChanging(false);
@@ -120,7 +121,7 @@ const TicketDetail: React.FC = () => {
       await loadTicket();
       setSuccessMessage(userId ? 'Ticket assigned successfully' : 'Ticket unassigned');
     } catch (err: any) {
-      console.error('Failed to change assignment:', err);
+      logApiError('Failed to change assignment:', err);
       setError(`Failed to change assignment: ${err.response?.data?.detail || err.message}`);
     } finally {
       setAssignmentChanging(false);
@@ -141,7 +142,7 @@ const TicketDetail: React.FC = () => {
       setIsInternalNote(false);
       setSuccessMessage(isInternalNote ? 'Internal note added' : 'Comment added');
     } catch (err: any) {
-      console.error('Failed to add comment:', err);
+      logApiError('Failed to add comment:', err);
       setError(`Failed to add comment: ${err.response?.data?.detail || err.message}`);
     } finally {
       setCommentLoading(false);
@@ -159,7 +160,7 @@ const TicketDetail: React.FC = () => {
       await loadTicket();
       setSuccessMessage('File uploaded successfully');
     } catch (err: any) {
-      console.error('Failed to upload file:', err);
+      logApiError('Failed to upload file:', err);
       setError(`Failed to upload file: ${err.response?.data?.detail || err.message}`);
     } finally {
       setUploadingFile(false);
@@ -178,7 +179,7 @@ const TicketDetail: React.FC = () => {
       await ApiService.deleteTicket(ticket.id);
       navigate('/tickets');
     } catch (err: any) {
-      console.error('Failed to delete ticket:', err);
+      logApiError('Failed to delete ticket:', err);
       setError(`Failed to delete ticket: ${err.response?.data?.detail || err.message}`);
     } finally {
       setDeleteLoading(false);

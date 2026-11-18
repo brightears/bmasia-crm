@@ -52,6 +52,7 @@ import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 import { PageHeader, ProductChip } from '../components/ui';
 import { useListReturnPath } from '../hooks/listReturn';
 import { statusTone, status } from '../theme';
+import { logApiError } from '../utils/logApiError';
 
 const stageConfig = [
   { id: 'Contacted', label: 'Contacted', color: '#2196f3' },
@@ -96,7 +97,7 @@ const OpportunityDetail: React.FC = () => {
       await loadTabData(currentTab);
       setLoading(false);
     } catch (err: any) {
-      console.error('Error loading opportunity:', err);
+      logApiError('Error loading opportunity:', err);
       setError(err.response?.data?.detail || 'Failed to load opportunity');
       setLoading(false);
     }
@@ -129,7 +130,7 @@ const OpportunityDetail: React.FC = () => {
         setReplies(allReplies.filter((r: ProspectReply) => enrollmentIds.has(r.enrollment_id)));
       }
     } catch (err) {
-      console.error('Error loading tab data:', err);
+      logApiError('Error loading tab data:', err);
     }
   };
 

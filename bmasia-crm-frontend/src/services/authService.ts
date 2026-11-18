@@ -1,5 +1,6 @@
 import axios, { AxiosResponse } from 'axios';
 import { LoginCredentials, AuthResponse, RefreshTokenResponse, User, JWTPayload } from '../types';
+import { logApiError } from '../utils/logApiError';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://bmasia-crm.onrender.com';
 
@@ -267,7 +268,7 @@ class AuthService {
                       sessionStorage.getItem(this.USER_KEY);
       return userStr ? JSON.parse(userStr) : null;
     } catch (error) {
-      console.error('Error parsing stored user data:', error);
+      logApiError('Error parsing stored user data:', error);
       return null;
     }
   }
@@ -294,7 +295,7 @@ class AuthService {
       );
       return JSON.parse(jsonPayload);
     } catch (error) {
-      console.error('Error decoding token:', error);
+      logApiError('Error decoding token:', error);
       return null;
     }
   }
@@ -367,7 +368,7 @@ class AuthService {
           await this.refreshToken();
           this.scheduleTokenRefresh(); // Schedule next refresh
         } catch (error) {
-          console.error('Scheduled token refresh failed:', error);
+          logApiError('Scheduled token refresh failed:', error);
           if (isSessionRejected(error)) {
             this.clearAuthData();
             this.handleSessionExpired();
