@@ -328,7 +328,7 @@ def test_plain_values_are_escaped_once_and_wording_markup_is_left_intact():
     markup = '<b>Bold</b> F&B &amp; &#160; &nbsp; <br/> x<y and 1 < 2 <font size="9">z</font>'
     guarded = paragraph_markup(markup)
     assert guarded == (
-        '<b>Bold</b> F&amp;B &amp; &#160; &nbsp; <br/> x&lt;y and 1 &lt; 2 <font size="9">z</font>'
+        '<b>Bold</b> F&amp;B &amp; &#160; &nbsp; <br/> x&lt;y and 1 &lt; 2 z'
     )
     # Guarding is idempotent, so already-guarded or escaped text never doubles.
     assert paragraph_markup(guarded) == guarded

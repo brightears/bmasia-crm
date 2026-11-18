@@ -269,23 +269,50 @@ def paragraph_text(value):
     return '' if value is None else escape(str(value))
 
 
-# "&" that does not start a character or entity reference, and "<" that cannot
-# start a tag. Neither is valid markup; ReportLab misreads or rejects both.
+# "&" that does not start a character or entity reference. ReportLab misreads
+# it ("F&B" prints as "F&B;").
 _BARE_AMPERSAND = re.compile(r'&(?!#[0-9]+;|#[xX][0-9a-fA-F]+;|[A-Za-z][A-Za-z0-9]*;)')
-_STRAY_LESS_THAN = re.compile(r'<(?![A-Za-z/!?][^<>]*>)')
+_CHARACTER_REFERENCE = re.compile(r'&#(?:([0-9]+)|[xX]([0-9a-fA-F]+));')
+# The formatting tags contract text fields accept. An opening tag may carry
+# name="value" attributes (they are dropped); anything else, such as the prose
+# "A<B and C>D", is text.
+_TAG_ATTRIBUTES = r'''(?:\s+[A-Za-z_:][-\w:.]*\s*=\s*(?:"[^"<>]*"|'[^'<>]*'))*'''
+_FORMATTING_TAG = re.compile(
+    r'<(?:/(b|i|u|strong|em|super|sub)\s*|(b|i|u|strong|em|super|sub)' + _TAG_ATTRIBUTES + r'\s*)>'
+    r'|<br' + _TAG_ATTRIBUTES + r'\s*/?\s*>', re.I)
+# Pasted Word formatting; the document, not the paste, owns typography.
+_PASTED_FONT_TAG = re.compile(r'</?(?:font|span)\b[^<>]*>', re.I)
+
+
+def _character_reference(match):
+    code = int(match.group(1) or match.group(2), 10 if match.group(1) else 16)
+    if 0 < code <= 0x10FFFF and not 0xD800 <= code <= 0xDFFF:
+        return match.group(0)
+    return '&amp;' + match.group(0)[1:]
 
 
 def paragraph_markup(value):
     """Guard stored wording that is Paragraph markup by design.
 
     Template bodies, corporate clause text, custom_terms and the standard
-    agreement's custom preamble/payment/activation wording may carry <b>, <br/>
-    or entities. Keep every tag and entity; escape only a bare "&" or a stray
-    "<", which cannot be intended markup. Idempotent: already escaped or
-    guarded text is returned unchanged, so it can never double-escape.
+    agreement's custom preamble/payment/activation wording accept basic
+    formatting tags only: b, i, u, br, strong, em, super and sub, written
+    without attributes. Pasted font/span tags are dropped and their text kept.
+    Every other "<" and every bare "&" is escaped, so it prints as written;
+    entities keep working. Idempotent: guarded or escaped text is returned
+    unchanged, so it can never double-escape.
     """
     text = '' if value is None else str(value)
-    return _STRAY_LESS_THAN.sub('&lt;', _BARE_AMPERSAND.sub('&amp;', text))
+    text = _PASTED_FONT_TAG.sub('', text)
+    text = _CHARACTER_REFERENCE.sub(_character_reference, _BARE_AMPERSAND.sub('&amp;', text))
+    parts, position = [], 0
+    for match in _FORMATTING_TAG.finditer(text):
+        closing, opening = match.group(1), match.group(2)
+        tag = f'</{closing.lower()}>' if closing else f'<{opening.lower()}>' if opening else '<br/>'
+        parts += [text[position:match.start()].replace('<', '&lt;'), tag]
+        position = match.end()
+    parts.append(text[position:].replace('<', '&lt;'))
+    return ''.join(parts)
 
 
 def _markup(text):
