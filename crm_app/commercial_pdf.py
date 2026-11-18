@@ -23,10 +23,12 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
+from reportlab.rl_config import _FUZZ
 from reportlab.platypus import (
     BaseDocTemplate,
     CondPageBreak,
     Frame,
+    FrameBreak,
     KeepTogether,
     PageTemplate,
     Paragraph,
@@ -50,6 +52,13 @@ TOTALS_SIDE_PADDING = 26
 IDENTITY_CARD_GAP = 12
 PRODUCT_COLUMN_WIDTH = 78
 TOTALS_SECTION_GAP = 14
+
+# A block kept on one page by section_block() still splits by row when it does
+# not fit the space left, if at least this many data rows stay on the current
+# page and at least this many carry over. When too few would carry over, it
+# splits earlier if enough rows still stay. Otherwise it moves as one unit.
+MIN_ROWS_BEFORE_SPLIT = 3
+MIN_ROWS_AFTER_SPLIT = 2
 
 STANDARD_SERVICE_COPY = (
     "Managed music service with curated scheduling and remote onboarding"
@@ -752,6 +761,198 @@ def section_start(number, title, styles, minimum_following_height=72):
     ]
 
 
+def _measured_block_height(flowables, width):
+    """Return the height a flowable sequence needs in one frame, or ``None``.
+
+    Space before and after each flowable is counted, which slightly
+    over-estimates (a frame drops the space before a flowable at its top and
+    the space after the last one). ``None`` means the sequence contains its own
+    page-break logic and must not be treated as one block.
+    """
+    total = 0
+    for flowable in flowables:
+        if isinstance(flowable, (CondPageBreak, KeepTogether)):
+            return None
+        _, height = flowable.wrap(width, PAGE_HEIGHT)
+        total += height + flowable.getSpaceBefore() + flowable.getSpaceAfter()
+    return total
+
+
+def _height_of_first_rows(table, count):
+    """Height of a laid-out table's first ``count`` rows, as ReportLab adds it.
+
+    ReportLab's row split keeps a plain running total (``h = h + rh``) and
+    stops at the first row with ``h + rh > availHeight``. ``sum()`` must not be
+    used here: since Python 3.12 it compensates rounding, so with row heights
+    that are not whole points its total can be one unit in the last place
+    below ReportLab's, and offering it makes ReportLab drop the last row.
+    Offered exactly this total, the split takes these rows and no more, since
+    every further row has a positive height.
+    """
+    height = 0
+    for row_height in table._rowHeights[:count]:
+        height = height + row_height
+    return height
+
+
+class _ItemTable(Table):
+    """A table segment from ``item_table``.
+
+    It lays out and splits exactly like ``Table``. The one exception is a
+    split that ``_BlockBreak`` has asked to happen before a given row: the
+    first part is then offered only the height of the rows above that row, so
+    ReportLab's own row split ends there, and a frame break follows it, so
+    the space left below that part is not used by anything else.
+
+    This and the block-break code below read ReportLab internals (``_calc``,
+    ``_rowHeights``, ``_nrows``) as of the pinned ReportLab 4.0.7; the
+    pricing-block tests exercise them, so an upgrade that changes them fails
+    those tests rather than production.
+    """
+
+    _commercial_split_before = None
+
+    def split(self, availWidth, availHeight):
+        split_before = self._commercial_split_before
+        if split_before is None:
+            return super().split(availWidth, availHeight)
+        self._commercial_split_before = None
+        self._calc(availWidth, availHeight)
+        height = min(availHeight, _height_of_first_rows(self, split_before))
+        parts = super().split(availWidth, height)
+        if len(parts) < 2:
+            return parts
+        return [parts[0], FrameBreak(), *parts[1:]]
+
+
+def _item_rows_either_side(flowables, width, height):
+    """Count the item-table data rows that fit in ``height`` and the rest.
+
+    The flowables are laid out in order as a frame would. The first one that
+    does not fit is split the way the frame would split it; only tables from
+    ``item_table`` carry data rows, so any other flowable leaves no rows.
+    Returns ``(before, after, table, placed, offered)``: ``table`` is the item
+    table that crosses the page edge (or ``None``), ``placed`` the number of
+    its rows, header included, that fit on this page, and ``offered`` the
+    height it is given there.
+    """
+    remaining = height
+    before = after = 0
+    crossing = None
+    placed = 0
+    offered = 0
+    for flowable in flowables:
+        rows = getattr(flowable, "commercial_item_rows", ())
+        if crossing is not None:
+            after += len(rows)
+            continue
+        _, needed = flowable.wrap(width, remaining)
+        if needed <= remaining + _FUZZ:
+            remaining -= needed
+            before += len(rows)
+            continue
+        crossing = flowable
+        offered = remaining
+        parts = flowable.split(width, remaining) if rows and remaining > 0 else []
+        placed = parts[0]._nrows if parts else 0
+        stayed = sum(1 for row in rows if row < placed)
+        before += stayed
+        after += len(rows) - stayed
+    table = crossing if getattr(crossing, "commercial_item_rows", ()) else None
+    return before, after, table, placed, offered
+
+
+def _earlier_split_row(table, width, before, after, placed, offered):
+    """Where to split ``table`` so that ``MIN_ROWS_AFTER_SPLIT`` rows carry over.
+
+    Gives up just enough of the rows that would stay on this page, provided
+    at least ``MIN_ROWS_BEFORE_SPLIT`` still stay. A group heading is never
+    left as the last line on the page: the split moves up to just before it.
+    Returns the local row index to split before, or ``None`` when no such
+    split exists and the block should move whole.
+    """
+    data_rows = table.commercial_item_rows
+    staying = [row for row in data_rows if row < placed]
+    give_up = MIN_ROWS_AFTER_SPLIT - after
+    if give_up <= 0 or give_up > len(staying):
+        return None
+    split_before = staying[-give_up]
+    while split_before - 1 > 0 and split_before - 1 not in data_rows:
+        split_before -= 1
+    stayed = sum(1 for row in staying if row < split_before)
+    carried = len(staying) - stayed
+    if before - carried < MIN_ROWS_BEFORE_SPLIT or after + carried < MIN_ROWS_AFTER_SPLIT:
+        return None
+    # Confirm that ReportLab's own split, offered the rows above that point,
+    # ends exactly there.
+    table._calc(width, offered)
+    height = min(offered, _height_of_first_rows(table, split_before))
+    parts = table.split(width, height)
+    if len(parts) < 2 or parts[0]._nrows != split_before:
+        return None
+    return split_before
+
+
+class _BlockBreak(CondPageBreak):
+    """Conditional break in front of a block that fits one page.
+
+    The block stays where it is when the remaining space holds it. When it
+    does not, the item table's natural split decides:
+
+    * at least ``MIN_ROWS_BEFORE_SPLIT`` data rows stay on this page and at
+      least ``MIN_ROWS_AFTER_SPLIT`` carry over: the table splits by row with
+      its header repeated, exactly as after ``section_start``;
+    * fewer carry over, but enough rows stay to give some up: the table
+      splits that many rows earlier, so ``MIN_ROWS_AFTER_SPLIT`` carry over
+      and ``MIN_ROWS_BEFORE_SPLIT`` still stay;
+    * otherwise the whole block moves to the next page.
+
+    Nothing beyond ``minimum_following_height`` is reserved when it splits.
+    """
+
+    def __init__(self, height, flowables, minimum_following_height):
+        super().__init__(height)
+        self._flowables = flowables
+        self._minimum_following_height = minimum_following_height
+
+    def wrap(self, availWidth, availHeight):
+        if self._minimum_following_height <= availHeight < self.height:
+            before, after, table, placed, offered = _item_rows_either_side(
+                self._flowables, availWidth, availHeight,
+            )
+            if before >= MIN_ROWS_BEFORE_SPLIT and after >= MIN_ROWS_AFTER_SPLIT:
+                return 0, 0
+            if table is not None and 0 < after < MIN_ROWS_AFTER_SPLIT:
+                split_before = _earlier_split_row(
+                    table, availWidth, before, after, placed, offered,
+                )
+                if split_before is not None:
+                    table._commercial_split_before = split_before
+                    return 0, 0
+        return super().wrap(availWidth, availHeight)
+
+
+def section_block(number, title, body, styles, minimum_following_height=72):
+    """Start a section and keep it on one page unless it splits cleanly.
+
+    The heading plus ``body`` is measured. If it fits one continuation frame,
+    the block stays where it is when the remaining space holds it. When it
+    does not, it splits by row only if at least ``MIN_ROWS_BEFORE_SPLIT``
+    data rows stay on this page and ``MIN_ROWS_AFTER_SPLIT`` carry over,
+    splitting a row or more earlier than ReportLab would when that is what it
+    takes (see ``_BlockBreak``); otherwise it moves to the next page as one
+    unit. A block taller than a page behaves exactly like ``section_start``:
+    only ``minimum_following_height`` is reserved and the body splits as
+    before, so a long table is never moved wholesale.
+    """
+    flowables = [section_heading(number, title, styles), *body]
+    usable_height = PAGE_HEIGHT - CONTINUATION_PAGE_TOP - PAGE_BOTTOM
+    block_height = _measured_block_height(flowables, CONTENT_WIDTH)
+    if block_height is not None and block_height <= usable_height:
+        return [_BlockBreak(block_height, flowables, minimum_following_height), *flowables]
+    return [CondPageBreak(minimum_following_height), *flowables]
+
+
 def totals_panel(rows, styles, width=300):
     parsed = []
     for index, (label, value) in enumerate(rows):
@@ -897,7 +1098,7 @@ def item_table(
             local_totals_row = len(segment_data)
             segment_data.append(data[totals_row])
 
-        table = Table(
+        table = _ItemTable(
             segment_data,
             colWidths=widths,
             repeatRows=1,
@@ -953,6 +1154,13 @@ def item_table(
                         ("NOSPLIT", (0, local_totals_row - 1), (-1, local_totals_row))
                     )
         table.setStyle(TableStyle(commands))
+        # Local indexes of the data rows (not the header, group headings or
+        # totals), so section_block() can count rows on each side of a split.
+        table.commercial_item_rows = tuple(
+            local_index
+            for local_index, original_index in enumerate(row_indices, start=1)
+            if original_index not in group_rows
+        )
         return table
 
     def build_totals_segment():
