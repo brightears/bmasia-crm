@@ -23,6 +23,7 @@ from crm_app.views import email_tracking_pixel
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/v1/', include('agent_inbox.urls')),  # activities and change proposals
     path('api/', include('crm_app.urls')),  # API endpoints under /api/
     path('api-auth/', include('rest_framework.urls')),
     path(
