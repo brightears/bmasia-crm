@@ -1,4 +1,4 @@
-"""Change proposals: storing them, and a person's accept / reject decision.
+"""Change proposals: storing them, and a person's decision on them.
 
 Storing a proposal never changes the target record. Accepting one applies it
 through the guarded MCP write path (``crm_app.mcp.update_record`` with
@@ -6,10 +6,32 @@ through the guarded MCP write path (``crm_app.mcp.update_record`` with
 contact or task), run as the reviewer, inside one transaction with the
 proposal's own update. The AuditLog row that path writes is tagged with the
 proposal id. A refused or failed apply writes nothing to the target.
+
+Rules a reviewer of this module should know:
+
+- A reviewer is a person signed in to the website who did not make the
+  proposal and did not record its evidence (``policy.review_refusal``).
+- Every decision carries the ``seen_version`` the API returned with the
+  proposal. If the proposal changed since (for example its current values were
+  re-read after the record changed), the decision is refused with the fresh
+  snapshot and nothing is applied.
+- A contact created from a proposal gets every ``receives_*`` email flag off
+  and is never primary. A proposal may not change the email of a contact that
+  receives invoices or payment emails, is the billing contact or is primary.
+- A newer proposal replaces an older open one only when both come from the
+  same proposer and the newer one's evidence is not older. Proposals from
+  different proposers for the same fields stay open side by side and are
+  reported as conflicting.
+- An agent account may link only an activity it recorded itself. Any other
+  activity gets the same refusal, whatever the quote. Refused attempts count
+  towards the proposer's daily cap.
+- Only one open proposal per fingerprint. An agent may not raise a decided
+  fingerprint again; a person may, and a person may reopen a rejected one.
 """
 from __future__ import annotations
 
 import json
+import re
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
@@ -17,26 +39,39 @@ from django.utils import timezone
 
 from agent_inbox import policy
 from agent_inbox.models import (
-    APPLY_ERROR_MAX, DECISION_NOTE_MAX, EVIDENCE_QUOTE_MAX, FINGERPRINT_BLOCKING_STATUSES,
-    MODEL_NAME_MAX, PATCH_VALUE_MAX, PROPOSER_KIND_CHOICES, RATIONALE_MAX, SOURCE_REF_MAX,
-    SOURCE_SYSTEM_CHOICES, SOURCE_URL_MAX, Activity, ChangeProposal,
+    APPLY_ERROR_MAX, DECIDED_STATUSES, DECISION_NOTE_MAX, EVIDENCE_QUOTE_MAX, MODEL_NAME_MAX, OPEN_STATUS,
+    PATCH_VALUE_MAX, PROPOSER_KIND_CHOICES, RATIONALE_MAX, SOURCE_REF_MAX, SOURCE_SYSTEM_CHOICES,
+    SOURCE_URL_MAX, Activity, ChangeProposal, ProposalRefusal,
 )
 from agent_inbox.validation import (
-    ServiceError, bad, batch_field, choice, has_control, optional_uuid, payload_sha256,
-    quote_occurs_in, strict_object, text_field, token_field, unprocessable, url_field, uuid_value,
+    ServiceError, bad, batch_field, choice, has_control, optional_uuid, past_datetime, payload_sha256,
+    quote_occurs_in, source_ref_field, strict_object, text_field, unprocessable, url_field, uuid_value,
 )
 
 PROPOSAL_KEYS = frozenset({
     'kind', 'target_collection', 'target_id', 'company_id', 'patch',
     'evidence_quote', 'evidence_source_system', 'evidence_source_ref', 'evidence_source_url',
-    'activity_id', 'rationale', 'proposer_kind', 'model', 'prompt_version', 'confidence', 'batch_key',
+    'evidence_occurred_at', 'activity_id', 'rationale', 'proposer_kind', 'model', 'prompt_version',
+    'confidence', 'batch_key',
 })
 MULTILINE_FIELDS = frozenset({'notes', 'description'})
 BULK_REJECT_MAX = 200
+# Contact flags that make a contact a recipient of invoices, receipts or payment emails.
+BILLING_RECIPIENT_FLAGS = ('receives_invoice_emails', 'receives_payment_emails')
+PERSON_ONLY_EMAIL_DETAIL = (
+    'This contact receives invoices or payment emails, or is the billing or primary contact. '
+    'A change to its email must be made by a person on the contact page.'
+)
 RECORD_CHANGED_DETAIL = (
     'The record changed after this proposal was made. Nothing was applied; the current values '
     'were re-read. Review them and accept again if the change is still right.'
 )
+STALE_VIEW_DETAIL = (
+    'This proposal changed since it was loaded. Nothing was done; reload it and decide again.'
+)
+ACTIVITY_NOT_USABLE_DETAIL = 'activity_id must be a live activity of this company that you recorded yourself'
+# Refusals recorded so they count towards the daily cap.
+COUNTED_REFUSAL_STATUSES = frozenset({400, 403, 404, 409, 422})
 
 
 def _not_enabled():
@@ -70,12 +105,49 @@ def _same_version(left, right):
     return a is not None and a == b
 
 
+def _iso(value):
+    return value.isoformat() if value else None
+
+
 def expire_due():
     """Mark open proposals past their expiry as expired. Returns the number changed."""
     now = timezone.now()
-    return ChangeProposal.objects.filter(status='proposed', expires_at__lte=now).update(
+    return ChangeProposal.objects.filter(status=OPEN_STATUS, expires_at__lte=now).update(
         status='expired', updated_at=now,
     )
+
+
+# ------------------------------------------------------------------ what the reviewer saw
+
+
+def seen_version(proposal):
+    """Digest of everything a decision is about. Changes whenever any of it changes."""
+    return payload_sha256({
+        'id': str(proposal.pk), 'status': proposal.status, 'kind': proposal.kind,
+        'target': [proposal.target_collection, proposal.target_id], 'patch': proposal.patch,
+        'current_values': proposal.current_values, 'expected_version': proposal.expected_version,
+        'target_changed_at': _iso(proposal.target_changed_at),
+    })[:40]
+
+
+def snapshot(proposal):
+    return {
+        'id': str(proposal.pk), 'seen_version': seen_version(proposal), 'status': proposal.status,
+        'patch': proposal.patch, 'current_values': proposal.current_values,
+        'expected_version': proposal.expected_version, 'target_changed_at': _iso(proposal.target_changed_at),
+    }
+
+
+def _check_seen(proposal, body):
+    if body.get('seen_version') != seen_version(proposal):
+        raise ServiceError(409, 'stale_view', STALE_VIEW_DETAIL, proposal=_plain(snapshot(proposal)))
+
+
+def _history(proposal, action, request, note):
+    proposal.history = [*(proposal.history or []), {
+        'action': action, 'by': str(request.user.username)[:150], 'at': timezone.now().isoformat(),
+        'note': note,
+    }]
 
 
 # ------------------------------------------------------------------ the patch
@@ -90,7 +162,7 @@ def _clean_value(key, value):
     if len(value) > PATCH_VALUE_MAX:
         raise bad(f'patch.{key} must be at most {PATCH_VALUE_MAX} characters')
     if has_control(value, allow_newlines=key in MULTILINE_FIELDS):
-        raise bad(f'patch.{key} contains control characters')
+        raise bad(f'patch.{key} contains control or invisible characters')
     return value
 
 
@@ -132,7 +204,7 @@ def _serializer_check(serializer):
                             errors=_plain(serializer.errors))
 
 
-def _check_task_relations(company, patch):
+def _check_task_relations(company_id, patch):
     from crm_app.models import Contact, Contract, Opportunity
 
     for key, model in (('related_contact', Contact), ('related_contract', Contract),
@@ -142,20 +214,49 @@ def _check_task_relations(company, patch):
             continue
         pk = uuid_value(value, f'patch.{key}')
         obj = model.objects.filter(pk=pk).only('pk', 'company_id').first()
-        if obj is None or obj.company_id != company.pk:
+        if obj is None or obj.company_id != company_id:
             raise unprocessable('wrong_company', f'patch.{key} is not a record of this company')
 
 
+def _check_billing_email(contact, keys):
+    """Refuse an email change on a contact that receives billing documents."""
+    if 'email' not in keys:
+        return
+    if (any(getattr(contact, flag, False) for flag in BILLING_RECIPIENT_FLAGS)
+            or contact.is_primary or contact.contact_type == 'Billing'):
+        raise unprocessable('person_only_change', PERSON_ONLY_EMAIL_DETAIL)
+
+
+_PHONE_PUNCTUATION = re.compile(r'[\s().\-/]')
+
+
+def _fingerprint_value(key, value):
+    """The value as compared for duplicates: spacing, and case where it carries no meaning, ignored."""
+    if not isinstance(value, str):
+        return value
+    text = ' '.join(value.split())
+    if key == 'email':
+        return text.casefold()
+    if key in ('phone', 'mobile'):
+        return _PHONE_PUNCTUATION.sub('', text)
+    if key in ('website', 'linkedin_url'):
+        scheme, sep, rest = text.partition('://')
+        host, slash, path = rest.partition('/')
+        return (f'{scheme.casefold()}{sep}{host.casefold()}{slash}{path}' if sep else text.casefold()).rstrip('/')
+    return text
+
+
 def _fingerprint(kind, collection, target_id, company_id, patch):
+    patch = {key: _fingerprint_value(key, value) for key, value in patch.items()}
     if kind == 'new_contact':
-        basis = {'kind': kind, 'company': str(company_id), 'email': (patch.get('email') or '').lower()}
+        basis = {'kind': kind, 'company': str(company_id), 'email': patch.get('email') or ''}
     elif kind == 'note':
         basis = {'kind': kind, 'collection': collection, 'target': target_id, 'text': patch['notes']}
     elif kind == 'task':
         basis = {'kind': kind, 'company': str(company_id), 'patch': patch}
     else:
         basis = {'kind': kind, 'collection': collection, 'target': target_id, 'patch': patch}
-    return payload_sha256({'v': 1, **basis})
+    return payload_sha256({'v': 2, **basis})
 
 
 # ------------------------------------------------------------------ create
@@ -191,50 +292,86 @@ def _resolve_target(body, kind):
     return collection, str(target_uuid), instance, company
 
 
-def _evidence(body, proposer_kind, company):
-    quote = text_field(body, 'evidence_quote', EVIDENCE_QUOTE_MAX, multiline=True)
+def _linked_activity(body, user, company):
+    activity_id = optional_uuid(body, 'activity_id')
+    if not activity_id:
+        return None
+    activity = Activity.objects.select_related('recorded_by').filter(pk=activity_id).first()
+    if policy.is_agent_account(user):
+        # One answer for every activity an agent cannot use, so nothing about
+        # other recorders' activities can be learned from the reply.
+        if (activity is None or activity.is_void or activity.company_id != company.pk
+                or not policy.can_read_activity_body(user, activity)):
+            raise unprocessable('activity_not_usable', ACTIVITY_NOT_USABLE_DETAIL)
+        return activity
+    if activity is None:
+        raise unprocessable('unknown_record', 'activity_id does not exist')
+    if activity.is_void:
+        raise unprocessable('activity_void', 'activity_id refers to a voided activity')
+    if activity.company_id != company.pk:
+        raise unprocessable('wrong_company', 'activity_id belongs to another company')
+    return activity
+
+
+def _evidence(body, user, proposer_kind, company):
+    quote = text_field(body, 'evidence_quote', EVIDENCE_QUOTE_MAX, multiline=True, allow_format=True)
     if proposer_kind in policy.EVIDENCE_REQUIRED_KINDS and not quote:
         raise unprocessable(
             'evidence_required',
             'evidence_quote is required: copy the exact words from the source that support the change',
         )
-    activity = None
-    activity_id = optional_uuid(body, 'activity_id')
-    if activity_id:
-        activity = Activity.objects.filter(pk=activity_id).first()
-        if activity is None:
-            raise unprocessable('unknown_record', 'activity_id does not exist')
-        if activity.is_void:
-            raise unprocessable('activity_void', 'activity_id refers to a voided activity')
-        if activity.company_id != company.pk:
-            raise unprocessable('wrong_company', 'activity_id belongs to another company')
-    verified = False
-    if activity is not None and activity.body:
-        if quote and not quote_occurs_in(quote, activity.body):
-            raise unprocessable(
-                'quote_not_verbatim',
-                'evidence_quote does not occur verbatim in the referenced activity body',
-            )
-        verified = bool(quote)
-    system = body.get('evidence_source_system') or (activity.source_system if activity else '')
+    activity = _linked_activity(body, user, company)
     systems = [value for value, _ in SOURCE_SYSTEM_CHOICES]
-    if system not in [''] + systems:
-        raise bad('evidence_source_system must be one of: ' + ', '.join(systems))
-    values = {
+    if activity is not None:
+        # The evidence source is the activity's; a different one is refused.
+        given = {
+            'evidence_source_system': (body.get('evidence_source_system'), activity.source_system),
+            'evidence_source_ref': (
+                source_ref_field(body, 'evidence_source_ref', activity.source_system, SOURCE_REF_MAX),
+                activity.source_ref,
+            ),
+            'evidence_source_url': (body.get('evidence_source_url'), activity.source_url),
+        }
+        for key, (value, actual) in given.items():
+            if value not in (None, '') and value != actual:
+                raise unprocessable('evidence_source_mismatch', f'{key} must match the linked activity')
+        if body.get('evidence_occurred_at') not in (None, ''):
+            stated = past_datetime(body['evidence_occurred_at'], 'evidence_occurred_at')
+            if stated != activity.occurred_at:
+                raise unprocessable('evidence_source_mismatch', 'evidence_occurred_at must match the linked activity')
+        system, ref, url = activity.source_system, activity.source_ref, activity.source_url
+        occurred_at = activity.occurred_at
+    else:
+        system = body.get('evidence_source_system') or ''
+        if system not in [''] + systems:
+            raise bad('evidence_source_system must be one of: ' + ', '.join(systems))
+        ref = source_ref_field(body, 'evidence_source_ref', system, SOURCE_REF_MAX)
+        url = url_field(body, 'evidence_source_url', SOURCE_URL_MAX)
+        occurred_at = (past_datetime(body['evidence_occurred_at'], 'evidence_occurred_at')
+                       if body.get('evidence_occurred_at') not in (None, '') else None)
+    verified = False
+    if activity is not None and activity.body and quote:
+        if not quote_occurs_in(quote, activity.body):
+            raise unprocessable(
+                'quote_not_verbatim', 'evidence_quote does not occur verbatim in the referenced activity body',
+            )
+        verified = True
+    return {
         'evidence_quote': quote,
         'evidence_verified': verified,
         'evidence_source_system': system,
-        'evidence_source_ref': token_field(body, 'evidence_source_ref', SOURCE_REF_MAX)
-        or (activity.source_ref if activity else ''),
-        'evidence_source_url': url_field(body, 'evidence_source_url', SOURCE_URL_MAX)
-        or (activity.source_url if activity else ''),
+        'evidence_source_ref': ref,
+        'evidence_source_url': url,
+        'evidence_occurred_at': occurred_at,
+        'evidence_recorder_is_agent': bool(
+            activity is not None and activity.recorded_by is not None
+            and policy.is_agent_account(activity.recorded_by)
+        ),
         'activity': activity,
     }
-    return values
 
 
-def _proposer_kind(body, user):
-    is_agent = policy.is_agent_account(user)
+def _proposer_kind(body, is_agent):
     kind = body.get('proposer_kind') or ('agent' if is_agent else 'human')
     choice({'proposer_kind': kind}, 'proposer_kind', PROPOSER_KIND_CHOICES)
     if is_agent and kind not in policy.AGENT_PROPOSER_KINDS:
@@ -251,21 +388,34 @@ def _confidence(body):
     return float(value)
 
 
-def _existing_outcome(fingerprint, user):
-    existing = ChangeProposal.objects.filter(
-        fingerprint=fingerprint, status__in=FINGERPRINT_BLOCKING_STATUSES,
-    ).first()
-    if existing is None:
+def _existing_outcome(fingerprint, user, is_agent):
+    """The caller's own open proposal (a replay), or None; raises for a duplicate."""
+    open_row = ChangeProposal.objects.filter(fingerprint=fingerprint, status=OPEN_STATUS).first()
+    if open_row is not None:
+        if open_row.proposer_id == user.pk:
+            return open_row
+        extra = {} if is_agent else {'existing_proposal_id': str(open_row.pk)}
+        raise ServiceError(409, 'duplicate_open', 'The same change is already waiting for review', **extra)
+    if not is_agent:
+        return None  # a person may raise a decided change again
+    decided = (ChangeProposal.objects.filter(fingerprint=fingerprint, status__in=DECIDED_STATUSES)
+               .order_by('-updated_at').first())
+    if decided is None:
         return None
-    if existing.status == 'proposed' and existing.proposer_id == getattr(user, 'pk', None):
-        return existing
-    code, detail = {
-        'proposed': ('duplicate_open', 'The same change is already waiting for review'),
-        'rejected': ('previously_rejected', 'The same change was rejected before and is not raised again'),
-        'accepted': ('already_applied', 'The same change was already accepted'),
-        'edited': ('already_applied', 'The same change was already accepted'),
-    }[existing.status]
-    raise ServiceError(409, code, detail, existing_proposal_id=str(existing.pk), existing_status=existing.status)
+    if decided.status == 'rejected':
+        raise ServiceError(409, 'previously_rejected',
+                           'The same change was rejected before and is not raised again by an agent')
+    raise ServiceError(409, 'already_applied', 'The same change was already accepted')
+
+
+def _check_cap(user):
+    since = timezone.now() - timedelta(hours=24)
+    cap = policy.proposal_daily_cap()
+    used = (ChangeProposal.objects.filter(proposer=user, created_at__gte=since).count()
+            + ProposalRefusal.objects.filter(proposer=user, created_at__gte=since).count())
+    if used >= cap:
+        raise ServiceError(429, 'daily_cap', f'Daily proposal cap of {cap} reached for this proposer '
+                                            '(refused attempts count too)')
 
 
 def create_proposal(user, body, *, via):
@@ -274,6 +424,16 @@ def create_proposal(user, body, *, via):
         raise _not_enabled()
     if user is None or not getattr(user, 'is_authenticated', False):
         raise ServiceError(401, 'not_authenticated', 'Authentication required')
+    _check_cap(user)
+    try:
+        return _create(user, body, via)
+    except ServiceError as exc:
+        if exc.status in COUNTED_REFUSAL_STATUSES:
+            ProposalRefusal.objects.create(proposer=user, code=str(exc.code)[:40])
+        raise
+
+
+def _create(user, body, via):
     strict_object(body, PROPOSAL_KEYS, required=('kind', 'patch'))
     expire_due()
     kind = body.get('kind')
@@ -282,10 +442,13 @@ def create_proposal(user, body, *, via):
             'kind_not_allowed',
             f'kind must be one of: {", ".join(sorted(policy.APPLICABLE_KINDS))} (link and other are not enabled)',
         )
-    proposer_kind = _proposer_kind(body, user)
+    is_agent = policy.is_agent_account(user)
+    proposer_kind = _proposer_kind(body, is_agent)
     collection, target_id, instance, company = _resolve_target(body, kind)
     patch = _clean_patch(kind, collection, body.get('patch'))
-    evidence = _evidence(body, proposer_kind, company)
+    # Evidence comes before any comparison with the record, so a refusal about
+    # the evidence never depends on the record's values.
+    evidence = _evidence(body, user, proposer_kind, company)
     rationale = text_field(body, 'rationale', RATIONALE_MAX, multiline=True)
     model_name = text_field(body, 'model', MODEL_NAME_MAX)
     prompt_version = text_field(body, 'prompt_version', MODEL_NAME_MAX)
@@ -295,6 +458,8 @@ def create_proposal(user, body, *, via):
     _, serializer_class = _collection(collection)
     current_values, expected_version = {}, ''
     if instance is not None:
+        if collection == 'contact':
+            _check_billing_email(instance, patch)
         current = _plain(serializer_class(instance).data)
         current_values = {key: current.get(key) for key in patch}
         expected_version = str(current.get('updated_at') or '')
@@ -307,18 +472,13 @@ def create_proposal(user, body, *, via):
             _serializer_check(serializer_class(instance, data={'notes': joined}, partial=True))
     else:
         if kind == 'task':
-            _check_task_relations(company, patch)
+            _check_task_relations(company.pk, patch)
         _serializer_check(serializer_class(data={'company': str(company.pk), **patch}))
 
     fingerprint = _fingerprint(kind, collection, target_id, company.pk, patch)
-    replayed = _existing_outcome(fingerprint, user)
+    replayed = _existing_outcome(fingerprint, user, is_agent)
     if replayed is not None:
         return replayed, True
-
-    since = timezone.now() - timedelta(hours=24)
-    cap = policy.proposal_daily_cap()
-    if ChangeProposal.objects.filter(proposer=user, created_at__gte=since).count() >= cap:
-        raise ServiceError(429, 'daily_cap', f'Daily proposal cap of {cap} reached for this proposer')
 
     try:
         with transaction.atomic():
@@ -346,25 +506,55 @@ def create_proposal(user, body, *, via):
             if kind == 'field_update':
                 _supersede_older(proposal)
     except IntegrityError:
-        replayed = _existing_outcome(fingerprint, user)
+        replayed = _existing_outcome(fingerprint, user, is_agent)
         if replayed is not None:
             return replayed, True
         raise
     return proposal, False
 
 
+def _not_older(new, old):
+    """Whether evidence dated ``new`` may replace evidence dated ``old`` (unknown never replaces known)."""
+    if new is None and old is None:
+        return True
+    if new is None or old is None:
+        return False
+    return new >= old
+
+
 def _supersede_older(proposal):
-    """An open field update for exactly the same fields of the same record is replaced."""
+    """The proposer's own open field update for exactly the same fields is replaced, unless its evidence is newer."""
     keys = set(proposal.patch)
     older = ChangeProposal.objects.select_for_update().filter(
-        status='proposed', kind='field_update', target_collection=proposal.target_collection,
-        target_id=proposal.target_id,
+        status=OPEN_STATUS, kind='field_update', target_collection=proposal.target_collection,
+        target_id=proposal.target_id, proposer=proposal.proposer,
     ).exclude(pk=proposal.pk)
     for row in older:
-        if set(row.patch or {}) == keys:
+        if set(row.patch or {}) == keys and _not_older(proposal.evidence_occurred_at, row.evidence_occurred_at):
             row.status = 'superseded'
             row.superseded_by = proposal
             row.save(update_fields=['status', 'superseded_by', 'updated_at'])
+
+
+def conflicts_for(proposals):
+    """For each open field update: the other open field updates of the same record that share a field."""
+    rows = [p for p in proposals if p.status == OPEN_STATUS and p.kind == 'field_update' and p.target_id]
+    if not rows:
+        return {}
+    targets = {(p.target_collection, p.target_id) for p in rows}
+    candidates = ChangeProposal.objects.filter(
+        status=OPEN_STATUS, kind='field_update', target_id__in={t[1] for t in targets},
+    ).only('id', 'target_collection', 'target_id', 'patch', 'proposer_id', 'proposer_username',
+           'evidence_occurred_at', 'created_at')
+    result = {}
+    for p in rows:
+        keys = set(p.patch or {})
+        result[p.pk] = [
+            other for other in candidates
+            if other.pk != p.pk and (other.target_collection, other.target_id) == (p.target_collection, p.target_id)
+            and keys & set(other.patch or {})
+        ]
+    return result
 
 
 # ------------------------------------------------------------------ decisions
@@ -378,12 +568,21 @@ class _Refusal(Exception):
         self.error = error
 
 
-def _require_reviewer(request):
+def _require_person(request, proposal=None):
     if not policy.proposals_enabled():
         raise _not_enabled()
-    refusal = policy.review_refusal(request)
+    refusal = policy.review_refusal(request, proposal)
     if refusal:
-        raise ServiceError(403, 'human_review_required', refusal)
+        code = 'reviewer_is_party' if proposal is not None and policy.review_refusal(request) is None \
+            else 'human_review_required'
+        raise ServiceError(403, code, refusal)
+
+
+def _locked(proposal_id):
+    proposal = ChangeProposal.objects.select_for_update().filter(pk=proposal_id).first()
+    if proposal is None:
+        raise ServiceError(404, 'not_found', 'Proposal not found')
+    return proposal
 
 
 def _as_reviewer(request, call):
@@ -464,6 +663,7 @@ def _tag_audit(model_name, record_id, before_ids, proposal, request):
     row = rows[0]
     row.additional_data = {
         **(row.additional_data or {}),
+        'via': 'change_proposal',
         'change_proposal_id': str(proposal.pk),
         'change_proposal_kind': proposal.kind,
         'change_proposal_proposer': proposal.proposer_username,
@@ -484,16 +684,28 @@ def _record_changed(proposal, serializer_class, current):
         proposal.status = 'superseded'
         proposal.last_apply_error = 'The record already has the proposed values.'
     proposal.save()
-    return ServiceError(
-        409, 'record_changed', RECORD_CHANGED_DETAIL, status=proposal.status,
-        current_values=proposal.current_values, expected_version=proposal.expected_version,
-    )
+    return ServiceError(409, 'record_changed', RECORD_CHANGED_DETAIL, proposal=_plain(snapshot(proposal)))
+
+
+def _keep_error(proposal, error):
+    proposal.last_apply_error = str(error.detail)[:APPLY_ERROR_MAX]
+    proposal.save()
+    return _Refusal(error)
+
+
+def _new_contact_data(company_id, applied):
+    """A contact created from a proposal receives no automated or document email and is not primary."""
+    from crm_app.serializers import ContactSerializer
+
+    flags = {name: False for name, field in ContactSerializer().fields.items()
+             if name.startswith('receives_') and not field.read_only}
+    return {'company': str(company_id), **applied, **flags, 'is_primary': False}
 
 
 def _apply(request, proposal, applied):
     """Apply ``applied`` to the target as the reviewer. Returns the write tool's data or raises _Refusal."""
     from crm_app.mcp import create_record, update_record
-    from crm_app.models import AuditLog
+    from crm_app.models import AuditLog, Contact
 
     model, serializer_class = _collection(proposal.target_collection)
     if proposal.kind in policy.UPDATE_KINDS:
@@ -510,6 +722,11 @@ def _apply(request, proposal, applied):
         )
         if changed:
             raise _Refusal(_record_changed(proposal, serializer_class, current))
+        if proposal.target_collection == 'contact':
+            try:
+                _check_billing_email(instance, applied)
+            except ServiceError as error:
+                raise _keep_error(proposal, error) from None
         if proposal.kind == 'note':
             data = {'notes': _join_notes(proposal.current_values.get('notes'), applied['notes'])}
         else:
@@ -523,8 +740,16 @@ def _apply(request, proposal, applied):
             expected_version=proposal.expected_version, expected_values=json.dumps(expected),
         ))
     else:
+        if proposal.kind == 'task':
+            try:
+                _check_task_relations(proposal.company_id, applied)
+            except ServiceError as error:
+                raise _keep_error(proposal, error) from None
         before = set()
-        data = {'company': str(proposal.company_id), **applied}
+        if proposal.kind == 'new_contact':
+            data = _new_contact_data(proposal.company_id, applied)
+        else:
+            data = {'company': str(proposal.company_id), **applied}
         reply = _as_reviewer(request, lambda: create_record(proposal.target_collection, json.dumps(data)))
         record_id = None
 
@@ -533,9 +758,7 @@ def _apply(request, proposal, applied):
         instance = model.objects.get(pk=proposal.target_id)
         raise _Refusal(_record_changed(proposal, serializer_class, _plain(serializer_class(instance).data)))
     if outcome == 'invalid':
-        proposal.last_apply_error = json.dumps(detail, default=str)[:APPLY_ERROR_MAX]
-        proposal.save()
-        raise _Refusal(unprocessable(
+        raise _keep_error(proposal, unprocessable(
             'invalid_value', 'The record refused the values; edit or reject the proposal', errors=_plain(detail),
         ))
     if outcome == 'error':
@@ -544,23 +767,27 @@ def _apply(request, proposal, applied):
         proposal.save()
         raise _Refusal(unprocessable('apply_refused', proposal.last_apply_error))
     record_id = record_id or str(detail['id'])
+    if proposal.kind == 'new_contact':
+        # Model fields the serializer does not expose follow the same rule.
+        flags = {field.name: False for field in Contact._meta.concrete_fields if field.name.startswith('receives_')}
+        Contact.objects.filter(pk=record_id).update(**flags, is_primary=False)
     audit = _tag_audit(model.__name__, record_id, before, proposal, request)
     return record_id, audit, detail
 
 
 def accept(request, proposal_id, body, *, with_edits=False):
     """Accept a proposal (optionally with edits) and apply it. Returns (proposal, tool_reply)."""
-    _require_reviewer(request)
-    allowed = {'note', 'edits', 'drop_fields'} if with_edits else {'note'}
-    strict_object(body, allowed)
+    _require_person(request)
+    allowed = {'note', 'seen_version', 'edits', 'drop_fields'} if with_edits else {'note', 'seen_version'}
+    strict_object(body, allowed, required=('seen_version',))
     note = text_field(body, 'note', DECISION_NOTE_MAX, multiline=True)
     refused = None
     with transaction.atomic():
-        proposal = ChangeProposal.objects.select_for_update().filter(pk=proposal_id).first()
-        if proposal is None:
-            raise ServiceError(404, 'not_found', 'Proposal not found')
-        if proposal.status != 'proposed':
+        proposal = _locked(proposal_id)
+        if proposal.status != OPEN_STATUS:
             raise ServiceError(409, 'not_open', f'Proposal is {proposal.status}', status=proposal.status)
+        _require_person(request, proposal)
+        _check_seen(proposal, body)
         try:
             if proposal.expires_at <= timezone.now():
                 proposal.status = 'expired'
@@ -581,6 +808,7 @@ def accept(request, proposal_id, body, *, with_edits=False):
             proposal.applied_audit_id = audit.pk
             proposal.last_apply_error = ''
             _mark_decided(proposal, request, note)
+            _history(proposal, proposal.status, request, note)
             proposal.save()
     if refused is not None:
         raise refused
@@ -588,48 +816,81 @@ def accept(request, proposal_id, body, *, with_edits=False):
 
 
 def reject(request, proposal_id, body):
-    _require_reviewer(request)
-    strict_object(body, {'reason'}, required=('reason',))
+    _require_person(request)
+    strict_object(body, {'reason', 'seen_version'}, required=('reason', 'seen_version'))
     reason = text_field(body, 'reason', DECISION_NOTE_MAX, required=True, multiline=True)
     with transaction.atomic():
-        proposal = ChangeProposal.objects.select_for_update().filter(pk=proposal_id).first()
-        if proposal is None:
-            raise ServiceError(404, 'not_found', 'Proposal not found')
-        if proposal.status != 'proposed':
+        proposal = _locked(proposal_id)
+        if proposal.status != OPEN_STATUS:
             raise ServiceError(409, 'not_open', f'Proposal is {proposal.status}', status=proposal.status)
+        _require_person(request, proposal)
+        _check_seen(proposal, body)
         proposal.status = 'rejected'
         _mark_decided(proposal, request, reason)
+        _history(proposal, 'rejected', request, reason)
+        proposal.save()
+    return proposal
+
+
+def reopen(request, proposal_id, body):
+    """A person reopens a rejected proposal, with a note."""
+    _require_person(request)
+    strict_object(body, {'note', 'seen_version'}, required=('note', 'seen_version'))
+    note = text_field(body, 'note', DECISION_NOTE_MAX, required=True, multiline=True)
+    with transaction.atomic():
+        proposal = _locked(proposal_id)
+        if proposal.status != 'rejected':
+            raise ServiceError(409, 'not_rejected', f'Only a rejected proposal can be reopened; this one is '
+                                                    f'{proposal.status}', status=proposal.status)
+        _require_person(request, proposal)
+        _check_seen(proposal, body)
+        if ChangeProposal.objects.filter(fingerprint=proposal.fingerprint, status=OPEN_STATUS).exists():
+            raise ServiceError(409, 'duplicate_open', 'The same change is already waiting for review')
+        _history(proposal, 'reopened', request, note)
+        proposal.status = OPEN_STATUS
+        proposal.reviewer = None
+        proposal.reviewer_username = ''
+        proposal.reviewed_at = None
+        proposal.decision_note = ''
+        proposal.expires_at = timezone.now() + timedelta(days=policy.proposal_expiry_days())
         proposal.save()
     return proposal
 
 
 def bulk_reject(request, body):
-    """Reject open proposals by id list or batch_key. Others are reported, not changed."""
-    _require_reviewer(request)
-    strict_object(body, {'ids', 'batch_key', 'reason'}, required=('reason',))
+    """Reject open proposals, each named with the seen_version the reviewer saw."""
+    _require_person(request)
+    strict_object(body, {'items', 'reason'}, required=('items', 'reason'))
     reason = text_field(body, 'reason', DECISION_NOTE_MAX, required=True, multiline=True)
-    ids, batch_key = body.get('ids'), batch_field(body)
-    if bool(ids) == bool(batch_key):
-        raise bad('Give either ids or batch_key')
-    if ids is not None:
-        if not isinstance(ids, list) or len(ids) > BULK_REJECT_MAX:
-            raise bad(f'ids must be a list of at most {BULK_REJECT_MAX} proposal ids')
-        ids = [uuid_value(value, 'ids[]') for value in ids]
+    items = body.get('items')
+    if not isinstance(items, list) or not 1 <= len(items) <= BULK_REJECT_MAX:
+        raise bad(f'items must be a list of 1-{BULK_REJECT_MAX} {{id, seen_version}} objects')
+    wanted = {}
+    for item in items:
+        if not isinstance(item, dict) or set(item) != {'id', 'seen_version'}:
+            raise bad('each item must be {id, seen_version}')
+        wanted[str(uuid_value(item['id'], 'items[].id'))] = item['seen_version']
+    rejected, skipped = [], []
     with transaction.atomic():
-        rows = ChangeProposal.objects.select_for_update()
-        rows = list(rows.filter(pk__in=ids) if ids is not None else rows.filter(batch_key=batch_key))
-        if len(rows) > BULK_REJECT_MAX:
-            raise bad(f'More than {BULK_REJECT_MAX} proposals match; narrow the selection')
-        rejected, skipped = [], []
-        for proposal in rows:
-            if proposal.status != 'proposed':
-                skipped.append({'id': str(proposal.pk), 'status': proposal.status})
+        rows = {str(row.pk): row for row in ChangeProposal.objects.select_for_update().filter(pk__in=list(wanted))}
+        for proposal_id, seen in wanted.items():
+            proposal = rows.get(proposal_id)
+            if proposal is None:
+                continue
+            if proposal.status != OPEN_STATUS:
+                skipped.append({'id': proposal_id, 'status': proposal.status, 'code': 'not_open'})
+                continue
+            if policy.review_refusal(request, proposal):
+                skipped.append({'id': proposal_id, 'status': proposal.status, 'code': 'reviewer_is_party'})
+                continue
+            if seen != seen_version(proposal):
+                skipped.append({'id': proposal_id, 'status': proposal.status, 'code': 'stale_view',
+                                'seen_version': seen_version(proposal)})
                 continue
             proposal.status = 'rejected'
             _mark_decided(proposal, request, reason)
+            _history(proposal, 'rejected', request, reason)
             proposal.save()
-            rejected.append(str(proposal.pk))
-    found = {str(row.pk) for row in rows}
-    not_found = sorted(str(value) for value in (ids or []) if str(value) not in found)
+            rejected.append(proposal_id)
+    not_found = sorted(proposal_id for proposal_id in wanted if proposal_id not in rows)
     return {'rejected': rejected, 'skipped': skipped, 'not_found': not_found}
-

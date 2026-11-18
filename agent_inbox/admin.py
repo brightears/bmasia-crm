@@ -1,7 +1,7 @@
 """Read-only admin views. Decisions are made through the API, never in the admin."""
 from django.contrib import admin
 
-from agent_inbox.models import Activity, ChangeProposal
+from agent_inbox.models import Activity, ChangeProposal, ProposalRefusal
 
 
 class _ReadOnlyAdmin(admin.ModelAdmin):
@@ -13,6 +13,9 @@ class _ReadOnlyAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+    def get_actions(self, request):
+        return {}
 
     def get_readonly_fields(self, request, obj=None):
         return [field.name for field in self.model._meta.fields]
@@ -35,3 +38,9 @@ class ChangeProposalAdmin(_ReadOnlyAdmin):
     search_fields = ('company__name', 'proposer_username', 'batch_key', 'fingerprint', 'target_id')
     date_hierarchy = 'created_at'
     list_select_related = ('company',)
+
+
+@admin.register(ProposalRefusal)
+class ProposalRefusalAdmin(_ReadOnlyAdmin):
+    list_display = ('created_at', 'proposer', 'code')
+    list_filter = ('code',)

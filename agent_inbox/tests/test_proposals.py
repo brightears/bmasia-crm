@@ -8,7 +8,7 @@ from django.utils import timezone
 from agent_inbox.activities import record_activity
 from agent_inbox.models import EVIDENCE_QUOTE_MAX, ChangeProposal
 from agent_inbox.tests.conftest import (
-    PROPOSALS, activity_body, jwt_client, session_client, token_client,
+    PROPOSALS, activity_body, decide, jwt_client, seen_of, session_client, token_client,
 )
 
 QUOTE = 'our new reception number is +66 2 111 2222 from Monday'
@@ -35,7 +35,7 @@ def activity(agent, company):
 
 
 def accept(client, proposal_id, **body):
-    return client.post(f'{PROPOSALS}{proposal_id}/accept/', body, format='json')
+    return decide(client, proposal_id, 'accept', **body)
 
 
 # ------------------------------------------------------------------ storing
@@ -51,7 +51,7 @@ def test_agent_proposal_is_stored_and_nothing_changes(agent, company, activity):
     assert data['current_values'] == {'phone': '+66 2 000 0000'}
     assert data['expected_version']
     assert data['evidence_verified'] is True
-    assert data['evidence_source_system'] == 'gmail' and data['evidence_source_ref'] == 'msg-0001'
+    assert data['evidence_source_system'] == 'gmail' and data['evidence_source_ref'] == 'msg-0001@mail.example.com'
     company.refresh_from_db()
     assert company.phone == '+66 2 000 0000'
 
@@ -77,19 +77,23 @@ def test_same_change_from_another_proposer_is_a_duplicate(agent, other_agent, co
     response = propose(token_client(other_agent), **phone_body(company))
     assert response.status_code == 409
     assert response.json()['code'] == 'duplicate_open'
-    assert response.json()['existing_proposal_id'] == first['id']
+    # An agent is not told the id of a proposal it cannot read.
+    assert 'existing_proposal_id' not in response.json()
 
 
-def test_rejected_proposal_never_comes_back(agent, person, company):
+def test_rejected_proposal_is_not_raised_again_by_agents(agent, other_agent, person, other_person, company):
     client = token_client(agent)
     first = propose(client, **phone_body(company)).json()
-    reject = session_client(person).post(f"{PROPOSALS}{first['id']}/reject/", {'reason': 'Old number'}, format='json')
-    assert reject.status_code == 200
-    for proposer in (client, token_client(person)):
+    assert decide(session_client(person), first['id'], 'reject', reason='Old number').status_code == 200
+    for proposer in (client, token_client(other_agent)):
         again = propose(proposer, **phone_body(company, evidence_quote=QUOTE, rationale='Trying again'))
         assert again.status_code == 409
         assert again.json()['code'] == 'previously_rejected'
     assert ChangeProposal.objects.count() == 1
+    # A person may raise it again.
+    by_person = propose(session_client(other_person), **phone_body(company))
+    assert by_person.status_code == 201
+    assert ChangeProposal.objects.count() == 2
 
 
 def test_accepted_proposal_is_not_raised_again(agent, person, company):
@@ -205,10 +209,10 @@ def test_activity_of_another_company_or_void_is_refused(agent, company, other_co
     from agent_inbox.activities import void_activity
     other, _ = record_activity(agent, activity_body(other_company, idempotency_key='test:other-act-1'), via='rest')
     response = propose(token_client(agent), **phone_body(company, activity_id=str(other.pk)))
-    assert response.json()['code'] == 'wrong_company'
+    assert response.json()['code'] == 'activity_not_usable'
     void_activity(agent, activity.pk, {'reason': 'wrong'})
     response = propose(token_client(agent), **phone_body(company, activity_id=str(activity.pk)))
-    assert response.json()['code'] == 'activity_void'
+    assert response.json()['code'] == 'activity_not_usable'
 
 
 def test_evidence_without_a_stored_body_is_kept_unverified(agent, company):
@@ -257,12 +261,12 @@ def test_accept_with_edits_applies_the_edited_value(agent, person, contact):
                        target_id=str(contact.pk), patch={'title': 'Director', 'department': 'Ops'},
                        evidence_quote='I am now Director of Ops').json()
     client = session_client(person)
-    path = f"{PROPOSALS}{proposal['id']}/accept-with-edits/"
-    assert client.post(path, {}, format='json').status_code == 400
-    outside = client.post(path, {'edits': {'email': 'x@example.com'}}, format='json')
+    pid = proposal['id']
+    assert decide(client, pid, 'accept-with-edits').status_code == 400
+    outside = decide(client, pid, 'accept-with-edits', edits={'email': 'x@example.com'})
     assert outside.status_code == 422 and outside.json()['code'] == 'edit_not_allowed'
-    response = client.post(path, {'edits': {'title': 'Director of Operations'}, 'drop_fields': ['department']},
-                           format='json')
+    response = decide(client, pid, 'accept-with-edits', edits={'title': 'Director of Operations'},
+                      drop_fields=['department'])
     assert response.status_code == 200, response.content
     assert response.json()['status'] == 'edited'
     assert response.json()['patch'] == {'title': 'Director', 'department': 'Ops'}
@@ -343,19 +347,28 @@ def test_version_mismatch_applies_nothing_and_refreshes(agent, person, company):
     proposal = propose(token_client(agent), **phone_body(company)).json()
     company.city = 'Chiang Mai'
     company.save()
-    response = accept(session_client(person), proposal['id'])
+    client = session_client(person)
+    response = accept(client, proposal['id'], seen_version=proposal['seen_version'])
     assert response.status_code == 409
     assert response.json()['code'] == 'record_changed'
     row = ChangeProposal.objects.get(pk=proposal['id'])
     assert row.status == 'proposed'
     assert row.target_changed_at is not None
     assert row.expected_version != proposal['expected_version']
-    assert response.json()['expected_version'] == row.expected_version
+    fresh = response.json()['proposal']
+    assert fresh['expected_version'] == row.expected_version
+    assert fresh['seen_version'] != proposal['seen_version']
     company.refresh_from_db()
     assert company.phone == '+66 2 000 0000'
     assert _audit_for('Company', company.pk) == []
-    # A second, explicit click against the refreshed values applies it.
-    again = accept(session_client(person), proposal['id'])
+    # Repeating the same click (double click, retry, stale tab) applies nothing.
+    repeat = accept(client, proposal['id'], seen_version=proposal['seen_version'])
+    assert repeat.status_code == 409 and repeat.json()['code'] == 'stale_view'
+    assert repeat.json()['proposal']['seen_version'] == fresh['seen_version']
+    company.refresh_from_db()
+    assert company.phone == '+66 2 000 0000'
+    # An accept bound to the refreshed values applies it.
+    again = accept(client, proposal['id'], seen_version=fresh['seen_version'])
     assert again.status_code == 200, again.content
     company.refresh_from_db()
     assert company.phone == '+66 2 111 2222'
@@ -367,7 +380,7 @@ def test_changed_field_value_refreshes_current_values(agent, person, company):
     company.save()
     response = accept(session_client(person), proposal['id'])
     assert response.status_code == 409
-    assert response.json()['current_values'] == {'phone': '+66 2 555 5555'}
+    assert response.json()['proposal']['current_values'] == {'phone': '+66 2 555 5555'}
 
 
 def test_record_already_holding_the_value_supersedes(agent, person, company):
@@ -375,7 +388,7 @@ def test_record_already_holding_the_value_supersedes(agent, person, company):
     company.phone = '+66 2 111 2222'
     company.save()
     response = accept(session_client(person), proposal['id'])
-    assert response.status_code == 409 and response.json()['status'] == 'superseded'
+    assert response.status_code == 409 and response.json()['proposal']['status'] == 'superseded'
     assert ChangeProposal.objects.get(pk=proposal['id']).status == 'superseded'
 
 
@@ -390,6 +403,7 @@ def test_deleted_target_marks_the_proposal_failed(agent, person, company, contac
 
 def test_values_refused_at_apply_leave_the_proposal_open(agent, person, contact, company):
     from crm_app.models import Contact
+    Contact.objects.filter(pk=contact.pk).update(receives_invoice_emails=False, receives_payment_emails=False)
     proposal = propose(token_client(agent), kind='field_update', target_collection='contact',
                        target_id=str(contact.pk), patch={'email': 'kim@riverside.example.com'},
                        evidence_quote='write to kim').json()
@@ -410,11 +424,17 @@ def test_apply_failure_rolls_back_the_target(agent, person, company, monkeypatch
         raise RuntimeError('audit tagging failed')
 
     monkeypatch.setattr(proposals, '_tag_audit', no_audit)
-    with pytest.raises(RuntimeError):
-        accept(session_client(person), proposal['id'])
+    client = session_client(person)
+    # Whether the error reaches the client as an exception or as a 500 reply depends
+    # on the project's exception handling; what matters is the state afterwards.
+    client.raise_request_exception = False
+    response = accept(client, proposal['id'])
+    assert response.status_code >= 500
     company.refresh_from_db()
     assert company.phone == '+66 2 000 0000'
-    assert ChangeProposal.objects.get(pk=proposal['id']).status == 'proposed'
+    row = ChangeProposal.objects.get(pk=proposal['id'])
+    assert (row.status, row.applied_audit_id, row.reviewer_id) == ('proposed', None, None)
+    assert _audit_for('Company', company.pk) == []
 
 
 def test_allowlist_is_checked_again_at_accept(agent, person, company, monkeypatch):
@@ -431,13 +451,14 @@ def test_allowlist_is_checked_again_at_accept(agent, person, company, monkeypatc
 # ------------------------------------------------------------------ who may decide
 
 
-@pytest.mark.parametrize('path', ['accept/', 'accept-with-edits/', 'reject/'])
+@pytest.mark.parametrize('path', ['accept', 'accept-with-edits', 'reject', 'reopen'])
 def test_agent_accounts_cannot_decide(agent, other_agent, company, path):
     proposal = propose(token_client(agent), **phone_body(company)).json()
     for client in (token_client(agent), session_client(other_agent), jwt_client(agent)):
-        response = client.post(f"{PROPOSALS}{proposal['id']}/{path}",
-                               {'reason': 'x', 'edits': {'phone': '+66 2 999 9999'}}, format='json')
-        assert response.status_code in (403, 404), response.content
+        body = {'accept': {}, 'accept-with-edits': {'edits': {'phone': '+66 2 999 9999'}},
+                'reject': {'reason': 'x'}, 'reopen': {'note': 'x'}}[path]
+        response = decide(client, proposal['id'], path, **body)
+        assert response.status_code == 403, response.content
     assert ChangeProposal.objects.get(pk=proposal['id']).status == 'proposed'
 
 
@@ -455,7 +476,8 @@ def test_a_person_with_an_api_token_cannot_decide(agent, person, company):
     response = accept(token_client(person), proposal['id'])
     assert response.status_code == 403
     assert response.json()['code'] == 'human_review_required'
-    assert 'website sign-in' in response.json()['detail']
+    # Holding an API token makes the account an agent account, also on the website.
+    assert accept(jwt_client(person), proposal['id']).status_code == 403
 
 
 def test_agents_only_see_their_own_proposals(agent, other_agent, person, company, contact):
@@ -473,40 +495,46 @@ def test_agents_only_see_their_own_proposals(agent, other_agent, person, company
 def test_reject_needs_a_reason_and_only_open_proposals(agent, person, company):
     proposal = propose(token_client(agent), **phone_body(company)).json()
     client = session_client(person)
-    path = f"{PROPOSALS}{proposal['id']}/reject/"
-    assert client.post(path, {}, format='json').status_code == 400
-    response = client.post(path, {'reason': 'Number is for another branch'}, format='json')
+    pid = proposal['id']
+    assert decide(client, pid, 'reject').status_code == 400
+    assert client.post(f'{PROPOSALS}{pid}/reject/', {'reason': 'x'}, format='json').status_code == 400
+    response = decide(client, pid, 'reject', reason='Number is for another branch')
     assert response.status_code == 200
     assert response.json()['status'] == 'rejected'
     assert response.json()['decision_note'] == 'Number is for another branch'
-    again = client.post(path, {'reason': 'twice'}, format='json')
+    assert response.json()['history'][0]['action'] == 'rejected'
+    again = decide(client, pid, 'reject', reason='twice')
     assert again.status_code == 409 and again.json()['code'] == 'not_open'
     assert accept(client, proposal['id']).status_code == 409
 
 
-def test_bulk_reject_by_batch_and_by_ids(agent, person, company, contact):
+def test_bulk_reject_names_each_proposal_with_what_was_seen(agent, person, company, contact):
     client = token_client(agent)
     a = propose(client, **phone_body(company)).json()
     b = propose(client, kind='field_update', target_collection='contact', target_id=str(contact.pk),
-                patch={'title': 'Director'}, evidence_quote='Director', batch_key='gmail:msg-0001').json()
+                patch={'title': 'Director'}, evidence_quote='Director').json()
     c = propose(client, kind='field_update', target_collection='contact', target_id=str(contact.pk),
-                patch={'department': 'Ops'}, evidence_quote='Ops', batch_key='other-batch').json()
+                patch={'department': 'Ops'}, evidence_quote='Ops').json()
     reviewer = session_client(person)
-    response = reviewer.post(f'{PROPOSALS}bulk-reject/', {'batch_key': 'gmail:msg-0001', 'reason': 'Spam'},
-                             format='json')
-    assert response.status_code == 200
-    assert sorted(response.json()['rejected']) == sorted([a['id'], b['id']])
     missing = '00000000-0000-0000-0000-000000000009'
-    response = reviewer.post(f'{PROPOSALS}bulk-reject/', {'ids': [a['id'], c['id'], missing], 'reason': 'No'},
-                             format='json')
-    assert response.json()['rejected'] == [c['id']]
-    assert response.json()['skipped'] == [{'id': a['id'], 'status': 'rejected'}]
+    items = [{'id': a['id'], 'seen_version': seen_of(a['id'])}, {'id': b['id'], 'seen_version': 'old-view'},
+             {'id': missing, 'seen_version': 'x'}]
+    response = reviewer.post(f'{PROPOSALS}bulk-reject/', {'items': items, 'reason': 'Spam'}, format='json')
+    assert response.status_code == 200
+    assert response.json()['rejected'] == [a['id']]
+    assert response.json()['skipped'] == [{'id': b['id'], 'status': 'proposed', 'code': 'stale_view',
+                                           'seen_version': seen_of(b['id'])}]
     assert response.json()['not_found'] == [missing]
-    both = reviewer.post(f'{PROPOSALS}bulk-reject/', {'ids': [a['id']], 'batch_key': 'x', 'reason': 'No'},
-                         format='json')
-    assert both.status_code == 400
-    assert token_client(agent).post(f'{PROPOSALS}bulk-reject/', {'batch_key': 'other-batch', 'reason': 'x'},
-                                    format='json').status_code == 403
+    again = reviewer.post(f'{PROPOSALS}bulk-reject/', {'items': [
+        {'id': a['id'], 'seen_version': seen_of(a['id'])}, {'id': c['id'], 'seen_version': seen_of(c['id'])},
+    ], 'reason': 'No'}, format='json')
+    assert again.json()['rejected'] == [c['id']]
+    assert again.json()['skipped'] == [{'id': a['id'], 'status': 'rejected', 'code': 'not_open'}]
+    for body in ({'items': [], 'reason': 'x'}, {'items': [{'id': a['id']}], 'reason': 'x'},
+                 {'batch_key': 'x', 'reason': 'x'}):
+        assert reviewer.post(f'{PROPOSALS}bulk-reject/', body, format='json').status_code == 400
+    assert token_client(agent).post(f'{PROPOSALS}bulk-reject/', {'items': [
+        {'id': b['id'], 'seen_version': seen_of(b['id'])}], 'reason': 'x'}, format='json').status_code == 403
 
 
 def test_list_filters(agent, person, company, contact):
@@ -559,8 +587,7 @@ def test_switch_off_refuses_every_proposal_write_and_reads_work(agent, person, c
     with override_settings(CHANGE_PROPOSALS_ENABLED=False):
         created = propose(token_client(agent), **phone_body(company, patch={'phone': '+66 2 999 9999'}))
         accepted = accept(session_client(person), proposal['id'])
-        rejected = session_client(person).post(f"{PROPOSALS}{proposal['id']}/reject/", {'reason': 'x'},
-                                               format='json')
+        rejected = decide(session_client(person), proposal['id'], 'reject', reason='x')
         listing = session_client(person).get(PROPOSALS)
     for response in (created, accepted, rejected):
         assert response.status_code == 403 and response.json()['code'] == 'not_enabled'

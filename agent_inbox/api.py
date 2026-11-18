@@ -84,7 +84,8 @@ class ActivityViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets
 
     def create(self, request):
         try:
-            activity, replayed = activity_service.record_activity(request.user, _body(request), via='rest')
+            activity, replayed = activity_service.record_activity(
+                request.user, _body(request), via=policy.recorded_via_for(request))
         except ServiceError as exc:
             return _error(exc)
         data = {**self.get_serializer(activity).data, 'replayed': replayed}
@@ -120,7 +121,10 @@ class ChangeProposalFilter(django_filters.FilterSet):
 
 
 class ChangeProposalViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
-    """List, retrieve and create proposals; accept, accept with edits, reject, bulk reject."""
+    """List, retrieve and create proposals; accept, accept with edits, reject, reopen, bulk reject.
+
+    Every decision carries the proposal's seen_version from the last read.
+    """
 
     serializer_class = ChangeProposalSerializer
     filterset_class = ChangeProposalFilter
@@ -130,15 +134,27 @@ class ChangeProposalViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, vi
     search_fields = ['rationale', 'evidence_quote', 'company__name']
 
     def get_queryset(self):
-        queryset = ChangeProposal.objects.select_related('company')
+        queryset = ChangeProposal.objects.select_related('company', 'activity')
         user = getattr(self.request, 'user', None)
         if policy.is_agent_account(user):
             queryset = queryset.filter(Q(proposer=user))
         return queryset
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        user = getattr(self.request, 'user', None)
+        if policy.is_agent_account(user):
+            context['hide_private_from'] = user.pk
+        return context
+
     def list(self, request, *args, **kwargs):
         proposal_service.expire_due()
-        return super().list(request, *args, **kwargs)
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        rows = list(page if page is not None else queryset)
+        context = {**self.get_serializer_context(), 'conflicts': proposal_service.conflicts_for(rows)}
+        data = ChangeProposalSerializer(rows, many=True, context=context).data
+        return self.get_paginated_response(data) if page is not None else Response(data)
 
     def create(self, request):
         try:
@@ -167,6 +183,14 @@ class ChangeProposalViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, vi
     def reject(self, request, pk=None):
         try:
             proposal = proposal_service.reject(request, pk, _body(request))
+        except ServiceError as exc:
+            return _error(exc)
+        return Response(self.get_serializer(proposal).data)
+
+    @action(detail=True, methods=['post'])
+    def reopen(self, request, pk=None):
+        try:
+            proposal = proposal_service.reopen(request, pk, _body(request))
         except ServiceError as exc:
             return _error(exc)
         return Response(self.get_serializer(proposal).data)

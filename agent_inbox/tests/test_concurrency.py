@@ -7,7 +7,7 @@ from django.db import connection, connections
 from agent_inbox.activities import record_activity
 from agent_inbox.models import Activity, ChangeProposal
 from agent_inbox.proposals import create_proposal
-from agent_inbox.tests.conftest import PROPOSALS, activity_body, session_client
+from agent_inbox.tests.conftest import PROPOSALS, activity_body, seen_of, session_client
 
 pytestmark = [
     pytest.mark.django_db(transaction=True),
@@ -64,7 +64,8 @@ def test_concurrent_accepts_apply_once(agent, person, company):
         'patch': {'phone': '+66 2 111 2222'}, 'evidence_quote': 'new number',
     }, via='rest')
     path = f'{PROPOSALS}{proposal.pk}/accept/'
-    statuses = run_together(lambda: session_client(person).post(path, {}, format='json').status_code)
+    body = {'seen_version': seen_of(proposal.pk)}
+    statuses = run_together(lambda: session_client(person).post(path, body, format='json').status_code)
     assert sorted(statuses) == [200] + [409] * (THREADS - 1)
     assert AuditLog.objects.filter(model_name='Company', record_id=str(company.pk)).count() == 1
     proposal.refresh_from_db()
