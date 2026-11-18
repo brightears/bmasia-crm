@@ -1,0 +1,9 @@
+From: accounts@docs-sender.test
+To: sales@ourco.example
+Subject: Signed TH-CT99001
+Date: Mon, 05 Jan 2099 09:20:00 +0700
+Message-ID: <sc-05@docs-sender.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Synthetic self-check message.

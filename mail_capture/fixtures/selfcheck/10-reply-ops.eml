@@ -1,0 +1,12 @@
+From: ops@ourco.example
+To: casey@selfcheck-lagoon.test
+Subject: Re: Synthetic renewal question
+Date: Mon, 05 Jan 2099 11:00:00 +0700
+Message-ID: <sc-10@ourco.example>
+In-Reply-To: <sc-09@ourco.example>
+References: <sc-01@selfcheck-lagoon.test>
+ <sc-09@ourco.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Synthetic self-check message.
