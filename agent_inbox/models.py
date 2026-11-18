@@ -15,7 +15,7 @@ from django.db.models import Q
 # anything is stored, and the column sizes follow them.
 SUMMARY_MAX = 500
 BODY_MAX = 20_000
-SOURCE_REF_MAX = 255
+SOURCE_REF_MAX = 500  # an RFC 822 Message-ID can be long; the capture app keeps up to 500
 SOURCE_URL_MAX = 500
 KEY_MAX = 200
 REASON_MAX = 500
@@ -92,9 +92,10 @@ PROPOSAL_STATUS_CHOICES = [
     ('superseded', 'Superseded'),
     ('failed', 'Failed'),
 ]
-# A new proposal with the same fingerprint as one of these is never stored:
-# open ones are not raised twice, decided ones never come back.
-FINGERPRINT_BLOCKING_STATUSES = ('proposed', 'accepted', 'edited', 'rejected')
+# Only one open proposal per fingerprint (enforced by a partial unique index).
+# An agent may not raise again a fingerprint that was decided; a person may.
+OPEN_STATUS = 'proposed'
+DECIDED_STATUSES = ('accepted', 'edited', 'rejected')
 
 
 class Activity(models.Model):
@@ -106,8 +107,9 @@ class Activity(models.Model):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # PROTECT: deleting a company must not erase its interaction log.
     company = models.ForeignKey(
-        'crm_app.Company', on_delete=models.CASCADE, related_name='inbox_activities',
+        'crm_app.Company', on_delete=models.PROTECT, related_name='inbox_activities',
     )
     contact = models.ForeignKey(
         'crm_app.Contact', on_delete=models.SET_NULL, null=True, blank=True, related_name='inbox_activities',
@@ -148,6 +150,14 @@ class Activity(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
     )
     voided_at = models.DateTimeField(null=True, blank=True)
+    duplicate_of = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
+        help_text='The captured record that replaced this one for the same source',
+    )
+    is_redacted = models.BooleanField(
+        default=False, help_text='Summary, body and participants were removed because the source was purged',
+    )
+    redacted_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -183,8 +193,9 @@ class ChangeProposal(models.Model):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # PROTECT: deleting a company must not erase the decision log.
     company = models.ForeignKey(
-        'crm_app.Company', on_delete=models.CASCADE, related_name='change_proposals',
+        'crm_app.Company', on_delete=models.PROTECT, related_name='change_proposals',
         help_text='The customer the proposal is about (the target or its company)',
     )
     target_collection = models.CharField(max_length=20, choices=PROPOSAL_TARGET_CHOICES)
@@ -205,6 +216,12 @@ class ChangeProposal(models.Model):
     evidence_source_url = models.CharField(max_length=SOURCE_URL_MAX, blank=True, default='')
     activity = models.ForeignKey(
         Activity, on_delete=models.SET_NULL, null=True, blank=True, related_name='change_proposals',
+    )
+    evidence_occurred_at = models.DateTimeField(
+        null=True, blank=True, help_text='When the source said it (the activity time when one is linked)',
+    )
+    evidence_recorder_is_agent = models.BooleanField(
+        default=False, help_text='The linked activity was recorded by an agent account',
     )
     rationale = models.CharField(max_length=RATIONALE_MAX, blank=True, default='')
     proposer = models.ForeignKey(
@@ -235,6 +252,9 @@ class ChangeProposal(models.Model):
     superseded_by = models.ForeignKey(
         'self', on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
     )
+    history = models.JSONField(
+        default=list, blank=True, help_text='Earlier decisions and reopenings: [{action, by, at, note}]',
+    )
     expires_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -250,11 +270,26 @@ class ChangeProposal(models.Model):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=['fingerprint'],
-                condition=Q(status__in=FINGERPRINT_BLOCKING_STATUSES),
-                name='inbox_proposal_unique_fingerprint',
+                fields=['fingerprint'], condition=Q(status=OPEN_STATUS),
+                name='inbox_proposal_unique_open_fingerprint',
             ),
         ]
 
     def __str__(self):
         return f'{self.kind} {self.target_collection} {self.status}'
+
+
+class ProposalRefusal(models.Model):
+    """A refused proposal attempt, counted with stored proposals against the daily cap."""
+
+    id = models.BigAutoField(primary_key=True)
+    proposer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='+')
+    code = models.CharField(max_length=40)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['proposer', 'created_at'], name='inbox_refusal_proposer_time')]
+
+    def __str__(self):
+        return f'{self.code} {self.created_at:%Y-%m-%d %H:%M}'
