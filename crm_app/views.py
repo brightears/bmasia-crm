@@ -7539,7 +7539,9 @@ class DashboardViewSet(viewsets.ViewSet):
         elif user.role == 'Finance':
             pass  # Finance sees all financial data
         elif user.role in ['Tech', 'Music']:
-            tasks = tasks.filter(Q(assigned_to=user) | Q(department=user.role))
+            # Their own tasks and their team's. Task.department was removed as unused
+            # (2026-02-10); a task's team is now the role of the person it is assigned to.
+            tasks = tasks.filter(Q(assigned_to=user) | Q(assigned_to__role=user.role))
             companies = companies.filter(tasks__in=tasks).distinct()
 
         # Calculate statistics
