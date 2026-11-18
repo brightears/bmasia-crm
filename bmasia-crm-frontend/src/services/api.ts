@@ -1,3 +1,4 @@
+import { BulkDeleteReply } from '../utils/bulkResults';
 import {
   User, UserCreateData, UserUpdateData, PasswordChangeData, SmtpSettingsData,
   Company, Contact, Note, Task, Opportunity, OpportunityActivity,
@@ -853,7 +854,7 @@ class ApiService {
     return response.data;
   }
 
-  async bulkOperateEmailTemplates(action: string, ids: string[]): Promise<{ message: string; count: number }> {
+  async bulkOperateEmailTemplates(action: string, ids: string[]): Promise<{ message: string; count: number } & BulkDeleteReply> {
     const response = await authApi.post('/email-templates/bulk_operations/', {
       action,
       ids

@@ -52,6 +52,7 @@ import ApiService from '../services/api';
 import EmailTemplateForm from '../components/EmailTemplateForm';
 import EmailTemplatePreview from '../components/EmailTemplatePreview';
 import { logApiError } from '../utils/logApiError';
+import { summarizeBulkDelete } from '../utils/bulkResults';
 
 const EmailTemplates: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -314,7 +315,10 @@ const EmailTemplates: React.FC = () => {
       setBulkLoading(true);
       setError('');
       const result = await ApiService.bulkOperateEmailTemplates('delete', selected);
-      setSuccess(result.message || `${result.count} template(s) deleted successfully`);
+      // 200 even when records were refused: show each reason, not only "0 records deleted".
+      const { success, error: refusedText } = summarizeBulkDelete(result, 'template');
+      if (success) setSuccess(success);
+      if (refusedText) setError(refusedText);
       setSelected([]);
       setBulkDeleteDialogOpen(false);
       loadTemplates();
