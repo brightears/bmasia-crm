@@ -68,7 +68,7 @@ def _unicode_base_fonts(styles):
     return styles
 
 from .models import (
-    User, Company, Contact, Note, Task, AuditLog,
+    User, Company, Contact, Note, Task, AuditLog, start_of_local_day,
     Opportunity, OpportunityActivity, Contract, Invoice, InvoiceLineItem, ContractZone,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailTemplate, EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
@@ -430,8 +430,8 @@ class BaseModelViewSet(viewsets.ModelViewSet):
             return bulk_delete(self, queryset, ids)
         
         elif action_type == 'update_status':
-            count = queryset.update(**data)
-            return Response({'message': f'{count} records updated'})
+            from crm_app.services.bulk_updates import bulk_update_status
+            return bulk_update_status(self, queryset, ids, data)
         
         elif action_type == 'assign':
             if 'assigned_to' in data:
@@ -496,6 +496,17 @@ class UserViewSet(BaseModelViewSet):
         data = request.data.copy()
         data.pop('role', None)  # Users cannot change their own role
         data.pop('is_active', None)  # Users cannot deactivate themselves
+        # The username is read-only here; an administrator changes it.
+        if data.get('username') not in (None, request.user.username):
+            return Response({'username': ['The username cannot be changed here.']},
+                            status=status.HTTP_400_BAD_REQUEST)
+        data.pop('username', None)
+        # A new password needs the current one, as in change_password.
+        current_password = data.pop('current_password', None)
+        if data.get('password') and not (
+                current_password and request.user.check_password(current_password)):
+            return Response({'current_password': ['Enter your current password to set a new one.']},
+                            status=status.HTTP_400_BAD_REQUEST)
         serializer = self.get_serializer(request.user, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
@@ -758,8 +769,8 @@ class CompanyViewSet(BaseModelViewSet):
                 'opportunities_value': opportunities.aggregate(Sum('expected_value'))['expected_value__sum'] or 0,
                 'contracts_count': contracts.count(),
                 'contracts_value': contracts.aggregate(Sum('value'))['value__sum'] or 0,
-                'open_tasks': tasks.filter(status__in=['Pending', 'In Progress']).count(),
-                'overdue_tasks': sum(1 for task in tasks if task.is_overdue),
+                'open_tasks': tasks.open().count(),
+                'overdue_tasks': tasks.overdue().count(),
             },
             'recent_activities': self.get_recent_activities(company),
             'upcoming_tasks': self.get_upcoming_tasks(company),
@@ -798,9 +809,8 @@ class CompanyViewSet(BaseModelViewSet):
     
     def get_upcoming_tasks(self, company):
         """Get upcoming tasks for a company"""
-        upcoming = company.tasks.filter(
-            status__in=['Pending', 'In Progress'],
-            due_date__gte=timezone.now().date()
+        upcoming = company.tasks.open().filter(
+            due_date__gte=start_of_local_day(timezone.localdate())
         ).order_by('due_date')[:5]
 
         return TaskSerializer(upcoming, many=True).data
@@ -969,7 +979,7 @@ class TaskViewSet(BaseModelViewSet):
         tasks = self.get_queryset()
         if request.user.role in ('Sales',):
             tasks = tasks.filter(assigned_to=request.user)
-        tasks = tasks.filter(status__in=['To Do', 'In Progress'])
+        tasks = tasks.open()
         serializer = self.get_serializer(tasks, many=True)
         return Response(serializer.data)
 
@@ -6309,80 +6319,82 @@ class InvoiceViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=['post'])
     def mark_paid(self, request, pk=None):
-        """Mark invoice as paid and auto-generate receipt/tax invoice"""
+        """Mark the invoice paid once and number its receipt (crm_app/services/invoice_payments.py).
+
+        Body (all optional): paid_date (bank date, YYYY-MM-DD, default today), send_receipt
+        (true to email the receipt to the customer; default false), payment_method,
+        transaction_id, notes (audit log only).
+        - An invoice already Paid with a receipt gets 409 with that receipt number; nothing
+          is renumbered or sent again.
+        - An invoice already Paid without a receipt (set Paid by another route) gets its
+          receipt number and keeps its status and its own paid date.
+        """
         from crm_app.services.email_service import EmailService
+        from crm_app.services.invoice_payments import (
+            InvoiceNotPayable, MarkPaidRequestSerializer, earliest_payment_date,
+            mark_invoice_paid, receipt_email_failure_text,
+        )
 
         invoice = self.get_object()
-        old_status = invoice.status
-        invoice.status = 'Paid'
-        invoice.paid_date = timezone.now().date()
+        body = MarkPaidRequestSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        data = body.validated_data
+        if data.get('paid_date') and data['paid_date'] < earliest_payment_date(invoice):
+            return Response({'paid_date': [
+                f'The payment date cannot be before {earliest_payment_date(invoice).isoformat()} '
+                '(more than a year before the invoice was issued, or before 2000).'
+            ]}, status=status.HTTP_400_BAD_REQUEST)
+        paid_date = data.get('paid_date') or timezone.localdate()
 
-        # Auto-generate receipt number
-        entity = effective_billing_entity(invoice)
-        prefix = 'REC-TH' if 'Thailand' in entity else 'REC-HK'
-        year = timezone.now().year
-        pattern = f'{prefix}-{year}-'
-        last = Invoice.objects.filter(
-            receipt_number__startswith=pattern
-        ).order_by('-receipt_number').first()
-        if last:
-            try:
-                last_seq = int(last.receipt_number.split('-')[-1])
-                next_seq = last_seq + 1
-            except (ValueError, IndexError):
-                next_seq = 1
-        else:
-            next_seq = 1
-        invoice.receipt_number = f'{pattern}{str(next_seq).zfill(4)}'
-        invoice.save()
+        try:
+            invoice, old_status, receipt_only = mark_invoice_paid(
+                invoice.pk, paid_date=paid_date,
+                payment_method=data.get('payment_method', ''),
+                transaction_id=data.get('transaction_id', ''),
+            )
+        except InvoiceNotPayable as refusal:
+            return Response({
+                'error': refusal.message,
+                'code': refusal.code,
+                'status': refusal.invoice.status,
+                'receipt_number': refusal.invoice.receipt_number,
+                'paid_date': refusal.invoice.paid_date.isoformat() if refusal.invoice.paid_date else None,
+            }, status=status.HTTP_409_CONFLICT)
+        except ValueError as exc:  # no usable billing entity on the invoice or its company
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        self.log_action('UPDATE', invoice, {
+        changes = {
             'status': {'old': old_status, 'new': 'Paid'},
             'receipt_number': invoice.receipt_number,
-        })
+            'paid_date': invoice.paid_date.isoformat(),
+            'send_receipt': data['send_receipt'],
+        }
+        if receipt_only:
+            changes['action'] = 'Receipt issued for an invoice already marked paid'
+        if data.get('notes'):
+            changes['payment_notes'] = data['notes']
+        self.log_action('UPDATE', invoice, changes)
 
-        # Auto-send receipt email (best-effort — don't fail mark_paid if email fails)
-        receipt_email_status = 'not_sent'
-        try:
-            email_service = EmailService()
-            success, message = email_service.send_receipt_email(
-                invoice_id=invoice.id,
-                request=request
-            )
-            receipt_email_status = 'sent' if success else f'failed: {message}'
-        except Exception as e:
-            logger.warning(f"Receipt email failed for {invoice.invoice_number}: {e}")
-            receipt_email_status = f'failed: {str(e)}'
+        receipt_email_status = 'not_requested'
+        if data['send_receipt']:
+            try:
+                success, message = EmailService().send_receipt_email(invoice_id=invoice.id, request=request)
+            except Exception as exc:
+                success, message = False, exc
+            receipt_email_status = 'sent' if success else (
+                f'failed: {receipt_email_failure_text(request, invoice, message)}')
 
         return Response({
-            'message': 'Invoice marked as paid',
+            'message': ('Receipt issued for an invoice already marked paid' if receipt_only
+                        else 'Invoice marked as paid'),
             'receipt_number': invoice.receipt_number,
+            'paid_date': invoice.paid_date.isoformat(),
+            'receipt_only': receipt_only,
             'receipt_email_status': receipt_email_status,
         })
 
-    @action(detail=False, methods=['get'], url_path='next-receipt-number')
-    def next_receipt_number(self, request):
-        """Generate next sequential receipt number based on billing entity.
-        Format: REC-TH-2026-0001 (Thailand) or REC-HK-2026-0001 (HK/International)
-        """
-        from datetime import datetime
-        entity = request.query_params.get('entity', '')
-        prefix = 'REC-TH' if 'Thailand' in entity else 'REC-HK'
-        year = datetime.now().year
-        pattern = f'{prefix}-{year}-'
-        last = Invoice.objects.filter(
-            receipt_number__startswith=pattern
-        ).order_by('-receipt_number').first()
-        if last:
-            try:
-                last_seq = int(last.receipt_number.split('-')[-1])
-                next_seq = last_seq + 1
-            except (ValueError, IndexError):
-                next_seq = 1
-        else:
-            next_seq = 1
-        receipt_number = f'{pattern}{str(next_seq).zfill(4)}'
-        return Response({'receipt_number': receipt_number})
+    # GET next-receipt-number was removed: nothing called it, and a number handed out without
+    # the numbering lock could be issued twice. mark_paid numbers receipts.
 
     @action(detail=True, methods=['post'], url_path='send-receipt')
     def send_receipt(self, request, pk=None):
@@ -7342,26 +7354,21 @@ class QuoteViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=['post'])
     def add_attachment(self, request, pk=None):
-        """Add attachment to quote"""
-        quote = self.get_object()
-        file = request.FILES.get('file')
+        """Refused for now: uploaded files would sit on the web container's temporary disk.
 
-        if not file:
-            return Response(
-                {'error': 'No file provided'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        attachment = QuoteAttachment.objects.create(
-            quote=quote,
-            name=file.name,
-            file=file,
-            size=file.size,
-            uploaded_by=request.user if request.user.is_authenticated else None
+        No MEDIA_ROOT or storage backend is configured and the service has no persistent
+        disk, so a stored file disappears on the next deploy or restart. Re-enable this
+        once uploads go to persistent storage.
+        """
+        self.get_object()  # 404 for an unknown quote, as before
+        return Response(
+            {
+                'error': 'Quote attachments are not available yet: the server cannot keep '
+                         'uploaded files. Send the file to the customer by email instead.',
+                'code': 'attachments_unavailable',
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
-
-        serializer = QuoteAttachmentSerializer(attachment)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
@@ -7532,7 +7539,7 @@ class DashboardViewSet(viewsets.ViewSet):
             'opportunities_value': opportunities.aggregate(Sum('expected_value'))['expected_value__sum'] or 0,
             'active_contracts': contracts.count(),
             'contracts_value': contracts.aggregate(Sum('value'))['value__sum'] or 0,
-            'overdue_tasks': sum(1 for task in tasks if task.is_overdue),
+            'overdue_tasks': tasks.overdue().count(),
             'overdue_invoices': sum(1 for invoice in invoices if invoice.is_overdue),
             'pending_renewals': sum(1 for contract in contracts if contract.is_expiring_soon),
         }
@@ -7777,7 +7784,8 @@ class ActionCenterViewSet(viewsets.ViewSet):
     def list(self, request):
         user = request.user
         now = timezone.now()
-        today = now.date()
+        # The business day in Bangkok, not the UTC date.
+        today = timezone.localdate()
         tomorrow = today + timedelta(days=1)
         day_after_tomorrow = today + timedelta(days=2)
         week_end = today + timedelta(days=7)
@@ -7792,9 +7800,9 @@ class ActionCenterViewSet(viewsets.ViewSet):
         if user.role == 'Sales':
             task_qs = task_qs.filter(assigned_to=user)
 
-        # --- OVERDUE TASKS ---
-        for t in task_qs.filter(status__in=['To Do', 'In Progress'], due_date__lt=now):
-            days = (today - t.due_date.date()).days
+        # --- OVERDUE TASKS (the shared rule: open, due on an earlier Bangkok day) ---
+        for t in task_qs.overdue(today):
+            days = (today - timezone.localdate(t.due_date)).days
             contact = t.related_contact or self._get_primary_contact(t.company)
             items.append({
                 'id': str(t.id), 'type': 'task', 'urgency': 'overdue',
@@ -7856,10 +7864,10 @@ class ActionCenterViewSet(viewsets.ViewSet):
                 'meta': {'stage': opp.stage, 'owner': opp.owner.get_full_name() if opp.owner else None},
             })
 
-        # --- TASKS DUE TODAY & TOMORROW ---
-        tomorrow_end = now.replace(hour=23, minute=59, second=59) + timedelta(days=1)
-        for t in task_qs.filter(status__in=['To Do', 'In Progress'], due_date__gte=now, due_date__lte=tomorrow_end):
-            is_today = t.due_date.date() == today
+        # --- TASKS DUE TODAY & TOMORROW (Bangkok days, including earlier today) ---
+        for t in task_qs.open().filter(due_date__gte=start_of_local_day(today),
+                                       due_date__lt=start_of_local_day(today + timedelta(days=2))):
+            is_today = timezone.localdate(t.due_date) == today
             contact = t.related_contact or self._get_primary_contact(t.company)
             items.append({
                 'id': str(t.id), 'type': 'task', 'urgency': 'today',
@@ -7918,10 +7926,9 @@ class ActionCenterViewSet(viewsets.ViewSet):
             })
 
         # --- TASKS DUE THIS WEEK (not today/tomorrow) ---
-        week_start = now + timedelta(days=2)
-        week_end_dt = now.replace(hour=23, minute=59, second=59) + timedelta(days=7)
-        for t in task_qs.filter(status__in=['To Do', 'In Progress'], due_date__gt=tomorrow_end, due_date__lte=week_end_dt):
-            days_until = (t.due_date.date() - today).days
+        for t in task_qs.open().filter(due_date__gte=start_of_local_day(today + timedelta(days=2)),
+                                       due_date__lt=start_of_local_day(today + timedelta(days=8))):
+            days_until = (timezone.localdate(t.due_date) - today).days
             contact = t.related_contact or self._get_primary_contact(t.company)
             items.append({
                 'id': str(t.id), 'type': 'task', 'urgency': 'upcoming',

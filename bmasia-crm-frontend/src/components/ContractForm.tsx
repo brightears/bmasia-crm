@@ -57,6 +57,7 @@ import { Contract, Company, ApiResponse, ContractTemplate, ContractLineItem, Quo
 import ApiService from '../services/api';
 import DocumentIssuerField from './DocumentIssuerField';
 import { documentLineTax, documentValidationMessage } from '../utils/documentTailoring';
+import { formatMoney } from '../theme';
 
 interface ContractFormProps {
   open: boolean;
@@ -575,16 +576,8 @@ const ContractForm: React.FC<ContractFormProps> = ({
     setAttachments(prev => prev.filter((_, i) => i !== index));
   };
 
-  // Helper to get currency symbol
-  const getCurrencySymbol = (currencyCode: string): string => {
-    const symbols: Record<string, string> = {
-      'USD': '$',
-      'THB': '฿',
-      'EUR': '€',
-      'GBP': '£',
-    };
-    return symbols[currencyCode] || '$';
-  };
+  // Input adornments show the currency code ("THB"), as in the house money format.
+  const getCurrencySymbol = (currencyCode: string): string => currencyCode || 'USD';
 
   // Available products based on company country
   const getAvailableProducts = () => {
@@ -1037,7 +1030,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
                         </MenuItem>
                         {quotes.map((quote) => (
                           <MenuItem key={quote.id} value={quote.id}>
-                            {quote.quote_number} - {getCurrencySymbol(quote.currency)}{quote.total_value.toLocaleString()}
+                            {quote.quote_number} - {formatMoney(quote.total_value, quote.currency)}
                             {quote.contact_name && ` (${quote.contact_name})`}
                           </MenuItem>
                         ))}
@@ -1529,7 +1522,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
                         </TableCell>
                         <TableCell>
                           <Typography variant="body2" fontWeight="medium">
-                            {getCurrencySymbol(formData.currency)}{(item.line_total || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {formatMoney(item.line_total || 0, formData.currency)}
                           </Typography>
                         </TableCell>
                         <TableCell>
@@ -1553,27 +1546,26 @@ const ContractForm: React.FC<ContractFormProps> = ({
                 const subtotal = calculateLineItemTotals();
                 const vatAmount = documentLineTax(lineItems);
                 const total = subtotal + vatAmount;
-                const sym = getCurrencySymbol(formData.currency);
-                const fmt = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                const fmt = (v: number) => formatMoney(v, formData.currency);
 
                 return (
                   <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
                     <Paper variant="outlined" sx={{ p: 2, minWidth: 300 }}>
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                         <Typography variant="body2" color="text.secondary">Subtotal:</Typography>
-                        <Typography variant="body2">{sym}{fmt(subtotal)}</Typography>
+                        <Typography variant="body2">{fmt(subtotal)}</Typography>
                       </Box>
                       {vatAmount > 0 && (
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                           <Typography variant="body2" color="text.secondary">Tax (from line items):</Typography>
-                          <Typography variant="body2">{sym}{fmt(vatAmount)}</Typography>
+                          <Typography variant="body2">{fmt(vatAmount)}</Typography>
                         </Box>
                       )}
                       <Divider sx={{ my: 1 }} />
                       <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography variant="body2" fontWeight="bold">Total{vatAmount > 0 ? ' (incl. tax)' : ''}:</Typography>
                         <Typography variant="body2" fontWeight="bold" color="primary">
-                          {sym}{fmt(total)}
+                          {fmt(total)}
                         </Typography>
                       </Box>
                     </Paper>

@@ -34,6 +34,7 @@ import {
   Receipt,
 } from '@mui/icons-material';
 import ApiService, { ARAgingReport, ARCompanyDetail } from '../services/api';
+import { formatMoney } from '../theme';
 
 interface KPICardProps {
   title: string;
@@ -131,15 +132,8 @@ const AccountsReceivable: React.FC = () => {
     });
   };
 
-  const formatCurrency = (value: number): string => {
-    const locale = currency === 'THB' ? 'th-TH' : 'en-US';
-    return new Intl.NumberFormat(locale, {
-      style: 'currency',
-      currency: currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
-  };
+  // House money format, e.g. "THB 108,000" (was Intl with a currency symbol).
+  const formatCurrency = (value: number): string => formatMoney(Math.round(value), currency); // whole units, as before
 
   const getAgingBucketColor = (bucket: string): string => {
     switch (bucket) {

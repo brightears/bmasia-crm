@@ -39,6 +39,7 @@ import {
 } from '@mui/icons-material';
 import { MonthlyRevenueData } from '../types';
 import ApiService from '../services/api';
+import { formatMoney } from '../theme';
 
 interface KPICardProps {
   title: string;
@@ -239,15 +240,8 @@ const RevenueDashboard: React.FC = () => {
     };
   };
 
-  const formatCurrency = (value: number): string => {
-    const locale = currency === 'THB' ? 'th-TH' : 'en-US';
-    return new Intl.NumberFormat(locale, {
-      style: 'currency',
-      currency: currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(Math.abs(value));
-  };
+  // House money format, e.g. "THB 108,000" (was Intl with a currency symbol).
+  const formatCurrency = (value: number): string => formatMoney(Math.round(Math.abs(value)), currency); // whole units, as before
 
   const getMonthTotal = (month: MonthlyRevenueData): number => {
     return month.new.value + month.renewal.value + month.addon.value + month.churn.value;

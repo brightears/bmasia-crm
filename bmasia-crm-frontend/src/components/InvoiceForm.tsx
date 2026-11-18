@@ -45,6 +45,7 @@ import ApiService from '../services/api';
 import DocumentIssuerField from './DocumentIssuerField';
 import { DOCUMENT_BILLING_ENTITIES, effectiveBillingEntity, issuerPaymentTerms, documentValidationMessage } from '../utils/documentTailoring';
 import { documentZoneLinks } from '../utils/contractZones';
+import { formatMoney } from '../theme';
 
 interface InvoiceFormProps {
   open: boolean;
@@ -156,16 +157,8 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [focusedPriceIndex, setFocusedPriceIndex] = useState<number | null>(null);
   const effectiveIssuer = effectiveBillingEntity(billingEntity, companies.find(c => c.id === companyId)?.billing_entity);
 
-  // Helper function to get currency symbol
-  const getCurrencySymbol = (currencyCode: string): string => {
-    const symbols: Record<string, string> = {
-      'USD': '$',
-      'THB': '฿',
-      'EUR': '€',
-      'GBP': '£',
-    };
-    return symbols[currencyCode] || '$';
-  };
+  // Input adornments show the currency code ("THB"), as in the house money format.
+  const getCurrencySymbol = (currencyCode: string): string => currencyCode || 'USD';
 
   // Determine tax label based on company country (same as QuoteForm)
   const getTaxLabel = (): string => {
@@ -607,21 +600,8 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
     }
   };
 
-  const formatCurrency = (value: number, currencyCode: string = currency): string => {
-    // Map currency to locale
-    const localeMap: Record<string, string> = {
-      'USD': 'en-US',
-      'THB': 'th-TH',
-      'EUR': 'de-DE',
-      'GBP': 'en-GB',
-    };
-
-    return new Intl.NumberFormat(localeMap[currencyCode] || 'en-US', {
-      style: 'currency',
-      currency: currencyCode,
-      minimumFractionDigits: 2,
-    }).format(value);
-  };
+  // House money format, e.g. "THB 108,000".
+  const formatCurrency = (value: number, currencyCode: string = currency): string => formatMoney(value, currencyCode);
 
   const totals = calculateTotals();
 

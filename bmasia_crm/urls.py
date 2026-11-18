@@ -26,6 +26,7 @@ urlpatterns = [
     path('healthz/', healthz, name='healthz'),  # process is up; unauthenticated, no database
     path('healthz', healthz),  # the same without the slash (no redirect for health checkers)
     path('admin/', admin.site.urls),
+    path('api/v1/', include('agent_inbox.urls')),  # activities and change proposals
     path('api/', include('crm_app.urls')),  # API endpoints under /api/
     path('api-auth/', include('rest_framework.urls')),
     path(

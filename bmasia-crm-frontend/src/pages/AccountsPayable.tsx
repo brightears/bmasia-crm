@@ -36,17 +36,11 @@ import {
 } from '@mui/icons-material';
 import api from '../services/api';
 import { APAgingReport, APAgingSummary, APVendorDetail, APExpenseDetail } from '../types';
+import { formatMoney } from '../theme';
 
 // Format currency
-const formatCurrency = (amount: number, currency: string = 'THB') => {
-  const locale = currency === 'THB' ? 'th-TH' : currency === 'USD' ? 'en-US' : 'en-US';
-  return new Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency: currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-};
+// House money format, e.g. "THB 108,000" (was Intl with a currency symbol).
+const formatCurrency = (amount: number, currency: string = 'THB') => formatMoney(Math.round(amount), currency); // whole units, as before
 
 // Format percentage
 const formatPercent = (value: number) => {
