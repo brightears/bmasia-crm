@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { logApiError } from '../utils/logApiError';
 import {
   Box,
   Typography,
@@ -44,7 +45,6 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { logApiError } from '../utils/logApiError';
 
 // Backend Cash Flow response interface
 interface CashFlowResponse {

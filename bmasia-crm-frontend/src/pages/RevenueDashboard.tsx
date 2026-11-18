@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { logApiError } from '../utils/logApiError';
 import {
   Box,
   Paper,
@@ -38,7 +39,6 @@ import {
 } from '@mui/icons-material';
 import { MonthlyRevenueData } from '../types';
 import ApiService from '../services/api';
-import { logApiError } from '../utils/logApiError';
 
 interface KPICardProps {
   title: string;

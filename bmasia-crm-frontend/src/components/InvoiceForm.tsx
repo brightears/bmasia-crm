@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { logApiError } from '../utils/logApiError';
 import {
   Dialog,
   DialogTitle,
@@ -44,7 +45,6 @@ import ApiService from '../services/api';
 import DocumentIssuerField from './DocumentIssuerField';
 import { DOCUMENT_BILLING_ENTITIES, effectiveBillingEntity, issuerPaymentTerms, documentValidationMessage } from '../utils/documentTailoring';
 import { documentZoneLinks } from '../utils/contractZones';
-import { logApiError } from '../utils/logApiError';
 
 interface InvoiceFormProps {
   open: boolean;

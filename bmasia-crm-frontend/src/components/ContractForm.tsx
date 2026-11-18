@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { logApiError } from '../utils/logApiError';
 import {
   RequiredCounts,
   ServiceLocationEntry,
@@ -56,7 +57,6 @@ import { Contract, Company, ApiResponse, ContractTemplate, ContractLineItem, Quo
 import ApiService from '../services/api';
 import DocumentIssuerField from './DocumentIssuerField';
 import { documentLineTax, documentValidationMessage } from '../utils/documentTailoring';
-import { logApiError } from '../utils/logApiError';
 
 interface ContractFormProps {
   open: boolean;

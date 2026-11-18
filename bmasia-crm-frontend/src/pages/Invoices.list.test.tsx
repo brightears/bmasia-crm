@@ -129,18 +129,6 @@ it('a row opens the invoice detail', async () => {
   expect(await screen.findByRole('dialog', { name: 'invoice detail' })).toHaveTextContent('INV-TEST-1');
 });
 
-it('?new=true from a contract opens the form pre-filled and keeps the list view', async () => {
-  renderAt(`/invoices?status=Sent&new=true&company=${CO}&contract=k-1`);
-  expect(await screen.findByRole('dialog', { name: 'invoice form' })).toHaveTextContent(`company=${CO} contract=k-1`);
-  await waitFor(() => expect(lastLocation.search).toBe('?status=Sent'));
-});
-
-it('an overdue invoice says how many days', async () => {
-  api.getInvoices.mockResolvedValue({ results: [invoice({ status: 'Overdue', is_overdue: true, days_overdue: 12 })], count: 1 });
-  renderAt('/invoices');
-  expect(await screen.findByText('12 days overdue')).toBeInTheDocument();
-});
-
 it('a refused delete shows the server\'s reason', async () => {
   const reason = 'INV-TEST-1 cannot be deleted: it is Sent; only a Draft can be deleted.';
   api.deleteInvoice = jest.fn(() => Promise.reject({ response: { status: 409, data: { error: reason } } }));
@@ -153,4 +141,16 @@ it('a refused delete shows the server\'s reason', async () => {
   expect(await screen.findByText(reason)).toBeInTheDocument();
   delete api.deleteInvoice;
   jest.restoreAllMocks();
+});
+
+it('?new=true from a contract opens the form pre-filled and keeps the list view', async () => {
+  renderAt(`/invoices?status=Sent&new=true&company=${CO}&contract=k-1`);
+  expect(await screen.findByRole('dialog', { name: 'invoice form' })).toHaveTextContent(`company=${CO} contract=k-1`);
+  await waitFor(() => expect(lastLocation.search).toBe('?status=Sent'));
+});
+
+it('an overdue invoice says how many days', async () => {
+  api.getInvoices.mockResolvedValue({ results: [invoice({ status: 'Overdue', is_overdue: true, days_overdue: 12 })], count: 1 });
+  renderAt('/invoices');
+  expect(await screen.findByText('12 days overdue')).toBeInTheDocument();
 });

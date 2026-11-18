@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { logApiError } from '../utils/logApiError';
 import {
   Dialog,
   DialogTitle,
@@ -45,7 +46,6 @@ import { Quote, QuoteLineItem, Company, Contact, Opportunity } from '../types';
 import ApiService from '../services/api';
 import DocumentIssuerField from './DocumentIssuerField';
 import { documentValidationMessage } from '../utils/documentTailoring';
-import { logApiError } from '../utils/logApiError';
 
 // Product options for dropdown
 const PRODUCT_OPTIONS = [

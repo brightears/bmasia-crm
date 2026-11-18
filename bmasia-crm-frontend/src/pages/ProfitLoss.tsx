@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { logApiError } from '../utils/logApiError';
 import {
   Box,
   Typography,
@@ -47,7 +48,6 @@ import {
   Bar,
 } from 'recharts';
 import api from '../services/api';
-import { logApiError } from '../utils/logApiError';
 
 // Backend P&L response interface (matches actual backend response)
 interface PLCategory {
