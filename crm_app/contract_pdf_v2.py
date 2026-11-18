@@ -671,11 +671,11 @@ def _flowables(source, width, styles, *, cell=False):
     return grouped
 
 
-_NUMBERED_CLAUSE = re.compile(r'\d+\.\s+')
-_COMMENCEMENT_CLAUSE = re.compile(r'\d+\.\s*Commencement Date\b', re.I)
+_NUMBERED_CLAUSE = re.compile(r'(\d+)\.\s+')
+_COMMENCEMENT_CLAUSE = re.compile(r'(\d+)\.\s*Commencement Date\b', re.I)
 _DURATION_CLAUSE = re.compile(r'\d+\.\s*Duration\b', re.I)
 # Points. Same bound as a short service-package list: small enough that moving
-# the joint to the next page never leaves a large gap behind it.
+# a kept group to the next page never leaves a large gap behind it.
 _COMMENCEMENT_JOINT_MAX_HEIGHT = 200
 
 
@@ -685,10 +685,12 @@ def _keep_commencement_with_duration(items, width):
     18 Nov 2026, DRAFT-0078 (defect sd-e915228b9697d948): clause 3 (one
     line) ended page 1 and clause 4 (Duration, with its "[under: duration]"
     renewal wording) began page 2. Keep the commencement clause, including
-    wording placed under it, with the duration line and the first paragraph
-    under that line. Later duration paragraphs still flow normally. A long
-    commencement block keeps only its last paragraph in the joint. Only page
-    flow changes; no text is added, removed or reordered.
+    wording placed under it, with the duration line and, when it fits, the
+    first paragraph under that line. Every kept group stays within the height
+    cap, so moving it never leaves a large gap; when the commencement wording
+    is long, its last paragraph joins the duration line and its first line
+    keeps its first paragraph. Only page flow changes; no text is added,
+    removed or reordered.
     """
     def text(item):
         return item.getPlainText().strip() if isinstance(item, Paragraph) else ''
@@ -696,35 +698,61 @@ def _keep_commencement_with_duration(items, width):
     def height(group):
         return sum(p.wrap(width, 10000)[1] + p.getSpaceBefore() + p.getSpaceAfter() for p in group)
 
+    def fits(group):
+        return height(group) <= _COMMENCEMENT_JOINT_MAX_HEIGHT
+
+    def duration_after(index):
+        # Wording under clause N, up to the Duration line. Numbered lines in
+        # clause N's own source paragraph ("1. Installation") are its wording,
+        # unless numbered N+1; any other numbered line is a different clause.
+        number = int(_COMMENCEMENT_CLAUSE.match(text(items[index])).group(1))
+        group = getattr(items[index], '_bmasia_explicit_group', None)
+        position = index + 1
+        while position < len(items) and isinstance(items[position], (Paragraph, Spacer)):
+            value = text(items[position])
+            if _DURATION_CLAUSE.match(value):
+                return position
+            numbered = _NUMBERED_CLAUSE.match(value)
+            if numbered and (
+                group is None or
+                getattr(items[position], '_bmasia_explicit_group', None) is not group or
+                int(numbered.group(1)) == number + 1
+            ):
+                return None
+            position += 1
+        return None
+
     output, index = [], 0
     while index < len(items):
         item = items[index]
-        duration = None
-        if _COMMENCEMENT_CLAUSE.match(text(item)):
-            # Wording under clause 3 (and gaps) up to the next numbered clause.
-            duration = index + 1
-            while (duration < len(items) and isinstance(items[duration], (Paragraph, Spacer))
-                   and not _NUMBERED_CLAUSE.match(text(items[duration]))):
-                duration += 1
-            if duration >= len(items) or not _DURATION_CLAUSE.match(text(items[duration])):
-                duration = None
+        duration = duration_after(index) if _COMMENCEMENT_CLAUSE.match(text(item)) else None
         if duration is None:
             output.append(item)
             index += 1
             continue
-        end = duration + 1
+        ends = [duration + 1]
         group = getattr(items[duration], '_bmasia_explicit_group', None)
-        if (end < len(items) and group is not None and
-                getattr(items[end], '_bmasia_explicit_group', None) is group and
-                not _NUMBERED_CLAUSE.match(text(items[end]))):
-            end += 1
-        start = index
-        if height(items[start:end]) > _COMMENCEMENT_JOINT_MAX_HEIGHT:
-            start = max(position for position in range(index, duration)
-                        if isinstance(items[position], Paragraph))
-        output.extend(items[index:start])
-        output.append(KeepTogether(items[start:end]))
-        index = end
+        if (duration + 1 < len(items) and group is not None and
+                getattr(items[duration + 1], '_bmasia_explicit_group', None) is group and
+                not _NUMBERED_CLAUSE.match(text(items[duration + 1]))):
+            ends.insert(0, duration + 2)
+        paragraphs = [position for position in range(index, duration)
+                      if isinstance(items[position], Paragraph)]
+        # Prefer the whole commencement clause; the clause line pairs with its
+        # first paragraph, so a later paragraph is the next possible start.
+        choice = next(((first, last) for first in [index] + paragraphs[2:]
+                       for last in ends if fits(items[first:last])), None)
+        first, last = choice or (duration, duration)
+        if first > index:
+            lead_end = paragraphs[1] + 1 if len(paragraphs) > 1 else None
+            if lead_end and lead_end <= first and fits(items[index:lead_end]):
+                output.append(KeepTogether(items[index:lead_end]))
+                output.extend(items[lead_end:first])
+            else:
+                output.extend(items[index:first])
+        if last > first:
+            output.append(KeepTogether(items[first:last]))
+        index = last
     return output
 
 
