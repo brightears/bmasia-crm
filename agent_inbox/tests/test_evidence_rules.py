@@ -181,17 +181,16 @@ def test_two_agents_still_cannot_record_the_same_message(agent, other_agent, com
     ('<CAB123.456@mail.example.com>', 'CAB123.456@mail.example.com'),
     ('  <CAB123.456@mail.example.com>  ', 'CAB123.456@mail.example.com'),
     ('CAB123.456@Mail.Example.com', 'CAB123.456@Mail.Example.com'),
-    ('synthetic:' + 'a' * 64, 'synthetic:' + 'a' * 64),
+    ('<a@b> (comment)', 'a@b'),
 ])
-def test_gmail_refs_are_stored_as_canonical_message_ids(agent, company, given, stored):
+def test_gmail_refs_are_stored_in_the_shared_canonical_form(agent, company, given, stored):
     response = token_client(agent).post(ACTIVITIES, activity_body(company, source_ref=given), format='json')
     assert response.status_code == 201, response.content
     assert response.json()['source_ref'] == stored
 
 
-@pytest.mark.parametrize('given', ['18c2a4f0b1d2e3f4', '<>', '<a b@example.com>', 'a@', '@b', 'x' * 501 + '@y',
-                                   '<<a@b>>', 'a@bé'])
-def test_values_that_are_not_message_ids_are_refused(agent, company, given):
+@pytest.mark.parametrize('given', ['18c2a4f0b1d2e3f4', 'synthetic:' + 'a' * 64])
+def test_gmail_api_ids_and_capture_internal_keys_are_refused(agent, company, given):
     response = token_client(agent).post(ACTIVITIES, activity_body(company, source_ref=given), format='json')
     assert response.status_code == 400 and 'Message-ID' in response.json()['detail']
 

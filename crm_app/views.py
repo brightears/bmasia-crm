@@ -111,7 +111,7 @@ from .serializers import (
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
     TaskAssigneePermission, ReadOnlyForNonOwner,
-    CommercialDocumentPreviewPermission,
+    CommercialDocumentPreviewPermission, PersonSignedInToWebsite,
 )
 from .rene_auth import (
     IsReneRenewalReaderOrAuthenticatedUser,
@@ -471,11 +471,25 @@ class UserViewSet(BaseModelViewSet):
     ordering_fields = ['username', 'email', 'role', 'date_joined', 'last_login']
     ordering = ['-date_joined']
 
+    # Reads, and the actions that act only on the caller's own account. Every
+    # other action, inherited ones included, changes who may sign in, with which
+    # password or role: staff and a person signed in to the website only.
+    # crm_app/tests/test_user_admin_routes.py fails when an action is added
+    # without being listed here or guarded.
+    OPEN_READ_ACTIONS = frozenset({'list', 'retrieve'})
+    SELF_SERVICE_ACTIONS = frozenset({'me', 'change_password', 'update_smtp', 'test_smtp', 'upload_avatar'})
+
     def get_permissions(self):
-        """Admin required for create/update/delete, authenticated for list/retrieve"""
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminUser()]
-        return [IsAuthenticated()]
+        if self.action in self.OPEN_READ_ACTIONS or self.action in self.SELF_SERVICE_ACTIONS:
+            return [IsAuthenticated()]
+        return [IsAdminUser(), PersonSignedInToWebsite()]
+
+    @action(detail=False, methods=['post'])
+    def bulk_operations(self, request):
+        """Not available for users: accounts are changed one at a time."""
+        return Response({'error': 'Users are changed one at a time on the Users page; '
+                                  'bulk changes to users are not available.'},
+                        status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     @action(detail=False, methods=['get', 'patch'])
     def me(self, request):
@@ -494,7 +508,9 @@ class UserViewSet(BaseModelViewSet):
                             status=status.HTTP_400_BAD_REQUEST)
         data.pop('username', None)
         # A new password needs the current one, as in change_password.
-        current_password = data.pop('current_password', None)
+        # .get, not .pop: on a multipart body QueryDict.pop returns a list.
+        current_password = request.data.get('current_password')
+        data.pop('current_password', None)
         if data.get('password') and not (
                 current_password and request.user.check_password(current_password)):
             return Response({'current_password': ['Enter your current password to set a new one.']},

@@ -65,16 +65,43 @@ def payload_sha256(body):
 # ------------------------------------------------------------------ text
 
 
-# Zero-width non-joiner and joiner: needed inside words of some scripts.
+# Characters refused in single-line values: they change the order or the look of
+# text without being seen. Direction embeddings, overrides and isolates, direction
+# marks, the Arabic letter mark, zero-width space, word joiner, invisible
+# operators, the byte-order mark, soft hyphen, Mongolian vowel separator and the
+# interlinear annotation characters.
+REFUSED_FORMAT_CHARACTERS = frozenset(
+    [chr(c) for c in range(0x202A, 0x202F)] + [chr(c) for c in range(0x2066, 0x206A)]
+    + ['‎', '‏', '؜', '​', '⁠', '⁡', '⁢', '⁣', '⁤',
+       '﻿', '­', '᠎', '￹', '￺', '￻']
+)
+# Zero-width non-joiner and joiner: needed inside words of some scripts and in
+# emoji sequences (a family, a profession), never between ASCII characters.
 _JOINERS = frozenset('‌‍')
+_TAG_FIRST, _TAG_LAST, _TAG_CANCEL, _BLACK_FLAG = 0xE0020, 0xE007E, 0xE007F, 0x1F3F4
 
 
-def _joins_letters(text, index):
-    """A joiner sits between two non-ASCII letters or marks (as in Indic or Persian words)."""
+def _joinable(char):
+    if ord(char) <= 0x7F:
+        return False
+    return unicodedata.category(char)[0] in 'LMS' or 0x1F3FB <= ord(char) <= 0x1F3FF
+
+
+def _joiner_allowed(text, index):
+    """A joiner sits between two non-ASCII letters, marks or symbols (emoji)."""
     if index == 0 or index == len(text) - 1:
         return False
-    before, after = text[index - 1], text[index + 1]
-    return all(ord(char) > 0x7F and unicodedata.category(char)[0] in 'LM' for char in (before, after))
+    return _joinable(text[index - 1]) and _joinable(text[index + 1])
+
+
+def _tag_allowed(text, index):
+    """Tag characters only inside a subdivision flag: black flag, tags, cancel tag."""
+    previous = ord(text[index - 1]) if index else 0
+    in_sequence = previous == _BLACK_FLAG or _TAG_FIRST <= previous <= _TAG_LAST
+    code = ord(text[index])
+    if code == _TAG_CANCEL:
+        return _TAG_FIRST <= previous <= _TAG_LAST
+    return in_sequence
 
 
 def has_control(text, allow_newlines=False, allow_format=False):
@@ -83,10 +110,10 @@ def has_control(text, allow_newlines=False, allow_format=False):
     Always refused: control characters (tabs and line breaks only with
     allow_newlines), surrogates and line/paragraph separators. Unless
     allow_format (used for bodies and quotes copied verbatim from a source),
-    also refused: private-use and unassigned code points, and format characters
-    such as direction overrides, zero-width spaces and the byte-order mark. A
-    zero-width (non-)joiner is kept only between two non-ASCII letters or marks.
-    Thai letters, vowel and tone marks are ordinary letters and marks.
+    also refused: private-use and unassigned code points, the characters in
+    REFUSED_FORMAT_CHARACTERS, a joiner that is not between two non-ASCII letters,
+    marks or emoji, and tag characters outside a subdivision flag. Other format
+    characters (emoji sequences, Thai, Arabic and Indic text) are kept.
     """
     for index, char in enumerate(text):
         if allow_newlines and char in '\n\r\t':
@@ -96,11 +123,36 @@ def has_control(text, allow_newlines=False, allow_format=False):
             return True
         if allow_format:
             continue
-        if category in ('Co', 'Cn'):
+        if category in ('Co', 'Cn') or char in REFUSED_FORMAT_CHARACTERS:
             return True
-        if category == 'Cf' and not (char in _JOINERS and _joins_letters(text, index)):
+        if char in _JOINERS and not _joiner_allowed(text, index):
+            return True
+        if _TAG_FIRST <= ord(char) <= _TAG_CANCEL and not _tag_allowed(text, index):
             return True
     return False
+
+
+_HOMOGLYPH_SCRIPTS = frozenset({'CYRILLIC', 'GREEK'})
+
+
+def mixed_script(text):
+    """Whether a value mixes scripts in a way that can mislead a reader.
+
+    Latin letters together with Cyrillic or Greek letters (look-alikes), or
+    right-to-left letters together with left-to-right letters (the display order
+    can differ from the stored order). Thai or Indic text next to Latin, as in
+    an address, is not flagged.
+    """
+    scripts, rtl, ltr = set(), False, False
+    for char in text or '':
+        if not unicodedata.category(char).startswith('L'):
+            continue
+        bidi = unicodedata.bidirectional(char)
+        rtl = rtl or bidi in ('R', 'AL')
+        ltr = ltr or bidi == 'L'
+        name = unicodedata.name(char, '')
+        scripts.add(name.split(' ', 1)[0])
+    return ('LATIN' in scripts and bool(scripts & _HOMOGLYPH_SCRIPTS)) or (rtl and ltr)
 
 
 def optional_str(body, key):
@@ -139,14 +191,15 @@ def token_field(body, key, max_length):
 
 
 def source_ref_field(body, key, source_system, max_length):
-    """A source reference; for gmail the canonical RFC 822 Message-ID (agent_inbox.message_ids)."""
+    """A source reference; for gmail the canonical Message-ID (agent_inbox.message_ids)."""
     if source_system == 'gmail' and body.get(key) not in (None, ''):
-        from agent_inbox.message_ids import canonical_message_id
+        from agent_inbox.message_ids import canonical_message_id, gmail_ref_problem
 
         canonical = canonical_message_id(optional_str(body, key))
-        if canonical is None:
+        problem = gmail_ref_problem(canonical)
+        if problem:
             raise bad(f'{key} for gmail must be the message\'s RFC 822 Message-ID, '
-                      'for example <CAB12345@mail.example.com>, not a Gmail API id')
+                      f'for example <CAB12345@mail.example.com>: this one {problem}')
         return canonical
     return token_field(body, key, max_length)
 

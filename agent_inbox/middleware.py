@@ -2,9 +2,14 @@
 
 Activity.company and ChangeProposal.company are PROTECT, so deleting a company
 that has either raises ProtectedError, which would otherwise end in a server
-error. The company delete request runs in one transaction here, so nothing it
-wrote before the refusal (such as its audit row) is kept. Other requests and
-other protected deletes are left to the existing handling.
+error. The two company delete requests (``DELETE /api/v1/companies/{id}/`` and
+``POST /api/v1/companies/bulk_operations/``) run in one transaction here, so
+nothing they wrote before the refusal (such as audit rows) is kept. Only those
+two requests are wrapped or answered; everything else passes through unchanged.
+
+When a project-wide delete guard is in place (one that refuses the delete before
+it is attempted and answers protected-record errors itself), this middleware
+never acts and can be removed together with its line in settings.MIDDLEWARE.
 """
 import re
 
@@ -12,7 +17,14 @@ from django.db import transaction
 from django.db.models import ProtectedError
 from django.http import JsonResponse
 
-_COMPANY_DELETE = re.compile(r'^/api/v1/companies/[^/]+/$')
+_WRAPPED = (
+    ('DELETE', re.compile(r'^/api/v1/companies/[0-9a-fA-F-]{36}/$')),
+    ('POST', re.compile(r'^/api/v1/companies/bulk_operations/$')),
+)
+
+
+def _is_company_delete(request):
+    return any(request.method == method and pattern.match(request.path) for method, pattern in _WRAPPED)
 
 
 class InboxProtectedDeleteMiddleware:
@@ -20,16 +32,16 @@ class InboxProtectedDeleteMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        if request.method != 'DELETE' or not _COMPANY_DELETE.match(request.path):
+        if not _is_company_delete(request):
             return self.get_response(request)
         with transaction.atomic():
             response = self.get_response(request)
-            if getattr(request, '_inbox_delete_refused', False):
+            if getattr(request, '_inbox_delete_refused', False) or response.status_code >= 400:
                 transaction.set_rollback(True)
         return response
 
     def process_exception(self, request, exception):
-        if not isinstance(exception, ProtectedError) or not _COMPANY_DELETE.match(request.path):
+        if not isinstance(exception, ProtectedError) or not _is_company_delete(request):
             return None
         from agent_inbox.models import Activity, ChangeProposal
 
