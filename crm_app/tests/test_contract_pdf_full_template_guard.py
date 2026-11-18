@@ -85,6 +85,31 @@ def test_tags_spanning_the_zones_heading_print_as_text(agreement, content):  # n
     assert ZONE_NAME in text and BMA_SIGNER_NAME in text
 
 
+@pytest.mark.parametrize('content, company_name', [
+    # A filled value ending in ":" makes the line before the zones table a
+    # heading only after the values are filled in.
+    ('Services: {{service_items}}<br/><b>Intro<br/>Services for {{company_name}}</b>{{zones_table}}'
+     '<br/>{{signature_blocks}}', 'Example Hotel:'),
+    # The text before a signature layout is laid out as one part.
+    ('Services: {{service_items}}<br/>X<b>---Y{{signature_blocks}}---</b>Z<br/>{{zones_table}}', 'Example Hotel'),
+], ids=['heading_from_value', 'before_signature'])
+def test_a_laid_out_part_whose_tags_do_not_pair_up_prints_as_text(agreement, content, company_name, caplog):  # noqa: F811
+    agreement.company.name = company_name
+    agreement.company.save()
+    template = ContractTemplate.objects.create(
+        name='Example full agreement', template_type='preamble', pdf_format='standard', content=content,
+    )
+    agreement.preamble_template = template
+    agreement.save()
+    with caplog.at_level(logging.WARNING, logger='crm_app.views'):
+        text = _render(agreement)
+    assert ZONE_NAME in text and BMA_SIGNER_NAME in text
+    assert '<b>' in text
+    messages = [r.getMessage() for r in caplog.records if r.name == 'crm_app.views']
+    assert any('ContractTemplate.content' in m and str(template.pk) in m for m in messages), messages
+    assert not any('Intro' in m or 'Example Hotel' in m for m in messages)
+
+
 def test_well_formed_body_keeps_its_formatting(agreement):  # noqa: F811
     _template(agreement, '<b>Client:</b> {{legal_entity_name}}<br/><b>Bold</b> and <i>italic</i> clause.<br/>'
                          '<b>---</b><br/>After the break.<br/>')

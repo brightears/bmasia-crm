@@ -3185,7 +3185,7 @@ class ContractViewSet(BaseModelViewSet):
             # FULL TEMPLATE MODE: Template contains complete contract text
             # Skip all hardcoded clauses and render only template content
             from crm_app.contract_pdf_v2 import (
-                ContractTailoringClarification, tailored_template_content,
+                ContractTailoringClarification, markup_as_text, tailored_template_content,
             )
             try:
                 source_content, full_body_override = full_template_source(contract)
@@ -3198,12 +3198,26 @@ class ContractViewSet(BaseModelViewSet):
             # splits it at the zones table, the signature blocks, page-break
             # markers and the zones heading; the values filled in above are
             # already escaped.
+            body_field = 'Contract.preamble_custom' if full_body_override else 'ContractTemplate.content'
+            body_record = getattr(contract if full_body_override else contract.preamble_template, 'pk', None)
             template_source = stored_markup(
-                template_source,
-                field='Contract.preamble_custom' if full_body_override else 'ContractTemplate.content',
-                record=getattr(contract if full_body_override else contract.preamble_template, 'pk', None),
-                pieces=self._template_layout_pieces,
+                template_source, field=body_field, record=body_record, pieces=self._template_layout_pieces,
             )
+
+            def layout_paragraph(content, style):
+                """One laid-out part of the guarded body.
+
+                A cut the guard cannot foresee (a filled value that turns a line
+                into the zones heading, a hand-built signature segment) can
+                still leave a part whose tags do not pair up; it prints as text
+                instead of stopping the PDF.
+                """
+                try:
+                    return Paragraph(content, style)
+                except Exception:
+                    logger.warning('Contract PDF: %s on record %s has formatting tags that do not pair up in '
+                                   'one laid-out part; printed as plain text.', body_field, body_record)
+                    return Paragraph(markup_as_text(content), style)
             template_content = re.sub(
                 r'\{\{\s*zones_table\s*\}\}',
                 '{{zones_table}}',
@@ -3244,10 +3258,10 @@ class ContractViewSet(BaseModelViewSet):
                         if i:
                             elements.append(PB())
                         if section.strip():
-                            elements.append(Paragraph(section.strip(), body_style))
+                            elements.append(layout_paragraph(section.strip(), body_style))
                             elements.append(Spacer(1, 0.2*inch))
                 else:
-                    elements.append(Paragraph(content, body_style))
+                    elements.append(layout_paragraph(content, body_style))
                     elements.append(Spacer(1, 0.2*inch))
 
             # Helper function to render template segments with special variable handling
@@ -3277,7 +3291,7 @@ class ContractViewSet(BaseModelViewSet):
                     )
                     keep_items = []
                     if before.strip():
-                        keep_items.append(Paragraph(before, body_style))
+                        keep_items.append(layout_paragraph(before, body_style))
                     keep_items.append(sig_table)
                     elements.append(KeepTogether(keep_items))
                     elements.append(Spacer(1, 0.2*inch))
@@ -3306,19 +3320,19 @@ class ContractViewSet(BaseModelViewSet):
                                 kt_list = []
                                 if heading_content.strip():
                                     heading_style = body_style.clone('section_heading', spaceAfter=6)
-                                    kt_list.append(Paragraph(heading_content, heading_style))
+                                    kt_list.append(layout_paragraph(heading_content, heading_style))
                                 kt_list.append(zone_table)
                                 kt_list.append(Spacer(1, 0.15*inch))
                                 elements.append(KeepTogether(kt_list))
                             else:
                                 if heading_content.strip():
-                                    elements.append(Paragraph(heading_content, body_style))
+                                    elements.append(layout_paragraph(heading_content, body_style))
                                 elements.append(zone_table)
                                 elements.append(Spacer(1, 0.15*inch))
                         elif heading_content.strip():
-                            elements.append(Paragraph(heading_content, body_style))
+                            elements.append(layout_paragraph(heading_content, body_style))
                     elif heading_content.strip():
-                        elements.append(Paragraph(heading_content, body_style))
+                        elements.append(layout_paragraph(heading_content, body_style))
 
                     # Process content after {{zones_table}} (may contain other special vars)
                     if len(parts) > 1 and parts[1].strip():
@@ -3343,7 +3357,7 @@ class ContractViewSet(BaseModelViewSet):
                     )
                     if before.strip():
                         keep_style = body_style.clone('keep_sig_heading', keepWithNext=True, spaceAfter=6)
-                        elements.append(Paragraph(before, keep_style))
+                        elements.append(layout_paragraph(before, keep_style))
                     elements.append(KeepTogether([sig_table]))
                     elements.append(Spacer(1, 0.2*inch))
                     # Process content after {{signature_blocks}}
