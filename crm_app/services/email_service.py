@@ -27,6 +27,33 @@ from crm_app.api_errors import mail_failure_text
 logger = logging.getLogger(__name__)
 
 
+def assign_message_id(msg, from_email):
+    """Give an outgoing message its Message-ID before it is sent and return it.
+
+    Django generates a fresh Message-ID every time ``message()`` is called
+    unless one is already among the extra headers, so reading it back after
+    sending gives an id that never went out. Setting it here makes the header
+    that is sent and the value stored on the EmailLog the same.
+
+    The id's domain is the From address's domain (not the server's host name);
+    without a parseable From it falls back to Django's default.
+    """
+    from email.utils import make_msgid, parseaddr
+    from django.core.mail.utils import DNS_NAME
+    address = parseaddr(from_email or '')[1]
+    domain = address.rsplit('@', 1)[1].strip().lower() if '@' in address else ''
+    try:
+        domain = domain.encode('idna').decode('ascii') if domain else ''
+    except UnicodeError:
+        domain = ''
+    message_id = make_msgid(domain=domain or DNS_NAME)
+    # First among the extra headers, so the header sits where Django put its
+    # own Message-ID before (right after Date): only the value changes.
+    msg.extra_headers = {'Message-ID': message_id, **{
+        k: v for k, v in msg.extra_headers.items() if k.lower() != 'message-id'}}
+    return message_id
+
+
 class EmailService:
     """Main email service for sending automated emails"""
     
@@ -226,15 +253,13 @@ class EmailService:
                     except Exception as e:
                         logger.warning(f"Failed to attach file {attachment.name}: {e}")
             
-            # Send email
+            # Send email with a Message-ID fixed beforehand, so the stored id
+            # is the one that went out (used for reply matching).
+            message_id = assign_message_id(msg, from_email)
             msg.send(fail_silently=False)
-
-            # Capture SMTP Message-ID for reply matching
             try:
-                smtp_message_id = msg.message()['Message-ID']
-                if smtp_message_id:
-                    email_log.message_id = smtp_message_id
-                    email_log.save(update_fields=['message_id'])
+                email_log.message_id = message_id
+                email_log.save(update_fields=['message_id'])
             except Exception:
                 pass  # Non-critical — reply matching falls back to subject line
 
@@ -976,9 +1001,11 @@ class EmailService:
                     msg.extra_headers['List-Unsubscribe'] = self._get_unsubscribe_url(contact)
 
                 # Send email
+                message_id = assign_message_id(msg, from_email)
                 msg.send(fail_silently=False)
 
-                # Mark as sent
+                # Mark as sent (mark_as_sent saves the row, Message-ID included)
+                email_log.message_id = message_id
                 email_log.mark_as_sent()
 
                 success_count += 1
@@ -1199,9 +1226,11 @@ class EmailService:
                     msg.extra_headers['List-Unsubscribe'] = self._get_unsubscribe_url(contact)
 
                 # Send email
+                message_id = assign_message_id(msg, from_email)
                 msg.send(fail_silently=False)
 
-                # Mark as sent
+                # Mark as sent (mark_as_sent saves the row, Message-ID included)
+                email_log.message_id = message_id
                 email_log.mark_as_sent()
 
                 success_count += 1
@@ -1426,9 +1455,11 @@ class EmailService:
                     msg.extra_headers['List-Unsubscribe'] = self._get_unsubscribe_url(contact)
 
                 # Send email
+                message_id = assign_message_id(msg, from_email)
                 msg.send(fail_silently=False)
 
-                # Mark as sent
+                # Mark as sent (mark_as_sent saves the row, Message-ID included)
+                email_log.message_id = message_id
                 email_log.mark_as_sent()
 
                 success_count += 1
@@ -1607,7 +1638,9 @@ class EmailService:
                 if contact:
                     msg.extra_headers['List-Unsubscribe'] = self._get_unsubscribe_url(contact)
 
+                message_id = assign_message_id(msg, from_email)
                 msg.send(fail_silently=False)
+                email_log.message_id = message_id
                 email_log.mark_as_sent()
                 success_count += 1
                 logger.info(f"Receipt email sent successfully to {recipient}")
@@ -1789,6 +1822,7 @@ class EmailService:
                     msg.extra_headers['List-Unsubscribe'] = self._get_unsubscribe_url(contact)
 
                 # Send email
+                message_id = assign_message_id(msg, from_email)
                 msg.send(fail_silently=False)
 
                 # Determine actual from_email for logging (extract from display format if needed)
@@ -1808,7 +1842,8 @@ class EmailService:
                     body_text=body,
                     status='sent',
                     sent_at=timezone.now(),
-                    contract=contract
+                    contract=contract,
+                    message_id=message_id,
                 )
 
                 success_count += 1
