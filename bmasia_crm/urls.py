@@ -20,8 +20,10 @@ from django.views.generic import RedirectView
 from crm_app.login_throttle import throttled_obtain_auth_token
 from crm_app.rene_mcp_server import RenePhase2MCPView
 from crm_app.views import email_tracking_pixel
+from crm_app.health import healthz
 
 urlpatterns = [
+    path('healthz/', healthz, name='healthz'),  # process is up; unauthenticated, no database
     path('admin/', admin.site.urls),
     path('api/', include('crm_app.urls')),  # API endpoints under /api/
     path('api-auth/', include('rest_framework.urls')),

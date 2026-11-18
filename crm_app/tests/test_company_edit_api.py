@@ -57,7 +57,9 @@ def test_company_patch_rolls_back_if_audit_fails(monkeypatch):
         raise ValueError('synthetic audit failure')
 
     monkeypatch.setattr(CompanyViewSet, 'log_action', fail_audit)
-    with pytest.raises(ValueError, match='synthetic audit failure'):
-        CompanyViewSet.as_view({'patch': 'partial_update'})(request, pk=str(company.pk))
+    # The API answers with a generic 500 (crm_app/api_errors.py); the write is still rolled back.
+    response = CompanyViewSet.as_view({'patch': 'partial_update'})(request, pk=str(company.pk))
+    assert response.status_code == 500
+    assert 'synthetic' not in str(response.data)
     company.refresh_from_db()
     assert company.city == ''
