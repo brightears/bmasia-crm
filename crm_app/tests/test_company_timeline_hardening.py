@@ -57,6 +57,9 @@ def _cursor(t, i):
     ({'cursor': _cursor('9999-12-31T23:59:59+00:00', f'note:{uuid.uuid4()}')}, 'cursor'),
     ({'cursor': _cursor('2026-11-10T09:30:00', f'note:{uuid.uuid4()}')}, 'cursor'),  # no zone
     ({'cursor': 'x' * 600}, 'cursor'),
+    # A source key nobody registered: only the shape check stands between it and a query.
+    ({'cursor': _cursor('2026-11-10T09:30:00+07:00', 'zz_unknown:a b')}, 'cursor'),
+    ({'cursor': _cursor('2026-11-10T09:30:00+07:00', 'zz_unknown:' + 'x' * 65)}, 'cursor'),
     ({'cursor': 'not-a-cursor'}, 'cursor'),
     ({'from': '0001-01-01'}, 'from'),
     ({'to': '9999-12-31'}, 'to'),

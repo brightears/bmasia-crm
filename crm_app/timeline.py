@@ -1680,7 +1680,8 @@ def build_page(ctx: TimelineContext, cursor: Cursor | None, page_size: int,
         need = page_size - len(page)
         page.extend(ready[:need])
         if len(ready) >= need:
-            more = len(ready) > need or cutoff is not None or len(pool) > len(ready)
+            # With no cut-off every source is exhausted and the whole pool was ready.
+            more = len(ready) > need or cutoff is not None
             next_cursor = Cursor(*page[-1].sort_key) if more and page else None
             break
         if cutoff is None:
