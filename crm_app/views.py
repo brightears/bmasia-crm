@@ -107,7 +107,9 @@ from .serializers import (
     ProspectSequenceSerializer, ProspectSequenceStepSerializer, ProspectEnrollmentSerializer,
     ProspectStepExecutionSerializer, ProspectReplySerializer, AIEmailDraftSerializer
 )
-from .api_errors import internal_error_text, smtp_error_text
+from .api_errors import (
+    client_error_text, error_response, internal_error_text, mail_failure_text, safe_mail_message, smtp_error_text,
+)
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
     TaskAssigneePermission, ReadOnlyForNonOwner,
@@ -1377,7 +1379,7 @@ class ContractViewSet(BaseModelViewSet):
                 payload = {key: value for key, value in message.items() if key != 'status_code'}
                 return Response(payload, status=response_status)
             return Response(
-                {'error': message},
+                {'error': safe_mail_message(request, message)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -6274,7 +6276,7 @@ class InvoiceViewSet(BaseModelViewSet):
 
         if not success:
             return Response(
-                {'error': message},
+                {'error': safe_mail_message(request, message)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -6411,7 +6413,7 @@ class InvoiceViewSet(BaseModelViewSet):
 
         if not success:
             return Response(
-                {'error': message},
+                {'error': safe_mail_message(request, message)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -7249,7 +7251,7 @@ class QuoteViewSet(BaseModelViewSet):
 
         if not success:
             return Response(
-                {'error': message},
+                {'error': safe_mail_message(request, message)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -9094,7 +9096,8 @@ class SequenceEnrollmentViewSet(viewsets.ModelViewSet):
                 pending_execution.refresh_from_db()
                 return Response({
                     'success': False,
-                    'error': pending_execution.error_message or 'Unknown error'
+                    'error': mail_failure_text(request, 'Failed to send the sequence email',
+                                               pending_execution.error_message or 'unknown error'),
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         except Exception as e:
@@ -9181,10 +9184,7 @@ class CustomerSegmentViewSet(viewsets.ModelViewSet):
                 'segment_type': segment.segment_type,
             })
         except Exception as e:
-            return Response(
-                {'error': internal_error_text(request, e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response(request, e)
 
     @action(detail=True, methods=['post'])
     def recalculate(self, request, pk=None):
@@ -9203,10 +9203,7 @@ class CustomerSegmentViewSet(viewsets.ModelViewSet):
                 'last_calculated_at': segment.last_calculated_at,
             })
         except Exception as e:
-            return Response(
-                {'error': internal_error_text(request, e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response(request, e)
 
     @action(detail=True, methods=['post'])
     def enroll_in_sequence(self, request, pk=None):
@@ -9244,10 +9241,7 @@ class CustomerSegmentViewSet(viewsets.ModelViewSet):
         try:
             members = segment.get_members()
         except Exception as e:
-            return Response(
-                {'error': internal_error_text(request, e, 'Error getting segment members')},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response(request, e, 'Error getting segment members')
 
         email_service = EmailService()
         enrolled_count = 0
@@ -9383,10 +9377,13 @@ class CustomerSegmentViewSet(viewsets.ModelViewSet):
                 'preview': ContactSerializer(preview, many=True, context={'request': request}).data
             })
         except Exception as e:
+            reason = client_error_text(e)  # a bad field or value in the criteria: say which
+            if reason:
+                return Response({'valid': False, 'error': reason}, status=status.HTTP_400_BAD_REQUEST)
             return Response({
                 'valid': False,
                 'error': internal_error_text(request, e, 'These filter criteria could not be applied'),
-            }, status=status.HTTP_400_BAD_REQUEST)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # Support Ticket System ViewSets
@@ -9471,10 +9468,7 @@ class TicketViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         except Exception as e:
-            return Response(
-                {'error': internal_error_text(request, e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response(request, e)
 
     @action(detail=True, methods=['post'])
     def assign(self, request, pk=None):
@@ -9514,10 +9508,7 @@ class TicketViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
-            return Response(
-                {'error': internal_error_text(request, e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response(request, e)
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
@@ -9653,10 +9644,7 @@ class TicketAttachmentViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         except Exception as e:
-            return Response(
-                {'error': internal_error_text(request, e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response(request, e)
 
 
 # ============================================================================

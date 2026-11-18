@@ -15,34 +15,17 @@ request shares it.
 """
 import logging
 import re
-import uuid
 
 from django.db.models import ProtectedError, RestrictedError
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler, set_rollback
 
+from crm_app.request_ids import request_id_for  # noqa: F401 (re-exported)
+
 logger = logging.getLogger('crm_app.api_errors')
 
 GENERIC_ERROR = 'Something went wrong on the server'
-_INCOMING_ID = re.compile(r'^[A-Za-z0-9._-]{8,64}$')
-
-
-def request_id_for(request):
-    """The id for this request, made once and reused."""
-    raw = getattr(request, '_request', request)  # DRF Request wraps Django's HttpRequest
-    if raw is None:
-        return uuid.uuid4().hex[:16]
-    existing = getattr(raw, 'crm_request_id', None)
-    if existing:
-        return existing
-    incoming = (getattr(raw, 'META', {}) or {}).get('HTTP_X_REQUEST_ID', '')
-    request_id = incoming if _INCOMING_ID.match(incoming or '') else uuid.uuid4().hex[:16]
-    try:
-        raw.crm_request_id = request_id
-    except AttributeError:
-        pass
-    return request_id
 
 
 def _log(request, exc, summary):
@@ -58,6 +41,57 @@ def internal_error_text(request, exc, summary=GENERIC_ERROR):
     """Log ``exc`` and return text safe to show: the summary plus the request id."""
     _log(request, exc, summary)
     return f'{summary}. Reference: {request_id_for(request)}'
+
+
+def client_error_text(exc):
+    """The message of an exception that means the request itself was wrong, else None.
+
+    Django validation errors (a malformed id, a bad value), ValueError raised on input,
+    FieldError (an unknown field in filter criteria) and a missing related record are
+    the caller's to fix, and their message says what to fix.
+    """
+    from django.core.exceptions import FieldError, ObjectDoesNotExist, ValidationError
+
+    if isinstance(exc, ValidationError):
+        return ' '.join(exc.messages)
+    if isinstance(exc, (ValueError, FieldError)):
+        return str(exc)
+    if isinstance(exc, ObjectDoesNotExist):
+        return 'A record named in the request does not exist.'
+    return None
+
+
+def error_response(request, exc, summary=GENERIC_ERROR):
+    """400 with the reason for a caller's mistake; otherwise a logged 500 with a reference."""
+    reason = client_error_text(exc)
+    if reason:
+        return Response({'error': reason}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({'error': internal_error_text(request, exc, summary)},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def mail_failure_text(request, summary, detail):
+    """The mail layer failed: log what the mail server said; give the caller a reference."""
+    reference = request_id_for(request)  # a fresh id when there is no request (crons)
+    logger.error('%s [request_id=%s]: %s', summary, reference, detail)
+    return f'{summary}. Reference: {reference}'
+
+
+# Mail-layer messages written by the code itself, safe to pass on.
+_OWN_MAIL_MESSAGES = re.compile(
+    r'^(No recipients found for this \w+'
+    r'|No receipt number generated for this invoice'
+    r'|\w+ with ID [\w-]+ not found'
+    r'|Contract PDF generation was blocked \(HTTP \d{3}\)'
+    r'|.+\. Reference: [A-Za-z0-9._-]{8,64})$'
+)
+
+
+def safe_mail_message(request, message):
+    """Pass on the mail layer's own wording; replace anything else (a mail server's reply)."""
+    if isinstance(message, str) and _OWN_MAIL_MESSAGES.match(message):
+        return message
+    return mail_failure_text(request, 'Failed to send the email', message)
 
 
 def smtp_error_text(request, exc):

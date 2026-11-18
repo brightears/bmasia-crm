@@ -180,3 +180,98 @@ def test_healthz_is_public_and_touches_no_database(client, django_assert_num_que
 def test_healthz_only_answers_reads(client):
     assert client.post('/healthz/').status_code == 405
     assert client.head('/healthz/').status_code == 200
+
+
+def test_healthz_answers_without_the_trailing_slash(client):
+    response = client.get('/healthz')
+    assert response.status_code == 200
+    assert response.json() == {'status': 'ok'}
+
+
+# --- the mail layer's failure text ---------------------------------------------------------
+
+def _invoice_for_send():
+    from datetime import date
+    from decimal import Decimal
+    from crm_app.models import Contact, Invoice
+    company = Company.objects.create(name='Mail Test Resort', billing_entity='BMAsia Limited')
+    Contact.objects.create(company=company, name='Billing', email='billing@example.com', receives_invoice_emails=True)
+    return Invoice.objects.create(company=company, invoice_number='INV-MAIL-1', status='Draft',
+                                  issue_date=date(2026, 11, 1), due_date=date(2026, 12, 1),
+                                  amount=Decimal('10'), total_amount=Decimal('10'))
+
+
+def test_a_mail_server_reply_does_not_reach_the_caller(api, caplog):
+    invoice = _invoice_for_send()
+    with mock.patch('django.core.mail.EmailMultiAlternatives.send',
+                    side_effect=smtplib.SMTPDataError(554, b'5.7.1 relay.internal.example rejected')), \
+            mock.patch('crm_app.views.InvoiceViewSet.pdf') as pdf:
+        pdf.return_value.content = b'%PDF-1.4'
+        pdf.return_value.status_code = 200
+        with caplog.at_level(logging.ERROR):
+            response = api.post(f'/api/v1/invoices/{invoice.pk}/send/', {'recipients': ['billing@example.com']},
+                                format='json',
+                                HTTP_X_REQUEST_ID='mail-ref-12345')
+    assert response.status_code == 500
+    assert response.data['error'] == 'Failed to send the invoice to any recipient. Reference: mail-ref-12345'
+    assert 'relay.internal' not in str(response.data)
+    assert any('mail-ref-12345' in r.getMessage() and 'relay.internal' in r.getMessage() for r in caplog.records)
+
+
+def test_a_pdf_failure_in_the_mail_layer_is_generic():
+    from crm_app.services.email_service import EmailService
+    invoice = _invoice_for_send()
+    with mock.patch('crm_app.views.InvoiceViewSet.pdf', side_effect=RuntimeError(SECRET)):
+        ok, message = EmailService().send_invoice_email(invoice_id=invoice.pk, recipients=['billing@example.com'])
+    assert ok is False
+    assert message.startswith('Failed to generate the PDF. Reference: ')
+    assert SECRET not in message
+
+
+# --- caller mistakes stay 400 with their reason --------------------------------------------
+
+def test_a_bad_user_id_on_ticket_assign_is_a_400_with_the_reason(api):
+    from crm_app.models import Ticket
+    ticket = Ticket.objects.create(company=Company.objects.create(name='Ticket Co'), subject='Zone offline',
+                                   description='x')
+    response = api.post(f'/api/v1/tickets/{ticket.pk}/assign/', {'user_id': 'not-a-uuid'}, format='json')
+    assert response.status_code == 400
+    assert 'is not a valid UUID' in response.data['error']
+
+
+def test_an_unknown_field_in_segment_filters_is_named(api):
+    response = api.post('/api/v1/segments/validate_filters/', {'filter_criteria': {
+        'entity': 'contact', 'match_type': 'all',
+        'rules': [{'field': 'shoe_size', 'operator': 'equals', 'value': '42'}],
+    }}, format='json')
+    assert response.status_code == 400
+    assert response.data['valid'] is False
+    assert 'shoe_size' in response.data['error']
+
+
+def test_an_unexpected_failure_at_a_former_400_site_is_a_500(api):
+    from crm_app.models import CustomerSegment
+    segment = CustomerSegment.objects.create(name='Seg', segment_type='dynamic', filter_criteria={})
+    with mock.patch.object(CustomerSegment, 'update_member_count', side_effect=RuntimeError(SECRET)):
+        response = api.post(f'/api/v1/segments/{segment.pk}/recalculate/')
+    assert response.status_code == 500
+    assert SECRET not in str(response.data)
+
+
+@pytest.mark.parametrize('path, service', [
+    ('invoices/{id}/send/', 'send_invoice_email'),
+    ('invoices/{id}/send-receipt/', 'send_receipt_email'),
+])
+def test_send_endpoints_pass_on_only_the_mail_layers_own_wording(api, path, service):
+    invoice = _invoice_for_send()
+    invoice.receipt_number = 'REC-HK-2026-0001'
+    invoice.save()
+    url = '/api/v1/' + path.format(id=invoice.pk)
+    raw = "Failed to send email: (535, b'5.7.8 smtp.internal.example says no')"
+    with mock.patch(f'crm_app.services.email_service.EmailService.{service}', return_value=(False, raw)):
+        leaked = api.post(url, {}, format='json', HTTP_X_REQUEST_ID='send-ref-1234')
+    assert leaked.data['error'] == 'Failed to send the email. Reference: send-ref-1234'
+    with mock.patch(f'crm_app.services.email_service.EmailService.{service}',
+                    return_value=(False, 'No recipients found for this invoice')):
+        own = api.post(url, {}, format='json')
+    assert own.data['error'] == 'No recipients found for this invoice'

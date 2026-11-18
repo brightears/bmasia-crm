@@ -24,6 +24,7 @@ from crm_app.health import healthz
 
 urlpatterns = [
     path('healthz/', healthz, name='healthz'),  # process is up; unauthenticated, no database
+    path('healthz', healthz),  # the same without the slash (no redirect for health checkers)
     path('admin/', admin.site.urls),
     path('api/', include('crm_app.urls')),  # API endpoints under /api/
     path('api-auth/', include('rest_framework.urls')),
