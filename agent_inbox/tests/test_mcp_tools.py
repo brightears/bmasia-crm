@@ -7,13 +7,13 @@ from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
 from agent_inbox.models import Activity, ChangeProposal
-from agent_inbox.tests.conftest import PROPOSALS, iso_ago, session_client
+from agent_inbox.tests.conftest import decide, iso_ago, session_client
 from crm_app.mcp_query_help import boundary_for, published_collections, unknown_field_message
 from crm_app.models import AgentRequest
 
 # Function tools run in the MCP transport's own thread and database connection,
 # so these tests commit their fixtures instead of wrapping them in a transaction.
-pytestmark = pytest.mark.django_db(transaction=True)
+pytestmark = [pytest.mark.django_db(transaction=True), pytest.mark.usefixtures("inbox_mcp")]
 
 BODY = 'Hi team,\nplease note our new reception number is +66 2 111 2222.\nThanks, Pat'
 
@@ -39,7 +39,7 @@ def log_args(company, **overrides):
     args = {
         'company_id': str(company.pk), 'kind': 'email', 'direction': 'inbound', 'occurred_at': iso_ago(hours=1),
         'summary': 'New reception number', 'idempotency_key': 'gmail:msg-0001', 'source_system': 'gmail',
-        'body': BODY, 'source_ref': 'msg-0001',
+        'body': BODY, 'source_ref': '<msg-0001@mail.example.com>',
         'participants_json': json.dumps([{'name': 'Pat Example', 'address': 'pat@riverside.example.com',
                                           'role': 'from'}]),
     }
@@ -107,8 +107,7 @@ def test_propose_review_and_learn_the_outcome(agent, person, company):
     assert listed['count'] == 1 and listed['proposals'][0]['status'] == 'proposed'
     assert listed['proposals'][0]['confidence'] == 0.9
 
-    response = session_client(person).post(f"{PROPOSALS}{proposed['id']}/reject/",
-                                           {'reason': 'That number belongs to the spa'}, format='json')
+    response = decide(session_client(person), proposed['id'], 'reject', reason='That number belongs to the spa')
     assert response.status_code == 200
     outcome = tool(agent, 'list_proposals', {'status': 'rejected'})['proposals'][0]
     assert outcome['decision_note'] == 'That number belongs to the spa'
