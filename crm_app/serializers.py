@@ -223,6 +223,9 @@ class ZoneSerializer(serializers.ModelSerializer):
 
     def get_contract_count(self, obj):
         """Total number of contracts this zone has been linked to"""
+        links = getattr(obj, '_prefetched_zone_links', None)  # set by the list querysets
+        if links is not None:
+            return len(links)
         return obj.zone_contracts.count()
 
 
@@ -323,7 +326,12 @@ class CompanySerializer(serializers.ModelSerializer):
 
     def get_primary_contact(self, obj):
         try:
-            primary = obj.contacts.filter(is_primary=True, is_active=True).first()
+            # The company list prefetches the same filter in the same order (list_querysets.py).
+            prefetched = getattr(obj, '_prefetched_primary_contacts', None)
+            if prefetched is not None:
+                primary = prefetched[0] if prefetched else None
+            else:
+                primary = obj.contacts.filter(is_primary=True, is_active=True).first()
             if primary:
                 return ContactSerializer(primary).data
             return None
@@ -336,20 +344,29 @@ class CompanySerializer(serializers.ModelSerializer):
 
     def get_opportunities_count(self, obj):
         try:
+            if hasattr(obj, '_list_active_opportunities_count'):  # annotated by the company list
+                return obj._list_active_opportunities_count
             return obj.opportunities.filter(is_active=True).count()
         except Exception:
             return 0
 
     def get_active_contracts_count(self, obj):
         try:
+            prefetched = getattr(obj, '_prefetched_active_contracts', None)  # company list
+            if prefetched is not None:
+                return len(prefetched)
             return obj.contracts.filter(is_active=True).count()
         except Exception:
             return 0
-    
+
     def get_subscription_summary(self, obj):
         """Get a summary of active contracts/subscriptions"""
         try:
-            active_contracts = obj.contracts.filter(is_active=True)
+            # The company list prefetches the active contracts in the default order
+            # (-start_date), the order the query below iterates in.
+            active_contracts = getattr(obj, '_prefetched_active_contracts', None)
+            if active_contracts is None:
+                active_contracts = obj.contracts.filter(is_active=True)
             if not active_contracts:
                 return "No active subscriptions"
 

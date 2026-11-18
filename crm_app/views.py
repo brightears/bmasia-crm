@@ -679,14 +679,9 @@ class CompanyViewSet(BaseModelViewSet):
 
         # For list action, optimize for serialization
         if self.action == 'list':
-            # Prefetch related objects that are used in the serializer
-            queryset = queryset.select_related('parent_company').prefetch_related(
-                'contacts',
-                'zones',
-                'opportunities',
-                'contracts',
-                'child_companies'
-            )
+            # Everything CompanySerializer reads, fetched once per page (no per-row queries).
+            from crm_app.services.list_querysets import company_list_queryset
+            queryset = company_list_queryset(queryset)
         elif self.action == 'retrieve':
             # For detail view, include even more related data
             queryset = queryset.select_related('parent_company').prefetch_related(

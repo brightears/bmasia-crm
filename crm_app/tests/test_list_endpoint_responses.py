@@ -89,6 +89,7 @@ def test_list_and_detail_bodies_are_unchanged():
 
 # name -> (URL without page_size, rows in the dataset, most queries allowed).
 QUERY_CASES = {
+    'companies': ('/api/v1/companies/', 7, 9),
     # Lists that were already flat before the query-count work.
     'contacts': ('/api/v1/contacts/', 21, 2),
     'invoices': ('/api/v1/invoices/', 21, 3),
