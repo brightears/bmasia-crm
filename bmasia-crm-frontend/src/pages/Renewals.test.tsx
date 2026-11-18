@@ -53,6 +53,7 @@ const row = (n: number, over: any = {}) => ({
   days_from_end: -2,
   is_addon: false,
   never_activated: false,
+  term_2025_placeholder: false,
   ...over,
   renewal: {
     state: 'not_started',
@@ -65,8 +66,8 @@ const row = (n: number, over: any = {}) => ({
     attention_label: null,
     successor: null,
     other_linked: [],
+    live_unlinked: [],
     value_change: null,
-    value_change_basis: null,
     ...(over.renewal || {}),
   },
 });
@@ -84,7 +85,7 @@ const response = (over: any = {}) => ({
   attention_reasons: [],
   months: Array.from({ length: 12 }, (_, i) => ({
     year: 2026, month: i + 1, label: '', count: i === 10 ? 2 : 0, attention: i === 10 ? 1 : 0,
-    open: 0, renewed: 0, auto: 0, lost: 0, placeholders: 0,
+    open: 0, renewed: 0, auto: 0, lost: 0, unlinked: 0, history: 0, placeholders: i === 10 ? 1 : 0,
   })),
   count: 3,
   rows: [
@@ -99,11 +100,12 @@ const response = (over: any = {}) => ({
       value: 108000,
       renewal: {
         state: 'paid', label: 'Paid', group: 'renewed', summary_bucket: 'renewed', in_rate: true,
-        value_change: 12000, value_change_basis: 'term',
+        value_change: 12000,
         successor: {
           contract_id: '20000000-0000-0000-0000-000000000002', contract_number: 'TH-CT99102', status: 'Active',
           start_date: '2026-11-21', end_date: '2027-11-20', term_months: 12, value: 120000, currency: 'THB',
-          signed_date: null, sent_date: null, invoice_state: 'paid', other_company: false,
+          signed_date: null, sent_date: null, invoice_state: 'paid', link: 'renewal', gap_days: null,
+          other_company: false,
         },
       },
     }),
@@ -152,6 +154,9 @@ it('shows the month in words, its rows with links, states and per-currency total
     'href', '/contracts/20000000-0000-0000-0000-000000000002');
   expect(within(rows[2]).getByText('+THB 12,000')).toBeInTheDocument();
 
+  // The strip says that a closed placeholder is hidden in November.
+  expect(screen.getByRole('button', { name: /^November 2026: 2 ending, 1 need attention, 1 closed placeholders hidden/ }))
+    .toBeInTheDocument();
   const thb = screen.getByRole('region', { name: 'THB totals' });
   expect(thb).toHaveTextContent('THB 108,000');
   expect(thb).toHaveTextContent('renewals worth THB 120,000');
@@ -192,7 +197,7 @@ it('keeps filters and sort in the address and filters the rows', async () => {
   expect(screen.queryByText('Fixture Hotel 1')).not.toBeInTheDocument();
   expect(screen.getByText('1 of 2 terms')).toBeInTheDocument();
 
-  fireEvent.click(screen.getByText('Current value'));
+  fireEvent.click(screen.getByText('Annual value'));
   await waitFor(() => expect(lastLocation.search).toContain('sort=value'));
 });
 
@@ -237,4 +242,48 @@ it('ignores unknown values in the address and keeps the year arrows within bound
   fireEvent.click(await screen.findByRole('button', { name: `Next year, ${now.getFullYear() + 2}` }));
   await waitFor(() =>
     expect(screen.getByRole('button', { name: `Next year, ${now.getFullYear() + 3}` })).toBeDisabled());
+});
+
+it('shows a gap before a late renewal, a live term not linked, and what is not counted as lost', async () => {
+  api.mockResolvedValue(response({
+    rows: [
+      row(4, {
+        company: 'Gap Resort',
+        renewal: {
+          state: 'signed', label: 'Signed / active', group: 'renewed', summary_bucket: 'renewed', in_rate: true,
+          attention: 'renewed_after_gap', attention_label: 'Renewed after a gap in service', value_change: 0,
+          successor: {
+            contract_id: '30000000-0000-0000-0000-000000000004', contract_number: 'HK-CT99204', status: 'Active',
+            start_date: '2027-03-01', end_date: '2028-02-29', term_months: 12, value: 1200, currency: 'USD',
+            signed_date: null, sent_date: null, invoice_state: 'none', link: 'late', gap_days: 100,
+            other_company: false,
+          },
+        },
+      }),
+      row(5, {
+        company: 'Unlinked Inn',
+        status: 'Expired',
+        renewal: {
+          state: 'live_unlinked', label: 'Live term not linked', group: 'unlinked', summary_bucket: 'unlinked',
+          attention: 'link_the_renewal',
+          attention_label: 'The company has a live term that is not linked: link the renewal',
+          live_unlinked: [{ contract_id: '40000000-0000-0000-0000-000000000005', contract_number: 'HK-CT99305',
+                            status: 'Active', start_date: '2026-11-21' }],
+        },
+      }),
+      row(6, {
+        company: 'Stamp Bar', status: 'Expired', term_2025_placeholder: true,
+        renewal: { state: 'lapsed', label: 'Expired, not renewed', group: 'lost', summary_bucket: 'history' },
+      }),
+    ],
+  }));
+  renderAt('/renewals?year=2026&month=11');
+  expect(await screen.findByText('renewed after a 100-day gap')).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Live contract HK-CT99305, not linked' })).toHaveAttribute(
+    'href', '/contracts/40000000-0000-0000-0000-000000000005');
+  expect(screen.getByText(/Expired · 2025 placeholder term/)).toBeInTheDocument();
+  const usd = screen.getByRole('region', { name: 'USD totals' });
+  expect(usd).toHaveTextContent(
+    "Not counted as lost: 1 term whose company has a live term not linked; 1 lapsed 2025 placeholder term (last year's records).");
+  expect(usd).toHaveTextContent('0 cancelled or expired');
 });

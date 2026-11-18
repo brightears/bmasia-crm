@@ -82,6 +82,7 @@ export const STATE_TONE: Record<RenewalStateKey, ChipColor> = {
   paid: 'success',
   renewed_unlinked: 'warning',
   auto_renews: 'primary',
+  live_unlinked: 'warning',
   lapsed: 'error',
   lost: 'error',
   placeholder: 'default',
@@ -217,12 +218,6 @@ const ValueChange: React.FC<{ row: RenewalRow }> = ({ row }) => {
       {change === null ? (
         s.currency !== row.currency ? (
           <Typography variant="caption" color="text.secondary">other currency</Typography>
-        ) : row.renewal.value_change_basis === 'different_length' ? (
-          <Tooltip title="The terms differ in length, so the values are not compared.">
-            <Typography variant="caption" color="text.secondary">
-              {s.term_months ? `${s.term_months}-month term` : 'other term length'}
-            </Typography>
-          </Tooltip>
         ) : null
       ) : (
         <Typography
@@ -245,7 +240,9 @@ const ValueChange: React.FC<{ row: RenewalRow }> = ({ row }) => {
 const SuccessorCell: React.FC<{ row: RenewalRow }> = ({ row }) => {
   const s = row.renewal.successor;
   const others = row.renewal.other_linked.length;
-  const notRenewal = row.renewal.other_linked.filter((o) => o.link === 'addon' || o.link === 'mid_term');
+  const notRenewal = row.renewal.other_linked.filter(
+    (o) => o.link === 'addon' || o.link === 'mid_term' || o.link === 'overlap'
+  );
   const linkNote = notRenewal.length ? (
     <Tooltip title={notRenewal.map((o) => `${o.contract_number}: ${o.link_label}`).join('; ')}>
       <Typography variant="caption" color="text.secondary" component="div" sx={{ lineHeight: 1.3 }}>
@@ -253,6 +250,21 @@ const SuccessorCell: React.FC<{ row: RenewalRow }> = ({ row }) => {
       </Typography>
     </Tooltip>
   ) : null;
+  if (!s && row.renewal.live_unlinked.length) {
+    const c = row.renewal.live_unlinked[0];
+    return (
+      <Box>
+        <RecordLink to={`/contracts/${c.contract_id}`} label={`Live contract ${c.contract_number}, not linked`}>
+          {c.contract_number}
+        </RecordLink>
+        <Typography variant="caption" color="text.secondary" component="div" sx={{ lineHeight: 1.3 }}>
+          {c.status}
+          {c.start_date ? ` from ${formatDate(c.start_date)}` : ''} · not linked
+          {row.renewal.live_unlinked.length > 1 ? ` · +${row.renewal.live_unlinked.length - 1} more` : ''}
+        </Typography>
+      </Box>
+    );
+  }
   if (!s) {
     return (
       <Box>
@@ -273,8 +285,12 @@ const SuccessorCell: React.FC<{ row: RenewalRow }> = ({ row }) => {
         {s.start_date ? ` from ${formatDate(s.start_date)}` : ''}
         {others - notRenewal.length ? ` · +${others - notRenewal.length} more` : ''}
         {s.other_company ? ' · other company record' : ''}
-        {s.link === 'late' ? ' · starts over 60 days after the end' : ''}
       </Typography>
+      {s.link === 'late' && s.gap_days !== null && !row.term_2025_placeholder ? (
+        <Typography variant="caption" component="div" sx={{ color: toneText('warning'), fontWeight: 600, lineHeight: 1.3 }}>
+          renewed after a {s.gap_days}-day gap
+        </Typography>
+      ) : null}
       {linkNote}
     </Box>
   );
@@ -286,6 +302,7 @@ const contractFacts = (row: RenewalRow) =>
     row.property_name,
     row.never_activated ? 'Sent, never activated' : row.status !== 'Active' ? row.status : '',
     row.is_addon ? 'Add-on' : '',
+    row.term_2025_placeholder ? '2025 placeholder term' : '',
   ]
     .filter(Boolean)
     .join(' · ');
@@ -316,9 +333,20 @@ interface StripProps {
   onMonth: (m: number) => void;
   onOpen: () => void;
   onYear: (y: number) => void;
+  showPlaceholders: boolean;
 }
 
-const MonthStrip: React.FC<StripProps> = ({ data, year, month, openView, today, onMonth, onOpen, onYear }) => {
+const MonthStrip: React.FC<StripProps> = ({
+  data,
+  year,
+  month,
+  openView,
+  today,
+  onMonth,
+  onOpen,
+  onYear,
+  showPlaceholders,
+}) => {
   const minYear = today.getFullYear() - YEARS_BACK;
   const maxYear = today.getFullYear() + YEARS_AHEAD;
   const months = data && data.year === year ? data.months : null;
@@ -370,7 +398,9 @@ const MonthStrip: React.FC<StripProps> = ({ data, year, month, openView, today, 
             All open
           </Typography>
           <Typography variant="body2" sx={{ fontWeight: openView && data ? 700 : 400, color: openView && data ? 'text.primary' : 'text.secondary' }}>
-            {openView && data && data.view === 'open' ? data.count : 'all months'}
+            {openView && data && data.view === 'open'
+              ? data.rows.filter((r) => r.renewal.state !== 'placeholder').length
+              : 'all months'}
           </Typography>
         </ButtonBase>
         {Array.from({ length: 12 }).map((_, i) => {
@@ -383,7 +413,7 @@ const MonthStrip: React.FC<StripProps> = ({ data, year, month, openView, today, 
               onClick={() => onMonth(i + 1)}
               aria-current={selected ? 'page' : undefined}
               ref={selected ? selectedRef : undefined}
-              aria-label={`${MONTH_LONG[i]} ${year}${m ? `: ${m.count} ending, ${m.attention} need attention` : ''}`}
+              aria-label={`${MONTH_LONG[i]} ${year}${m ? `: ${m.count} ending, ${m.attention} need attention${m.placeholders && !showPlaceholders ? `, ${m.placeholders} closed placeholders hidden` : ''}` : ''}`}
               sx={cell(selected)}
             >
               <Typography
@@ -403,6 +433,12 @@ const MonthStrip: React.FC<StripProps> = ({ data, year, month, openView, today, 
                 <Typography variant="body2" sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                   {m ? m.count : <Skeleton width={18} />}
                 </Typography>
+                {m && m.placeholders > 0 && !showPlaceholders && (
+                  <Box component="span" title={`${m.placeholders} closed placeholders hidden`}
+                    sx={{ fontSize: '0.6875rem', color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                    +{m.placeholders}
+                  </Box>
+                )}
                 {m && m.attention > 0 && (
                   <Box
                     component="span"
@@ -474,9 +510,21 @@ const SummaryStrip: React.FC<{ summaries: CurrencySummary[]; filtered: boolean; 
       {summaries.map((s) => (
         <Paper key={s.currency} component="section" aria-label={`${s.currency} totals`} sx={{ p: 2 }}>
           <Typography variant="overline" sx={{ lineHeight: 1, color: 'text.secondary', fontWeight: 700 }}>
-            {s.currency}
+            {s.currency} · annual values
             {filtered ? ' · rows shown' : ''}
           </Typography>
+          {s.unlinked || s.history ? (
+            <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 0.5, mb: 0 }}>
+              Not counted as lost:{' '}
+              {[
+                s.unlinked ? `${s.unlinked} term${s.unlinked === 1 ? '' : 's'} whose company has a live term not linked` : '',
+                s.history ? `${s.history} lapsed 2025 placeholder term${s.history === 1 ? '' : 's'} (last year's records)` : '',
+              ]
+                .filter(Boolean)
+                .join('; ')}
+              .
+            </Typography>
+          ) : null}
           <Box
             sx={{
               display: 'grid',
@@ -544,10 +592,10 @@ const COLUMNS: Column[] = [
   { key: 'contract', label: 'Contract', width: 150 },
   { key: 'product', label: 'Product', width: 150, hide: { display: { xs: 'none', xl: 'table-cell' } } },
   { key: 'end', label: 'Term ends', width: 108 },
-  { key: 'value', label: 'Current value', align: 'right', width: 116 },
+  { key: 'value', label: 'Annual value', align: 'right', width: 116 },
   { key: 'state', label: 'Renewal', width: 172 },
   { key: 'renewal', label: 'Renewal contract', width: 140 },
-  { key: 'change', label: 'New value', align: 'right', width: 124 },
+  { key: 'change', label: 'New annual value', align: 'right', width: 132 },
   { key: 'owner', label: 'Owner', width: 120, hide: { display: { xs: 'none', xl: 'table-cell' } } },
 ];
 
@@ -965,6 +1013,7 @@ const Renewals: React.FC = () => {
         onMonth={(m) => update({ view: '', month: String(m), year: String(year) })}
         onOpen={() => update({ view: 'open', year: String(year) })}
         onYear={(y) => update({ year: String(y) })}
+        showPlaceholders={filters.showPlaceholders}
       />
 
       {error && (
@@ -1078,10 +1127,10 @@ const Renewals: React.FC = () => {
         {narrow ? cards : table}
       </Paper>
       <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 1.5 }}>
-        Draft contracts are not terms. The renewal state comes from the contracts linked to the term and their invoices;
-        a linked contract that starts more than 90 days before the term ends is treated as a possible add-on, not the
-        renewal. Placeholders closed by the November data corrections are hidden unless shown. * zone count from the
-        company's funnel figure.
+        Values are annual prices, for terms of any length. Draft contracts are not terms. The renewal state comes from
+        the contracts linked to the term and their invoices; a linked contract that starts more than 90 days before the
+        term ends is not the renewal. Placeholders closed by the November data corrections are hidden unless shown
+        (+N in the month strip). * zone count from the company's funnel figure.
       </Typography>
     </Box>
   );

@@ -18,6 +18,7 @@ export const STATE_ORDER: RenewalStateKey[] = [
   'part_paid',
   'paid',
   'auto_renews',
+  'live_unlinked',
   'lapsed',
   'lost',
   'placeholder',
@@ -159,6 +160,10 @@ export interface CurrencySummary {
   lostValue: number;
   auto: number;
   autoValue: number;
+  /** Terms whose company has a live term that is not linked: probably renewed, not counted as lost. */
+  unlinked: number;
+  /** Lapsed 2025 placeholder terms: last year's records, not counted as lost. */
+  history: number;
   /** Terms counted in the rate (decided, or ended without a renewal). */
   rateBase: number;
   rateRenewed: number;
@@ -178,6 +183,8 @@ const emptySummary = (currency: string): CurrencySummary => ({
   lostValue: 0,
   auto: 0,
   autoValue: 0,
+  unlinked: 0,
+  history: 0,
   rateBase: 0,
   rateRenewed: 0,
   rate: null,
@@ -214,6 +221,12 @@ export function summarize(rows: RenewalRow[]): CurrencySummary[] {
       case 'auto':
         s.auto += 1;
         s.autoValue += v;
+        break;
+      case 'unlinked':
+        s.unlinked += 1;
+        break;
+      case 'history':
+        s.history += 1;
         break;
     }
     if (r.renewal.in_rate) {
@@ -270,16 +283,20 @@ export const CSV_HEADER = [
   'Term start',
   'Term end',
   'Term months',
+  '2025 placeholder term',
   'Days from end (positive = ended, negative = days to go)',
   'Currency',
-  'Current value',
+  'Annual value',
   'Renewal state',
   'Needs attention',
   'Renewal contract',
   'Renewal status',
+  'Renewal link',
+  'Renewal start',
+  'Gap before renewal (days)',
   'Renewal currency',
-  'New value',
-  'Change (same term length only)',
+  'New annual value',
+  'Annual change',
   'Add-on',
   'Never activated',
   'Owner',
@@ -306,6 +323,7 @@ export function rowsToCsv(rows: RenewalRow[]): string {
         r.start_date,
         r.end_date,
         r.term_months,
+        r.term_2025_placeholder,
         r.days_from_end,
         r.currency,
         r.value,
@@ -313,6 +331,9 @@ export function rowsToCsv(rows: RenewalRow[]): string {
         r.renewal.attention_label,
         s?.contract_number,
         s?.status,
+        s?.link,
+        s?.start_date,
+        s?.gap_days,
         s?.currency,
         s ? s.value : null,
         r.renewal.value_change,

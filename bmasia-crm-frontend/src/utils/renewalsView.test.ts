@@ -41,6 +41,7 @@ const row = (over: Over = {}): RenewalRow => {
     days_from_end: -12,
     is_addon: false,
     never_activated: false,
+    term_2025_placeholder: false,
     renewal: {
       state,
       label: state,
@@ -63,13 +64,15 @@ const row = (over: Over = {}): RenewalRow => {
             signed_date: null,
             sent_date: null,
             invoice_state: 'none',
+            link: 'renewal',
+            gap_days: null,
             other_company: false,
             ...successor,
           } as RenewalRow['renewal']['successor'])
         : null,
       other_linked: [],
+      live_unlinked: [],
       value_change: change,
-      value_change_basis: change === null ? null : 'term',
     },
     ...rest,
   } as RenewalRow;
@@ -114,6 +117,15 @@ describe('summarize', () => {
     ]);
     expect(thb).toMatchObject({ currency: 'THB', terms: 0, renewedValue: 110000 });
     expect(usd).toMatchObject({ currency: 'USD', terms: 1, renewed: 1, renewedValue: 0, rate: 1 });
+  });
+
+  it('counts terms with an unlinked live term and lapsed 2025 placeholder terms apart from lost', () => {
+    const [usd] = summarize([
+      row({ state: 'live_unlinked', bucket: 'unlinked' }),
+      row({ state: 'lapsed', bucket: 'history', term_2025_placeholder: true }),
+      row({ state: 'lapsed', bucket: 'lost', inRate: true }),
+    ]);
+    expect(usd).toMatchObject({ terms: 3, unlinked: 1, history: 1, lost: 1, lostValue: 1200, rateBase: 1, rate: 0 });
   });
 
   it('has no rate while nothing is decided', () => {
@@ -226,6 +238,7 @@ describe('CSV', () => {
 
   it('writes one line per row with a header that states the sign of days from end', () => {
     expect(CSV_HEADER).toContain('Days from end (positive = ended, negative = days to go)');
+    expect(CSV_HEADER).toEqual(expect.arrayContaining(['Renewal link', 'Renewal start', 'Gap before renewal (days)']));
     const csv = rowsToCsv([row({ company: '=Evil Hotel', value: 108000, currency: 'THB' })]);
     expect(csv.startsWith('﻿Customer,')).toBe(true);
     const lines = csv.trim().split('\r\n');

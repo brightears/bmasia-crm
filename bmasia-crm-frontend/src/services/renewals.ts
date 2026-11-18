@@ -17,16 +17,22 @@ export type RenewalStateKey =
   | 'paid'
   | 'renewed_unlinked'
   | 'auto_renews'
+  | 'live_unlinked'
   | 'lapsed'
   | 'lost'
   | 'placeholder';
 
-export type RenewalGroup = 'open' | 'renewed' | 'auto' | 'lost' | 'excluded';
+export type RenewalGroup = 'open' | 'renewed' | 'auto' | 'unlinked' | 'lost' | 'excluded';
+/** The total a row counts in; 'history' = a lapsed 2025 placeholder term, not churn. */
+export type SummaryBucket = RenewalGroup | 'history';
 
 export type AttentionKey =
   | 'renewed_unlinked'
   | 'renewed_link_mid_term'
+  | 'renewed_link_overlap'
+  | 'link_the_renewal'
   | 'invoice_refunded'
+  | 'renewed_after_gap'
   | 'auto_renew_ended'
   | 'ended_nothing_sent'
   | 'ended_not_signed'
@@ -34,7 +40,7 @@ export type AttentionKey =
 
 export type EntityKey = 'th' | 'hk';
 export type MonthBasis = 'funnel' | 'calendar';
-export type LinkKind = 'renewal' | 'addon' | 'mid_term' | 'late';
+export type LinkKind = 'renewal' | 'late' | 'addon' | 'mid_term' | 'overlap';
 
 export interface RenewalSuccessor {
   contract_id: string;
@@ -50,6 +56,8 @@ export interface RenewalSuccessor {
   invoice_state: 'none' | 'invoiced' | 'part_paid' | 'paid';
   /** 'late': starts more than 60 days after the term ended (still the renewal). */
   link: LinkKind;
+  /** Days without a term between the end and this renewal's start (late links only). */
+  gap_days: number | null;
   other_company: boolean;
 }
 
@@ -95,11 +103,13 @@ export interface RenewalRow {
   is_addon: boolean;
   /** The term is still in status Sent: it was never activated. */
   never_activated: boolean;
+  /** One of the 2025 placeholder terms (1 Jan - 31 Dec 2025): last year's record, never churn. */
+  term_2025_placeholder: boolean;
   renewal: {
     state: RenewalStateKey;
     label: string;
     group: RenewalGroup;
-    summary_bucket: RenewalGroup;
+    summary_bucket: SummaryBucket;
     in_rate: boolean;
     reason: string;
     attention: AttentionKey | null;
@@ -113,8 +123,10 @@ export interface RenewalRow {
       link: LinkKind;
       link_label: string;
     }[];
+    /** Live contracts of the company around the end that are not linked (state live_unlinked). */
+    live_unlinked: { contract_id: string; contract_number: string; status: string; start_date: string | null }[];
+    /** The renewal's annual value minus the term's (value is the annual price for any term length). */
     value_change: number | null;
-    value_change_basis: 'term' | 'different_length' | null;
   };
 }
 
@@ -128,6 +140,8 @@ export interface RenewalMonth {
   renewed: number;
   auto: number;
   lost: number;
+  unlinked: number;
+  history: number;
   placeholders: number;
 }
 
