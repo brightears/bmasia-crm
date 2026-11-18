@@ -778,6 +778,23 @@ def _measured_block_height(flowables, width):
     return total
 
 
+def _height_of_first_rows(table, count):
+    """Height of a laid-out table's first ``count`` rows, as ReportLab adds it.
+
+    ReportLab's row split keeps a plain running total (``h = h + rh``) and
+    stops at the first row with ``h + rh > availHeight``. ``sum()`` must not be
+    used here: since Python 3.12 it compensates rounding, so with row heights
+    that are not whole points its total can be one unit in the last place
+    below ReportLab's, and offering it makes ReportLab drop the last row.
+    Offered exactly this total, the split takes these rows and no more, since
+    every further row has a positive height.
+    """
+    height = 0
+    for row_height in table._rowHeights[:count]:
+        height = height + row_height
+    return height
+
+
 class _ItemTable(Table):
     """A table segment from ``item_table``.
 
@@ -786,6 +803,11 @@ class _ItemTable(Table):
     first part is then offered only the height of the rows above that row, so
     ReportLab's own row split ends there, and a frame break follows it, so
     the space left below that part is not used by anything else.
+
+    This and the block-break code below read ReportLab internals (``_calc``,
+    ``_rowHeights``, ``_nrows``) as of the pinned ReportLab 4.0.7; the
+    pricing-block tests exercise them, so an upgrade that changes them fails
+    those tests rather than production.
     """
 
     _commercial_split_before = None
@@ -796,7 +818,7 @@ class _ItemTable(Table):
             return super().split(availWidth, availHeight)
         self._commercial_split_before = None
         self._calc(availWidth, availHeight)
-        height = min(availHeight, sum(self._rowHeights[:split_before]))
+        height = min(availHeight, _height_of_first_rows(self, split_before))
         parts = super().split(availWidth, height)
         if len(parts) < 2:
             return parts
@@ -864,7 +886,7 @@ def _earlier_split_row(table, width, before, after, placed, offered):
     # Confirm that ReportLab's own split, offered the rows above that point,
     # ends exactly there.
     table._calc(width, offered)
-    height = min(offered, sum(table._rowHeights[:split_before]))
+    height = min(offered, _height_of_first_rows(table, split_before))
     parts = table.split(width, height)
     if len(parts) < 2 or parts[0]._nrows != split_before:
         return None

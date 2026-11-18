@@ -82,7 +82,7 @@ def _example_company():
     )
 
 
-def _item(index, words):
+def _item(index, words, price="1000.00"):
     description = (
         f"R{index:02d}B Example area {index} "
         + " ".join(f"d{word}" for word in range(words))
@@ -92,9 +92,9 @@ def _item(index, words):
         product_service="soundtrack",
         description=description,
         quantity=Decimal("1"),
-        unit_price=Decimal("1000.00"),
+        unit_price=Decimal(price),
         unit_value=None,
-        line_total=Decimal("1000.00"),
+        line_total=Decimal(price),
     )
 
 
@@ -109,11 +109,11 @@ def _one_time_item(index):
     )
 
 
-def _quote(row_count, words, one_time=0, tall=()):
+def _quote(row_count, words, one_time=0, tall=(), currency=None, price="1000.00"):
     quote = sample_quote()
     quote.company = _example_company()
     items = [
-        _item(index, TALL_ROW_WORDS if index in tall else words)
+        _item(index, TALL_ROW_WORDS if index in tall else words, price)
         for index in range(1, row_count + 1)
     ]
     # The last ``one_time`` data rows become items included at no charge,
@@ -124,6 +124,8 @@ def _quote(row_count, words, one_time=0, tall=()):
     quote.subtotal = sum((item.line_total for item in items), Decimal("0"))
     quote.total_value = quote.subtotal
     quote.contract_duration_months = 24
+    if currency:
+        quote.currency = currency
     return quote
 
 
@@ -148,11 +150,11 @@ def _captured_block(seen, layout_before_measuring=False):
         yield
 
 
-def _layout(row_count, words, *, layout_before_measuring=False, one_time=0, tall=()):
+def _layout(row_count, words, *, layout_before_measuring=False, one_time=0, tall=(), **money):
     seen = {}
     with _captured_block(seen, layout_before_measuring):
         pdf = quote_pdf.build_quote_pdf_v2(
-            _quote(row_count, words, one_time, tall),
+            _quote(row_count, words, one_time, tall, **money),
             ENTITY,
             str(LOGO),
             format_address_multiline,
@@ -364,3 +366,74 @@ def test_block_never_splits_where_the_heading_reservation_would_already_break():
 def test_split_thresholds_are_named_constants():
     assert commercial_pdf.MIN_ROWS_BEFORE_SPLIT == ROWS_THAT_MUST_STAY
     assert commercial_pdf.MIN_ROWS_AFTER_SPLIT == ROWS_THAT_MUST_CARRY
+
+
+# Large money values are shrunk to fit their cells, which gives row heights
+# that are not whole points. The earlier split must still land exactly where
+# the rule says (Python 3.12's sum() and ReportLab's running total can differ
+# in the last bit for such heights).
+def test_large_amounts_with_fractional_row_heights_still_split_earlier():
+    old, fits_a_page = _layout(8, 0, layout_before_measuring=True, currency="THB", price="108000.00")
+    assert fits_a_page
+    assert old.rows == (0,) * 7 + (1,)
+
+    new, _ = _layout(8, 0, currency="THB", price="108000.00")
+    texts = _page_texts(8, 0, currency="THB", price="108000.00")
+
+    assert new == Layout(0, (0, 1), (0,) * 6 + (1,) * 2, 1)
+    assert len(texts) == 2
+
+
+LARGE_AMOUNTS = [
+    ("THB", "108000.00"),
+    ("THB", "1250000.00"),
+    ("USD", "108000.00"),
+    ("USD", "1250000.00"),
+]
+
+
+@pytest.mark.parametrize("words", [0, 4])
+@pytest.mark.parametrize("row_count", range(5, 13))
+@pytest.mark.parametrize("currency, price", LARGE_AMOUNTS)
+def test_large_amount_layouts_follow_the_rule(currency, price, row_count, words):
+    old, fits_a_page = _layout(
+        row_count, words, layout_before_measuring=True, currency=currency, price=price,
+    )
+    new, _ = _layout(row_count, words, currency=currency, price=price)
+
+    assert new.totals == new.rows[-1]
+    assert new == _expected(old, fits_a_page)
+
+
+def test_row_counter_treats_an_exact_fit_as_fitting():
+    # A frame places a flowable that is no more than _FUZZ taller than the
+    # space left; the row counter must agree, so the item table after it is
+    # the one that crosses the page edge.
+    from reportlab.platypus import Spacer
+    from reportlab.rl_config import _FUZZ
+
+    styles = commercial_pdf.document_styles()
+    rows = [[f"ZROW{index}", "Example", "1", "1", "1"] for index in range(1, 6)]
+    (table,) = commercial_pdf.item_table(
+        ["Service", "Zone", "Qty", "Unit", "Amount"],
+        rows,
+        [78, commercial_pdf.CONTENT_WIDTH - 324, 42, 92, 112],
+        {2, 3, 4},
+        styles,
+        amount_columns={4},
+    )
+    width = commercial_pdf.CONTENT_WIDTH
+
+    for overshoot in (0, _FUZZ / 2):
+        before, after, crossing, placed, offered = commercial_pdf._item_rows_either_side(
+            [Spacer(1, 100 + overshoot), table], width, 100,
+        )
+        assert (before, after, placed) == (0, 5, 0)
+        assert crossing is table
+        assert offered == pytest.approx(0, abs=_FUZZ)
+
+    # More than _FUZZ over: the spacer itself crosses the edge.
+    before, after, crossing, placed, offered = commercial_pdf._item_rows_either_side(
+        [Spacer(1, 100 + 2 * _FUZZ), table], width, 100,
+    )
+    assert (before, after, crossing, placed, offered) == (0, 5, None, 0, 100)
