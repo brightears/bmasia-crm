@@ -402,8 +402,14 @@ class EmailService:
                     template_type = 'renewal_urgent'
                 
                 # Get contacts to notify
-                from crm_app.services.recipients import renewal_reminder_contacts
-                contacts = renewal_reminder_contacts(contract.company)
+                contacts = contract.company.contacts.filter(
+                    is_active=True,
+                    receives_notifications=True,
+                    unsubscribed=False
+                ).filter(
+                    Q(contact_type__in=['Primary', 'Decision Maker']) |
+                    Q(notification_types__contains='renewal')
+                )
                 
                 for contact in contacts:
                     context = {
@@ -478,8 +484,14 @@ class EmailService:
             invoice.save()
             
             # Get billing contacts
-            from crm_app.services.recipients import payment_reminder_contacts
-            contacts = payment_reminder_contacts(invoice.company)
+            contacts = invoice.company.contacts.filter(
+                is_active=True,
+                receives_notifications=True,
+                unsubscribed=False
+            ).filter(
+                Q(contact_type='Billing') |
+                Q(notification_types__contains='payment')
+            )
             
             for contact in contacts:
                 context = {
@@ -551,8 +563,11 @@ class EmailService:
             # Get contact to email — prefer quote contact, fallback to primary
             contact = quote.contact
             if not contact:
-                from crm_app.services.recipients import followup_contact
-                contact = followup_contact(quote.company, 'quote')
+                contact = quote.company.contacts.filter(
+                    is_active=True,
+                    receives_notifications=True,
+                    unsubscribed=False
+                ).first()
 
             if not contact or not contact.email:
                 results['skipped'] += 1
@@ -658,8 +673,10 @@ class EmailService:
             contract.save(update_fields=['first_followup_sent', 'second_followup_sent'])
 
             # Get contact to email
-            from crm_app.services.recipients import followup_contact
-            contact = followup_contact(contract.company, 'contract')
+            contact = contract.company.contacts.filter(
+                is_active=True,
+                email__isnull=False,
+            ).first()
 
             if not contact or not contact.email:
                 results['skipped'] += 1
@@ -760,8 +777,14 @@ class EmailService:
                 continue
 
             # Get contacts for quarterly updates
-            from crm_app.services.recipients import quarterly_checkin_contacts
-            contacts = quarterly_checkin_contacts(company)
+            contacts = company.contacts.filter(
+                is_active=True,
+                receives_notifications=True,
+                unsubscribed=False
+            ).filter(
+                Q(contact_type='Primary') |
+                Q(notification_types__contains='quarterly')
+            )
 
             for contact in contacts:
                 context = {
@@ -821,10 +844,10 @@ class EmailService:
 
         # Get recipients
         if not recipients:
-            from crm_app.services.recipients import no_recipient_message, quote_recipients
-            recipients = quote_recipients(quote.company)
-            if not recipients:
-                return False, no_recipient_message(quote.company, 'quote')
+            recipients = list(quote.company.contacts.filter(
+                email__isnull=False,
+                is_active=True
+            ).values_list('email', flat=True))
 
         if not recipients:
             return False, "No recipients found for this quote"
@@ -1040,10 +1063,10 @@ class EmailService:
 
         # Get recipients
         if not recipients:
-            from crm_app.services.recipients import contract_recipients, no_recipient_message
-            recipients = contract_recipients(contract.company)
-            if not recipients:
-                return False, no_recipient_message(contract.company, 'contract')
+            recipients = list(contract.company.contacts.filter(
+                email__isnull=False,
+                is_active=True
+            ).values_list('email', flat=True))
 
         if not recipients:
             return False, "No recipients found for this contract"
@@ -1262,12 +1285,22 @@ class EmailService:
 
         company = invoice.company
 
-        # Get recipients - billing contacts first, then other contacts set to receive invoices
+        # Get recipients - prioritize billing contacts
         if not recipients:
-            from crm_app.services.recipients import invoice_recipients, no_recipient_message
-            recipients = invoice_recipients(company)
+            recipients = list(company.contacts.filter(
+                email__isnull=False,
+                is_active=True
+            ).filter(
+                Q(contact_type='Billing') |
+                Q(notification_types__contains='invoice')
+            ).values_list('email', flat=True))
+
+            # Fallback to all contacts if no billing contacts
             if not recipients:
-                return False, no_recipient_message(company, 'invoice')
+                recipients = list(company.contacts.filter(
+                    email__isnull=False,
+                    is_active=True
+                ).values_list('email', flat=True))
 
         if not recipients:
             return False, "No recipients found for this invoice"
@@ -1473,12 +1506,21 @@ class EmailService:
 
         company = invoice.company
 
-        # Get recipients - contacts set to receive invoice emails
+        # Get recipients - prioritize billing contacts
         if not recipients:
-            from crm_app.services.recipients import no_recipient_message, receipt_recipients
-            recipients = receipt_recipients(company)
+            recipients = list(company.contacts.filter(
+                email__isnull=False,
+                is_active=True
+            ).filter(
+                Q(receives_invoice_emails=True) |
+                Q(contact_type='Billing')
+            ).values_list('email', flat=True).distinct())
+
             if not recipients:
-                return False, no_recipient_message(company, 'receipt')
+                recipients = list(company.contacts.filter(
+                    email__isnull=False,
+                    is_active=True
+                ).values_list('email', flat=True))
 
         if not recipients:
             return False, "No recipients found for this receipt"
@@ -1658,12 +1700,22 @@ class EmailService:
         if recent_auto_reminder:
             raise ValueError("An automated renewal reminder was sent within the last 24 hours. Please wait before sending a manual reminder.")
 
-        # Get recipients - decision makers first, then other contacts set to receive renewal emails
+        # Get recipients - prioritize decision makers
         if not recipients:
-            from crm_app.services.recipients import manual_renewal_recipients, no_recipient_message
-            recipients = manual_renewal_recipients(contract.company)
+            recipients = list(contract.company.contacts.filter(
+                email__isnull=False,
+                is_active=True
+            ).filter(
+                Q(contact_type__in=['Primary', 'Decision Maker']) |
+                Q(notification_types__contains='renewal')
+            ).values_list('email', flat=True))
+
+            # Fallback to all contacts if no decision makers
             if not recipients:
-                return False, no_recipient_message(contract.company, 'renewal')
+                recipients = list(contract.company.contacts.filter(
+                    email__isnull=False,
+                    is_active=True
+                ).values_list('email', flat=True))
 
         if not recipients:
             return False, "No recipients found for this contract"
