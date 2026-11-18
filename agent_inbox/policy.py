@@ -26,8 +26,16 @@ PROPOSALS_DISABLED_DETAIL = 'Change proposals are not enabled on this server (CH
 
 
 def _positive_int(name, default):
+    """The setting as a positive int; the default for anything else (e.g. '30d')."""
     value = getattr(settings, name, default)
-    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else default
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, str):
+        value = value.strip()
+        if not value.isdigit():
+            return default
+        value = int(value)
+    return value if isinstance(value, int) and value > 0 else default
 
 
 def proposal_expiry_days() -> int:
@@ -112,47 +120,84 @@ def collections_for(kind: str) -> tuple:
 
 # ------------------------------------------------------------------ agent accounts
 #
-# Agent accounts are told apart the way the agent gate does today: by CRM
-# username, through crm_app.agent_policy (cira, vera, theo, lyra, riff, nina,
-# cara, sales, ruby; mint_agent_tokens creates its users under those names).
-# AGENT_INBOX_AGENT_USERNAMES adds more names without a code change. Research
-# note 08 replaces this with AgentPrincipal rows; is_agent_account() is the one
-# place to switch over.
+# An account is an agent account when any of these holds:
+#   - its username is a principal in crm_app.agent_policy (the agent gate's map);
+#   - its username is listed in AGENT_INBOX_AGENT_USERNAMES;
+#   - it holds a DRF API token. Every agent and the shared headless account
+#     authenticate with one; people use the website sign-in (JWT).
+# Usernames are compared case-insensitively. An agent account proposes as agent
+# or ai (never human or job), must give evidence, sees only its own proposals and
+# other recorders' activity bodies stay hidden from it. Research note 08 replaces
+# this with AgentPrincipal rows; is_agent_account() is the one place to switch over.
 
 AGENT_PROPOSER_KINDS = frozenset({'agent', 'ai'})
 EVIDENCE_REQUIRED_KINDS = frozenset({'agent', 'ai'})
 REVIEW_AUTH_METHODS = frozenset({'jwt', 'session'})
+# Source systems that say a person or the CRM itself wrote the text.
+PERSON_SOURCE_SYSTEMS = frozenset({'manual', 'crm'})
+
+
+def _name(value) -> str:
+    return str(value or '').strip().casefold()
 
 
 def extra_agent_usernames() -> frozenset:
     raw = getattr(settings, 'AGENT_INBOX_AGENT_USERNAMES', ()) or ()
     if isinstance(raw, str):
         raw = raw.split(',')
-    return frozenset(str(name).strip().lower() for name in raw if str(name).strip())
+    return frozenset(_name(name) for name in raw if _name(name))
+
+
+def holds_api_token(user) -> bool:
+    from rest_framework.authtoken.models import Token
+    return Token.objects.filter(user_id=user.pk).exists()
 
 
 def is_agent_account(user) -> bool:
     if user is None or not getattr(user, 'is_authenticated', False):
         return False
-    username = str(getattr(user, 'username', '') or '').strip().lower()
+    username = _name(getattr(user, 'username', ''))
     from crm_app import agent_policy
-    return agent_policy.principal_for_username(username) is not None or username in extra_agent_usernames()
+    return (
+        agent_policy.principal_for_username(username) is not None
+        or username in extra_agent_usernames()
+        or holds_api_token(user)
+    )
 
 
-def review_refusal(request) -> str | None:
-    """Why this request may not accept or reject a proposal, or None.
+def can_read_activity_body(user, activity) -> bool:
+    """People read every body; an agent account only the bodies it recorded."""
+    return not is_agent_account(user) or activity.recorded_by_id == getattr(user, 'pk', None)
 
-    A decision needs a signed-in person: not an agent account, and signed in
-    with the website's JWT or a session. DRF tokens are the credential every
-    agent holds today, so a decision made with one cannot be told apart from
-    an agent's.
+
+def recorded_via_for(request) -> str:
+    """'ui' for a person signed in to the website, otherwise 'rest'. Never taken from the body."""
+    from crm_app.auth_observability import auth_method
+    if auth_method(request) in REVIEW_AUTH_METHODS and not is_agent_account(getattr(request, 'user', None)):
+        return 'ui'
+    return 'rest'
+
+
+def review_refusal(request, proposal=None) -> str | None:
+    """Why this request may not decide on a proposal, or None.
+
+    A reviewer is a person signed in to the website (JWT or session) who is not
+    an agent account, did not make the proposal and did not record its evidence.
     """
     user = getattr(request, 'user', None)
     if user is None or not getattr(user, 'is_authenticated', False):
         return 'Sign in to review proposals.'
     if is_agent_account(user):
-        return 'Agent accounts cannot accept or reject proposals; a person reviews them on the website.'
+        return 'Agent accounts cannot decide on proposals; a person reviews them on the website.'
     from crm_app.auth_observability import auth_method
     if auth_method(request) not in REVIEW_AUTH_METHODS:
         return 'Proposal decisions need a website sign-in (JWT or session), not an API token.'
+    if proposal is not None:
+        if proposal.proposer_id is not None and proposal.proposer_id == user.pk:
+            return 'A reviewer must be a different person from the proposer.'
+        activity = proposal.activity
+        if activity is not None and activity.recorded_by_id == user.pk:
+            return 'A reviewer must be a different person from the one who recorded the evidence.'
     return None
+
+

@@ -65,11 +65,40 @@ def payload_sha256(body):
 # ------------------------------------------------------------------ text
 
 
-def has_control(text, allow_newlines=False):
-    for char in text:
+# Zero-width non-joiner and joiner: needed inside words of some scripts.
+_JOINERS = frozenset('‌‍')
+
+
+def _joins_letters(text, index):
+    """A joiner sits between two non-ASCII letters or marks (as in Indic or Persian words)."""
+    if index == 0 or index == len(text) - 1:
+        return False
+    before, after = text[index - 1], text[index + 1]
+    return all(ord(char) > 0x7F and unicodedata.category(char)[0] in 'LM' for char in (before, after))
+
+
+def has_control(text, allow_newlines=False, allow_format=False):
+    """True when the text holds characters that change how it looks or reads without showing.
+
+    Always refused: control characters (tabs and line breaks only with
+    allow_newlines), surrogates and line/paragraph separators. Unless
+    allow_format (used for bodies and quotes copied verbatim from a source),
+    also refused: private-use and unassigned code points, and format characters
+    such as direction overrides, zero-width spaces and the byte-order mark. A
+    zero-width (non-)joiner is kept only between two non-ASCII letters or marks.
+    Thai letters, vowel and tone marks are ordinary letters and marks.
+    """
+    for index, char in enumerate(text):
         if allow_newlines and char in '\n\r\t':
             continue
-        if unicodedata.category(char) in ('Cc', 'Cs', 'Zl', 'Zp'):
+        category = unicodedata.category(char)
+        if category in ('Cc', 'Cs', 'Zl', 'Zp'):
+            return True
+        if allow_format:
+            continue
+        if category in ('Co', 'Cn'):
+            return True
+        if category == 'Cf' and not (char in _JOINERS and _joins_letters(text, index)):
             return True
     return False
 
@@ -83,8 +112,8 @@ def optional_str(body, key):
     return value
 
 
-def text_field(body, key, max_length, *, required=False, multiline=False):
-    """A plain-text value: capped, without control characters (newlines only if multiline)."""
+def text_field(body, key, max_length, *, required=False, multiline=False, allow_format=False):
+    """A plain-text value: capped, without control or invisible characters (newlines only if multiline)."""
     value = optional_str(body, key)
     if multiline:
         value = value.replace('\r\n', '\n').replace('\r', '\n')
@@ -93,10 +122,10 @@ def text_field(body, key, max_length, *, required=False, multiline=False):
         raise bad(f'{key} is required')
     if len(value) > max_length:
         raise bad(f'{key} must be at most {max_length} characters')
-    if has_control(value, allow_newlines=multiline):
+    if has_control(value, allow_newlines=multiline, allow_format=allow_format):
         if multiline:
-            raise bad(f'{key} must not contain control characters other than newlines and tabs')
-        raise bad(f'{key} must be a single line without control characters')
+            raise bad(f'{key} must not contain control or invisible characters other than newlines and tabs')
+        raise bad(f'{key} must be a single line without control or invisible characters')
     return value
 
 
@@ -107,6 +136,19 @@ def token_field(body, key, max_length):
     if any(char.isspace() for char in value) or has_control(value):
         raise bad(f'{key} must not contain whitespace or control characters')
     return value
+
+
+def source_ref_field(body, key, source_system, max_length):
+    """A source reference; for gmail the canonical RFC 822 Message-ID (agent_inbox.message_ids)."""
+    if source_system == 'gmail' and body.get(key) not in (None, ''):
+        from agent_inbox.message_ids import canonical_message_id
+
+        canonical = canonical_message_id(optional_str(body, key))
+        if canonical is None:
+            raise bad(f'{key} for gmail must be the message\'s RFC 822 Message-ID, '
+                      'for example <CAB12345@mail.example.com>, not a Gmail API id')
+        return canonical
+    return token_field(body, key, max_length)
 
 
 def url_field(body, key, max_length):
