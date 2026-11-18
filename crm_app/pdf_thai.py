@@ -48,28 +48,28 @@ THAI_FONT_FILES = {
     THAI_BOLD_FONT: os.path.join(FONT_DIR, "Sarabun-Bold.ttf"),
 }
 
-BAHT = "฿"
+BAHT = "\u0E3F"
 # Thai block. A run continues across ordinary and no-break spaces so the
 # spaces inside a Thai name use the Thai font's spacing.
-THAI_RUN = re.compile("[฀-๿]+(?:[  ]+[฀-๿]+)*")
+THAI_RUN = re.compile("[\u0E00-\u0E7F]+(?:[ \u00A0]+[\u0E00-\u0E7F]+)*")
 # Thai letters, marks and digits: everything in the block except the baht
 # sign, which DejaVu draws. A run holding only baht signs stays in DejaVu, so a
 # document whose only Thai-block character is "฿" does not change.
-_THAI_LETTER = re.compile("[฀-฾เ-๿]")
+_THAI_LETTER = re.compile("[\u0E00-\u0E3E\u0E40-\u0E7F]")
 
 # Zero-width characters a paste may leave inside a syllable. They are not part
 # of a Thai run (DejaVu draws them, with no width) but do not separate a mark
 # from its consonant when deciding how the mark is drawn.
-_IGNORABLE = frozenset("​‌‍")
-_TALL = frozenset("ปฝฟ")            # ป ฝ ฟ
-_LO_CHULA = "ฬ"                               # ฬ
-_DESCENDER_LESS = frozenset("ญฐ")        # ญ ฐ
-_DESCENDER_SHORT = frozenset("ฎฏ")       # ฎ ฏ
-_BELOW = frozenset("ฺุู")
-_UPPER_VOWEL = frozenset("ัิีึื")
-_TONE = frozenset("่้๊๋์")  # four tone marks and thanthakhat
-_ABOVE = _UPPER_VOWEL | _TONE | frozenset("็ํ")
-_SARA_AM = "ำ"
+_IGNORABLE = frozenset("\u200B\u200C\u200D")
+_TALL = frozenset("\u0E1B\u0E1D\u0E1F")            # ป ฝ ฟ
+_LO_CHULA = "\u0E2C"                               # ฬ
+_DESCENDER_LESS = frozenset("\u0E0D\u0E10")        # ญ ฐ
+_DESCENDER_SHORT = frozenset("\u0E0E\u0E0F")       # ฎ ฏ
+_BELOW = frozenset("\u0E38\u0E39\u0E3A")
+_UPPER_VOWEL = frozenset("\u0E31\u0E34\u0E35\u0E36\u0E37")
+_TONE = frozenset("\u0E48\u0E49\u0E4A\u0E4B\u0E4C")  # four tone marks and thanthakhat
+_ABOVE = _UPPER_VOWEL | _TONE | frozenset("\u0E47\u0E4D")
+_SARA_AM = "\u0E33"
 
 # Characters each variant font points at Sarabun's variant glyph: the glyph's
 # name plus the suffix (uni0E48 -> uni0E48.narrow), or for the consonants the
@@ -81,11 +81,11 @@ VARIANT_CHARACTERS = {
     ".small": tuple(sorted(_BELOW)),
 }
 _VARIANT_GLYPH_NAMES = {
-    ("ญ", ".less"): "yoYingthai.less",
-    ("ฐ", ".less"): "thoThanthai.less",
-    ("ฎ", ".short"): "doChadathai.short",
-    ("ฏ", ".short"): "toPatakthai.short",
-    ("ฬ", ".short"): "loChulathai.short",
+    ("\u0E0D", ".less"): "yoYingthai.less",
+    ("\u0E10", ".less"): "thoThanthai.less",
+    ("\u0E0E", ".short"): "doChadathai.short",
+    ("\u0E0F", ".short"): "toPatakthai.short",
+    ("\u0E2C", ".short"): "loChulathai.short",
 }
 
 # Sarabun's ".small" tone marks are about 0.9 of the default mark and start

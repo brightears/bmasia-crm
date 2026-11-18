@@ -263,11 +263,25 @@ def test_below_vowel_clears_the_consonant_above_it(word, consonant, vowel):
         assert gap >= MARGIN_EM * size, (word, size, bold, gap)
 
 
+def test_lo_chula_carrying_a_mark_is_drawn_with_its_shorter_form():
+    # Sarabun shortens ฬ under a mark (HarfBuzz: loChulathai.short); a ฬ
+    # without a mark keeps its full height.
+    for size, bold in _cases():
+        face_name = pdf_thai.THAI_BOLD_FONT if bold else pdf_thai.THAI_FONT
+        short = _top(_glyph_points(face_name, 'loChulathai.short')) * size / 1000
+        full = _top(_glyph_points(face_name, 'uni0E2C')) * size / 1000
+        assert short < full
+        for word, expected in (('จุฬ่', short), ('ฬี', short), ('กีฬา', full)):
+            index = word.index('ฬ')
+            drawn = _ink(_paragraph(word, size, bold))
+            assert _top(_at(drawn, word, index)) == pytest.approx(expected, abs=0.001), (word, size, bold)
+
+
 # --- run boundaries ----------------------------------------------------------
 
 def test_no_break_space_stays_inside_a_thai_run():
-    paragraph = _paragraph('บริษัท ทดสอบ จำกัด', 9.2)
-    assert [frag.text for frag in paragraph.frags] == ['บริษัท ทดสอบ จำกัด']
+    paragraph = _paragraph('บริษัท\u00A0ทดสอบ จำกัด', 9.2)
+    assert [frag.text for frag in paragraph.frags] == ['บริษัท\u00A0ทดสอบ จำกัด']
     assert paragraph.frags[0].fontName == pdf_thai.THAI_FONT
 
 
@@ -282,9 +296,9 @@ def test_lift_adds_to_an_existing_rise():
 
 
 @pytest.mark.parametrize('markup, word', [
-    ('ที​่', 'ที​่'),          # zero-width space pasted inside the syllable
+    ('ที\u200B่', 'ที\u200B่'),          # zero-width space pasted inside the syllable
     ('ที<b>่</b>', 'ที่'),                # a tag inside the syllable
-    ('ป​่า', 'ป​่า'),
+    ('ป\u200B่า', 'ป\u200B่า'),
 ])
 def test_zero_width_space_or_tag_inside_a_syllable_does_not_hide_the_mark(markup, word):
     style = document_styles()['body']
