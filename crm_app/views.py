@@ -110,7 +110,7 @@ from .serializers import (
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
     TaskAssigneePermission, ReadOnlyForNonOwner,
-    CommercialDocumentPreviewPermission,
+    CommercialDocumentPreviewPermission, PersonSignedInToWebsite,
 )
 from .rene_auth import (
     IsReneRenewalReaderOrAuthenticatedUser,
@@ -473,7 +473,9 @@ class UserViewSet(BaseModelViewSet):
     def get_permissions(self):
         """Admin required for create/update/delete, authenticated for list/retrieve"""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminUser()]
+            # Who may sign in, with which password and role, is changed only by a
+            # person signed in to the website, never with an API token.
+            return [IsAdminUser(), PersonSignedInToWebsite()]
         return [IsAuthenticated()]
 
     @action(detail=False, methods=['get', 'patch'])
@@ -493,7 +495,9 @@ class UserViewSet(BaseModelViewSet):
                             status=status.HTTP_400_BAD_REQUEST)
         data.pop('username', None)
         # A new password needs the current one, as in change_password.
-        current_password = data.pop('current_password', None)
+        # .get, not .pop: on a multipart body QueryDict.pop returns a list.
+        current_password = request.data.get('current_password')
+        data.pop('current_password', None)
         if data.get('password') and not (
                 current_password and request.user.check_password(current_password)):
             return Response({'current_password': ['Enter your current password to set a new one.']},
