@@ -866,7 +866,7 @@ class ContactViewSet(BaseModelViewSet):
 
 class NoteViewSet(BaseModelViewSet):
     """ViewSet for Note management"""
-    queryset = Note.objects.select_related('author', 'company', 'contact')
+    queryset = Note.objects.all()
     serializer_class = NoteSerializer
     search_fields = ['title', 'text', 'tags']
     ordering_fields = ['created_at', 'priority', 'note_type']
@@ -883,7 +883,14 @@ class NoteViewSet(BaseModelViewSet):
             queryset = queryset.filter(
                 Q(is_private=False) | Q(author=user)
             )
-        
+
+        # The list sorts every note on created_at (no index) before LIMIT, so joins there
+        # would run over the whole table: it fetches the page's authors, companies and
+        # contacts in three queries instead. A single note is joined.
+        if self.action == 'list':
+            queryset = queryset.prefetch_related('author', 'company', 'contact')
+        else:
+            queryset = queryset.select_related('author', 'company', 'contact')
         return queryset
 
 
