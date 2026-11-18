@@ -549,10 +549,21 @@ class InvoiceSerializer(serializers.ModelSerializer):
             'receipt_number', 'receipt_sent',
             'line_items', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        # receipt_number is issued only by mark_paid (crm_app/services/invoice_payments.py).
+        read_only_fields = ['id', 'created_at', 'updated_at', 'receipt_number']
 
     def get_contract_number(self, obj):
         return obj.contract.contract_number if obj.contract else None
+
+    def validate_status(self, value):
+        """Paid is reached only through mark_paid, which dates the payment and numbers the receipt."""
+        current = self.instance.status if self.instance is not None else None
+        if value == 'Paid' and current != 'Paid':
+            raise serializers.ValidationError(
+                'Use "Mark as paid" (POST /api/v1/invoices/{id}/mark_paid/) to mark an invoice paid: '
+                'it records the payment date and issues the receipt number.'
+            )
+        return value
 
     def validate(self, attrs):
         if self.instance is not None and {'billing_entity', 'company'} & set(attrs):

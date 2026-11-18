@@ -32,7 +32,7 @@ import {
   Refresh,
   Close,
 } from '@mui/icons-material';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Task, User, Company, Opportunity, Contract, Contact } from '../types';
 import ApiService from '../services/api';
 import TaskKanbanBoard from '../components/TaskKanbanBoard';
@@ -54,6 +54,9 @@ const Tasks: React.FC = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [searchParams, setSearchParams] = useSearchParams();
+  // /tasks/:id opens that task over the list (links from Today and Needs fixing).
+  const { id: taskIdFromUrl } = useParams<{ id?: string }>();
+  const navigate = useNavigate();
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [initialTaskType, setInitialTaskType] = useState<string | null>(null);
@@ -162,6 +165,34 @@ const Tasks: React.FC = () => {
     fetchTasks();
     fetchSupportingData();
   }, [fetchTasks, fetchSupportingData]);
+
+  useEffect(() => {
+    if (!taskIdFromUrl) return;
+    let cancelled = false;
+    ApiService.getTask(taskIdFromUrl)
+      .then((task) => {
+        if (cancelled) return;
+        setSelectedTask(task);
+        setTaskDetailOpen(true);
+      })
+      .catch(() => {
+        if (!cancelled) setNotification({ open: true, message: 'Could not open that task', severity: 'error' });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskIdFromUrl]);
+
+  // Leaving the task (close, edit or delete) drops it from the address, so a reload or Back
+  // does not reopen it.
+  const leaveTaskAddress = () => {
+    if (taskIdFromUrl) navigate('/tasks', { replace: true });
+  };
+
+  const closeTaskDetail = () => {
+    setTaskDetailOpen(false);
+    leaveTaskAddress();
+  };
 
   useEffect(() => {
     applyFilters();
@@ -563,14 +594,16 @@ const Tasks: React.FC = () => {
       {selectedTask && (
         <TaskDetail
           open={taskDetailOpen}
-          onClose={() => setTaskDetailOpen(false)}
+          onClose={closeTaskDetail}
           task={selectedTask}
           onEdit={() => {
             setTaskDetailOpen(false);
+            leaveTaskAddress();
             handleEditTask(selectedTask);
           }}
           onDelete={(taskId) => {
             setTaskDetailOpen(false);
+            leaveTaskAddress();
             handleTaskDelete(taskId);
           }}
           onStatusChange={handleTaskStatusChange}
