@@ -691,14 +691,9 @@ class CompanyViewSet(BaseModelViewSet):
 
         # For list action, optimize for serialization
         if self.action == 'list':
-            # Prefetch related objects that are used in the serializer
-            queryset = queryset.select_related('parent_company').prefetch_related(
-                'contacts',
-                'zones',
-                'opportunities',
-                'contracts',
-                'child_companies'
-            )
+            # Everything CompanySerializer reads, fetched once per page (no per-row queries).
+            from crm_app.services.list_querysets import company_list_queryset
+            queryset = company_list_queryset(queryset)
         elif self.action == 'retrieve':
             # For detail view, include even more related data
             queryset = queryset.select_related('parent_company').prefetch_related(
@@ -899,7 +894,14 @@ class NoteViewSet(BaseModelViewSet):
             queryset = queryset.filter(
                 Q(is_private=False) | Q(author=user)
             )
-        
+
+        # The list sorts every note on created_at (no index) before LIMIT, so joins there
+        # would run over the whole table: it fetches the page's authors, companies and
+        # contacts in three queries instead. A single note is joined.
+        if self.action == 'list':
+            queryset = queryset.prefetch_related('author', 'company', 'contact')
+        else:
+            queryset = queryset.select_related('author', 'company', 'contact')
         return queryset
 
 
@@ -1018,7 +1020,9 @@ class TaskViewSet(BaseModelViewSet):
 
 class OpportunityViewSet(BaseModelViewSet):
     """ViewSet for Opportunity management"""
-    queryset = Opportunity.objects.select_related('company', 'owner').prefetch_related('activities').all()
+    queryset = Opportunity.objects.select_related('company', 'owner').prefetch_related(
+        'activities__user', 'activities__contact',
+    ).all()
     serializer_class = OpportunitySerializer
     search_fields = ['name', 'company__name', 'notes']
     ordering_fields = ['created_at', 'expected_value', 'expected_close_date', 'stage']
@@ -1314,7 +1318,15 @@ class ContractViewSet(BaseModelViewSet):
     ordering_fields = ['created_at', 'start_date', 'end_date', 'value', 'updated_at', 'company__name', 'contract_number']
     ordering = ['-start_date']
     filterset_fields = ['company', 'contract_type', 'status', 'auto_renew', 'is_active', 'contract_category', 'opportunity']
-    
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.action == 'list':
+            # Everything ContractSerializer reads, fetched once per page (no per-row queries).
+            from crm_app.services.list_querysets import contract_list_queryset
+            queryset = contract_list_queryset(queryset)
+        return queryset
+
     @action(detail=False, methods=['get'])
     def expiring_soon(self, request):
         """Get contracts expiring within 30 days"""
@@ -7117,7 +7129,9 @@ class QuoteViewSet(BaseModelViewSet):
         queryset = super().get_queryset()
 
         if self.action == 'list':
-            queryset = queryset.prefetch_related('line_items')
+            queryset = queryset.prefetch_related(
+                'line_items', 'attachments__uploaded_by', 'activities__user',
+            )
         elif self.action == 'retrieve':
             queryset = queryset.prefetch_related(
                 'line_items',
@@ -9449,6 +9463,10 @@ class TicketViewSet(viewsets.ModelViewSet):
         queryset = queryset.select_related(
             'company', 'contact', 'zone', 'assigned_to', 'created_by'
         ).prefetch_related('comments', 'attachments')
+        if self.action == 'list':
+            # Comment authors, uploaders and comment counts once per page (no per-row queries).
+            from crm_app.services.list_querysets import ticket_list_queryset
+            queryset = ticket_list_queryset(queryset)
 
         return queryset
 
@@ -11069,6 +11087,14 @@ class ZoneViewSet(viewsets.ModelViewSet):
     filterset_fields = ['company', 'platform', 'status']
     search_fields = ['name', 'company__name']
     ordering = ['company__name', 'name']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.action == 'list':
+            # Device and contract links once per page (no per-row queries).
+            from crm_app.services.list_querysets import zone_list_queryset
+            queryset = zone_list_queryset(queryset)
+        return queryset
 
     @action(detail=False, methods=['get'])
     def by_company(self, request):
