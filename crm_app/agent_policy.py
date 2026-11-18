@@ -13,7 +13,7 @@ listed here are treated as humans and are not gated.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 ANY = '*'
 
@@ -131,6 +131,19 @@ PRINCIPALS = {
     ),
     # Retired agent whose Admin token is still live: every write is a violation.
     'ruby': Principal(name='ruby', retired=True, note='retired agent; token to be revoked'),
+}
+
+# Activity log and review queue (agent_inbox). Every active agent may record an
+# interaction (log_activity -> create 'activity') and propose a change for a
+# person to review (propose_change -> create 'changeproposal'); neither tool
+# changes a CRM record. list_proposals is a read and is not gated. Deciding on a
+# proposal is not an agent verb: the review endpoints refuse every agent account.
+INBOX_COLLECTIONS = frozenset({'activity', 'changeproposal'})
+PRINCIPALS = {
+    key: principal if principal.retired else replace(
+        principal, create={**{name: Rule() for name in INBOX_COLLECTIONS}, **principal.create},
+    )
+    for key, principal in PRINCIPALS.items()
 }
 
 # CRM username -> principal (explicit: DRF-token users are attributed by username).

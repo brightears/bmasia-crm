@@ -65,3 +65,22 @@ def test_activity_summary_refuses_hidden_characters_but_body_keeps_them(agent, c
     assert refused.status_code == 400
     kept = client.post(ACTIVITIES, activity_body(company, body='ข้อความ​จากลูกค้า'), format='json')
     assert kept.status_code == 201
+
+
+@pytest.mark.parametrize('text', [
+    'Team \U0001F468\u200d\U0001F469\u200d\U0001F467',          # family emoji sequence
+    'Dr \U0001F469\u200d\u2695\ufe0f',                            # profession emoji with variation selector
+    'Fans \U0001F3F4\U000E0067\U000E0062\U000E0073\U000E0063\U000E0074\U000E007F',  # subdivision flag
+    'Bangkok \U0001F1F9\U0001F1ED',                                  # country flag
+    'Café \U0001F44D\U0001F3FD',                                     # skin-tone modifier
+])
+def test_emoji_sequences_and_flags_are_accepted_in_names(text):
+    assert has_control(text) is False
+
+
+@pytest.mark.parametrize('text', [
+    'Room\u061c12', 'Room\u202e21', 'Room\u2066x\u2069', 'ab\u200dcd', 'Fans \U000E0067\U000E007F',
+    '\U000E007F', 'ok\u200d', 'Hotel\u2060X',
+])
+def test_direction_controls_and_stray_joiners_or_tags_are_refused(text):
+    assert has_control(text) is True

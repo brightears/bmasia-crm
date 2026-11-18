@@ -223,6 +223,9 @@ class ZoneSerializer(serializers.ModelSerializer):
 
     def get_contract_count(self, obj):
         """Total number of contracts this zone has been linked to"""
+        links = getattr(obj, '_prefetched_zone_links', None)  # set by the list querysets
+        if links is not None:
+            return len(links)
         return obj.zone_contracts.count()
 
 
@@ -323,7 +326,12 @@ class CompanySerializer(serializers.ModelSerializer):
 
     def get_primary_contact(self, obj):
         try:
-            primary = obj.contacts.filter(is_primary=True, is_active=True).first()
+            # The company list prefetches the same filter in the same order (list_querysets.py).
+            prefetched = getattr(obj, '_prefetched_primary_contacts', None)
+            if prefetched is not None:
+                primary = prefetched[0] if prefetched else None
+            else:
+                primary = obj.contacts.filter(is_primary=True, is_active=True).first()
             if primary:
                 return ContactSerializer(primary).data
             return None
@@ -336,20 +344,29 @@ class CompanySerializer(serializers.ModelSerializer):
 
     def get_opportunities_count(self, obj):
         try:
+            if hasattr(obj, '_list_active_opportunities_count'):  # annotated by the company list
+                return obj._list_active_opportunities_count
             return obj.opportunities.filter(is_active=True).count()
         except Exception:
             return 0
 
     def get_active_contracts_count(self, obj):
         try:
+            prefetched = getattr(obj, '_prefetched_active_contracts', None)  # company list
+            if prefetched is not None:
+                return len(prefetched)
             return obj.contracts.filter(is_active=True).count()
         except Exception:
             return 0
-    
+
     def get_subscription_summary(self, obj):
         """Get a summary of active contracts/subscriptions"""
         try:
-            active_contracts = obj.contracts.filter(is_active=True)
+            # The company list prefetches the active contracts in the default order
+            # (-start_date), the order the query below iterates in.
+            active_contracts = getattr(obj, '_prefetched_active_contracts', None)
+            if active_contracts is None:
+                active_contracts = obj.contracts.filter(is_active=True)
             if not active_contracts:
                 return "No active subscriptions"
 
@@ -568,6 +585,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
+        self._refuse_backward_status(attrs.get('status'))
         if self.instance is not None and {'billing_entity', 'company'} & set(attrs):
             from types import SimpleNamespace
             from crm_app.services.document_context import effective_billing_entity
@@ -593,6 +611,28 @@ class InvoiceSerializer(serializers.ModelSerializer):
                     ),
                 })
         return attrs
+
+    def _refuse_backward_status(self, value):
+        """A plain update never moves an invoice backwards.
+
+        Draft cannot be re-entered once left, and Paid is left only for Refunded; undoing a
+        payment is the admin's "Mark selected invoices as unpaid". Saving the current status is
+        always allowed. (Paid itself is reached only through mark_paid, see validate_status.)
+        """
+        current = self.instance.status if self.instance is not None else None
+        if value is None or current is None or value == current:
+            return
+        if current == 'Paid' and value != 'Refunded':
+            raise serializers.ValidationError({'status': (
+                f'A paid invoice cannot be set to {value} by an edit. Paid can change only to Refunded; '
+                'to undo a payment recorded by mistake, use the admin action "Mark selected invoices as '
+                'unpaid" (it keeps the receipt number).'
+            )})
+        if value == 'Draft':
+            raise serializers.ValidationError({'status': (
+                f'An invoice that is {current} cannot go back to Draft. Use Cancelled for one that '
+                'should not stand.'
+            )})
 
     def create(self, validated_data):
         """Create invoice with nested line items"""
@@ -862,10 +902,17 @@ class ContractSerializer(serializers.ModelSerializer):
             'contract_number': {'required': False}
         }
 
+    # The contract list annotates the _list_* counts and sums with the same filters and
+    # aggregates (services/list_querysets.py); elsewhere they are queried per contract.
+
     def get_paid_invoices_count(self, obj):
+        if hasattr(obj, '_list_paid_invoices_count'):
+            return obj._list_paid_invoices_count
         return obj.invoices.filter(status='Paid').count()
 
     def get_outstanding_amount(self, obj):
+        if hasattr(obj, '_list_outstanding_amount'):
+            return obj._list_outstanding_amount or 0
         outstanding = obj.invoices.exclude(status='Paid').aggregate(
             total=Sum('total_amount')
         )['total']
@@ -876,6 +923,8 @@ class ContractSerializer(serializers.ModelSerializer):
         loc_count = obj.service_locations.count()
         if loc_count > 0:
             return loc_count
+        if hasattr(obj, '_list_active_zone_link_count'):
+            return obj._list_active_zone_link_count
         return obj.contract_zones.filter(is_active=True).count()
 
     def get_total_zone_count(self, obj):
@@ -888,11 +937,15 @@ class ContractSerializer(serializers.ModelSerializer):
     def get_participation_agreements_count(self, obj):
         """Count of participation agreements under this master contract"""
         if obj.contract_category == 'corporate_master':
+            if hasattr(obj, '_list_participation_agreements_count'):
+                return obj._list_participation_agreements_count
             return obj.participation_agreements.count()
         return 0
 
     def get_renewal_count(self, obj):
         """Count how many times this contract has been renewed"""
+        if hasattr(obj, '_list_renewal_count'):
+            return obj._list_renewal_count
         return obj.renewals.count()
 
     def get_effective_soundtrack_account_id(self, obj):
@@ -2062,10 +2115,14 @@ class TicketSerializer(serializers.ModelSerializer):
 
     def get_comments_count(self, obj):
         """Count public comments (exclude internal notes)"""
+        if hasattr(obj, '_list_comments_count'):  # annotated by the ticket list
+            return obj._list_comments_count
         return obj.comments.filter(is_internal=False).count()
 
     def get_internal_notes_count(self, obj):
         """Count internal notes"""
+        if hasattr(obj, '_list_internal_notes_count'):  # annotated by the ticket list
+            return obj._list_internal_notes_count
         return obj.comments.filter(is_internal=True).count()
 
     def create(self, validated_data):

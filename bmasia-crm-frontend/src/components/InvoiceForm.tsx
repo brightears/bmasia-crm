@@ -569,7 +569,9 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         total_amount: Math.round(totals.total * 100) / 100,
         currency: currency,
         billing_entity: billingEntity,
-        status: 'Draft' as const,
+        // A new invoice starts as Draft. Editing never sends a status: it changes only through
+        // its own actions (Mark as Sent, Send via Email, Mark as Paid), never by saving the form.
+        ...(mode === 'create' ? { status: 'Draft' as const } : {}),
       };
 
       let savedInvoice: Invoice;

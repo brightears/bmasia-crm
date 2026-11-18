@@ -154,6 +154,9 @@ class Activity(models.Model):
         'self', on_delete=models.SET_NULL, null=True, blank=True, related_name='+',
         help_text='The captured record that replaced this one for the same source',
     )
+    restricted = models.BooleanField(
+        default=False, help_text='Set by the recorder: the body is not shown to agent accounts',
+    )
     is_redacted = models.BooleanField(
         default=False, help_text='Summary, body and participants were removed because the source was purged',
     )
@@ -277,6 +280,29 @@ class ChangeProposal(models.Model):
 
     def __str__(self):
         return f'{self.kind} {self.target_collection} {self.status}'
+
+
+class RedactedSource(models.Model):
+    """A source whose content was removed here; it cannot be recorded or cited again.
+
+    Holds no content: the source system and canonical reference, when, and why.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    source_system = models.CharField(max_length=20, choices=SOURCE_SYSTEM_CHOICES)
+    source_ref = models.CharField(max_length=SOURCE_REF_MAX)
+    reason = models.CharField(max_length=REASON_MAX, blank=True, default='')
+    redacted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-redacted_at']
+        constraints = [
+            models.UniqueConstraint(fields=['source_system', 'source_ref'], name='inbox_redacted_source_unique'),
+        ]
+        indexes = [models.Index(fields=['source_ref'], name='inbox_redacted_ref')]
+
+    def __str__(self):
+        return f'{self.source_system} redacted {self.redacted_at:%Y-%m-%d}'
 
 
 class ProposalRefusal(models.Model):

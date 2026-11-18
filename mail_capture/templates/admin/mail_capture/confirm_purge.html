@@ -1,0 +1,28 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<h1>Confirm purge of stored mail</h1>
+<p>The rule <strong>{{ rule.get_kind_display }}: {{ rule.value }}</strong>
+({{ rule.get_action_display }}, {{ rule.get_scope_display }}{% if rule.mailbox %}: {{ rule.mailbox.email }}{% endif %})
+already blocks new capture. Confirming also removes mail stored before the rule existed.</p>
+{% if preview.messages is None %}
+<p>{{ preview.note }}</p>
+{% else %}
+<ul>
+  <li>Messages purged: <strong>{{ preview.messages }}</strong></li>
+  {% if preview.bodies is not None %}<li>Stored bodies cleared: <strong>{{ preview.bodies }}</strong></li>{% endif %}
+  {% if preview.copies is not None %}<li>Mailbox copies removed: <strong>{{ preview.copies }}</strong></li>{% endif %}
+  <li>Conversations affected: <strong>{{ preview.conversations }}</strong></li>
+  <li>Unmatched-sender rows removed: <strong>{{ preview.queue_rows }}</strong></li>
+</ul>
+{% endif %}
+<p>A purge cannot be undone; the mail could only be read again from Gmail.</p>
+{% if rule.purge_state == 'awaiting_confirmation' %}
+<form method="post">{% csrf_token %}
+  <input type="hidden" name="confirm" value="yes">
+  <input type="submit" value="Confirm purge">
+  <a href="{% url 'admin:mail_capture_capturerule_changelist' %}">Not now</a>
+</form>
+{% else %}
+<p>State: {{ rule.get_purge_state_display }}.</p>
+{% endif %}
+{% endblock %}
