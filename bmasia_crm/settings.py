@@ -319,6 +319,9 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
 
+# The automation page's test run sends real email only when this is on (default off).
+EMAIL_AUTOMATION_MANUAL_SEND_ENABLED = os.environ.get('EMAIL_AUTOMATION_MANUAL_SEND_ENABLED', '').lower() in ('1', 'true', 'yes')
+
 # Anthropic / Claude API Configuration
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 

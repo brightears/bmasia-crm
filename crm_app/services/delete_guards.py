@@ -25,9 +25,10 @@ from rest_framework import status
 from rest_framework.response import Response
 
 from crm_app.models import (
-    Company, Contact, Contract, ContractTemplate, CorporatePdfTemplate, CustomerSegment, EmailSequence,
-    EmailTemplate, Invoice, KBArticle, KBCategory, KBTag, ProspectEnrollment, ProspectSequence, Quote,
-    SeasonalTriggerDate, SequenceEnrollment, SequenceStep, StaticDocument, Ticket, Zone,
+    Company, Contact, Contract, ContractDocument, ContractTemplate, CorporatePdfTemplate, CustomerSegment,
+    Device, EmailCampaign, EmailSequence, EmailTemplate, ExpenseEntry, Invoice, KBArticle, KBCategory, KBTag,
+    Opportunity, ProspectEnrollment, ProspectSequence, Quote, RecurringExpense, SeasonalTriggerDate,
+    SequenceEnrollment, SequenceStep, StaticDocument, Ticket, TicketAttachment, TicketComment, User, Vendor, Zone,
 )
 
 # Rows that belong to the record and go with it when a Draft is deleted.
@@ -59,7 +60,31 @@ OWN_PARTS = {
                 'crm_app.KBArticleRelation.to_article'},
     Ticket: set(),
     Zone: set(),
+    # Records that carry history or that other records link to.
+    EmailCampaign: set(),
+    Opportunity: set(),
+    ContractDocument: set(),
+    TicketComment: set(),
+    TicketAttachment: set(),
+    ExpenseEntry: set(),
+    Vendor: set(),
+    RecurringExpense: set(),
+    Device: set(),
+    User: set(),
 }
+
+# Links that are not counted as history: the follow-up task created with an opportunity keeps
+# its own record (its link is cleared), so it does not keep the opportunity.
+UNCOUNTED = {
+    Opportunity: {'crm_app.Task.related_opportunity'},
+}
+
+# Only the record's own rule decides (references are not counted): a user's notes, tasks and
+# audit rows keep their history with the author cleared.
+OWN_RULE_ONLY = (User,)
+
+# Never deleted through the API by an agent request.
+NOT_FOR_AGENTS = (ContractDocument,)
 
 # Deleted only by a person signed in to the CRM, never by an agent account.
 CONFIGURATION_MODELS = (
@@ -88,6 +113,12 @@ ALTERNATIVE_FIELDS = {
     KBArticle: {'status': 'archived'},
     Ticket: {'status': 'closed'},
     Zone: {'status': 'cancelled'},
+    EmailCampaign: {'status': 'cancelled'},
+    Opportunity: {'stage': 'Lost'},
+    ExpenseEntry: {'status': 'cancelled'},
+    Vendor: {'is_active': False},
+    RecurringExpense: {'is_active': False},
+    User: {'is_active': False},
 }
 _REST_PATHS = {
     Company: 'companies', Contact: 'contacts', Contract: 'contracts', Quote: 'quotes', Invoice: 'invoices',
@@ -95,7 +126,8 @@ _REST_PATHS = {
     SequenceEnrollment: 'sequence-enrollments', ProspectSequence: 'prospect-sequences',
     ProspectEnrollment: 'prospect-enrollments', ContractTemplate: 'contract-templates',
     CustomerSegment: 'segments', KBCategory: 'kb/categories', KBArticle: 'kb/articles', Ticket: 'tickets',
-    Zone: 'zones',
+    Zone: 'zones', EmailCampaign: 'campaigns', Opportunity: 'opportunities', ExpenseEntry: 'expenses',
+    Vendor: 'vendors', RecurringExpense: 'recurring-expenses', User: 'users',
 }
 _ALTERNATIVE_WORDS = {
     Company: 'deactivate the company',
@@ -115,7 +147,47 @@ _ALTERNATIVE_WORDS = {
     KBArticle: 'archive the article',
     Ticket: 'close the ticket',
     Zone: 'mark the zone cancelled',
+    EmailCampaign: 'cancel the campaign',
+    Opportunity: 'mark the opportunity Lost',
+    ExpenseEntry: 'cancel the expense',
+    Vendor: 'deactivate the vendor',
+    RecurringExpense: 'deactivate the recurring expense',
+    User: 'deactivate the user',
 }
+
+def _own_rule_reasons(instance):
+    """Reasons that come from the record itself rather than from what links to it."""
+    reasons = []
+    if isinstance(instance, ContractDocument):
+        contract = instance.contract
+        if contract is not None and contract.status != 'Draft':
+            reasons.append(f'it belongs to contract {contract.contract_number}, which is {contract.status}; '
+                           'contract documents are deleted only while their contract is a Draft')
+    elif isinstance(instance, (TicketComment, TicketAttachment)):
+        if instance.ticket is not None and instance.ticket.status == 'closed':
+            reasons.append('its ticket is closed')
+    elif isinstance(instance, ExpenseEntry):
+        if instance.status in ('approved', 'paid'):
+            reasons.append(f'it is {instance.status}; only a draft, pending or cancelled expense can be deleted')
+    elif isinstance(instance, EmailCampaign):
+        if instance.status in ('sending', 'sent'):
+            reasons.append(f'it has been {instance.status}')
+    elif isinstance(instance, CorporatePdfTemplate):
+        in_use = Contract.objects.filter(company__parent_company_id=instance.company_id).count()
+        if in_use:
+            reasons.append(f'{in_use} contract{"s" if in_use != 1 else ""} of its group print with it')
+    elif isinstance(instance, SeasonalTriggerDate):
+        from django.utils import timezone
+        if instance.year >= timezone.localdate().year and EmailSequence.objects.filter(
+                sequence_type=instance.holiday_type, status='active').exists():
+            reasons.append('an active seasonal sequence uses this date')
+    elif isinstance(instance, User):
+        sequences = EmailSequence.objects.filter(created_by=instance).count()
+        if sequences:
+            reasons.append(f'deleting the user would delete the {sequences} email sequence'
+                           f'{"s" if sequences != 1 else ""} they created (with their steps and enrolments)')
+    return reasons
+
 
 MCP_COLLECTIONS = {'company': Company, 'contact': Contact, 'contract': Contract, 'quote': Quote,
                    'invoice': Invoice}
@@ -139,10 +211,12 @@ def cascading_relation_keys(model):
 
 def _reference_rows(instance):
     """[(plural kind, singular kind, count)] of rows pointing at ``instance``, its own parts left out."""
-    parts = OWN_PARTS.get(type(instance), set())
+    if isinstance(instance, OWN_RULE_ONLY):
+        return []
+    skipped = OWN_PARTS.get(type(instance), set()) | UNCOUNTED.get(type(instance), set())
     rows = {}
     for rel in referencing_relations(type(instance)):
-        if relation_key(rel) in parts:
+        if relation_key(rel) in skipped:
             continue
         n = rel.related_model._base_manager.filter(**{rel.field.name: instance}).count()
         if not n:
@@ -194,13 +268,15 @@ def _refusal_reasons(instance):
     """(name, reasons, counts) for a record covered by these rules; reasons is empty when it may go."""
     model = type(instance)
     name = next((str(getattr(instance, attr)) for attr in (
-        'name', 'contract_number', 'quote_number', 'invoice_number', 'title', 'subject', 'ticket_number')
+        'name', 'contract_number', 'quote_number', 'invoice_number', 'title', 'subject', 'ticket_number',
+        'description', 'username')
         if getattr(instance, attr, None)), str(instance.pk))
     reasons = []
     if model in DRAFT_ONLY and instance.status != 'Draft':
         reasons.append(f'it is {instance.status}; only a Draft can be deleted')
     if model is Contact and instance.is_primary:
         reasons.append("it is the company's primary contact")
+    reasons.extend(_own_rule_reasons(instance))
     rows = _reference_rows(instance)
     counts = {plural: n for plural, _singular, n in rows}
     if rows:
@@ -260,27 +336,16 @@ def _delete_parts_that_would_be_orphaned(instance):
             rel.related_model._base_manager.filter(**{rel.field.name: instance}).delete()
 
 
-def is_agent_user(user):
-    """An agent account (agent_inbox's rule where that app is installed, else the agent names)."""
-    if user is None or not getattr(user, 'is_authenticated', False):
-        return False
-    from django.apps import apps
-    if apps.is_installed('agent_inbox'):
-        from agent_inbox.policy import is_agent_account
-        return is_agent_account(user)
-    from crm_app import agent_policy
-    return agent_policy.principal_for_username(getattr(user, 'username', '')) is not None
-
-
 def agent_refusal(viewset, instance):
-    """Configuration records are not deleted by agent accounts: the body of a 403, or None."""
-    if not isinstance(instance, CONFIGURATION_MODELS):
+    """Configuration and contract documents are not deleted by agent requests: a 403 body, or None."""
+    if not isinstance(instance, CONFIGURATION_MODELS + NOT_FOR_AGENTS):
         return None
-    if not is_agent_user(getattr(getattr(viewset, 'request', None), 'user', None)):
+    from crm_app.request_policy import is_agent_request
+    if not is_agent_request(getattr(viewset, 'request', None)):
         return None
     kind = str(instance._meta.verbose_name).lower()
-    return {'error': f'A {kind} is configuration: it is deleted by a person signed in to the CRM, '
-                     'not by an agent account.', 'code': 'not_for_agents'}
+    return {'error': f'A {kind} is deleted by a person signed in to the CRM website, not by an API token '
+                     'or agent.', 'code': 'not_for_agents'}
 
 
 def destroy_one(viewset, instance):
@@ -318,12 +383,13 @@ def bulk_delete(viewset, queryset, ids):
     results = []
     for record_id in (str(i) for i in ids):
         obj = found.get(record_id)
-        if obj is None:
+        if obj is None or not type(obj)._base_manager.filter(pk=obj.pk).exists():
             results.append({'id': record_id, 'deleted': False, 'error': 'Not found.'})
             continue
         deleted, refusal, _status = destroy_one(viewset, obj)
         results.append({'id': record_id, 'deleted': True} if deleted
                        else {'id': record_id, 'deleted': False, **refusal})
     count = sum(1 for r in results if r['deleted'])
-    return Response({'message': f'{count} records deleted', 'deleted': count, 'results': results},
+    noun = getattr(viewset, 'bulk_noun', 'record')
+    return Response({'message': f'{count} {noun}{"s" if count != 1 else ""} deleted', 'deleted': count, 'results': results},
                     status=status.HTTP_200_OK)

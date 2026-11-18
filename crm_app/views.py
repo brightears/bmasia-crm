@@ -108,6 +108,10 @@ from .serializers import (
     ProspectStepExecutionSerializer, ProspectReplySerializer, AIEmailDraftSerializer
 )
 from .services.delete_guards import GuardedDestroyMixin
+from .request_policy import (
+    AdminOnWebsite, FinanceOrAdminOnWebsite, PersonForConfigurationWrites, SalesOrAdminOnWebsite,
+    StaffOrAdminOnWebsite, StaffOrTechOnWebsite,
+)
 from .api_errors import (
     client_error_text, error_response, internal_error_text, mail_failure_text, safe_mail_message, smtp_error_text,
 )
@@ -1076,7 +1080,7 @@ class OpportunityViewSet(BaseModelViewSet):
         return Response({'error': 'Opportunity is already at final stage'},
                        status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=False, methods=['get'], url_path='export/pdf')
+    @action(detail=False, methods=['get'], url_path='export/pdf', permission_classes=[SalesOrAdminOnWebsite])
     def export_pdf(self, request):
         """
         GET /api/v1/opportunities/export/pdf/?stage=Won&company__billing_entity=BMAsia+Limited&search=...&owner=...&ordering=-expected_value
@@ -1148,7 +1152,7 @@ class OpportunityViewSet(BaseModelViewSet):
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
 
-    @action(detail=False, methods=['get'], url_path='export/sales-performance-pdf')
+    @action(detail=False, methods=['get'], url_path='export/sales-performance-pdf', permission_classes=[SalesOrAdminOnWebsite])
     def export_sales_performance_pdf(self, request):
         """
         GET /api/v1/opportunities/export/sales-performance-pdf/?year=2026&entity=BMAsia+Limited&period_type=monthly
@@ -6421,7 +6425,7 @@ class InvoiceViewSet(BaseModelViewSet):
             'receipt_number': invoice.receipt_number,
         })
 
-    @action(detail=False, methods=['get'], url_path='export-quickbooks')
+    @action(detail=False, methods=['get'], url_path='export-quickbooks', permission_classes=[FinanceOrAdminOnWebsite])
     def export_quickbooks(self, request):
         """
         Export invoices as IIF file for QuickBooks Pro 2016 import.
@@ -8543,7 +8547,7 @@ class AutomationViewSet(viewsets.ViewSet):
             'recent_stats': recent_stats,
         })
 
-    @action(detail=False, methods=['post'], url_path='test-run')
+    @action(detail=False, methods=['post'], url_path='test-run', permission_classes=[AdminOnWebsite])
     def test_run(self, request):
         """
         POST /api/v1/automation/test-run/
@@ -8554,7 +8558,16 @@ class AutomationViewSet(viewsets.ViewSet):
         import sys
 
         email_type = request.data.get('type', 'all')
+        from django.conf import settings
         dry_run = request.data.get('dry_run', True)
+        if isinstance(dry_run, str):
+            dry_run = dry_run.strip().lower() not in ('false', '0', 'no', 'off')
+        if not dry_run and not getattr(settings, 'EMAIL_AUTOMATION_MANUAL_SEND_ENABLED', False):
+            return Response(
+                {'error': 'Sending from the test run is switched off (EMAIL_AUTOMATION_MANUAL_SEND_ENABLED). '
+                          'Run it with dry_run to see what would be sent.', 'code': 'manual_send_disabled'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         # Validate type
         valid_types = ['all', 'renewal', 'payment', 'quarterly']
@@ -8641,7 +8654,7 @@ class EmailTemplateViewSet(BaseModelViewSet):
     """ViewSet for EmailTemplate management with preview and duplication"""
     queryset = EmailTemplate.objects.all()
     serializer_class = EmailTemplateSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     search_fields = ['name', 'template_type', 'subject', 'body_text']
     ordering_fields = ['created_at', 'name', 'template_type', 'language']
     ordering = ['-created_at', 'name']
@@ -8669,6 +8682,7 @@ class EmailTemplateViewSet(BaseModelViewSet):
 
     # The Email Templates page selects templates and activates, deactivates or deletes them.
     bulk_allowed = frozenset({'activate', 'deactivate', 'delete'})
+    bulk_noun = 'template'
 
     @action(detail=True, methods=['get'])
     def preview(self, request, pk=None):
@@ -8858,7 +8872,7 @@ class EmailSequenceViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     queryset = EmailSequence.objects.all().prefetch_related('steps')
     serializer_class = EmailSequenceSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status']
     search_fields = ['name', 'description']
@@ -8877,7 +8891,7 @@ class SequenceStepViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     queryset = SequenceStep.objects.all().select_related('sequence', 'email_template')
     serializer_class = SequenceStepSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['sequence', 'is_active']
     search_fields = ['name']
@@ -9079,7 +9093,7 @@ class CustomerSegmentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     queryset = CustomerSegment.objects.all().select_related('created_by')
     serializer_class = CustomerSegmentSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'segment_type', 'created_by']
     search_fields = ['name', 'description', 'tags']
@@ -9603,7 +9617,7 @@ class KBCategoryViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     queryset = KBCategory.objects.all().prefetch_related('parent', 'children')
     serializer_class = KBCategorySerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['is_active', 'parent']
     search_fields = ['name', 'description']
@@ -9618,7 +9632,7 @@ class KBTagViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     queryset = KBTag.objects.all().order_by('name')
     serializer_class = KBTagSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name']
     ordering = ['name']
@@ -10420,7 +10434,7 @@ class DeviceViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
 class ProspectSequenceViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     queryset = ProspectSequence.objects.prefetch_related('steps').all()
     serializer_class = ProspectSequenceSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['trigger_type', 'is_active']
     search_fields = ['name', 'description']
@@ -11026,7 +11040,7 @@ class ZoneViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
         serializer = ContractZoneSerializer(queryset, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['post'], url_path='sync-all')
+    @action(detail=False, methods=['post'], url_path='sync-all', permission_classes=[StaffOrTechOnWebsite])
     def sync_all(self, request):
         """
         Trigger manual sync for all Soundtrack zones across all companies.
@@ -11043,7 +11057,7 @@ class ZoneViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
             'message': f'Synced {synced} zones with {errors} errors'
         })
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[StaffOrTechOnWebsite])
     def sync(self, request, pk=None):
         """
         Sync single company's zones from Soundtrack API.
@@ -11117,7 +11131,7 @@ class ZoneViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
             'message': f'Found {orphaned_zones.count()} orphaned zones'
         })
 
-    @action(detail=True, methods=['delete'], url_path='hard-delete')
+    @action(detail=True, methods=['delete'], url_path='hard-delete', permission_classes=[StaffOrAdminOnWebsite])
     def hard_delete(self, request, pk=None):
         """
         Permanently delete an orphaned zone.
@@ -11260,7 +11274,7 @@ class StaticDocumentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     queryset = StaticDocument.objects.all()
     serializer_class = StaticDocumentSerializer
-    permission_classes = [IsAuthenticated]  # hardened 2026-07-02: was AllowAny — anon could POST forged legal T&Cs served on every contract pack
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]  # hardened 2026-07-02: was AllowAny — anon could POST forged legal T&Cs served on every contract pack
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['document_type', 'is_active']
     search_fields = ['name', 'description']
@@ -11308,7 +11322,9 @@ class ContractTemplateViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     queryset = ContractTemplate.objects.all()
     serializer_class = ContractTemplateSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
+    # Cira creates and updates contract templates (crm_app.agent_policy); the same holds here as in MCP.
+    agent_write_collection = 'contracttemplate'
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['template_type', 'is_default', 'is_active']
     search_fields = ['name', 'content']
@@ -11337,7 +11353,7 @@ class CorporatePdfTemplateViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     queryset = CorporatePdfTemplate.objects.select_related('company')
     serializer_class = CorporatePdfTemplateSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['company', 'template_format', 'use_corporate_branding']
     search_fields = ['name', 'company__name']
@@ -11386,7 +11402,7 @@ class SeasonalTriggerDateViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     queryset = SeasonalTriggerDate.objects.select_related('updated_by').order_by('-year', 'holiday_type')
     serializer_class = SeasonalTriggerDateSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['holiday_type', 'year']
     ordering_fields = ['year', 'trigger_date', 'holiday_type']
@@ -11740,7 +11756,7 @@ class RevenueViewSet(viewsets.ViewSet):
         serializer = MonthlyRevenueSnapshotSerializer(queryset, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['post'], url_path='classify-contracts')
+    @action(detail=False, methods=['post'], url_path='classify-contracts', permission_classes=[FinanceOrAdminOnWebsite])
     def classify_contracts(self, request):
         """
         POST /api/v1/revenue/classify-contracts/
@@ -11774,7 +11790,7 @@ class RevenueViewSet(viewsets.ViewSet):
                 'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['post'], url_path='generate-snapshots')
+    @action(detail=False, methods=['post'], url_path='generate-snapshots', permission_classes=[FinanceOrAdminOnWebsite])
     def generate_snapshots(self, request):
         """
         POST /api/v1/revenue/generate-snapshots/
@@ -11846,7 +11862,7 @@ class RevenueViewSet(viewsets.ViewSet):
                 'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['post'], url_path='initialize')
+    @action(detail=False, methods=['post'], url_path='initialize', permission_classes=[FinanceOrAdminOnWebsite])
     def initialize(self, request):
         """
         POST /api/v1/revenue/initialize/
@@ -12142,7 +12158,7 @@ class ExpenseCategoryViewSet(BaseModelViewSet):
         serializer = self.get_serializer(categories, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['post'], url_path='initialize-defaults')
+    @action(detail=False, methods=['post'], url_path='initialize-defaults', permission_classes=[FinanceOrAdminOnWebsite])
     def initialize_defaults(self, request):
         """
         POST /api/v1/expense-categories/initialize-defaults/
@@ -12226,7 +12242,7 @@ class RecurringExpenseViewSet(BaseModelViewSet):
         serializer = self.get_serializer(expenses, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'], url_path='generate-entries')
+    @action(detail=True, methods=['post'], url_path='generate-entries', permission_classes=[FinanceOrAdminOnWebsite])
     def generate_entries(self, request, pk=None):
         """
         POST /api/v1/recurring-expenses/{id}/generate-entries/
@@ -12858,7 +12874,7 @@ class ProfitLossViewSet(viewsets.ViewSet):
                 'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='export/pdf')
+    @action(detail=False, methods=['get'], url_path='export/pdf', permission_classes=[FinanceOrAdminOnWebsite])
     def export_pdf(self, request):
         """
         GET /api/v1/profit-loss/export/pdf/?year=2026&month=1&billing_entity=bmasia_th&currency=THB
@@ -12910,7 +12926,7 @@ class ProfitLossViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='export/excel')
+    @action(detail=False, methods=['get'], url_path='export/excel', permission_classes=[FinanceOrAdminOnWebsite])
     def export_excel(self, request):
         """
         GET /api/v1/profit-loss/export/excel/?year=2026&month=1&billing_entity=bmasia_th&currency=THB
@@ -13108,7 +13124,7 @@ class CashFlowViewSet(viewsets.ViewSet):
                 'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='export/pdf')
+    @action(detail=False, methods=['get'], url_path='export/pdf', permission_classes=[FinanceOrAdminOnWebsite])
     def export_pdf(self, request):
         """
         GET /api/v1/cash-flow/export/pdf/?year=2026&month=1&billing_entity=bmasia_th&currency=THB
@@ -13160,7 +13176,7 @@ class CashFlowViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='export/excel')
+    @action(detail=False, methods=['get'], url_path='export/excel', permission_classes=[FinanceOrAdminOnWebsite])
     def export_excel(self, request):
         """
         GET /api/v1/cash-flow/export/excel/?year=2026&month=1&billing_entity=bmasia_th&currency=THB
@@ -13311,7 +13327,7 @@ class BalanceSheetViewSet(viewsets.ViewSet):
                 'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='export/pdf')
+    @action(detail=False, methods=['get'], url_path='export/pdf', permission_classes=[FinanceOrAdminOnWebsite])
     def export_pdf(self, request):
         """
         GET /api/v1/balance-sheet/export/pdf/?year=2026&quarter=1&billing_entity=bmasia_th&currency=THB
@@ -13356,7 +13372,7 @@ class BalanceSheetViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='export/excel')
+    @action(detail=False, methods=['get'], url_path='export/excel', permission_classes=[FinanceOrAdminOnWebsite])
     def export_excel(self, request):
         """
         GET /api/v1/balance-sheet/export/excel/?year=2026&quarter=1&billing_entity=bmasia_th&currency=THB
@@ -13519,7 +13535,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
         }
         return Response(data)
 
-    @action(detail=False, methods=['post'], url_path='import')
+    @action(detail=False, methods=['post'], url_path='import', permission_classes=[FinanceOrAdminOnWebsite])
     def import_excel(self, request):
         """POST upload Pom's Excel file to create schedules + entries."""
         from crm_app.services.revenue_recognition_service import RevenueRecognitionService
@@ -13557,7 +13573,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             logger.exception("Revenue recognition import error")
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['post'], url_path='generate')
+    @action(detail=False, methods=['post'], url_path='generate', permission_classes=[FinanceOrAdminOnWebsite])
     def generate(self, request):
         """POST auto-generate schedules from CRM invoices."""
         from crm_app.services.revenue_recognition_service import RevenueRecognitionService
@@ -13597,7 +13613,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             logger.exception("Revenue recognition generate error")
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['post'], url_path='regenerate')
+    @action(detail=False, methods=['post'], url_path='regenerate', permission_classes=[FinanceOrAdminOnWebsite])
     def regenerate(self, request):
         """POST recalculate all entries for a year + entity."""
         from crm_app.services.revenue_recognition_service import RevenueRecognitionService
@@ -13616,7 +13632,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             logger.exception("Revenue recognition regenerate error")
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['patch'], url_path=r'schedules/(?P<pk>\d+)/update')
+    @action(detail=False, methods=['patch'], url_path=r'schedules/(?P<pk>\d+)/update', permission_classes=[FinanceOrAdminOnWebsite])
     def update_schedule(self, request, pk=None):
         """PATCH modify a schedule and recalculate entries."""
         from crm_app.services.revenue_recognition_service import RevenueRecognitionService
@@ -13643,7 +13659,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             logger.exception("Revenue recognition update error")
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['post'], url_path=r'schedules/(?P<pk>\d+)/cancel')
+    @action(detail=False, methods=['post'], url_path=r'schedules/(?P<pk>\d+)/cancel', permission_classes=[FinanceOrAdminOnWebsite])
     def cancel_schedule(self, request, pk=None):
         """POST cancel a schedule and remove future entries."""
         from crm_app.services.revenue_recognition_service import RevenueRecognitionService
@@ -13689,7 +13705,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             logger.exception("Deferred revenue error")
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='export/excel')
+    @action(detail=False, methods=['get'], url_path='export/excel', permission_classes=[FinanceOrAdminOnWebsite])
     def export_excel(self, request):
         """GET export revenue accrual report in Pom's Excel format."""
         from crm_app.services.revenue_recognition_service import RevenueRecognitionService

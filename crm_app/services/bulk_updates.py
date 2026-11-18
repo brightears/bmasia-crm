@@ -14,6 +14,7 @@ lists the result per record:
 - ``export``: CSV of the selected records.
 """
 from django.db import transaction
+from django.http import Http404
 from rest_framework import status
 from rest_framework.response import Response
 
@@ -26,7 +27,7 @@ def run_bulk_operation(viewset, request):
     body = BulkOperationSerializer(data=request.data)
     body.is_valid(raise_exception=True)
     action = body.validated_data['action']
-    ids = body.validated_data['ids']
+    ids = list(dict.fromkeys(str(i) for i in body.validated_data['ids']))  # each record once, order kept
     data = body.validated_data.get('data') or {}
 
     if action not in getattr(viewset, 'bulk_allowed', frozenset()):
@@ -61,7 +62,7 @@ def _bulk_update_fields(viewset, queryset, ids, fields, verb='updated'):
     results = []
     for record_id in (str(i) for i in ids):
         obj = found.get(record_id)
-        if obj is None:
+        if obj is None or not type(obj)._base_manager.filter(pk=obj.pk).exists():
             results.append({'id': record_id, 'updated': False, 'error': 'Not found.'})
             continue
         # perform_update reads the record again through get_object(), as for PATCH /{id}/.
@@ -70,12 +71,17 @@ def _bulk_update_fields(viewset, queryset, ids, fields, verb='updated'):
         if not serializer.is_valid():
             results.append({'id': record_id, 'updated': False, 'errors': serializer.errors})
             continue
-        with transaction.atomic():
-            viewset.perform_update(serializer)
+        try:
+            with transaction.atomic():
+                viewset.perform_update(serializer)
+        except Http404:  # deleted by someone else while this call ran
+            results.append({'id': record_id, 'updated': False, 'error': 'Not found.'})
+            continue
         results.append({'id': record_id, 'updated': True})
 
     updated = sum(1 for r in results if r['updated'])
-    return Response({'message': f'{updated} record{"s" if updated != 1 else ""} {verb}',
+    noun = getattr(viewset, 'bulk_noun', 'record')
+    return Response({'message': f'{updated} {noun}{"s" if updated != 1 else ""} {verb}',
                      'updated': updated, 'count': updated, 'results': results})
 
 
