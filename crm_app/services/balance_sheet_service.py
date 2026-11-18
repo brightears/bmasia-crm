@@ -52,6 +52,8 @@ from decimal import Decimal
 from typing import Dict, Optional, List, Tuple
 from django.db.models import Sum, Q
 
+from crm_app.dates import business_today
+
 logger = logging.getLogger(__name__)
 
 
@@ -265,7 +267,7 @@ class BalanceSheetService:
         quarter_names = {1: 'Q1', 2: 'Q2', 3: 'Q3', 4: 'Q4'}
 
         # Determine current quarter
-        today = date.today()
+        today = business_today()
         if today.year == year:
             current_quarter = (today.month - 1) // 3 + 1
         else:
