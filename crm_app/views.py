@@ -29,7 +29,7 @@ from decimal import Decimal
 from crm_app.services.document_context import customer_legal_entity_name, effective_billing_entity
 from crm_app.services.document_entity_filters import filter_document_entity
 from crm_app.contract_pdf_v2 import (
-    clause_addition_markup, optional_clause_paragraph, paragraph_text,
+    clause_addition_markup, literal_hyphens, optional_clause_paragraph, paragraph_text,
     split_clause_placements, stored_markup,
 )
 
@@ -2267,7 +2267,9 @@ class ContractViewSet(BaseModelViewSet):
                 # while CRM values are plain text. Escape only the dynamic value
                 # so legal names such as "T&T" render literally without allowing
                 # customer data to be parsed as paragraph markup.
-                replacement = paragraph_text(replacement)
+                # A value's own "---" prints as written; the full-template
+                # layout must not read it as a page-break marker.
+                replacement = literal_hyphens(paragraph_text(replacement))
             rendered[var] = replacement
         # One pass: a value that itself contains "{{variable}}" text prints as
         # written instead of being filled in again.

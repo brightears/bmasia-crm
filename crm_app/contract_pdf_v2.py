@@ -208,7 +208,7 @@ def tailored_template_content(contract, resolved_content=None):
             # no explicit payment wording is supplied.
             if not value and slot == '{{payment_terms}}':
                 continue
-            content = content.replace(slot, html_text(value) if getattr(contract, field, '') else stored_markup(
+            content = content.replace(slot, filled_text(value) if getattr(contract, field, '') else stored_markup(
                 clean_text(value), field='ContractTemplate.content', record=getattr(selected, 'pk', None)))
     additional_terms, placed = split_clause_placements(getattr(contract, 'custom_terms', ''))
     for clause in CLAUSE_PLACEMENTS:
@@ -216,7 +216,7 @@ def tailored_template_content(contract, resolved_content=None):
         value = placed.get(clause, '')
         if value and slot not in content and not already_present(value):
             missing.append({'field': 'custom_terms', 'accepted_slots': [f'under_{clause}']})
-        content = content.replace(slot, html_text(value) if value else '')
+        content = content.replace(slot, filled_text(value) if value else '')
     if missing:
         raise ContractTailoringClarification(missing)
 
@@ -225,7 +225,7 @@ def tailored_template_content(contract, resolved_content=None):
         if '{{service_items}}' not in content:
             raise ContractTailoringClarification([{'field': 'custom_service_items', 'accepted_slots': ['service_items']}])
         content = content.replace('{{service_items}}', '<br/>'.join(
-            html_text(item.get('name', '')) + (': ' + html_text(item['description']) if item.get('description') else '')
+            filled_text(item.get('name', '')) + (': ' + filled_text(item['description']) if item.get('description') else '')
             for item in custom_services if isinstance(item, dict)
         ))
     else:
@@ -239,9 +239,9 @@ def tailored_template_content(contract, resolved_content=None):
         value = (additional_terms if field == 'custom_terms' else getattr(contract, field, '')) or ''
         found = [f'{{{{{slot}}}}}' for slot in slots if f'{{{{{slot}}}}}' in content]
         for slot in found:
-            content = content.replace(slot, html_text(value) if value.strip() else '')
+            content = content.replace(slot, filled_text(value) if value.strip() else '')
         if value.strip() and not found and not already_present(value):
-            inserts.append(optional_clause_markup(heading, value))
+            inserts.append(literal_hyphens(optional_clause_markup(heading, value)))
     if inserts:
         extra = '<br/><br/>'.join(inserts) + '<br/><br/>'
         # Place the additions before the complete signature segment, including
@@ -263,6 +263,26 @@ def tailored_template_content(contract, resolved_content=None):
             'accepted_slots': ['issuer_name', 'issuer_address', 'issuer_bank', 'issuer_account', 'issuer_swift'],
         }])
     return content
+
+
+# A hyphen that could join others into the full-template page-break marker
+# "---": one beside another hyphen, or at either end of a filled value.
+_MARKER_HYPHEN = re.compile(r'^-|-$|-(?=-)|(?<=-)-')
+
+
+def literal_hyphens(markup):
+    """Write a filled value's marker-forming hyphens as "&#45;".
+
+    The full-template layout starts a page at "---" after the template's
+    values are filled in. A value such as "Alpha---Beta" is plain text and
+    prints its hyphens; the entity prints the same character.
+    """
+    return _MARKER_HYPHEN.sub('&#45;', markup)
+
+
+def filled_text(value):
+    """html_text() for a plain value filled into a full template."""
+    return literal_hyphens(html_text(value))
 
 
 def paragraph_text(value):
