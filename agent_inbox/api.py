@@ -79,8 +79,24 @@ class ActivityViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets
         context = super().get_serializer_context()
         user = getattr(self.request, 'user', None)
         if policy.is_agent_account(user):
-            context['hide_private_from'] = user.pk
+            context['agent_viewer'] = user
         return context
+
+    def _with_recorders(self, rows):
+        context = self.get_serializer_context()
+        if 'agent_viewer' in context:
+            context['agent_recorder_ids'] = policy.agent_account_ids({row.recorded_by_id for row in rows})
+        return ActivitySerializer(rows, many=True, context=context).data
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        rows = list(page if page is not None else queryset)
+        data = self._with_recorders(rows)
+        return self.get_paginated_response(data) if page is not None else Response(data)
+
+    def retrieve(self, request, *args, **kwargs):
+        return Response(self._with_recorders([self.get_object()])[0])
 
     def create(self, request):
         try:
@@ -88,7 +104,7 @@ class ActivityViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets
                 request.user, _body(request), via=policy.recorded_via_for(request))
         except ServiceError as exc:
             return _error(exc)
-        data = {**self.get_serializer(activity).data, 'replayed': replayed}
+        data = {**self._with_recorders([activity])[0], 'replayed': replayed}
         return Response(data, status=status.HTTP_200_OK if replayed else status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'])
@@ -97,7 +113,7 @@ class ActivityViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets
             activity = activity_service.void_activity(request.user, pk, _body(request))
         except ServiceError as exc:
             return _error(exc)
-        return Response(self.get_serializer(activity).data)
+        return Response(self._with_recorders([activity])[0])
 
 
 class ChangeProposalFilter(django_filters.FilterSet):
@@ -152,9 +168,15 @@ class ChangeProposalViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, vi
         queryset = self.filter_queryset(self.get_queryset())
         page = self.paginate_queryset(queryset)
         rows = list(page if page is not None else queryset)
+        proposal_service.refresh_snapshots(rows)
         context = {**self.get_serializer_context(), 'conflicts': proposal_service.conflicts_for(rows)}
         data = ChangeProposalSerializer(rows, many=True, context=context).data
         return self.get_paginated_response(data) if page is not None else Response(data)
+
+    def retrieve(self, request, *args, **kwargs):
+        proposal = self.get_object()
+        proposal_service.refresh_snapshots([proposal])
+        return Response(self.get_serializer(proposal).data)
 
     def create(self, request):
         try:
@@ -213,4 +235,5 @@ class ChangeProposalViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, vi
             },
             'proposals_enabled': policy.proposals_enabled(),
             'activity_writes_enabled': policy.activity_writes_enabled(),
+            **policy.account_status(request),
         })
