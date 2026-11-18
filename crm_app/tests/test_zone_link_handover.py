@@ -167,7 +167,7 @@ def test_cancel_closes_links_on_the_earlier_of_today_and_the_term_end(term_end, 
     link = _link(c, _zone(company))
     c.status = 'Cancelled'
     c.save()
-    assert _state(link) == (False, expected or timezone.now().date())
+    assert _state(link) == (False, expected or timezone.localdate())
 
 
 def test_cancel_never_ends_a_link_before_it_started():

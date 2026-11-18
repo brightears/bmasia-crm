@@ -8,6 +8,8 @@ from factory.django import DjangoModelFactory
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.utils import timezone
+
 from crm_app.models import (
     User, Company, Contact, Opportunity, Contract,
     ContractZone, Zone, Invoice
@@ -71,7 +73,7 @@ class OpportunityFactory(DjangoModelFactory):
     stage = fuzzy.FuzzyChoice(['Contacted', 'Quotation Sent', 'Contract Sent', 'Won', 'Lost'])
     expected_value = fuzzy.FuzzyDecimal(1000.0, 50000.0, 2)
     probability = fuzzy.FuzzyInteger(0, 100)
-    expected_close_date = factory.LazyFunction(lambda: date.today() + timedelta(days=30))
+    expected_close_date = factory.LazyFunction(lambda: timezone.localdate() + timedelta(days=30))
     owner = factory.SubFactory(UserFactory)
 
 
@@ -85,8 +87,8 @@ class ContractFactory(DjangoModelFactory):
     contract_number = factory.Sequence(lambda n: f'CTR-2025-{n:04d}')
     contract_type = fuzzy.FuzzyChoice(['New', 'Renewal', 'Amendment'])
     status = 'Active'
-    start_date = factory.LazyFunction(lambda: date.today())
-    end_date = factory.LazyFunction(lambda: date.today() + timedelta(days=365))
+    start_date = factory.LazyFunction(lambda: timezone.localdate())
+    end_date = factory.LazyFunction(lambda: timezone.localdate() + timedelta(days=365))
     value = fuzzy.FuzzyDecimal(5000.0, 100000.0, 2)
     currency = 'USD'
     auto_renew = False
@@ -131,8 +133,8 @@ class InvoiceFactory(DjangoModelFactory):
     contract = factory.SubFactory(ContractFactory)
     invoice_number = factory.Sequence(lambda n: f'INV-2025-{n:04d}')
     status = 'Draft'
-    issue_date = factory.LazyFunction(lambda: date.today())
-    due_date = factory.LazyFunction(lambda: date.today() + timedelta(days=30))
+    issue_date = factory.LazyFunction(lambda: timezone.localdate())
+    due_date = factory.LazyFunction(lambda: timezone.localdate() + timedelta(days=30))
     amount = fuzzy.FuzzyDecimal(1000.0, 10000.0, 2)
     tax_amount = factory.LazyAttribute(lambda obj: obj.amount * Decimal('0.07'))
     discount_amount = Decimal('0.00')

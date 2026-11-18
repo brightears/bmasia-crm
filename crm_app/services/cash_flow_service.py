@@ -31,10 +31,11 @@ Usage:
 """
 
 import logging
-from datetime import date
 from decimal import Decimal
 from typing import Dict, Optional, List, Tuple
 from django.db.models import Sum, Count, Q
+
+from crm_app.dates import business_today
 
 logger = logging.getLogger(__name__)
 
@@ -318,7 +319,7 @@ class CashFlowService:
             '', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
             'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
         ]
-        current_month = date.today().month if date.today().year == year else 12
+        current_month = business_today().month if business_today().year == year else 12
 
         for month in range(1, current_month + 1):
             cf = self.get_monthly_cash_flow(year, month, billing_entity, currency)

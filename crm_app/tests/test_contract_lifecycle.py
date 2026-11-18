@@ -6,6 +6,8 @@ fixed duplicate_for_renewal action, and the close_renewed_predecessors backfill.
 All data is synthetic.
 """
 from datetime import date, timedelta
+
+from django.utils import timezone
 from decimal import Decimal
 from io import StringIO
 import json
@@ -523,7 +525,7 @@ def _run_backfill(**kwargs):
 
 
 def _backfill_fixture():
-    today = date.today()
+    today = timezone.localdate()
     company = _company('Backfill company')
     stale = _contract(company, start=today - timedelta(days=730))
     live = _contract(company, renewed_from=stale, start=today - timedelta(days=300))  # both Active
@@ -590,6 +592,8 @@ def test_renewal_enrollment_skips_contract_with_renewal_in_flight():
     SequenceStep.objects.create(
         sequence=sequence, step_number=1, name='First', email_template=template, delay_days=30,
     )
+    # The suspended renewal cron counts from date.today() (the process time zone, Bangkok
+    # in production); this fixture follows the same clock on purpose.
     target_end = date.today() + timedelta(days=30)
     in_flight_company = _company('In-flight renewal company')
     plain_company = _company('No renewal company')

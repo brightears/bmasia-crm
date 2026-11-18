@@ -14,6 +14,7 @@ from django.conf import settings
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.urls import reverse
+from crm_app.dates import business_today
 from django.db.models import Q
 
 from crm_app.models import (
@@ -1019,7 +1020,7 @@ class EmailService:
         # Update quote status
         if success_count > 0:
             quote.status = 'Sent'
-            quote.sent_date = timezone.now().date()
+            quote.sent_date = business_today()
             quote.save()
 
             return True, f"Quote sent successfully to {success_count} recipient(s)"
@@ -1851,7 +1852,7 @@ class EmailService:
         # Update contract reminder tracking
         if success_count > 0:
             contract.renewal_notice_sent = True
-            contract.renewal_notice_date = timezone.now().date()
+            contract.renewal_notice_date = business_today()
             contract.save()
 
             return True, f"Renewal reminder sent successfully to {success_count} recipient(s)"

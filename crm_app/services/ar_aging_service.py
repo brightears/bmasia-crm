@@ -30,6 +30,8 @@ from typing import List, Dict, Optional
 from django.db.models import Sum, Count, Q, F
 from django.db.models.functions import Coalesce
 
+from crm_app.dates import business_today
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,7 +74,7 @@ class ARAgingService:
             QuerySet of Invoice objects
         """
         if as_of_date is None:
-            as_of_date = date.today()
+            as_of_date = business_today()
 
         # Outstanding = Sent or Overdue (not Paid, Draft, Cancelled, Refunded)
         queryset = self.Invoice.objects.filter(
@@ -103,7 +105,7 @@ class ARAgingService:
             Bucket key: 'current', '1_30', '31_60', '61_90', or '90_plus'
         """
         if as_of_date is None:
-            as_of_date = date.today()
+            as_of_date = business_today()
 
         if due_date >= as_of_date:
             return 'current'
@@ -172,7 +174,7 @@ class ARAgingService:
         }
         """
         if as_of_date is None:
-            as_of_date = date.today()
+            as_of_date = business_today()
 
         invoices = self.get_outstanding_invoices(
             as_of_date=as_of_date,
@@ -292,7 +294,7 @@ class ARAgingService:
         Get invoices that are overdue by at least min_days_overdue days.
         Useful for generating collection lists or alerts.
         """
-        as_of_date = date.today()
+        as_of_date = business_today()
         cutoff_date = as_of_date - timedelta(days=min_days_overdue)
 
         invoices = self.Invoice.objects.filter(
