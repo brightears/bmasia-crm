@@ -54,6 +54,34 @@ def zone_links_prefetch(prefix=''):
     return Prefetch(f'{prefix}zone_contracts', queryset=links, to_attr='_prefetched_zone_links')
 
 
+def contract_list_queryset(queryset):
+    """Contracts for /contracts/ (ContractSerializer). Keeps the view's select_related."""
+    from crm_app.models import Contract, ContractDocument, ContractZone, Invoice
+
+    invoices = Invoice.objects.select_related('company').prefetch_related('line_items')
+    return (
+        queryset
+        .prefetch_related(None)
+        .prefetch_related(
+            'line_items',
+            'service_locations',
+            'service_items',
+            Prefetch('contract_zones', queryset=ContractZone.objects.select_related('zone')),
+            Prefetch('invoices', queryset=invoices),
+            Prefetch('contract_documents',
+                     queryset=ContractDocument.objects.select_related('uploaded_by')),
+        )
+        .annotate(
+            _list_paid_invoices_count=count_of(Invoice, 'contract', status='Paid'),
+            _list_outstanding_amount=sum_of(Invoice, 'contract', 'total_amount',
+                                            exclude={'status': 'Paid'}),
+            _list_active_zone_link_count=count_of(ContractZone, 'contract', is_active=True),
+            _list_participation_agreements_count=count_of(Contract, 'master_contract'),
+            _list_renewal_count=count_of(Contract, 'renewed_from'),
+        )
+    )
+
+
 def company_list_queryset(queryset):
     """Companies for /companies/ (CompanySerializer)."""
     from crm_app.models import Contact, Contract, Opportunity, Zone

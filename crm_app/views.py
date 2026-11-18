@@ -1300,7 +1300,15 @@ class ContractViewSet(BaseModelViewSet):
     ordering_fields = ['created_at', 'start_date', 'end_date', 'value', 'updated_at', 'company__name', 'contract_number']
     ordering = ['-start_date']
     filterset_fields = ['company', 'contract_type', 'status', 'auto_renew', 'is_active', 'contract_category', 'opportunity']
-    
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.action == 'list':
+            # Everything ContractSerializer reads, fetched once per page (no per-row queries).
+            from crm_app.services.list_querysets import contract_list_queryset
+            queryset = contract_list_queryset(queryset)
+        return queryset
+
     @action(detail=False, methods=['get'])
     def expiring_soon(self, request):
         """Get contracts expiring within 30 days"""

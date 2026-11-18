@@ -866,10 +866,17 @@ class ContractSerializer(serializers.ModelSerializer):
             'contract_number': {'required': False}
         }
 
+    # The contract list annotates the _list_* counts and sums with the same filters and
+    # aggregates (services/list_querysets.py); elsewhere they are queried per contract.
+
     def get_paid_invoices_count(self, obj):
+        if hasattr(obj, '_list_paid_invoices_count'):
+            return obj._list_paid_invoices_count
         return obj.invoices.filter(status='Paid').count()
 
     def get_outstanding_amount(self, obj):
+        if hasattr(obj, '_list_outstanding_amount'):
+            return obj._list_outstanding_amount or 0
         outstanding = obj.invoices.exclude(status='Paid').aggregate(
             total=Sum('total_amount')
         )['total']
@@ -880,6 +887,8 @@ class ContractSerializer(serializers.ModelSerializer):
         loc_count = obj.service_locations.count()
         if loc_count > 0:
             return loc_count
+        if hasattr(obj, '_list_active_zone_link_count'):
+            return obj._list_active_zone_link_count
         return obj.contract_zones.filter(is_active=True).count()
 
     def get_total_zone_count(self, obj):
@@ -892,11 +901,15 @@ class ContractSerializer(serializers.ModelSerializer):
     def get_participation_agreements_count(self, obj):
         """Count of participation agreements under this master contract"""
         if obj.contract_category == 'corporate_master':
+            if hasattr(obj, '_list_participation_agreements_count'):
+                return obj._list_participation_agreements_count
             return obj.participation_agreements.count()
         return 0
 
     def get_renewal_count(self, obj):
         """Count how many times this contract has been renewed"""
+        if hasattr(obj, '_list_renewal_count'):
+            return obj._list_renewal_count
         return obj.renewals.count()
 
     def get_effective_soundtrack_account_id(self, obj):

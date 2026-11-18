@@ -90,6 +90,7 @@ def test_list_and_detail_bodies_are_unchanged():
 # name -> (URL without page_size, rows in the dataset, most queries allowed).
 QUERY_CASES = {
     'companies': ('/api/v1/companies/', 7, 9),
+    'contracts': ('/api/v1/contracts/', 21, 12),
     # Lists that were already flat before the query-count work.
     'contacts': ('/api/v1/contacts/', 21, 2),
     'invoices': ('/api/v1/invoices/', 21, 3),
@@ -119,5 +120,7 @@ def test_list_query_count_does_not_grow_with_rows(name):
 
     assert len(one_body['results']) == 1
     assert len(every_body['results']) == rows
-    assert every == one, (name, one, every)
+    # A one-row page can be a query or two cheaper: Django skips a nested prefetch
+    # when the rows have nothing to nest (a draft contract has no invoices).
+    assert one <= every <= one + 2, (name, one, every)
     assert every <= most, (name, every)
