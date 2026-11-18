@@ -18,7 +18,10 @@ How it works
   number of extra rounds (``EXTRA_ROUNDS``), so a page is full unless the
   history is exhausted. A page costs 31 queries for an Admin in the usual case
   (one per source, four label maps, the company) and at most
-  ``(1 + EXTRA_ROUNDS) * (sources + 3) + 5`` when it must read on.
+  ``(1 + EXTRA_ROUNDS) * (sources + 3) + 5`` when it must read on, plus one
+  per distinct person the rows read name: the agent rule
+  (``agent_inbox.policy.is_agent_account``) reads the token table, once per
+  account per request.
 * Ties: two events at the same instant are ordered by their id
   (``"<source key>:<pk>"``). Source keys are ``[a-z_]`` words, so comparing two
   ids from different sources is decided by the keys alone, and SQL can apply the
@@ -93,6 +96,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from datetime import timezone as dt_timezone
 from typing import Any, Iterable
 
 from django.core.exceptions import ValidationError
@@ -153,6 +157,8 @@ RECORD_VIEWSETS = {
 
 _KEY_RE = re.compile(r'^[a-z][a-z_]*$')
 _CURSOR_PK_RE = re.compile(r'^[A-Za-z0-9-]{1,64}$')
+# Real time zones lie between UTC-12 and UTC+14; a cursor with an offset beyond is refused.
+MAX_UTC_OFFSET = timedelta(hours=14)
 _SECRET_KEY = re.compile(r'password|passwd|secret|token|api_?key|credential|smtp', re.IGNORECASE)
 
 
@@ -186,18 +192,9 @@ def _extra_agent_usernames() -> frozenset:
     return frozenset(str(name).strip().lower() for name in raw if str(name).strip())
 
 
-def is_agent_account(user) -> bool:
-    """Whether an account belongs to an agent rather than a person.
-
-    The one rule the timeline uses, both to label actors and for
-    ``TimelineContext.is_agent``. It is the rule of the agent gate and of the
-    agent inbox (PR 58, ``agent_inbox.policy.is_agent_account``): the CRM
-    username is an agent principal in ``crm_app.agent_policy`` (cira, vera,
-    theo, lyra, riff, nina, cara, sales, ruby), or is listed in the
-    AGENT_INBOX_AGENT_USERNAMES setting. The CRM stores nothing else that tells
-    an agent account from a person's, so those usernames are reserved for agents.
-    """
-    if user is None or not getattr(user, 'is_authenticated', True):
+def _fallback_is_agent_account(user) -> bool:
+    """The agent gate's rule, used only when the agent inbox app is not installed."""
+    if user is None or not getattr(user, 'is_authenticated', False):
         return False
     from crm_app.agent_policy import principal_for_username
     username = str(getattr(user, 'username', '') or '').strip().lower()
@@ -205,12 +202,36 @@ def is_agent_account(user) -> bool:
         principal_for_username(username) is not None or username in _extra_agent_usernames())
 
 
-def actor_for_user(user) -> dict | None:
-    """Display name for a user or agent. Never an email address and never a fragment of one."""
+def is_agent_account(user) -> bool:
+    """Whether an account belongs to an agent rather than a person.
+
+    The one rule the timeline uses, both to label actors and for
+    ``TimelineContext.is_agent``: the agent inbox's
+    ``agent_inbox.policy.is_agent_account`` (an agent principal's username, a
+    name in AGENT_INBOX_AGENT_USERNAMES, or an account holding an API token),
+    so the timeline withholds and labels exactly as that app's API does. Only
+    its public name and signature are relied on. If the app is not installed,
+    the agent gate's username rule applies.
+    """
+    from django.apps import apps
+    if apps.is_installed('agent_inbox'):
+        from agent_inbox.policy import is_agent_account as inbox_rule
+        return bool(inbox_rule(user))
+    return _fallback_is_agent_account(user)
+
+
+def actor_for_user(user, agent: bool | None = None) -> dict | None:
+    """Display name for a user or agent. Never an email address and never a fragment of one.
+
+    ``agent`` is the account's agent status when the caller already knows it
+    (``TimelineContext.actor`` remembers it per request).
+    """
     if user is None:
         return None
     username = str(getattr(user, 'username', '') or '').strip()
-    if is_agent_account(user):
+    if agent is None:
+        agent = is_agent_account(user)
+    if agent:
         from crm_app.agent_policy import principal_for_username
         principal = principal_for_username(username)
         name = principal.name if principal is not None else username
@@ -309,9 +330,10 @@ class Cursor:
             raise ValueError('invalid cursor') from exc
         key, _, pk = event_id.partition(':')
         if (timezone.is_naive(moment) or not _KEY_RE.match(key) or not _CURSOR_PK_RE.match(pk)
-                or not MIN_YEAR <= moment.year <= MAX_YEAR):
+                or abs(moment.utcoffset()) > MAX_UTC_OFFSET or not MIN_YEAR <= moment.year <= MAX_YEAR):
             raise ValueError('invalid cursor')
-        return cls(moment, event_id)
+        # Queries get UTC: some databases refuse offsets that Python accepts (Postgres: ±15:59).
+        return cls(moment.astimezone(dt_timezone.utc), event_id)
 
 
 @dataclass
@@ -389,6 +411,20 @@ class TimelineContext:
     @cached_property
     def is_agent(self) -> bool:
         return is_agent_account(self.user)
+
+    def actor(self, user) -> dict | None:
+        """``actor_for_user``, deciding each account's agent status once per request.
+
+        The agent rule may read the token table, so a page costs one more query
+        per distinct person it names (never per event).
+        """
+        if user is None:
+            return None
+        cache = self.__dict__.setdefault('_agent_status', {})
+        key = str(user.pk)
+        if key not in cache:
+            cache[key] = is_agent_account(user)
+        return actor_for_user(user, agent=cache[key])
 
     def visible(self, viewset_path: str):
         if viewset_path not in self._viewset_qs:
@@ -705,7 +741,7 @@ class NoteSource(RowSource):
         links = [_link('contact', row.contact_id, row.contact.name)] if row.contact_id else []
         return self.event(
             row, ctx, type='note', title=row.title or f'{label} note', detail=row.text,
-            actor=actor_for_user(row.author), links=links,
+            actor=ctx.actor(row.author), links=links,
             extra={'note_type': row.note_type, 'note_type_label': label, 'priority': row.priority,
                    'is_private': row.is_private},
         )
@@ -739,10 +775,10 @@ class TaskCreatedSource(RowSource):
     visibility = (('crm_app.views.TaskViewSet', 'pk'),)
 
     def to_event(self, row, ctx):
-        assignee = actor_for_user(row.assigned_to)
+        assignee = ctx.actor(row.assigned_to)
         return self.event(
             row, ctx, type='task_created', title=f'Task created: {row.title}', detail=row.description,
-            actor=actor_for_user(row.created_by), links=_task_links(row, ctx),
+            actor=ctx.actor(row.created_by), links=_task_links(row, ctx),
             extra={'status': row.status, 'priority': row.priority, 'task_type': row.task_type,
                    'due_date': row.due_date.isoformat() if row.due_date else None,
                    'assigned_to': assignee['name'] if assignee else None},
@@ -758,7 +794,7 @@ class TaskCompletedSource(TaskCreatedSource):
         return Q(completed_at__isnull=False)
 
     def to_event(self, row, ctx):
-        assignee = actor_for_user(row.assigned_to)
+        assignee = ctx.actor(row.assigned_to)
         return self.event(
             row, ctx, type='task_completed', title=f'Task completed: {row.title}', links=_task_links(row, ctx),
             extra={'assigned_to': assignee['name'] if assignee else None},
@@ -782,7 +818,7 @@ class TaskCommentSource(RowSource):
     def to_event(self, row, ctx):
         return self.event(
             row, ctx, type='task_comment', title=f'Comment on task: {row.task.title}', detail=row.comment,
-            actor=actor_for_user(row.user), links=_task_links(row.task, ctx),
+            actor=ctx.actor(row.user), links=_task_links(row.task, ctx),
         )
 
 
@@ -882,7 +918,7 @@ class QuoteCreatedSource(RowSource):
     def to_event(self, row, ctx):
         return self.event(
             row, ctx, type='quote_created', title=f'Quote {row.quote_number} created',
-            actor=actor_for_user(row.created_by), links=_quote_links(row, ctx),
+            actor=ctx.actor(row.created_by), links=_quote_links(row, ctx),
             extra={'money': _money(row.total_value, row.currency), 'status': row.status,
                    'quote_type': row.quote_type},
         )
@@ -923,7 +959,7 @@ class QuoteActivitySource(RowSource):
         type_, title = _QUOTE_ACTIVITY_TITLES[row.activity_type]
         return self.event(
             row, ctx, type=type_, title=title.format(n=row.quote.quote_number),
-            actor=actor_for_user(row.user), links=_quote_links(row.quote, ctx),
+            actor=ctx.actor(row.user), links=_quote_links(row.quote, ctx),
             extra={'money': _money(row.quote.total_value, row.quote.currency)},
         )
 
@@ -1111,7 +1147,7 @@ class OpportunityActivitySource(RowSource):
         label = row.get_activity_type_display()
         return self.event(
             row, ctx, type='opportunity_activity', title=f'{label}: {row.subject}',
-            detail='\n\n'.join(p for p in parts if p), actor=actor_for_user(row.user), links=links,
+            detail='\n\n'.join(p for p in parts if p), actor=ctx.actor(row.user), links=links,
             extra={'activity_type': row.activity_type, 'activity_type_label': label,
                    'duration_minutes': row.duration_minutes},
         )
@@ -1133,7 +1169,7 @@ class TicketOpenedSource(RowSource):
 
     def to_event(self, row, ctx):
         return self.event(row, ctx, type='ticket_opened', title=f'Ticket opened: {row.subject}',
-                          detail=row.description, actor=actor_for_user(row.created_by),
+                          detail=row.description, actor=ctx.actor(row.created_by),
                           links=[_ticket_link(row)],
                           extra={'priority': row.priority, 'category': row.category, 'status': row.status})
 
@@ -1170,7 +1206,7 @@ class TicketCommentSource(RowSource):
     def to_event(self, row, ctx):
         kind = 'Internal note' if row.is_internal else 'Reply'
         return self.event(row, ctx, type='ticket_comment', title=f'{kind} on ticket: {row.ticket.subject}',
-                          detail=row.text, actor=actor_for_user(row.author), links=[_ticket_link(row.ticket)],
+                          detail=row.text, actor=ctx.actor(row.author), links=[_ticket_link(row.ticket)],
                           extra={'is_internal': row.is_internal})
 
 
@@ -1424,7 +1460,7 @@ class AuditSource(RowSource):
                 valid.append(uuid.UUID(value))
             except ValueError:
                 continue
-        ctx.audit_users = {str(u.pk): actor_for_user(u)['name'] for u in User.objects.filter(pk__in=valid)} \
+        ctx.audit_users = {str(u.pk): ctx.actor(u)['name'] for u in User.objects.filter(pk__in=valid)} \
             if valid else {}
 
     def _record_label(self, row, ctx) -> tuple[str, str | None]:
@@ -1535,10 +1571,10 @@ class AuditSource(RowSource):
     def to_event(self, row, ctx):
         label, link_type = self._record_label(row, ctx)
         links = [_link(link_type, row.record_id, label)] if link_type and row.action != 'DELETE' else []
-        additional = row.additional_data if isinstance(row.additional_data, dict) else {}
-        actor = actor_for_user(row.user) or _deleted_or_system(additional)
         if not audit_row_visible(row.model_name, row.action, row.changes):
             return None  # a save that changed nothing visible
+        additional = row.additional_data if isinstance(row.additional_data, dict) else {}
+        actor = ctx.actor(row.user) or _deleted_or_system(additional)
         extra = {'model': row.model_name, 'action': row.action}
         reason = additional.get('action') or additional.get('reason')
         if isinstance(reason, str) and reason:
@@ -1723,6 +1759,6 @@ def build_facets(ctx: TimelineContext) -> dict:
             user = users.get(actor_id)
             if user is None:
                 continue
-            actors.append({**actor_for_user(user), 'count': n})
+            actors.append({**ctx.actor(user), 'count': n})
         actors.sort(key=lambda a: (-a['count'], a['name'].lower()))
     return {'types': types, 'actors': actors}

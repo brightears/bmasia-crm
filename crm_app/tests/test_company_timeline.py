@@ -777,10 +777,13 @@ def _page_queries(user, company, **params):
 
 
 # One query per registered source (26), the four label maps the audit adapters
-# share (contacts, contracts, quotes, opportunities) and the company lookup.
+# share (contacts, contracts, quotes, opportunities) and the company lookup: 31.
+# Plus one per distinct person the page names (main's agent rule reads the token
+# table, once per account per request); the seeded history names one person.
 # Field changes that name a user add one user lookup. Registering a new source
 # adds exactly one; anything else means a per-row query crept in.
-QUERIES_PER_PAGE = 31
+QUERIES_BASE = 31
+QUERIES_PER_PAGE = QUERIES_BASE + 1
 MAX_QUERIES_PER_PAGE = QUERIES_PER_PAGE + 1
 
 

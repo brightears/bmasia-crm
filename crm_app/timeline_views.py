@@ -20,6 +20,8 @@ from crm_app.models import Company
 
 MAX_CURSOR_LENGTH = 512
 _CONTROL = re.compile(r'[\x00-\x1f\x7f]')
+_SEARCH_WHITESPACE = re.compile(r'[\t\n\r]+')
+_ASCII_DIGITS = re.compile(r'^[0-9]{1,4}$')
 
 
 class TimelineQueryError(ValueError):
@@ -81,7 +83,11 @@ def parse_filters(params) -> tuple[timeline.Filters, timeline.Cursor | None, int
     if params.get('actor'):
         filters.actor_id = _uuid(_text(params, 'actor'), 'actor')
 
-    search = _text(params, 'q').strip()
+    # Tabs and line breaks (a paste) read as spaces; other control characters are refused.
+    search = _SEARCH_WHITESPACE.sub(' ', params.get('q', ''))
+    if _CONTROL.search(search):
+        raise TimelineQueryError('q must not contain control characters', 'q')
+    search = search.strip()
     if len(search) > timeline.MAX_SEARCH_LENGTH:
         raise TimelineQueryError(f'q must be at most {timeline.MAX_SEARCH_LENGTH} characters', 'q')
     filters.search = search
@@ -101,7 +107,8 @@ def parse_filters(params) -> tuple[timeline.Filters, timeline.Cursor | None, int
 
     raw_size = _text(params, 'page_size').strip()
     if raw_size:
-        if not raw_size.isdigit() or not 1 <= int(raw_size) <= timeline.MAX_PAGE_SIZE:
+        # ASCII digits only: str.isdigit() also accepts "²", which int() refuses.
+        if not _ASCII_DIGITS.match(raw_size) or not 1 <= int(raw_size) <= timeline.MAX_PAGE_SIZE:
             raise TimelineQueryError(f'page_size must be a whole number from 1 to {timeline.MAX_PAGE_SIZE}',
                                      'page_size')
         page_size = int(raw_size)

@@ -67,7 +67,8 @@ def _cursor(t, i):
     ({'from': '2026-11-10', 'to': '2026-11-01'}, 'from'),
     ({'from': '2026-13-01'}, 'from'),
     ({'q': 'a\x00b'}, 'q'),
-    ({'q': 'line\nbreak'}, 'q'),
+    ({'q': 'a\x01b'}, 'q'),
+    ({'q': 'a\x7fb'}, 'q'),
     ({'q': 'x' * 201}, 'q'),
     ({'record': 'contract:\x00'}, 'record'),
     ({'record': 'zone:' + str(uuid.uuid4())}, 'record'),
@@ -79,6 +80,13 @@ def _cursor(t, i):
     ({'page_size': '1000'}, 'page_size'),
     ({'page_size': '-1'}, 'page_size'),
     ({'page_size': '2.5'}, 'page_size'),
+    ({'page_size': '²'}, 'page_size'),          # str.isdigit() says yes, int() says no
+    ({'page_size': '١٠'}, 'page_size'),    # Arabic-Indic numerals
+    ({'page_size': '１０'}, 'page_size'),    # full-width numerals
+    ({'cursor': _cursor('2026-11-10T09:30:00+16:00', f'note:{uuid.uuid4()}')}, 'cursor'),
+    ({'cursor': _cursor('2026-11-10T09:30:00-15:59', f'note:{uuid.uuid4()}')}, 'cursor'),
+    ({'cursor': _cursor('2026-11-10T09:30:00+23:59', f'note:{uuid.uuid4()}')}, 'cursor'),
+    ({'cursor': _cursor('2026-11-10T09:30:00+14:01', f'note:{uuid.uuid4()}')}, 'cursor'),
 ])
 def test_bad_input_is_a_400_naming_the_parameter(admin, company, params, param):
     Note.objects.create(company=company, author=admin, text='something')
@@ -90,7 +98,9 @@ def test_bad_input_is_a_400_naming_the_parameter(admin, company, params, param):
 
 @pytest.mark.parametrize('params', [
     {'page_size': '100'}, {'page_size': '1'}, {'from': '1900-01-01', 'to': '9998-12-31'},
-    {'q': 'x' * 200}, {'q': 'ทดสอบ'}, {'q': '%_'},
+    {'q': 'x' * 200}, {'q': 'ทดสอบ'}, {'q': '%_'}, {'q': '\tzones\t'}, {'q': 'line\nbreak'},
+    {'cursor': _cursor('2026-11-10T09:30:00+14:00', f'note:{uuid.uuid4()}')},
+    {'cursor': _cursor('2026-11-10T09:30:00-12:00', f'note:{uuid.uuid4()}')},
     {'cursor': _cursor('9998-12-31T23:59:59+07:00', f'zz_unknown:{uuid.uuid4()}')},  # unknown source: harmless
     {'cursor': _cursor('1900-01-02T00:00:00+07:00', f'note:{uuid.uuid4()}')},
 ])
@@ -98,7 +108,8 @@ def test_extreme_but_valid_input_is_accepted(admin, company, params):
     assert _client(admin).get(_url(company), params).status_code == 200
 
 
-ALPHABET = ['a', 'Z', '0', '9', '-', ':', '_', '%', ' ', '\x00', '\n', '\x7f', 'é', 'ท', '😀', ',', '=', '+', '/']
+ALPHABET = ['a', 'Z', '0', '9', '-', ':', '_', '%', ' ', '\x00', '\n', '\t', '\x7f', 'é', 'ท', '😀', ',', '=', '+', '/',
+            '²', '٣', '１', '߀']  # numerals outside ASCII that str.isdigit() accepts
 
 
 def _fuzz_value(rnd):
@@ -106,13 +117,16 @@ def _fuzz_value(rnd):
     if kind < 0.15:
         return ''.join(rnd.choice(ALPHABET) for _ in range(rnd.randint(0, 600)))
     if kind < 0.3:
-        return str(rnd.choice([0, -1, 1, 99, 100, 101, 10 ** 12, 1.5]))
+        return rnd.choice(['0', '-1', '1', '99', '100', '101', str(10 ** 12), '1.5', '²', '٣',
+                           '１０', '1²', ' 5'])
     if kind < 0.45:
         year = rnd.choice([1, 1899, 1900, 2026, 9998, 9999])
         return f'{year:04d}-{rnd.randint(0, 13):02d}-{rnd.randint(0, 32):02d}'
     if kind < 0.6:
         t = rnd.choice(['0001-01-01T00:00:00+00:00', '2026-11-10T09:30:00+07:00', '9999-12-31T23:59:59+00:00',
-                        '2026-11-10T09:30:00', 'nonsense'])
+                        '2026-11-10T09:30:00', 'nonsense', '2026-11-10T09:30:00+16:00', '2026-11-10T09:30:00-15:59',
+                        '2026-11-10T09:30:00+23:59', '2026-11-10T09:30:00+14:00', '9998-12-31T23:59:59-12:00',
+                        '1900-01-01T00:00:00+14:00'])
         i = rnd.choice([f'note:{uuid.uuid4()}', 'note:1', 'note:', ':x', 'Note:x', 'audit_change:zz',
                         f'email:{uuid.uuid4().hex}', 'x' * 70, 'note:\x00'])
         return _cursor(t, i)
@@ -128,7 +142,7 @@ def test_fuzzed_parameters_never_give_a_server_error(admin, company):
     client = _client(admin)
     names = ['types', 'from', 'to', 'record', 'actor', 'q', 'cursor', 'page_size', 'facets']
     seen = set()
-    for _ in range(160):
+    for _ in range(220):
         params = {name: _fuzz_value(rnd) for name in rnd.sample(names, rnd.randint(1, 4))}
         response = client.get(_url(company), params)
         assert response.status_code in (200, 400), (params, response.status_code)
@@ -162,8 +176,14 @@ def test_a_run_of_no_op_saves_does_not_empty_the_first_page(admin, company):
 
 QUERIES_FIRST_PAGE = 31
 # Worst case: every round asks every source (26) plus one user lookup per audit
-# source (3), for 1 + EXTRA_ROUNDS rounds, plus the company and the four label maps.
+# source (3), for 1 + EXTRA_ROUNDS rounds, plus the company and the four label maps,
+# plus one agent-status lookup per distinct person named (at most one per event).
 MAX_QUERIES_ANY_PAGE = (1 + timeline.EXTRA_ROUNDS) * (26 + 3) + 5
+
+
+def _people_named(events):
+    return len({e['actor']['id'] for e in events if e['actor'] and e['actor']['id']}
+               | {name for e in events for name in [e['extra'].get('assigned_to')] if name})
 
 
 def test_thousands_of_no_op_saves_page_on_with_bounded_queries(admin, company):
@@ -191,11 +211,24 @@ def test_thousands_of_no_op_saves_page_on_with_bounded_queries(admin, company):
     assert seen == ['note', 'contract_created']
     # 3,000 rows at 25 + 3 x 250 a request: four requests, the last one finds the events.
     assert pages == 4
-    # The first request reads the usual 31 queries and three extra rounds of the one open source.
-    assert counts[0] == QUERIES_FIRST_PAGE + timeline.EXTRA_ROUNDS
-    assert max(counts) <= MAX_QUERIES_ANY_PAGE
+    # The first request reads the usual 31 queries and three extra rounds of the one open source,
+    # plus one agent-status lookup for the note's author (read in the first round, delivered later).
+    assert counts[0] == QUERIES_FIRST_PAGE + timeline.EXTRA_ROUNDS + 1
+    assert max(counts) <= MAX_QUERIES_ANY_PAGE + 1  # one person named
     facets = _get(admin, company, facets=1)['facets']['types']
     assert facets['change'] == 0 and facets['contract'] == 1
+
+
+def test_query_count_grows_with_people_named_not_with_events(admin, company):
+    others = [_user(f'person{i}', 'Admin', f'P{i}', 'Test') for i in range(3)]
+    for i in range(40):
+        author = (admin, *others)[i % 4]
+        _at(Note.objects.create(company=company, author=author, text=f'n{i}'), BASE - timedelta(minutes=i))
+    client = _client(admin)
+    with CaptureQueriesContext(connection) as q:
+        data = client.get(_url(company), {'page_size': 25}).json()
+    assert _people_named(data['results']) == 4
+    assert len(q.captured_queries) == QUERIES_FIRST_PAGE + 4
 
 
 @pytest.mark.parametrize('seed', [1, 2, 3])
@@ -371,6 +404,8 @@ def test_sales_user_never_sees_another_owners_opportunity_anywhere(company, two_
     assert {'quote_created', 'quote_sent', 'task_created', 'contract_created'} <= set(_types(events))
     assert _all(sam, company, q='Secret') == [] and _all(sam, company, q='900k') == []
     assert _all(sam, company, record=f'opportunity:{pat_opp.pk}') == []
+    hidden_counts = _get(sam, company, record=f'opportunity:{pat_opp.pk}', facets=1)['facets']
+    assert all(n == 0 for n in hidden_counts['types'].values()) and hidden_counts['actors'] == []
     facets = _get(sam, company, facets=1)['facets']['types']
     assert facets['opportunity'] == 2  # Sam's own opportunity and its activity
     # Pat sees their own; Admin sees everything.
@@ -399,6 +434,20 @@ def test_agent_property_and_names(company):
     assert timeline.actor_for_user(cira) == {'id': str(cira.pk), 'name': 'Cira', 'kind': 'agent'}
     assert timeline.actor_for_user(person)['name'] == 'mo.person'  # never a fragment of an address
     assert timeline.actor_for_user(address)['name'] == 'kim'
+
+
+def test_an_account_holding_an_api_token_is_an_agent(company):
+    from rest_framework.authtoken.models import Token
+    funnel = _user('funnel.admin', 'Admin', 'Funnel', 'Host')
+    person = _user('mai.person', 'Admin', 'Mai', 'Person')
+    Token.objects.create(user=funnel)
+    filters = timeline.Filters()
+    assert timeline.TimelineContext(company, funnel, filters).is_agent is True
+    assert timeline.TimelineContext(company, person, filters).is_agent is False
+    assert timeline.actor_for_user(funnel)['kind'] == 'agent'
+    _at(Note.objects.create(company=company, author=funnel, text='written with a token'), BASE)
+    [event] = _all(person, company)
+    assert event['actor'] == {'id': str(funnel.pk), 'name': 'Funnel.admin', 'kind': 'agent'}
 
 
 def test_extra_agent_usernames_setting(settings, company):
@@ -433,3 +482,37 @@ def test_deleted_user_is_not_the_system(admin, company):
            BASE - timedelta(1), additional={'source': 'reconcile_false_expiry'})
     actors = [e['actor'] for e in _all(admin, company) if e['category'] == 'change']
     assert actors == [timeline.DELETED_USER, timeline.SYSTEM_ACTOR]
+
+
+# ---------------------------------------------------------------- small rules the mutation pass found untested
+
+
+@pytest.mark.parametrize('changes', [
+    {'auto_renew': {'old': True, 'new': 'true'}},             # the same boolean written two ways
+    {'notes': {'old': None, 'new': ''}},                     # empty either way
+    {'line_items': {'old': [{'x': 1}], 'new': [{'x': 1}]}},  # a collection listed unchanged
+])
+def test_saves_that_change_nothing_visible_show_nothing(admin, company, changes):
+    contract = _contract(company, 'TH-NOOP1')
+    _audit(admin, 'Contract', contract.pk, changes, BASE)
+    assert [e for e in _all(admin, company) if e['type'] == 'field_change'] == []
+    assert _get(admin, company, facets=1)['facets']['types']['change'] == 0
+
+
+def test_invoice_paid_reads_above_issued_on_the_same_day(admin, company):
+    contract = _contract(company, 'TH-INVDAY')
+    Invoice.objects.create(company=company, contract=contract, invoice_number='INV-SAME-DAY', status='Paid',
+                           issue_date=date(2026, 11, 5), paid_date=date(2026, 11, 5), due_date=date(2026, 12, 5),
+                           amount=Decimal('1'), total_amount=Decimal('1'), currency='THB')
+    assert [e['type'] for e in _all(admin, company, types='invoice')] == ['invoice_paid', 'invoice_issued']
+
+
+def test_without_the_agent_inbox_app_the_username_rule_applies(monkeypatch, company):
+    from django.apps import apps
+    from rest_framework.authtoken.models import Token
+    real = apps.is_installed
+    monkeypatch.setattr(apps, 'is_installed', lambda name: False if name == 'agent_inbox' else real(name))
+    holder = _user('token.holder', 'Admin', 'Token', 'Holder')
+    Token.objects.create(user=holder)
+    assert timeline.is_agent_account(holder) is False
+    assert timeline.is_agent_account(_user('theo', 'Admin')) is True
