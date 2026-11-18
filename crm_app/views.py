@@ -7785,16 +7785,38 @@ class ActionCenterViewSet(viewsets.ViewSet):
     """Today page: prioritized feed of items needing attention."""
     permission_classes = [IsAuthenticated]
 
+    def _load_primary_contacts(self, companies):
+        """Look up the contact of many companies at once (two queries, not two per item).
+
+        Same rule as before: the company's first active primary contact by name, else its
+        first active contact by name. Kept for the rest of this request.
+        """
+        cache = self.__dict__.setdefault('_primary_contacts', {})
+        ids = {company.pk for company in companies if company is not None} - set(cache)
+        if not ids:
+            return
+        found = {}
+        for contact in Contact.objects.filter(company_id__in=ids, is_primary=True, is_active=True):
+            found.setdefault(contact.company_id, contact)
+        missing = ids - set(found)
+        if missing:
+            for contact in Contact.objects.filter(company_id__in=missing, is_active=True):
+                found.setdefault(contact.company_id, contact)
+        for pk in ids:
+            cache[pk] = found.get(pk)
+
+    def _with_contacts(self, rows):
+        """The rows as a list, with their companies' contacts loaded in one go."""
+        rows = list(rows)
+        self._load_primary_contacts(row.company for row in rows)
+        return rows
+
     def _get_primary_contact(self, company):
         """Get primary contact for a company, fallback to first active."""
-        contact = Contact.objects.filter(
-            company=company, is_primary=True, is_active=True
-        ).first()
-        if not contact:
-            contact = Contact.objects.filter(
-                company=company, is_active=True
-            ).first()
-        return contact
+        if company is None:
+            return None  # contacts always belong to a company
+        self._load_primary_contacts([company])
+        return self._primary_contacts[company.pk]
 
     def _contact_dict(self, contact):
         if not contact:
@@ -7825,7 +7847,7 @@ class ActionCenterViewSet(viewsets.ViewSet):
             task_qs = task_qs.filter(assigned_to=user)
 
         # --- OVERDUE TASKS (the shared rule: open, due on an earlier Bangkok day) ---
-        for t in task_qs.overdue(today):
+        for t in self._with_contacts(task_qs.overdue(today)):
             days = (today - timezone.localdate(t.due_date)).days
             contact = t.related_contact or self._get_primary_contact(t.company)
             items.append({
@@ -7845,7 +7867,7 @@ class ActionCenterViewSet(viewsets.ViewSet):
         overdue_invoices = Invoice.objects.filter(
             status__in=['Sent', 'Overdue'], due_date__lt=today
         ).select_related('company')
-        for inv in overdue_invoices:
+        for inv in self._with_contacts(overdue_invoices):
             company = inv.company
             contact = self._get_primary_contact(company) if company else None
             items.append({
@@ -7872,7 +7894,7 @@ class ActionCenterViewSet(viewsets.ViewSet):
         if user.role == 'Sales':
             stale_opps = stale_opps.filter(owner=user)
 
-        for opp in stale_opps:
+        for opp in self._with_contacts(stale_opps):
             contact = self._get_primary_contact(opp.company) if opp.company else None
             ref_date = opp.follow_up_date if opp.follow_up_date else opp.updated_at.date()
             days_stale = (today - ref_date).days
@@ -7889,8 +7911,9 @@ class ActionCenterViewSet(viewsets.ViewSet):
             })
 
         # --- TASKS DUE TODAY & TOMORROW (Bangkok days, including earlier today) ---
-        for t in task_qs.open().filter(due_date__gte=start_of_local_day(today),
-                                       due_date__lt=start_of_local_day(today + timedelta(days=2))):
+        for t in self._with_contacts(task_qs.open().filter(
+                due_date__gte=start_of_local_day(today),
+                due_date__lt=start_of_local_day(today + timedelta(days=2)))):
             is_today = timezone.localdate(t.due_date) == today
             contact = t.related_contact or self._get_primary_contact(t.company)
             items.append({
@@ -7907,9 +7930,9 @@ class ActionCenterViewSet(viewsets.ViewSet):
             })
 
         # --- INVOICES DUE THIS WEEK ---
-        for inv in Invoice.objects.filter(
+        for inv in self._with_contacts(Invoice.objects.filter(
             status='Sent', due_date__gte=today, due_date__lte=week_end
-        ).select_related('company'):
+        ).select_related('company')):
             company = inv.company
             contact = self._get_primary_contact(company) if company else None
             days_until = (inv.due_date - today).days
@@ -7925,9 +7948,9 @@ class ActionCenterViewSet(viewsets.ViewSet):
             })
 
         # --- CONTRACTS EXPIRING WITHIN 60 DAYS ---
-        for c in Contract.objects.filter(
+        for c in self._with_contacts(Contract.objects.filter(
             status='Active', end_date__gte=today, end_date__lte=sixty_days
-        ).select_related('company'):
+        ).select_related('company')):
             contact_name = c.customer_signatory_name
             contact = None
             if not contact_name and c.company:
@@ -7950,8 +7973,9 @@ class ActionCenterViewSet(viewsets.ViewSet):
             })
 
         # --- TASKS DUE THIS WEEK (not today/tomorrow) ---
-        for t in task_qs.open().filter(due_date__gte=start_of_local_day(today + timedelta(days=2)),
-                                       due_date__lt=start_of_local_day(today + timedelta(days=8))):
+        for t in self._with_contacts(task_qs.open().filter(
+                due_date__gte=start_of_local_day(today + timedelta(days=2)),
+                due_date__lt=start_of_local_day(today + timedelta(days=8)))):
             days_until = (timezone.localdate(t.due_date) - today).days
             contact = t.related_contact or self._get_primary_contact(t.company)
             items.append({
@@ -7974,7 +7998,7 @@ class ActionCenterViewSet(viewsets.ViewSet):
         if user.role == 'Sales':
             upcoming_opps = upcoming_opps.filter(owner=user)
 
-        for opp in upcoming_opps:
+        for opp in self._with_contacts(upcoming_opps):
             contact = self._get_primary_contact(opp.company) if opp.company else None
             days_until = (opp.follow_up_date - today).days
             items.append({

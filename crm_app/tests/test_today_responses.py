@@ -112,14 +112,17 @@ def _count(user_name, url, n_companies, first=0):
 
 
 # name -> (user, URL, queries whatever the number of items)
-QUERY_CASES = {}
+QUERY_CASES = {
+    'action_center_admin': ('admin', '/api/v1/action-center/', 10),
+    'action_center_sales': ('sales', '/api/v1/action-center/', 12),
+}
 
 
 @pytest.mark.parametrize('name', sorted(QUERY_CASES))
 def test_query_count_does_not_grow_with_items(name):
     user_name, url, exact = QUERY_CASES[name]
-    small = _count(user_name, url, 2)
+    small = _count(user_name, url, 4)
     connection.queries_log.clear()
-    large = _count(user_name, url, 6, first=2)  # now 8 companies, four times the items
+    large = _count(user_name, url, 8, first=4)  # now 12 companies, three times the items
     assert large == small, (name, small, large)
-    assert large <= exact, (name, large)
+    assert large == exact, (name, large)
