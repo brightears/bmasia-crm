@@ -86,7 +86,7 @@ def test_repeated_review_reuses_reserved_number_and_sent_keeps_it(renewal):
 
 def test_reservation_skips_legacy_number_ahead_of_sequence(renewal):
     source, draft = renewal
-    year = timezone.now().strftime('%y')
+    year = timezone.localdate().strftime('%y')
     Contract.objects.filter(pk=source.pk).update(contract_number=f'HK-CT{year}001')
     _, metadata = generate(draft)
     assert metadata['contract_number'] == f'HK-CT{year}002'

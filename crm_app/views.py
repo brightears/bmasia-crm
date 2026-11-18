@@ -28,6 +28,7 @@ import uuid
 from decimal import Decimal
 from crm_app.services.document_context import customer_legal_entity_name, effective_billing_entity
 from crm_app.services.document_entity_filters import filter_document_entity
+from crm_app.dates import business_today
 from crm_app.contract_pdf_v2 import (
     clause_addition_markup, fill_template_values, literal_hyphens, optional_clause_paragraph, paragraph_text,
     split_clause_placements, stored_markup,
@@ -1169,8 +1170,7 @@ class OpportunityViewSet(BaseModelViewSet):
             opportunities, filters_applied, summary
         )
 
-        from datetime import datetime as dt
-        today = dt.now().strftime('%Y-%m-%d')
+        today = business_today().strftime('%Y-%m-%d')
         filename = f"Opportunities_{today}.pdf"
 
         response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
@@ -1185,10 +1185,9 @@ class OpportunityViewSet(BaseModelViewSet):
         Export sales performance summary as PDF.
         """
         from crm_app.services.sales_export_service import SalesExportService
-        from datetime import datetime as dt
         from collections import defaultdict
 
-        year = int(request.query_params.get('year', dt.now().year))
+        year = int(request.query_params.get('year', business_today().year))
         entity_filter = request.query_params.get('entity', '')
         period_type = request.query_params.get('period_type', 'monthly')
         service_type_filter = request.query_params.get('service_type', '')
@@ -1421,7 +1420,7 @@ class ContractViewSet(BaseModelViewSet):
         """Mark renewal notice as sent"""
         contract = self.get_object()
         contract.renewal_notice_sent = True
-        contract.renewal_notice_date = timezone.now().date()
+        contract.renewal_notice_date = business_today()
         contract.save()
 
         self.log_action('UPDATE', contract, {
@@ -2671,7 +2670,7 @@ class ContractViewSet(BaseModelViewSet):
         # Get signatory info
         bmasia_signatory = contract.bmasia_signatory_name or 'Chris Andrews'
         bmasia_title = contract.bmasia_signatory_title or 'Director'
-        bmasia_date = datetime.now().strftime('%d %B %Y')
+        bmasia_date = business_today().strftime('%d %B %Y')
         default_customer_entity = customer_legal_entity_name(company)
 
         def clean_text(value, fallback=''):
@@ -3878,8 +3877,7 @@ and<br/><br/>
         stamp_img = None
 
         # Auto-fill date for BMAsia side (already signed)
-        from datetime import datetime
-        bmasia_date = datetime.now().strftime('%d %B %Y')
+        bmasia_date = business_today().strftime('%d %B %Y')
 
         # Text styles
         sig_line_style = ParagraphStyle('SigLine', alignment=TA_CENTER, fontSize=10)
@@ -6107,7 +6105,7 @@ and<br/><br/>
             )
 
         # Close the relationship
-        contract_zone.end_date = timezone.now().date()
+        contract_zone.end_date = business_today()
         contract_zone.is_active = False
         contract_zone.save()
 
@@ -6161,7 +6159,7 @@ and<br/><br/>
                 is_active=True
             ).update(
                 is_active=False,
-                end_date=timezone.now().date()
+                end_date=business_today()
             )
 
             # Create or reactivate zone links for provided zone IDs
@@ -6176,7 +6174,7 @@ and<br/><br/>
                         defaults={
                             'is_active': True,
                             'end_date': None,
-                            'start_date': contract.start_date or timezone.now().date()
+                            'start_date': contract.start_date or business_today()
                         }
                     )
                 except Zone.DoesNotExist:
@@ -6250,10 +6248,9 @@ class InvoiceViewSet(BaseModelViewSet):
         """Generate next sequential invoice number based on billing entity.
         Format: INV-TH-2026-0001 (Thailand) or INV-HK-2026-0001 (HK/International)
         """
-        from datetime import datetime
         entity = request.query_params.get('entity', '')
         prefix = 'INV-TH' if 'Thailand' in entity else 'INV-HK'
-        year = datetime.now().year
+        year = business_today().year
         pattern = f'{prefix}-{year}-'
         last = Invoice.objects.filter(
             invoice_number__startswith=pattern
@@ -6517,7 +6514,7 @@ class InvoiceViewSet(BaseModelViewSet):
         iif_buffer = service.generate_iif(queryset, ar_accounts, income_accounts, tax_account)
 
         entity_abbr = 'BMAT' if 'Thailand' in billing_entity else 'BMAL'
-        filename = f'invoices-{entity_abbr}-{timezone.now().strftime("%Y%m%d")}.iif'
+        filename = f'invoices-{entity_abbr}-{business_today().strftime("%Y%m%d")}.iif'
 
         response = HttpResponse(iif_buffer.getvalue(), content_type='text/plain; charset=utf-8')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
@@ -7216,7 +7213,7 @@ class QuoteViewSet(BaseModelViewSet):
     @action(detail=False, methods=['get'])
     def expiring_soon(self, request):
         """Get quotes expiring within 7 days"""
-        today = timezone.now().date()
+        today = business_today()
         expiring = self.get_queryset().filter(
             valid_until__lte=today + timedelta(days=7),
             valid_until__gte=today,
@@ -7331,7 +7328,7 @@ class QuoteViewSet(BaseModelViewSet):
         """Mark quote as accepted"""
         quote = self.get_object()
         quote.status = 'Accepted'
-        quote.accepted_date = timezone.now().date()
+        quote.accepted_date = business_today()
         quote.save()
 
         # Create activity
@@ -7349,7 +7346,7 @@ class QuoteViewSet(BaseModelViewSet):
         """Mark quote as rejected"""
         quote = self.get_object()
         quote.status = 'Rejected'
-        quote.rejected_date = timezone.now().date()
+        quote.rejected_date = business_today()
         quote.save()
 
         # Create activity
@@ -7563,8 +7560,8 @@ class DashboardViewSet(viewsets.ViewSet):
             'lost_count': opportunities.filter(stage='Lost').count(),
         })
 
-        # Monthly stats
-        now = timezone.now()
+        # Monthly stats (Bangkok month)
+        now = timezone.localtime()
         current_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         monthly_contracts = contracts.filter(start_date__gte=current_month)
         monthly_opportunities = opportunities.filter(created_at__gte=current_month)
@@ -11531,7 +11528,7 @@ class RevenueViewSet(viewsets.ViewSet):
             ]
         }
         """
-        year = request.query_params.get('year', timezone.now().year)
+        year = request.query_params.get('year', business_today().year)
         currency = request.query_params.get('currency', 'USD')
         billing_entity = request.query_params.get('billing_entity', 'bmasia_hk')
 
@@ -11680,8 +11677,8 @@ class RevenueViewSet(viewsets.ViewSet):
             ]
         }
         """
-        year = request.query_params.get('year', timezone.now().year)
-        compare_year = request.query_params.get('compare_year', int(year) - 1 if year else timezone.now().year - 1)
+        year = request.query_params.get('year', business_today().year)
+        compare_year = request.query_params.get('compare_year', int(year) - 1 if year else business_today().year - 1)
         currency = request.query_params.get('currency', 'USD')
         billing_entity = request.query_params.get('billing_entity', 'bmasia_hk')
 
@@ -12487,7 +12484,7 @@ class ExpenseEntryViewSet(BaseModelViewSet):
                     'error': 'Invalid payment_date format. Use YYYY-MM-DD'
                 }, status=status.HTTP_400_BAD_REQUEST)
         else:
-            payment_date = date.today()
+            payment_date = business_today()
 
         expense.status = 'paid'
         expense.payment_date = payment_date

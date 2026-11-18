@@ -30,7 +30,8 @@ from decimal import Decimal
 from typing import Optional, Tuple, List, Dict
 from django.db import transaction
 from django.db.models import Sum, Count, Q
-from django.utils import timezone
+
+from crm_app.dates import business_today
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ class RevenueTrackingService:
         # A renewal declined while still at 'Sent' (never went live) is a lost opportunity, not churn
         # (Norbert 2026-07-02). "Went live" is approximated by the term having started.
         if (contract.status == 'Cancelled' and contract.start_date
-                and contract.start_date <= timezone.now().date()):
+                and contract.start_date <= business_today()):
             return 'churn'
 
         # Get prior contracts for this company (excluding current)
@@ -157,7 +158,7 @@ class RevenueTrackingService:
         - addon: will be set when zone is added
         """
         if lifecycle_type == 'churn':
-            return contract.end_date or date.today()
+            return contract.end_date or business_today()
         return contract.start_date
 
     def classify_all_contracts(self, force: bool = False) -> Dict[str, int]:
@@ -218,7 +219,7 @@ class RevenueTrackingService:
         event = self.ContractRevenueEvent.objects.create(
             contract=contract,
             event_type='addon_zones',
-            event_date=date.today(),
+            event_date=business_today(),
             zone_count_change=zone_count,
             contract_value_change=value_increase or Decimal('0'),
             monthly_value_change=self._calculate_monthly_value(value_increase, contract),
@@ -248,7 +249,7 @@ class RevenueTrackingService:
         event = self.ContractRevenueEvent.objects.create(
             contract=contract,
             event_type='removal_zones',
-            event_date=date.today(),
+            event_date=business_today(),
             zone_count_change=-zone_count,
             contract_value_change=-(value_decrease or Decimal('0')),
             monthly_value_change=-self._calculate_monthly_value(value_decrease, contract),
@@ -307,7 +308,7 @@ class RevenueTrackingService:
         event = self.ContractRevenueEvent.objects.create(
             contract=contract,
             event_type=event_type,
-            event_date=event_date or date.today(),
+            event_date=event_date or business_today(),
             contract_value_change=value_change or Decimal('0'),
             monthly_value_change=self._calculate_monthly_value(value_change, contract),
             zone_count_change=zone_count_change,
@@ -360,7 +361,7 @@ class RevenueTrackingService:
         return self.create_contract_event(
             contract=contract,
             event_type='churn',
-            event_date=contract.end_date or date.today(),
+            event_date=contract.end_date or business_today(),
             value_change=-contract.value,
             zone_count_change=-zone_count,
             notes=f"Contract cancelled/churned: {contract.contract_number}",

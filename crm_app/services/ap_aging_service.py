@@ -30,6 +30,8 @@ from typing import List, Dict, Optional
 from django.db.models import Sum, Count, Q, F
 from django.db.models.functions import Coalesce
 
+from crm_app.dates import business_today
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,7 +74,7 @@ class APAgingService:
             QuerySet of ExpenseEntry objects
         """
         if as_of_date is None:
-            as_of_date = date.today()
+            as_of_date = business_today()
 
         # Outstanding = pending, approved (not paid, draft, cancelled)
         queryset = self.ExpenseEntry.objects.filter(
@@ -102,7 +104,7 @@ class APAgingService:
             Bucket key: 'current', '1_30', '31_60', '61_90', or '90_plus'
         """
         if as_of_date is None:
-            as_of_date = date.today()
+            as_of_date = business_today()
 
         # If no due date, treat as current
         if due_date is None:
@@ -183,7 +185,7 @@ class APAgingService:
         }
         """
         if as_of_date is None:
-            as_of_date = date.today()
+            as_of_date = business_today()
 
         expenses = self.get_outstanding_expenses(
             as_of_date=as_of_date,
@@ -341,7 +343,7 @@ class APAgingService:
         Get expenses that are overdue by at least min_days_overdue days.
         Useful for generating payment lists or alerts.
         """
-        as_of_date = date.today()
+        as_of_date = business_today()
         cutoff_date = as_of_date - timedelta(days=min_days_overdue)
 
         expenses = self.ExpenseEntry.objects.filter(
