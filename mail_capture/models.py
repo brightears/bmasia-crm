@@ -14,6 +14,10 @@ On-delete policy, so that capture never removes or blocks CRM records:
   log (switch a mailbox off with ``enabled``; the access log must survive).
   A message owns its copies, participants and matches (``CASCADE``); purging a
   message removes all of them.
+
+Beyond B.7: ``CapturePurge`` (one counts-only row per purge chunk) and
+``CaptureFailure`` (messages that failed, retried then parked; Gmail id and
+error class only).
 """
 import uuid
 
@@ -117,6 +121,10 @@ class MailConversation(models.Model):
         related_name='mail_conversations',
     )
     link_state = models.CharField(max_length=10, choices=LINK_STATE_CHOICES, default='none')
+    is_mixed = models.BooleanField(
+        default=False,
+        help_text='Participants from more than one customer; the company link needs a person',
+    )
     link_confirmed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='+',
@@ -139,17 +147,28 @@ class MailConversation(models.Model):
 class MailMessage(models.Model):
     """One email, stored once however many mailboxes hold it.
 
-    ``rfc_message_id`` is the normalised Message-ID (angle brackets and outer
-    whitespace removed, case kept). When a message has none, a fallback key
-    ``synthetic:<sha256>`` over sender, date, subject and recipients is used
-    and ``message_id_synthetic`` is set.
+    ``rfc_message_id`` is the canonical Message-ID (``identity.canonical_source_ref``).
+    When a message has none, a fallback key ``synthetic:<sha256>`` is used and
+    ``message_id_synthetic`` is set (``parse.synthetic_message_id`` states its limits).
+
+    Times: ``sent_at`` is Gmail's internal date, the clock a sender cannot set;
+    retention and the conversation clocks use it. ``claimed_date`` is the Date
+    header, kept for display; a claim far from Gmail's date is flagged.
+
+    Direction: ``outbound`` only when a captured mailbox's copy carries Gmail's
+    SENT label; a From header that merely claims an internal sender is
+    ``claimed_internal`` and moves neither clock.
 
     ``body_text`` stays empty unless the capturing mailbox has
     ``body_mode='body'`` and the message matched a company. Purging deletes the
     row (with copies, participants and matches); no tombstone is kept.
     """
 
-    DIRECTION_CHOICES = [('inbound', 'Inbound'), ('outbound', 'Outbound')]
+    DIRECTION_CHOICES = [
+        ('inbound', 'Inbound'),
+        ('outbound', 'Outbound (SENT label on a captured copy)'),
+        ('claimed_internal', 'From claims an internal sender; not verified'),
+    ]
     CAPTURE_STATE_CHOICES = [('headers', 'Headers only'), ('body', 'Headers and body')]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -158,14 +177,26 @@ class MailMessage(models.Model):
     conversation = models.ForeignKey(
         MailConversation, on_delete=models.PROTECT, related_name='messages',
     )
-    sent_at = models.DateTimeField(help_text='Date header, else the Gmail internal date')
+    sent_at = models.DateTimeField(
+        help_text="Gmail's internal date (the trusted clock), earliest over the copies",
+    )
+    claimed_date = models.DateTimeField(
+        null=True, blank=True, help_text='The Date header as the sender claims it; display only',
+    )
     from_address = models.CharField(max_length=320, blank=True, default='')
     from_name = models.CharField(max_length=200, blank=True, default='')
     subject = models.CharField(max_length=300, blank=True, default='')
-    direction = models.CharField(max_length=10, choices=DIRECTION_CHOICES)
+    direction = models.CharField(max_length=16, choices=DIRECTION_CHOICES)
+    flags = models.JSONField(
+        default=list, blank=True, help_text='truncated, bounded, date_mismatch, synthetic_id',
+    )
     in_reply_to = models.CharField(max_length=512, blank=True, default='')
     references = models.JSONField(default=list, blank=True)
-    has_attachments = models.BooleanField(default=False)
+    has_attachments = models.BooleanField(
+        default=False,
+        help_text='Known only when the body was read (format=full); under headers-only '
+                  'capture False means unknown, not "no attachments"',
+    )
     attachments = models.JSONField(
         default=list, blank=True,
         help_text='Metadata only: filename, mime_type, size, gmail ids to fetch it',
@@ -364,17 +395,36 @@ class CompanyDomain(models.Model):
     def __str__(self):
         return self.domain
 
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        from .rules import company_domain_problem
+        self.domain = normalise_rule_value('domain', self.domain)
+        problem = company_domain_problem(self.domain)
+        if problem:
+            raise ValidationError({'domain': problem})
+
     def save(self, *args, **kwargs):
-        self.domain = (self.domain or '').strip().lower().lstrip('@').rstrip('.')
+        # Refused on every path, not only in forms: a freemail, public-suffix
+        # or internal domain would match far more than one company.
+        from django.core.exceptions import ValidationError
+        from .rules import company_domain_problem
+        self.domain = normalise_rule_value('domain', self.domain)
+        problem = company_domain_problem(self.domain)
+        if problem:
+            raise ValidationError({'domain': problem})
         super().save(*args, **kwargs)
+
 
 
 class UnmatchedSender(models.Model):
     """Review queue of unknown external addresses. Headers only, never a body.
 
     No ``MailMessage`` is stored for unmatched mail; this row is all that is
-    kept (address, name, domain, counts, up to three subjects). Open rows
-    expire 30 days after they were last seen (``purge.purge_expired_unmatched``).
+    kept (address, name, domain, counts, up to three subjects). Each sample
+    and each counted message carries its hashed message key and the mailbox
+    it came from, so a purge can remove exactly what belongs to a purged
+    message or mailbox. Open rows expire 30 days after Gmail last delivered a
+    message from them (``purge.purge_expired_unmatched``).
     """
 
     STATUS_CHOICES = [
@@ -386,15 +436,19 @@ class UnmatchedSender(models.Model):
     address = models.CharField(max_length=320, unique=True)
     domain = models.CharField(max_length=253, blank=True, default='')
     display_name = models.CharField(max_length=200, blank=True, default='')
-    first_seen = models.DateTimeField()
-    last_seen = models.DateTimeField()
+    first_seen = models.DateTimeField(help_text="Gmail's internal date of the first message")
+    last_seen = models.DateTimeField(help_text="Gmail's internal date of the latest message")
     message_count = models.PositiveIntegerField(default=0)
     message_keys = models.JSONField(
         default=list, blank=True,
-        help_text='Hashed message keys already counted (keeps re-runs idempotent)',
+        help_text='[hashed message key, mailbox] pairs already counted; keeps re-runs '
+                  'idempotent and lets a purge find what to remove',
     )
     mailboxes = models.JSONField(default=list, blank=True)
-    sample_subjects = models.JSONField(default=list, blank=True)
+    samples = models.JSONField(
+        default=list, blank=True,
+        help_text='Up to three {"k": message key, "m": mailbox, "s": subject}',
+    )
     candidate_company_ids = models.JSONField(default=list, blank=True)
     reason = models.CharField(
         max_length=20, blank=True, default='',
@@ -418,20 +472,31 @@ class UnmatchedSender(models.Model):
 class CaptureRule(models.Model):
     """The never-log list and related rules.
 
-    ``kind`` address or domain (a domain also covers its subdomains), or label
-    (a Gmail label name, matched case-insensitively). The built-in label
-    ``CRM private`` always applies and needs no row.
+    ``kind`` address (plus-addressed variants included) or domain (its
+    subdomains included), or label (a Gmail label name, matched
+    case-insensitively). The built-in label ``CRM private`` always applies and
+    needs no row. Values that would match too much (our own domains, public
+    suffixes, freemail domains, Gmail system labels, wildcards) are refused
+    (``rules.rule_problem``).
 
-    Actions: ``skip`` stores nothing and purges what is stored; ``private``
-    does the same (meant for labels); ``headers_only`` never stores a body and
-    clears stored ones. Rules apply to stored mail at the next sync run and at
-    once when saved in the admin (``purge.enforce_rules``).
+    Actions: ``skip`` stores nothing; ``private`` does the same (meant for
+    labels); ``headers_only`` never stores a body. A rule blocks new capture as
+    soon as it is saved. Removing mail already stored is a separate step: the
+    rule starts ``awaiting_confirmation``; a superuser confirms it after seeing
+    a preview; the purge then runs in capped chunks (``purge.enforce_rules``)
+    until nothing is left (``done``). Changing a rule's kind, value, scope or
+    action sends it back to ``awaiting_confirmation``.
     """
 
     KIND_CHOICES = [('address', 'Address'), ('domain', 'Domain'), ('label', 'Gmail label')]
     SCOPE_CHOICES = [('org', 'Whole organisation'), ('mailbox', 'One mailbox')]
     ACTION_CHOICES = [
         ('skip', 'Never log'), ('headers_only', 'Headers only'), ('private', 'Private'),
+    ]
+    PURGE_STATE_CHOICES = [
+        ('awaiting_confirmation', 'Stored mail not yet purged; awaiting confirmation'),
+        ('confirmed', 'Confirmed; purge in progress'),
+        ('done', 'Stored mail purged'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -443,11 +508,21 @@ class CaptureRule(models.Model):
     )
     action = models.CharField(max_length=12, choices=ACTION_CHOICES, default='skip')
     note = models.CharField(max_length=200, blank=True, default='')
+    purge_state = models.CharField(
+        max_length=24, choices=PURGE_STATE_CHOICES, default='awaiting_confirmation',
+    )
+    confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='+',
+    )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    purge_done_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='+',
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['kind', 'value']
@@ -468,16 +543,99 @@ class CaptureRule(models.Model):
                 name='mc_rule_scope_mailbox',
             ),
         ]
+        indexes = [models.Index(fields=['purge_state'], name='mc_rule_purge_state')]
 
     def __str__(self):
         return f'{self.kind} rule ({self.action}, {self.scope})'
 
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        from .rules import rule_problem
+        self.value = normalise_rule_value(self.kind, self.value)
+        problem = rule_problem(self.kind, self.value)
+        if problem:
+            raise ValidationError({'value': problem})
+
     def save(self, *args, **kwargs):
-        value = (self.value or '').strip()
-        if self.kind in ('address', 'domain'):
-            value = value.lower().lstrip('@').rstrip('.')
-        self.value = value
+        self.value = normalise_rule_value(self.kind, self.value)
+        if self.pk is not None and not self._state.adding:
+            old = type(self).objects.filter(pk=self.pk).values(
+                'kind', 'value', 'scope', 'mailbox_id', 'action').first()
+            new = {'kind': self.kind, 'value': self.value, 'scope': self.scope,
+                   'mailbox_id': self.mailbox_id, 'action': self.action}
+            if old is not None and old != new:
+                self.purge_state = 'awaiting_confirmation'
+                self.confirmed_by = None
+                self.confirmed_at = None
+                self.purge_done_at = None
         super().save(*args, **kwargs)
+
+
+def normalise_rule_value(kind, value):
+    value = (value or '').strip()
+    if kind in ('address', 'domain'):
+        value = value.lower().lstrip('@').rstrip('.')
+    return value
+
+
+class CapturePurge(models.Model):
+    """One purge chunk: what a rule, a label or a deletion removed. Counts only."""
+
+    REASON_CHOICES = [
+        ('rule', 'Never-log rule'), ('label', 'Private or label rule'),
+        ('gmail_deleted', 'Deleted in Gmail'), ('expiry', 'Queue expiry'),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    at = models.DateTimeField()
+    reason = models.CharField(max_length=16, choices=REASON_CHOICES)
+    rule = models.ForeignKey(
+        CaptureRule, on_delete=models.SET_NULL, null=True, blank=True, related_name='purges',
+    )
+    mailbox = models.ForeignKey(
+        CaptureMailbox, on_delete=models.SET_NULL, null=True, blank=True, related_name='purges',
+    )
+    actor = models.CharField(max_length=80, blank=True, default='')
+    messages = models.PositiveIntegerField(default=0)
+    copies = models.PositiveIntegerField(default=0)
+    conversations = models.PositiveIntegerField(default=0)
+    queue_rows = models.PositiveIntegerField(default=0)
+    queue_samples = models.PositiveIntegerField(default=0)
+    bodies_cleared = models.PositiveIntegerField(default=0)
+    remaining = models.BooleanField(default=False, help_text='The cap was reached; more follows')
+
+    class Meta:
+        ordering = ['-at']
+        indexes = [models.Index(fields=['at'], name='mc_purge_at')]
+
+    def __str__(self):
+        return f'purge {self.pk} ({self.reason}, {self.messages} messages)'
+
+
+class CaptureFailure(models.Model):
+    """A message that could not be processed. The cursor moves on without it;
+    it is retried on later runs and parked after ``sync.MAX_MESSAGE_ATTEMPTS``.
+    Holds the Gmail id and the error class only, never content."""
+
+    id = models.BigAutoField(primary_key=True)
+    mailbox = models.ForeignKey(
+        CaptureMailbox, on_delete=models.CASCADE, related_name='failures',
+    )
+    gmail_id = models.CharField(max_length=64)
+    attempts = models.PositiveIntegerField(default=1)
+    error = models.CharField(max_length=80, blank=True, default='')
+    parked = models.BooleanField(default=False)
+    first_failed_at = models.DateTimeField()
+    last_failed_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['mailbox', 'gmail_id'], name='mc_failure_unique'),
+        ]
+        indexes = [models.Index(fields=['mailbox', 'parked'], name='mc_failure_mailbox')]
+
+    def __str__(self):
+        return f'failure {self.gmail_id} ({self.attempts}, parked={self.parked})'
 
 
 # --- runs and access log ---------------------------------------------------
@@ -490,9 +648,9 @@ class CaptureRun(models.Model):
         ('check', 'Check'), ('selfcheck', 'Self-check'),
     ]
     OUTCOME_CHOICES = [
-        ('running', 'Running'), ('ok', 'OK'), ('disabled', 'Capture disabled'),
-        ('busy', 'Another runner holds the mailbox'), ('resync_needed', 'Resync needed'),
-        ('rate_limited', 'Rate limited'), ('error', 'Error'),
+        ('running', 'Running'), ('ok', 'OK'), ('partial', 'Partial; continues next run'),
+        ('disabled', 'Capture disabled'), ('busy', 'Another runner holds the mailbox'),
+        ('resync_needed', 'Resync needed'), ('rate_limited', 'Rate limited'), ('error', 'Error'),
     ]
 
     id = models.BigAutoField(primary_key=True)
@@ -517,27 +675,40 @@ class CaptureRun(models.Model):
     unmatched = models.PositiveIntegerField(default=0)
     purged = models.PositiveIntegerField(default=0)
     malformed = models.PositiveIntegerField(default=0)
+    failed = models.PositiveIntegerField(default=0)
+    parked = models.PositiveIntegerField(default=0)
     errors = models.PositiveIntegerField(default=0)
     quota_units_est = models.PositiveIntegerField(default=0)
+    failed_gmail_ids = models.JSONField(
+        default=list, blank=True, help_text='Gmail ids of messages that failed (at most 100)',
+    )
     history_id_start = models.CharField(max_length=32, blank=True, default='')
     history_id_end = models.CharField(max_length=32, blank=True, default='')
     error_summary = models.CharField(max_length=200, blank=True, default='')
 
     class Meta:
         ordering = ['-started_at']
-        indexes = [models.Index(fields=['mailbox', '-started_at'], name='mc_run_mailbox_started')]
+        indexes = [
+            models.Index(fields=['mailbox', '-started_at'], name='mc_run_mailbox_started'),
+            models.Index(fields=['started_at'], name='mc_run_started'),
+        ]
 
     def __str__(self):
         return f'{self.kind} run {self.pk} ({self.outcome})'
 
 
 class MailboxAccessLog(models.Model):
-    """Every read of a mailbox, kept one year (purge in a later PR)."""
+    """Every read of a mailbox, and every change to a mailbox's capture settings.
+
+    A run writes its row before the first Gmail call and updates it at the
+    end, so a run that dies half-way is still on record (``finished_at``
+    empty). Kept ``CAPTURE_ACCESS_LOG_RETENTION_DAYS`` (``purge.purge_old_records``).
+    """
 
     PURPOSE_CHOICES = [
         ('poll', 'Incremental poll'), ('backfill', 'Backfill'), ('resync', 'Resync'),
         ('body', 'Body fetch'), ('attachment', 'Attachment'), ('check', 'Check'),
-        ('selfcheck', 'Self-check'),
+        ('selfcheck', 'Self-check'), ('config', 'Capture settings changed'),
     ]
 
     id = models.BigAutoField(primary_key=True)
@@ -548,16 +719,24 @@ class MailboxAccessLog(models.Model):
         CaptureRun, on_delete=models.SET_NULL, null=True, blank=True, related_name='access_log',
     )
     at = models.DateTimeField()
+    finished_at = models.DateTimeField(null=True, blank=True)
     purpose = models.CharField(max_length=12, choices=PURPOSE_CHOICES)
     actor = models.CharField(max_length=80, help_text='Job name, or user:<id>')
     dry_run = models.BooleanField(default=False)
     api_calls = models.PositiveIntegerField(default=0)
     messages_read = models.PositiveIntegerField(default=0)
     bodies_read = models.PositiveIntegerField(default=0)
+    detail = models.JSONField(
+        default=dict, blank=True,
+        help_text='For config changes: field, old and new value. Never mail content',
+    )
 
     class Meta:
         ordering = ['-at']
-        indexes = [models.Index(fields=['mailbox', '-at'], name='mc_access_mailbox_at')]
+        indexes = [
+            models.Index(fields=['mailbox', '-at'], name='mc_access_mailbox_at'),
+            models.Index(fields=['at'], name='mc_access_at'),
+        ]
 
     def __str__(self):
-        return f'{self.purpose} read of {self.mailbox_id} at {self.at:%Y-%m-%d %H:%M}'
+        return f'{self.purpose} on {self.mailbox_id} at {self.at:%Y-%m-%d %H:%M}'

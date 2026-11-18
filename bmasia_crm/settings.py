@@ -341,6 +341,11 @@ CARA_CARE_WRITES_ENABLED = config('CARA_CARE_WRITES_ENABLED', default=False, cas
 GOOGLE_CAPTURE_ENABLED = config('GOOGLE_CAPTURE_ENABLED', default=False, cast=bool)
 CAPTURE_INTERNAL_DOMAINS = config('CAPTURE_INTERNAL_DOMAINS', default='', cast=Csv())
 CAPTURE_INTERNAL_ADDRESSES = config('CAPTURE_INTERNAL_ADDRESSES', default='', cast=Csv())
+# More public mail providers to treat as freemail (comma-separated).
+CAPTURE_EXTRA_FREEMAIL_DOMAINS = config('CAPTURE_EXTRA_FREEMAIL_DOMAINS', default='', cast=Csv())
+# How long capture keeps its run rows and its mailbox access log (days).
+CAPTURE_RUN_RETENTION_DAYS = config('CAPTURE_RUN_RETENTION_DAYS', default=90, cast=int)
+CAPTURE_ACCESS_LOG_RETENTION_DAYS = config('CAPTURE_ACCESS_LOG_RETENTION_DAYS', default=365, cast=int)
 
 # Phase 1 agent gate (docs/agent-gate-phase1-design.md). 'observe' records what
 # crm_app/agent_policy.py would refuse without changing any write; 'off' disables
