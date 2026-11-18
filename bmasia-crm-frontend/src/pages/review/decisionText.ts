@@ -34,7 +34,15 @@ export const acceptedText = (p: ChangeProposal): string => {
 export const rejectedText = (reason: string) => `Rejected. Reason: ${short(reason, 120)}`;
 
 /** A result for a proposal that turned out to be closed already. */
-export const closedResult = (p: ChangeProposal): DecisionResult | null => {
+export const closedResult = (p: ChangeProposal, me?: string): DecisionResult | null => {
+  const mine = Boolean(me && p.reviewer_username && p.reviewer_username.toLowerCase() === me.toLowerCase());
+  if (mine && (p.status === 'accepted' || p.status === 'edited')) {
+    return {
+      tone: 'success',
+      text: `Your decision was saved: ${p.status === 'edited' ? 'accepted with edits' : 'accepted'}.`,
+    };
+  }
+  if (mine && p.status === 'rejected') return { tone: 'info', text: 'Your decision was saved: rejected.' };
   switch (p.status) {
     case 'accepted':
     case 'edited':

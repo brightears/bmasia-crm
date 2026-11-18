@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link as RouterLink, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Badge,
@@ -14,6 +14,7 @@ import {
   Paper,
   Popover,
   Snackbar,
+  Switch,
   Tab,
   Tabs,
   TextField,
@@ -33,17 +34,20 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import reviewApi, {
   ChangeProposal,
+  OPEN_PAGE_SIZE,
   PatchValue,
   ProposalConflict,
   ReviewApiError,
   ReviewSettings,
 } from '../../services/reviewApi';
 import { EmptyState, PageHeader } from '../../components/ui';
-import ProposalCard, { CardNotice, ConflictChoice, ContactInfo, DecisionResult } from './ProposalCard';
+import ProposalCard, { CardHandlers, CardNotice, ConflictChoice, ContactInfo, DecisionResult } from './ProposalCard';
 import ReasonDialog from './ReasonDialog';
 import PlainText from './PlainText';
 import {
+  BULK_REJECT_MAX,
   CONFLICT_REJECT_REASON,
+  CardState,
   DECIDED_STATUSES,
   EVIDENCE_LABEL,
   KIND_LABEL,
@@ -51,11 +55,14 @@ import {
   ReviewQuery,
   ReviewTab,
   STATUS_LABEL,
+  cardActions,
   displayValue,
+  fieldLabel,
   groupProposals,
   needsAnotherLook,
   readOnlyReason,
   readQuery,
+  sortProposals,
   writeQuery,
 } from './reviewModel';
 import { acceptedText, closedResult, fieldErrorsOf, outcomeOf, rejectedText } from './decisionText';
@@ -64,23 +71,88 @@ import { announceReviewChange } from './useReviewStatus';
 type Load = 'loading' | 'ready' | 'error';
 type DialogState =
   | { type: 'reject'; proposal: ChangeProposal; initial?: string; then?: () => void }
-  | { type: 'bulk' }
+  | { type: 'bulk'; rows: ChangeProposal[] }
   | { type: 'reopen'; proposal: ChangeProposal }
   | null;
 
 const DECIDED_PAGE = 25;
+/** Cards rendered at once; more appear on request, so the page stays quick with a long queue. */
+const RENDER_STEP = 50;
+/** Contact and conflict look-ups: at most this many at a time, and this many per page visit. */
+const LOOKUP_CONCURRENCY = 4;
+const LOOKUP_CAP = 300;
+const BULK_LIST_MAX = 8;
+const SHORTCUTS_KEY = 'bmasia.review.shortcuts';
+
 const asError = (e: unknown): ReviewApiError =>
   e instanceof ReviewApiError ? e : new ReviewApiError(undefined, 'no_answer', 'No answer from the server.');
 
 const sameValues = (a: Record<string, PatchValue>, b: Record<string, PatchValue> | undefined) =>
   Object.keys(a).every((k) => displayValue(a[k]) === displayValue(b?.[k]));
 
+const readShortcuts = (): boolean => {
+  try {
+    return localStorage.getItem(SHORTCUTS_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+};
+
+const isTypingTarget = (el: Element | null) =>
+  Boolean(
+    el &&
+    el instanceof HTMLElement &&
+    (el.tagName === 'INPUT' ||
+      el.tagName === 'TEXTAREA' ||
+      el.tagName === 'SELECT' ||
+      el.isContentEditable ||
+      el.closest('[role="dialog"],[role="listbox"],[role="menu"],[role="combobox"]')),
+  );
+
+const summary = (p: ChangeProposal) =>
+  `${p.company_name}: ${KIND_LABEL[p.kind] || p.kind}${
+    p.kind === 'field_update'
+      ? ` (${Object.keys(p.patch || {})
+          .map(fieldLabel)
+          .join(', ')})`
+      : ''
+  }`;
+
+/** A small queue for look-ups, so a long list never fires hundreds of requests at once. */
+const useLookupQueue = () => {
+  const queue = useRef<(() => Promise<void>)[]>([]);
+  const running = useRef(0);
+  const started = useRef(0);
+  const pump = useCallback(() => {
+    while (running.current < LOOKUP_CONCURRENCY && queue.current.length) {
+      const job = queue.current.shift()!;
+      running.current += 1;
+      job().finally(() => {
+        running.current -= 1;
+        pump();
+      });
+    }
+  }, []);
+  return useCallback(
+    (job: () => Promise<void>) => {
+      if (started.current >= LOOKUP_CAP) return false;
+      started.current += 1;
+      queue.current.push(job);
+      pump();
+      return true;
+    },
+    [pump],
+  );
+};
+
 /**
  * The Review page: a person works through what agents and jobs suggest, one decision at a time.
- * Every decision is bound to the version that was shown; a refused one is explained and never retried.
+ * Every decision is bound to the version that was shown; a refused one is explained and the card
+ * is read again, and the reviewer decides again with a fresh click.
  */
 const ReviewQueue: React.FC = () => {
   const { user } = useAuth();
+  const me = user?.username;
   const [search, setSearch] = useSearchParams();
   const query = readQuery(search);
 
@@ -88,7 +160,10 @@ const ReviewQueue: React.FC = () => {
   const [settingsLoad, setSettingsLoad] = useState<Load>('loading');
   const [openRows, setOpenRows] = useState<ChangeProposal[]>([]);
   const [openLoad, setOpenLoad] = useState<Load>('loading');
-  const [truncated, setTruncated] = useState(false);
+  const [openTotal, setOpenTotal] = useState(0);
+  const [openPage, setOpenPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [extraRows, setExtraRows] = useState<Record<string, ChangeProposal>>({});
   const [decided, setDecided] = useState<{ rows: ChangeProposal[]; count: number; page: number; load: Load }>({
     rows: [],
     count: 0,
@@ -103,20 +178,34 @@ const ReviewQueue: React.FC = () => {
   const [pageReadOnly, setPageReadOnly] = useState<string | null>(null);
   const [cardReadOnly, setCardReadOnly] = useState<Record<string, string>>({});
   const [contacts, setContacts] = useState<Record<string, ContactInfo>>({});
-  const requestedContacts = useRef<Set<string>>(new Set());
+  const requested = useRef<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [focusReq, setFocusReq] = useState<{ id: string; n: number }>({ id: '', n: 0 });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [serverErrors, setServerErrors] = useState<Record<string, Record<string, string>>>({});
   const [acks, setAcks] = useState<Record<string, string>>({});
+  const [choices, setChoices] = useState<Record<string, { choice: ConflictChoice; seen: string }>>({});
+  const [sourceChecks, setSourceChecks] = useState<Record<string, string>>({});
   const armed = useRef<Record<string, boolean>>({});
   const [dialog, setDialog] = useState<DialogState>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
   const [snack, setSnack] = useState<string | null>(null);
   const [helpAnchor, setHelpAnchor] = useState<HTMLElement | null>(null);
-  const [now, setNow] = useState(() => Date.now());
+  const [renderLimit, setRenderLimit] = useState(RENDER_STEP);
+  const [proposer, setProposer] = useState('');
+  const [shortcutsOn, setShortcutsOn] = useState(readShortcuts);
+  const lookup = useLookupQueue();
 
-  const setQuery = (patch: Partial<ReviewQuery>) => setSearch(writeQuery({ ...query, ...patch }), { replace: false });
+  /** Any change of list, filter or order clears the selection and starts the rendering window again. */
+  const resetView = () => {
+    setSelected(new Set());
+    setRenderLimit(RENDER_STEP);
+  };
+  const setQuery = (patch: Partial<ReviewQuery>) => {
+    resetView();
+    setSearch(writeQuery({ ...query, ...patch }), { replace: false });
+  };
 
   // ------------------------------------------------------------------ loading
 
@@ -137,18 +226,37 @@ const ReviewQueue: React.FC = () => {
   }, []);
 
   const enabled = settingsLoad === 'ready' && settings?.proposals_enabled === true;
+  const valuesFollowTarget = Boolean(settings && 'you_can_review' in settings);
 
-  const loadOpen = useCallback(async () => {
+  const loadOpen = useCallback(async (sort: 'newest' | 'expiring') => {
     setOpenLoad('loading');
     try {
-      const { rows, truncated: more } = await reviewApi.listAllOpen({});
-      setOpenRows(rows);
-      setTruncated(more);
+      const data = await reviewApi.listOpen(1, sort);
+      setOpenRows(data.results);
+      setOpenTotal(data.count);
+      setOpenPage(1);
       setOpenLoad('ready');
     } catch {
       setOpenLoad('error');
     }
   }, []);
+
+  const loadMoreOpen = async () => {
+    setLoadingMore(true);
+    try {
+      const data = await reviewApi.listOpen(openPage + 1, query.sort);
+      setOpenRows((rows) => {
+        const have = new Set(rows.map((r) => r.id));
+        return [...rows, ...data.results.filter((r) => !have.has(r.id))];
+      });
+      setOpenTotal(data.count);
+      setOpenPage((n) => n + 1);
+    } catch {
+      setSnack('More suggestions could not be loaded. Try again.');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const loadDecided = useCallback(
     async (page: number) => {
@@ -161,7 +269,7 @@ const ReviewQueue: React.FC = () => {
               : DECIDED_STATUSES,
           company: query.company || undefined,
           kind: query.kind ? [query.kind] : undefined,
-          proposer: query.proposer || undefined,
+          proposer: proposer || undefined,
           page,
           page_size: DECIDED_PAGE,
           ordering: '-created_at',
@@ -176,7 +284,7 @@ const ReviewQueue: React.FC = () => {
         setDecided((d) => ({ ...d, load: 'error' }));
       }
     },
-    [query.decided, query.company, query.kind, query.proposer],
+    [query.decided, query.company, query.kind, proposer],
   );
 
   useEffect(() => {
@@ -184,56 +292,12 @@ const ReviewQueue: React.FC = () => {
   }, [loadSettings]);
 
   useEffect(() => {
-    if (enabled) loadOpen();
-  }, [enabled, loadOpen]);
+    if (enabled) loadOpen(query.sort);
+  }, [enabled, loadOpen, query.sort]);
 
   useEffect(() => {
     if (enabled && query.tab === 'decided') loadDecided(1);
   }, [enabled, query.tab, loadDecided]);
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Names and role flags of target contacts and linked contacts.
-  useEffect(() => {
-    const ids = new Set<string>();
-    [...openRows, ...decided.rows].forEach((p) => {
-      if (p.target_collection === 'contact' && p.target_id) ids.add(p.target_id);
-      const related = displayValue(p.patch?.related_contact);
-      if (related) ids.add(related);
-    });
-    ids.forEach((id) => {
-      if (requestedContacts.current.has(id)) return;
-      requestedContacts.current.add(id);
-      reviewApi
-        .getContact(id)
-        .then((c) =>
-          setContacts((all) => ({
-            ...all,
-            [id]: {
-              name: typeof c?.name === 'string' ? c.name : undefined,
-              is_primary: c?.is_primary === true,
-              contact_type: typeof c?.contact_type === 'string' ? c.contact_type : undefined,
-              receives_invoice_emails: c?.receives_invoice_emails === true,
-              receives_payment_emails: c?.receives_payment_emails === true,
-            },
-          })),
-        )
-        .catch(() => setContacts((all) => ({ ...all, [id]: {} })));
-    });
-  }, [openRows, decided.rows]);
-
-  const contactNames = useMemo(
-    () =>
-      Object.fromEntries(
-        Object.entries(contacts)
-          .filter(([, c]) => c.name)
-          .map(([id, c]) => [id, c.name as string]),
-      ),
-    [contacts],
-  );
 
   // ------------------------------------------------------------------ row bookkeeping
 
@@ -243,6 +307,7 @@ const ReviewQueue: React.FC = () => {
       rows.some((r) => r.id === fresh.id) ? merge(rows) : fresh.status === 'proposed' ? [fresh, ...rows] : rows,
     );
     setDecided((d) => ({ ...d, rows: merge(d.rows) }));
+    setExtraRows((x) => (x[fresh.id] ? { ...x, [fresh.id]: fresh } : x));
   }, []);
 
   const mergeSnapshot = useCallback((id: string, snap: Partial<ChangeProposal>) => {
@@ -251,11 +316,28 @@ const ReviewQueue: React.FC = () => {
     setDecided((d) => ({ ...d, rows: merge(d.rows) }));
   }, []);
 
-  const findRow = (id: string) => openRows.find((r) => r.id === id) || decided.rows.find((r) => r.id === id);
+  const findRow = (id: string) =>
+    openRows.find((r) => r.id === id) || decided.rows.find((r) => r.id === id) || extraRows[id];
+
+  /** The full rows of each card's conflicting suggestions, once loaded. */
+  const partnersById = useMemo(() => {
+    const byId = new Map<string, ChangeProposal>();
+    [...Object.values(extraRows), ...decided.rows, ...openRows].forEach((r) => byId.set(r.id, r));
+    const out: Record<string, ChangeProposal[]> = {};
+    openRows.forEach((p) => {
+      const list = (p.conflicts_with || []).map((c) => byId.get(c.id)).filter(Boolean) as ChangeProposal[];
+      if ((p.conflicts_with || []).length) out[p.id] = list;
+    });
+    return out;
+  }, [openRows, decided.rows, extraRows]);
 
   const setNotice = (id: string, notice?: CardNotice) => setNotices((n) => ({ ...n, [id]: notice }));
   const setResult = (id: string, result?: DecisionResult) => setResults((r) => ({ ...r, [id]: result }));
   const stick = (id: string) => setSticky((s) => (s[id] ? s : { ...s, [id]: query.tab }));
+  const focusCard = (id: string) => {
+    setFocusedId(id);
+    setFocusReq((f) => ({ id, n: f.n + 1 }));
+  };
 
   const startBusy = (ids: string[]) => {
     if (ids.some((id) => busyRef.current.has(id))) return false;
@@ -268,7 +350,42 @@ const ReviewQueue: React.FC = () => {
     setBusy(new Set(busyRef.current));
   };
 
-  /** Read one proposal again (never a decision). Shows its closed state when it was decided elsewhere. */
+  // ------------------------------------------------------------------ the shared rule
+
+  const readOnlyFor = (p: ChangeProposal) => cardReadOnly[p.id] || readOnlyReason(p, me, pageReadOnly);
+
+  /** Everything `cardActions` needs, from page state. The card computes the same from its props. */
+  const stateFor = (p: ChangeProposal): CardState => {
+    const choice = choices[p.id];
+    const partners = partnersById[p.id] || [];
+    return {
+      readOnly: readOnlyFor(p),
+      expired: p.status === 'proposed' && Date.parse(p.expires_at) <= Date.now(),
+      busy: busyRef.current.has(p.id),
+      decided: Boolean(results[p.id]),
+      editing: editingId === p.id,
+      acknowledged: acks[p.id] === p.seen_version,
+      conflictChoice: choice && choice.seen === p.seen_version ? choice.choice : null,
+      partnersShown: (p.conflicts_with || []).every((c) => partners.some((r) => r.id === c.id)),
+      sourceChecked: sourceChecks[p.id] === p.seen_version,
+    };
+  };
+  const actionsFor = (p: ChangeProposal) => cardActions(p, stateFor(p));
+
+  /** After a decision, move on to the next card in the list. */
+  const focusNextAfter = (id: string) => {
+    const ids = navigableRef.current;
+    const at = ids.indexOf(id);
+    const next =
+      ids.slice(at + 1).find((x) => x !== id) ||
+      ids
+        .slice(0, Math.max(at, 0))
+        .reverse()
+        .find((x) => x !== id);
+    if (next) focusCard(next);
+  };
+
+  /** Read one proposal again (never a decision). */
   const reread = async (id: string): Promise<ChangeProposal | null> => {
     try {
       const fresh = await reviewApi.get(id);
@@ -288,22 +405,29 @@ const ReviewQueue: React.FC = () => {
     }
     if (outcome.kind === 'page_read_only') {
       setPageReadOnly(outcome.reason);
+      setEditingId(null);
       return;
     }
     if (outcome.kind === 'card_read_only') {
       setCardReadOnly((c) => ({ ...c, [p.id]: outcome.reason }));
+      setEditingId((id) => (id === p.id ? null : id));
       return;
     }
     if (outcome.snapshot) mergeSnapshot(p.id, outcome.snapshot);
     if (error.code === 'invalid_value') setServerErrors((s) => ({ ...s, [p.id]: fieldErrorsOf(error) }));
+    else if (outcome.refresh || outcome.snapshot) {
+      // What was being edited is no longer what is on the card: close the form until it is looked at again.
+      setEditingId((id) => (id === p.id ? null : id));
+    }
     setNotice(p.id, outcome.notice);
     if (outcome.refresh) {
       const fresh = await reread(p.id);
       if (fresh && fresh.status !== 'proposed' && !(p.status === 'rejected' && fresh.status === 'rejected')) {
-        const closed = closedResult(fresh);
+        const closed = closedResult(fresh, me);
         if (closed && error.code !== 'not_rejected') setResult(p.id, closed);
       }
     }
+    focusCard(p.id);
   };
 
   // ------------------------------------------------------------------ decisions
@@ -311,7 +435,7 @@ const ReviewQueue: React.FC = () => {
   const rejectConflicting = async (winner: ChangeProposal): Promise<string> => {
     const lines: string[] = [];
     for (const c of winner.conflicts_with || []) {
-      let other = findRow(c.id);
+      let other: ChangeProposal | undefined = findRow(c.id);
       if (!other || other.status !== 'proposed' || !sameValues(c.patch, other.patch)) {
         other = (await reread(c.id)) || undefined;
       }
@@ -345,11 +469,10 @@ const ReviewQueue: React.FC = () => {
     return lines.join(' ');
   };
 
-  const accept = async (
-    p: ChangeProposal,
-    choice?: ConflictChoice,
-    edits?: { edits: Record<string, PatchValue>; drop: string[] },
-  ) => {
+  const accept = async (p: ChangeProposal, edits?: { edits: Record<string, PatchValue>; drop: string[] }) => {
+    const allowed = edits ? actionsFor(p).acceptEdits : actionsFor(p).accept;
+    if (!allowed.ok) return;
+    const keepThis = (p.conflicts_with || []).length > 0 && stateFor(p).conflictChoice === 'this';
     if (!startBusy([p.id])) return;
     stick(p.id);
     setNotice(p.id, undefined);
@@ -361,7 +484,7 @@ const ReviewQueue: React.FC = () => {
       setEditingId((id) => (id === p.id ? null : id));
       setServerErrors((s) => ({ ...s, [p.id]: {} }));
       let text = acceptedText(updated);
-      if (choice === 'this' && (p.conflicts_with || []).length) text += ` ${await rejectConflicting(p)}`;
+      if (keepThis) text += ` ${await rejectConflicting(p)}`;
       setResult(p.id, { tone: 'success', text });
       setSelected((s) => {
         const next = new Set(s);
@@ -369,6 +492,7 @@ const ReviewQueue: React.FC = () => {
         return next;
       });
       announceReviewChange();
+      focusNextAfter(p.id);
     } catch (e) {
       await handleError(p, e);
     } finally {
@@ -377,13 +501,14 @@ const ReviewQueue: React.FC = () => {
   };
 
   const reject = async (p: ChangeProposal, reason: string, then?: () => void) => {
-    if (!startBusy([p.id])) return;
+    if (!actionsFor(p).reject.ok || !startBusy([p.id])) return;
     stick(p.id);
     setNotice(p.id, undefined);
     setDialogBusy(true);
     try {
       const updated = await reviewApi.reject(p.id, p.seen_version, reason);
       updateRow(updated);
+      setEditingId((id) => (id === p.id ? null : id));
       setResult(p.id, { tone: 'info', text: rejectedText(reason) });
       setSelected((s) => {
         const next = new Set(s);
@@ -393,6 +518,7 @@ const ReviewQueue: React.FC = () => {
       announceReviewChange();
       setDialog(null);
       if (then) then();
+      else focusNextAfter(p.id);
     } catch (e) {
       setDialog(null);
       await handleError(p, e);
@@ -403,7 +529,7 @@ const ReviewQueue: React.FC = () => {
   };
 
   const reopen = async (p: ChangeProposal, note: string) => {
-    if (!startBusy([p.id])) return;
+    if (!actionsFor(p).reopen.ok || !startBusy([p.id])) return;
     stick(p.id);
     setNotice(p.id, undefined);
     setDialogBusy(true);
@@ -413,6 +539,7 @@ const ReviewQueue: React.FC = () => {
       setResult(p.id, { tone: 'success', text: 'Reopened. It is waiting in the Open tab again.' });
       announceReviewChange();
       setDialog(null);
+      focusCard(p.id);
     } catch (e) {
       setDialog(null);
       await handleError(p, e);
@@ -422,10 +549,10 @@ const ReviewQueue: React.FC = () => {
     }
   };
 
-  const bulkReject = async (reason: string) => {
-    const rows = openRows.filter((r) => selected.has(r.id) && r.status === 'proposed');
+  /** Rejects exactly the rows the dialog listed. */
+  const bulkReject = async (rows: ChangeProposal[], reason: string) => {
     const ids = rows.map((r) => r.id);
-    if (!ids.length || !startBusy(ids)) return;
+    if (!ids.length || ids.length > BULK_REJECT_MAX || !startBusy(ids)) return;
     setDialogBusy(true);
     ids.forEach((id) => {
       stick(id);
@@ -440,18 +567,12 @@ const ReviewQueue: React.FC = () => {
       setOpenRows((all) =>
         all.map((r) =>
           rejected.has(r.id)
-            ? {
-                ...r,
-                status: 'rejected',
-                decision_note: reason,
-                reviewer_username: user?.username || r.reviewer_username,
-              }
+            ? { ...r, status: 'rejected', decision_note: reason, reviewer_username: me || r.reviewer_username }
             : r,
         ),
       );
       rejected.forEach((id) => setResult(id, { tone: 'info', text: rejectedText(reason) }));
       for (const skip of answer.skipped || []) {
-        const row = rows.find((r) => r.id === skip.id);
         if (skip.code === 'reviewer_is_party') {
           setCardReadOnly((c) => ({
             ...c,
@@ -465,9 +586,9 @@ const ReviewQueue: React.FC = () => {
           await reread(skip.id);
         } else {
           const fresh = await reread(skip.id);
-          const closed = fresh ? closedResult(fresh) : null;
+          const closed = fresh ? closedResult(fresh, me) : null;
           if (closed) setResult(skip.id, closed);
-          else if (row) setNotice(row.id, { tone: 'info', text: `Not rejected (${skip.code}).` });
+          else setNotice(skip.id, { tone: 'info', text: `Not rejected (${skip.code}).` });
         }
       }
       (answer.not_found || []).forEach((id) =>
@@ -491,7 +612,7 @@ const ReviewQueue: React.FC = () => {
             ? 'No answer from the server. The list was read again; check it before deciding.'
             : `Nothing was rejected: ${error.detail}`,
         );
-        if (error.noAnswer) await loadOpen();
+        if (error.noAnswer) await loadOpen(query.sort);
       }
     } finally {
       setDialogBusy(false);
@@ -513,20 +634,56 @@ const ReviewQueue: React.FC = () => {
             tone: 'info',
             text: 'You chose this suggestion over the other one. Accept it to apply it.',
           });
-          setFocusedId(other.id);
+          focusCard(other.id);
         }
       },
     });
   };
 
-  // ------------------------------------------------------------------ what is shown
+  const toggleSelect = (id: string, checked: boolean) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
 
-  const readOnlyFor = (p: ChangeProposal) => cardReadOnly[p.id] || readOnlyReason(p, user?.username, pageReadOnly);
+  // One stable set of callbacks for every card; they call the latest page functions.
+  const live = useRef({ accept, reject, pickOther, toggleSelect, findRow });
+  live.current = { accept, reject, pickOther, toggleSelect, findRow };
+  const onArm = useCallback((id: string, value: boolean) => {
+    armed.current[id] = value;
+  }, []);
+  const handlers = useMemo<CardHandlers>(
+    () => ({
+      onSelect: (id, checked) => live.current.toggleSelect(id, checked),
+      onFocusCard: (id) => setFocusedId(id),
+      onArm,
+      onEdit: (id, value) => setEditingId(value ? id : null),
+      onAccept: (p) => live.current.accept(p),
+      onAcceptEdits: (p, edits, drop) => live.current.accept(p, { edits, drop }),
+      onRequestReject: (p) => setDialog({ type: 'reject', proposal: p }),
+      onRequestReopen: (p) => setDialog({ type: 'reopen', proposal: p }),
+      onPickOther: (p, other) => live.current.pickOther(p, other),
+      onChoose: (p, choice) =>
+        setChoices((c) => {
+          const next = { ...c };
+          if (choice) next[p.id] = { choice, seen: p.seen_version };
+          else delete next[p.id];
+          return next;
+        }),
+      onAcknowledge: (p, value) => setAcks((a) => ({ ...a, [p.id]: value ? p.seen_version : '' })),
+      onSourceCheck: (p, value) => setSourceChecks((s) => ({ ...s, [p.id]: value ? p.seen_version : '' })),
+    }),
+    [onArm],
+  );
+
+  // ------------------------------------------------------------------ what is shown
 
   const matchesFilters = (p: ChangeProposal) =>
     (!query.company || p.company_id === query.company) &&
     (!query.kind || p.kind === query.kind) &&
-    (!query.proposer || p.proposer_username.toLowerCase() === query.proposer.toLowerCase()) &&
+    (!proposer || p.proposer_username.toLowerCase() === proposer.toLowerCase()) &&
     (!query.evidence || p.evidence === query.evidence);
 
   const inTab = (p: ChangeProposal, tab: ReviewTab) => {
@@ -536,17 +693,82 @@ const ReviewQueue: React.FC = () => {
     return tab === 'look' ? look : !look;
   };
 
-  const filteredOpen = openRows.filter(matchesFilters);
+  const filteredOpen = useMemo(
+    () => openRows.filter(matchesFilters),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [openRows, query.company, query.kind, query.evidence, proposer],
+  );
   const openCount = filteredOpen.filter((p) => p.status === 'proposed' && !needsAnotherLook(p).length).length;
   const lookCount = filteredOpen.filter((p) => p.status === 'proposed' && needsAnotherLook(p).length > 0).length;
 
-  const shown =
-    query.tab === 'decided'
-      ? decided.rows.filter((p) => !query.evidence || p.evidence === query.evidence)
-      : filteredOpen.filter((p) => inTab(p, query.tab));
-  const groups = query.tab === 'decided' ? null : groupProposals(shown);
-  const order = groups ? groups.flatMap((g) => g.batches.flatMap((b) => b.proposals)) : shown;
-  const navigable = order.filter((p) => !results[p.id]).map((p) => p.id);
+  const shown = useMemo(
+    () =>
+      query.tab === 'decided'
+        ? decided.rows.filter((p) => !query.evidence || p.evidence === query.evidence)
+        : sortProposals(
+            filteredOpen.filter((p) => inTab(p, query.tab)),
+            query.sort,
+          ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [query.tab, query.sort, query.evidence, decided.rows, filteredOpen, sticky],
+  );
+  // Group in display order, then render only the first `renderLimit` cards.
+  const order = useMemo(
+    () =>
+      query.tab === 'decided'
+        ? shown
+        : groupProposals(shown, query.sort, true).flatMap((g) => g.batches.flatMap((b) => b.proposals)),
+    [shown, query.tab, query.sort],
+  );
+  const windowed = order.slice(0, renderLimit);
+  const groups = query.tab === 'decided' ? null : groupProposals(windowed, query.sort, true);
+  const navigable = windowed.filter((p) => !results[p.id]).map((p) => p.id);
+  const navigableRef = useRef<string[]>(navigable);
+  navigableRef.current = navigable;
+
+  // Names and role flags of contacts on the rendered cards only, a few at a time.
+  useEffect(() => {
+    windowed.forEach((p) => {
+      const ids = [p.target_collection === 'contact' ? p.target_id : '', displayValue(p.patch?.related_contact)].filter(
+        Boolean,
+      );
+      ids.forEach((id) => {
+        if (requested.current.has(id)) return;
+        const queued = lookup(async () => {
+          try {
+            const c = await reviewApi.getContact(id);
+            setContacts((all) => ({
+              ...all,
+              [id]: {
+                name: typeof c?.name === 'string' ? c.name : undefined,
+                is_primary: c?.is_primary === true,
+                contact_type: typeof c?.contact_type === 'string' ? c.contact_type : undefined,
+                receives_invoice_emails: c?.receives_invoice_emails === true,
+                receives_payment_emails: c?.receives_payment_emails === true,
+              },
+            }));
+          } catch {
+            setContacts((all) => ({ ...all, [id]: {} }));
+          }
+        });
+        if (queued) requested.current.add(id);
+      });
+      // The other side of a conflict, when it is not among the loaded rows: read it to show its evidence.
+      (p.conflicts_with || []).forEach((c) => {
+        const key = `p:${c.id}`;
+        if (requested.current.has(key) || openRows.some((r) => r.id === c.id) || extraRows[c.id]) return;
+        const queued = lookup(async () => {
+          try {
+            const row = await reviewApi.get(c.id);
+            setExtraRows((x) => ({ ...x, [row.id]: row }));
+          } catch {
+            // The card keeps saying the evidence is loading, and accepting stays blocked.
+          }
+        });
+        if (queued) requested.current.add(key);
+      });
+    });
+  }, [windowed, openRows, extraRows, lookup]);
 
   const companyOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -558,77 +780,74 @@ const ReviewQueue: React.FC = () => {
   const proposerOptions = useMemo(() => {
     const set = new Set<string>();
     [...openRows, ...decided.rows].forEach((p) => p.proposer_username && set.add(p.proposer_username));
-    if (query.proposer) set.add(query.proposer);
+    if (proposer) set.add(proposer);
     return Array.from(set).sort();
-  }, [openRows, decided.rows, query.proposer]);
+  }, [openRows, decided.rows, proposer]);
 
-  const filtersActive = Boolean(query.company || query.kind || query.proposer || query.evidence || query.decided);
+  const filtersActive = Boolean(query.company || query.kind || proposer || query.evidence || query.decided);
+  const clearFilters = () => {
+    setProposer('');
+    setQuery({ company: '', kind: '', evidence: '', decided: '' });
+  };
 
-  const decidable = (p: ChangeProposal) =>
-    p.status === 'proposed' && !readOnlyFor(p) && new Date(p.expires_at).getTime() > now && !results[p.id];
-
-  const toggleSelect = (id: string, checked: boolean) =>
-    setSelected((s) => {
-      const next = new Set(s);
-      if (checked) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-
-  const onArm = useCallback((id: string, value: boolean) => {
-    armed.current[id] = value;
-  }, []);
+  /** Exactly what a bulk reject would send: selected, shown with the current tab and filters, and decidable. */
+  const bulkRows = shown.filter((p) => selected.has(p.id) && actionsFor(p).select.ok);
+  const tooMany = bulkRows.length > BULK_REJECT_MAX;
 
   // ------------------------------------------------------------------ keyboard
 
-  const keyState = useRef({ navigable, focusedId, dialog, order });
-  keyState.current = { navigable, focusedId, dialog, order };
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const keyState = useRef<any>(null);
+  keyState.current = { navigable, focusedId, dialog, editingId, order, shortcutsOn, helpAnchor, renderLimit };
+  const keyFns = useRef<any>(null);
+  keyFns.current = { actionsFor, stateFor, accept, toggleSelect };
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const state = keyState.current;
-      if (state.dialog || event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.isContentEditable ||
-          target.closest('[role="dialog"],[role="listbox"],[role="menu"]'))
-      ) {
-        return;
-      }
-      const ids = state.navigable;
-      const index = state.focusedId ? ids.indexOf(state.focusedId) : -1;
-      const current = state.order.find((p) => p.id === state.focusedId);
+      const s = keyState.current;
+      const f = keyFns.current;
+      if (!s.shortcutsOn || s.dialog || s.helpAnchor || event.metaKey || event.ctrlKey || event.altKey) return;
+      // While a card is being edited, every shortcut waits until the form is saved or closed.
+      if (s.editingId) return;
+      if (isTypingTarget(event.target as Element) || isTypingTarget(document.activeElement)) return;
+      const ids: string[] = s.navigable;
+      const index = s.focusedId ? ids.indexOf(s.focusedId) : -1;
+      const current: ChangeProposal | undefined = s.order.find((p: ChangeProposal) => p.id === s.focusedId);
+      // Card shortcuts act only on the card that really has focus.
+      const focusInCard =
+        current && document.activeElement instanceof HTMLElement
+          ? document.activeElement.closest('[data-proposal-id]')?.getAttribute('data-proposal-id') === current.id
+          : false;
       switch (event.key) {
-        case 'j':
-          if (ids.length) setFocusedId(ids[Math.min(ids.length - 1, index + 1)]);
+        case 'j': {
+          if (index + 1 >= ids.length && s.order.length > s.renderLimit) setRenderLimit((n: number) => n + RENDER_STEP);
+          const next = ids[Math.min(ids.length - 1, index + 1)];
+          if (next) focusCard(next);
           break;
+        }
         case 'k':
-          if (ids.length) setFocusedId(ids[Math.max(0, index - 1)]);
+          if (ids.length) focusCard(ids[Math.max(0, index - 1)]);
           break;
         case 'e':
-          if (current && decidable(current) && !(current.conflicts_with || []).length) setEditingId(current.id);
+          if (current && focusInCard && f.actionsFor(current).edit.ok) setEditingId(current.id);
+          else if (current && focusInCard) setSnack(f.actionsFor(current).edit.reason || 'Not possible now.');
           break;
         case 'r':
-          if (current && decidable(current)) setDialog({ type: 'reject', proposal: current });
+          if (current && focusInCard && f.actionsFor(current).reject.ok)
+            setDialog({ type: 'reject', proposal: current });
           break;
         case 'x':
-          if (current && decidable(current)) toggleSelect(current.id, !selected.has(current.id));
+          if (current && focusInCard && f.actionsFor(current).select.ok)
+            f.toggleSelect(current.id, !selectedRef.current.has(current.id));
           break;
         case 'a': {
-          if (!current || !decidable(current)) break;
-          if ((current.conflicts_with || []).length) {
-            setSnack('This one conflicts with another suggestion: pick one on the card.');
-          } else if (current.target_changed_at && acks[current.id] !== current.seen_version) {
-            setSnack('The record changed: compare the current values and tick the box on the card first.');
-          } else if (!armed.current[current.id]) {
+          if (!current || !focusInCard) break;
+          const allowed = f.actionsFor(current).accept;
+          if (!allowed.ok) setSnack(allowed.reason || 'Not possible now.');
+          else if (!armed.current[current.id])
             setSnack('Read the card first: the A key accepts once the card has been in focus for a moment.');
-          } else {
-            accept(current);
-          }
+          else f.accept(current);
           break;
         }
         case '?':
@@ -641,7 +860,16 @@ const ReviewQueue: React.FC = () => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const toggleShortcuts = (on: boolean) => {
+    setShortcutsOn(on);
+    try {
+      localStorage.setItem(SHORTCUTS_KEY, on ? 'on' : 'off');
+    } catch {
+      // Storage unavailable: the choice lasts until the page is left.
+    }
+  };
 
   // ------------------------------------------------------------------ states
 
@@ -696,7 +924,7 @@ const ReviewQueue: React.FC = () => {
       anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
       transformOrigin={{ vertical: 'top', horizontal: 'right' }}
     >
-      <Box sx={{ p: 2, maxWidth: 360 }} data-testid="review-help">
+      <Box sx={{ p: 2, maxWidth: 380 }} data-testid="review-help">
         <Typography variant="subtitle2" gutterBottom>
           How review works
         </Typography>
@@ -706,7 +934,10 @@ const ReviewQueue: React.FC = () => {
               Each change is accepted on its own card, after you have looked at it. There is deliberately no “accept
               all”.
             </li>
-            <li>You can reject several at once: tick them (or a whole batch) and give one reason.</li>
+            <li>
+              You can reject several at once: tick them (or a whole batch) and give one reason. The dialog lists what
+              will be rejected.
+            </li>
             <li>
               If a suggestion changed since you loaded it, nothing happens and the card shows what changed. Decide again
               with a fresh click.
@@ -715,7 +946,7 @@ const ReviewQueue: React.FC = () => {
           </ul>
         </Typography>
         <Typography variant="subtitle2" sx={{ mt: 1.5 }} gutterBottom>
-          Keys
+          Keys (when switched on, and never while typing or editing)
         </Typography>
         <Box
           component="dl"
@@ -752,26 +983,28 @@ const ReviewQueue: React.FC = () => {
 
   const actions = (
     <>
-      <Tooltip title="Read the list again">
-        <span>
-          <Button
-            variant="outlined"
-            startIcon={<Refresh />}
-            onClick={() => {
-              setResults({});
-              setNotices({});
-              setSticky({});
-              setSelected(new Set());
-              setServerErrors({});
-              loadOpen();
-              if (query.tab === 'decided') loadDecided(1);
-            }}
-            disabled={busy.size > 0}
-          >
-            Refresh
-          </Button>
-        </span>
-      </Tooltip>
+      <FormControlLabel
+        control={<Switch size="small" checked={shortcutsOn} onChange={(e) => toggleShortcuts(e.target.checked)} />}
+        label={<Typography variant="body2">Keyboard shortcuts</Typography>}
+        sx={{ mr: 0.5 }}
+      />
+      <Button
+        variant="outlined"
+        startIcon={<Refresh />}
+        onClick={() => {
+          setResults({});
+          setNotices({});
+          setSticky({});
+          setServerErrors({});
+          setEditingId(null);
+          resetView();
+          loadOpen(query.sort);
+          if (query.tab === 'decided') loadDecided(1);
+        }}
+        disabled={busy.size > 0}
+      >
+        Refresh
+      </Button>
       <Tooltip title="How review works, and keys">
         <IconButton
           id="review-help-button"
@@ -785,37 +1018,33 @@ const ReviewQueue: React.FC = () => {
     </>
   );
 
-  const selectable = filteredOpen.filter((p) => selected.has(p.id) && decidable(p));
-
-  const renderCard = (p: ChangeProposal) => (
-    <ProposalCard
-      key={p.id}
-      proposal={p}
-      settings={settings}
-      now={now}
-      busy={busy.has(p.id)}
-      notice={notices[p.id]}
-      result={results[p.id]}
-      readOnly={readOnlyFor(p)}
-      contact={p.target_collection === 'contact' ? contacts[p.target_id] : undefined}
-      contactNames={contactNames}
-      selected={selected.has(p.id)}
-      focused={focusedId === p.id}
-      editing={editingId === p.id}
-      serverErrors={serverErrors[p.id]}
-      onSelect={toggleSelect}
-      onFocusCard={setFocusedId}
-      onArm={onArm}
-      onEdit={(id, value) => setEditingId(value ? id : null)}
-      onAccept={(proposal, choice) => accept(proposal, choice)}
-      onAcceptEdits={(proposal, edits, drop, choice) => accept(proposal, choice, { edits, drop })}
-      onRequestReject={(proposal) => setDialog({ type: 'reject', proposal })}
-      onRequestReopen={(proposal) => setDialog({ type: 'reopen', proposal })}
-      onPickOther={pickOther}
-      acknowledged={acks[p.id] === p.seen_version}
-      onAcknowledge={(proposal, value) => setAcks((a) => ({ ...a, [proposal.id]: value ? proposal.seen_version : '' }))}
-    />
-  );
+  const renderCard = (p: ChangeProposal) => {
+    const s = stateFor(p);
+    return (
+      <ProposalCard
+        key={p.id}
+        proposal={p}
+        settings={settings}
+        valuesFollowTarget={valuesFollowTarget}
+        busy={busy.has(p.id)}
+        notice={notices[p.id]}
+        result={results[p.id]}
+        readOnly={s.readOnly}
+        contact={p.target_collection === 'contact' ? contacts[p.target_id] : undefined}
+        relatedName={contacts[displayValue(p.patch?.related_contact)]?.name}
+        partners={partnersById[p.id]}
+        selected={selected.has(p.id)}
+        focused={focusedId === p.id}
+        focusNonce={focusReq.id === p.id ? focusReq.n : 0}
+        editing={s.editing}
+        serverErrors={serverErrors[p.id]}
+        acknowledged={s.acknowledged}
+        conflictChoice={s.conflictChoice}
+        sourceChecked={s.sourceChecked}
+        handlers={handlers}
+      />
+    );
+  };
 
   const emptyFor = (tab: ReviewTab) => {
     if (filtersActive) {
@@ -823,11 +1052,7 @@ const ReviewQueue: React.FC = () => {
         <EmptyState
           icon={<ManageSearchOutlined />}
           title="Nothing matches these filters"
-          action={
-            <Button onClick={() => setQuery({ company: '', kind: '', proposer: '', evidence: '', decided: '' })}>
-              Clear filters
-            </Button>
-          }
+          action={<Button onClick={clearFilters}>Clear filters</Button>}
         />
       );
     }
@@ -863,6 +1088,7 @@ const ReviewQueue: React.FC = () => {
   };
 
   const listLoad = query.tab === 'decided' ? decided.load : openLoad;
+  const notLoaded = openTotal - openRows.length;
 
   return (
     <Box>
@@ -875,14 +1101,31 @@ const ReviewQueue: React.FC = () => {
         </Alert>
       )}
 
+      {query.tab !== 'decided' && openLoad === 'ready' && notLoaded > 0 && (
+        <Alert
+          severity="warning"
+          sx={{ mb: 2 }}
+          data-testid="more-not-loaded"
+          action={
+            <Button color="inherit" onClick={loadMoreOpen} disabled={loadingMore}>
+              {loadingMore ? 'Loading…' : `Load ${Math.min(OPEN_PAGE_SIZE, notLoaded)} more`}
+            </Button>
+          }
+        >
+          Showing the {query.sort === 'expiring' ? 'soonest-expiring' : 'newest'}{' '}
+          {openRows.length.toLocaleString('en-US')} of {openTotal.toLocaleString('en-US')} open suggestions. The counts
+          below are for the loaded ones.
+        </Alert>
+      )}
+
       <Paper variant="outlined" sx={{ mb: 2 }}>
         <Tabs
           value={query.tab}
           onChange={(_, tab: ReviewTab) => {
             // Decided cards stay where they were decided only until the list changes.
-            setSelected(new Set());
             setSticky({});
             setResults({});
+            setEditingId(null);
             setQuery({ tab, decided: tab === 'decided' ? query.decided : '' });
           }}
           variant="scrollable"
@@ -904,7 +1147,7 @@ const ReviewQueue: React.FC = () => {
             p: 1.5,
             display: 'grid',
             gap: 1.5,
-            gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(5, minmax(0, 1fr))' },
+            gridTemplateColumns: { xs: '1fr 1fr', md: 'repeat(6, minmax(0, 1fr))' },
           }}
         >
           <FilterSelect
@@ -921,8 +1164,11 @@ const ReviewQueue: React.FC = () => {
           />
           <FilterSelect
             label="Suggested by"
-            value={query.proposer}
-            onChange={(proposer) => setQuery({ proposer })}
+            value={proposer}
+            onChange={(value) => {
+              resetView();
+              setProposer(value);
+            }}
             options={proposerOptions.map((p) => [p, p])}
           />
           <FilterSelect
@@ -939,21 +1185,28 @@ const ReviewQueue: React.FC = () => {
               options={DECIDED_STATUSES.map((s) => [s, STATUS_LABEL[s]])}
             />
           ) : (
-            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-              {filtersActive && (
-                <Button
-                  size="small"
-                  onClick={() => setQuery({ company: '', kind: '', proposer: '', evidence: '', decided: '' })}
-                >
-                  Clear filters
-                </Button>
-              )}
-            </Box>
+            <FilterSelect
+              label="Order"
+              value={query.sort}
+              allowEmpty={false}
+              onChange={(value) => setQuery({ sort: value === 'expiring' ? 'expiring' : 'newest' })}
+              options={[
+                ['newest', 'Newest evidence first'],
+                ['expiring', 'Expiring soonest first'],
+              ]}
+            />
           )}
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            {filtersActive && (
+              <Button size="small" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            )}
+          </Box>
         </Box>
       </Paper>
 
-      {query.tab !== 'decided' && selectable.length > 0 && (
+      {query.tab !== 'decided' && bulkRows.length > 0 && (
         <Paper
           variant="outlined"
           sx={{
@@ -971,34 +1224,32 @@ const ReviewQueue: React.FC = () => {
           data-testid="bulk-bar"
         >
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            {selectable.length} selected
+            {bulkRows.length} selected
           </Typography>
           <Button
             color="error"
             variant="contained"
-            onClick={() => setDialog({ type: 'bulk' })}
-            disabled={busy.size > 0}
+            onClick={() => setDialog({ type: 'bulk', rows: bulkRows })}
+            disabled={busy.size > 0 || tooMany}
           >
             Reject selected…
           </Button>
           <Button onClick={() => setSelected(new Set())}>Clear selection</Button>
-          <Typography variant="caption" color="text.secondary">
-            Accepting is always one card at a time.
+          <Typography variant="caption" color={tooMany ? 'error' : 'text.secondary'} data-testid="bulk-note">
+            {tooMany
+              ? `At most ${BULK_REJECT_MAX} can be rejected at once; the server refuses more. Clear some first.`
+              : 'Accepting is always one card at a time.'}
           </Typography>
         </Paper>
-      )}
-
-      {truncated && query.tab !== 'decided' && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          Showing the first 1,000 open suggestions. Decide on some, then refresh to see the rest.
-        </Alert>
       )}
 
       {listLoad === 'error' && (
         <Alert
           severity="error"
           sx={{ mb: 2 }}
-          action={<Button onClick={() => (query.tab === 'decided' ? loadDecided(1) : loadOpen())}>Try again</Button>}
+          action={
+            <Button onClick={() => (query.tab === 'decided' ? loadDecided(1) : loadOpen(query.sort))}>Try again</Button>
+          }
         >
           The suggestions could not be loaded. Check your connection and try again.
         </Alert>
@@ -1037,7 +1288,7 @@ const ReviewQueue: React.FC = () => {
             </Box>
             <Box sx={{ display: 'grid', gap: 1.5 }}>
               {group.batches.map((batch) => {
-                const batchDecidable = batch.proposals.filter(decidable);
+                const batchDecidable = batch.proposals.filter((p) => actionsFor(p).select.ok);
                 const allSelected = batchDecidable.length > 0 && batchDecidable.every((p) => selected.has(p.id));
                 if (!batch.batchKey || batch.proposals.length === 1) {
                   return <React.Fragment key={batch.key}>{batch.proposals.map(renderCard)}</React.Fragment>;
@@ -1084,13 +1335,42 @@ const ReviewQueue: React.FC = () => {
           </Box>
         ))}
 
-      {query.tab === 'decided' && shown.length > 0 && (
+      {groups && order.length > windowed.length && (
+        <Box sx={{ textAlign: 'center', mb: 2 }}>
+          <Button
+            variant="outlined"
+            onClick={() => setRenderLimit((n) => n + RENDER_STEP)}
+            data-testid="show-more-cards"
+          >
+            Show {Math.min(RENDER_STEP, order.length - windowed.length)} more of {order.length.toLocaleString('en-US')}{' '}
+            here
+          </Button>
+        </Box>
+      )}
+
+      {query.tab === 'decided' && (shown.length > 0 || decided.rows.length > 0) && (
         <Box sx={{ display: 'grid', gap: 1.5 }}>
-          {shown.map(renderCard)}
-          {decided.rows.length < decided.count && (
+          {query.evidence && (
+            <Typography variant="body2" color="text.secondary" data-testid="decided-count">
+              {shown.length} of the {decided.rows.length} loaded match the evidence filter (
+              {decided.count.toLocaleString('en-US')} decided in all; the evidence filter applies to loaded rows only).
+            </Typography>
+          )}
+          {windowed.map(renderCard)}
+          {(decided.rows.length < decided.count || order.length > windowed.length) && (
             <Box sx={{ textAlign: 'center', mt: 1 }}>
-              <Button onClick={() => loadDecided(decided.page + 1)} disabled={decided.load === 'loading'}>
-                {decided.load === 'loading' ? 'Loading…' : `Show more (${decided.count - decided.rows.length} left)`}
+              <Button
+                onClick={() => {
+                  if (order.length > windowed.length) setRenderLimit((n) => n + RENDER_STEP);
+                  else loadDecided(decided.page + 1);
+                }}
+                disabled={decided.load === 'loading'}
+              >
+                {decided.load === 'loading'
+                  ? 'Loading…'
+                  : order.length > windowed.length
+                    ? `Show ${Math.min(RENDER_STEP, order.length - windowed.length)} more`
+                    : `Load ${Math.min(DECIDED_PAGE, decided.count - decided.rows.length)} more (${(decided.count - decided.rows.length).toLocaleString('en-US')} not loaded)`}
               </Button>
             </Box>
           )}
@@ -1104,7 +1384,7 @@ const ReviewQueue: React.FC = () => {
           dialog?.type === 'reject' ? (
             <>
               Nothing changes in the CRM. An agent will not raise the same change again. (
-              {KIND_LABEL[dialog.proposal.kind]}, <PlainText value={dialog.proposal.company_name} />)
+              <PlainText value={summary(dialog.proposal)} />)
             </>
           ) : undefined
         }
@@ -1119,15 +1399,31 @@ const ReviewQueue: React.FC = () => {
       />
       <ReasonDialog
         open={dialog?.type === 'bulk'}
-        title={`Reject ${selectable.length} suggestions`}
-        intro="All of them get the same reason. Any that changed since you loaded them are left open and marked."
+        title={`Reject ${dialog?.type === 'bulk' ? dialog.rows.length : 0} suggestions`}
+        intro={
+          dialog?.type === 'bulk' ? (
+            <Box data-testid="bulk-list">
+              These get the same reason. Any that changed since you loaded them are left open and marked.
+              <Box component="ul" sx={{ m: 0, mt: 1, pl: 2.5 }}>
+                {dialog.rows.slice(0, BULK_LIST_MAX).map((r) => (
+                  <li key={r.id}>
+                    <PlainText value={summary(r)} />
+                  </li>
+                ))}
+              </Box>
+              {dialog.rows.length > BULK_LIST_MAX && (
+                <Box sx={{ mt: 0.5 }}>and {dialog.rows.length - BULK_LIST_MAX} more</Box>
+              )}
+            </Box>
+          ) : undefined
+        }
         label="Reason"
-        confirmLabel={`Reject ${selectable.length}`}
+        confirmLabel={`Reject ${dialog?.type === 'bulk' ? dialog.rows.length : 0}`}
         confirmColor="error"
         quickPicks={REJECT_REASONS}
         busy={dialogBusy}
         onClose={() => setDialog(null)}
-        onConfirm={bulkReject}
+        onConfirm={(reason) => dialog?.type === 'bulk' && bulkReject(dialog.rows, reason)}
       />
       <ReasonDialog
         open={dialog?.type === 'reopen'}
@@ -1140,13 +1436,6 @@ const ReviewQueue: React.FC = () => {
         onConfirm={(note) => dialog?.type === 'reopen' && reopen(dialog.proposal, note)}
       />
       <Snackbar open={Boolean(snack)} autoHideDuration={5000} onClose={() => setSnack(null)} message={snack || ''} />
-      <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 3 }}>
-        Press ? for keys. See also{' '}
-        <Link component={RouterLink} to="/today">
-          Today
-        </Link>
-        .
-      </Typography>
     </Box>
   );
 };
@@ -1170,12 +1459,15 @@ const FilterSelect: React.FC<{
   label: string;
   value: string;
   options: [string, string][] | string[][];
+  allowEmpty?: boolean;
   onChange: (value: string) => void;
-}> = ({ label, value, options, onChange }) => (
+}> = ({ label, value, options, allowEmpty = true, onChange }) => (
   <TextField select size="small" label={label} value={value} onChange={(e) => onChange(e.target.value)} fullWidth>
-    <MenuItem value="">
-      <em>All</em>
-    </MenuItem>
+    {allowEmpty && (
+      <MenuItem value="">
+        <em>All</em>
+      </MenuItem>
+    )}
     {options.map(([v, text]) => (
       <MenuItem key={v} value={v}>
         {text}

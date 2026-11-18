@@ -9,7 +9,6 @@ import {
   FormControlLabel,
   Link,
   Paper,
-  Tooltip,
   Typography,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
@@ -24,7 +23,7 @@ import {
   ReplayOutlined,
 } from '@mui/icons-material';
 import type { ChangeProposal, PatchValue, ProposalConflict, ReviewSettings } from '../../services/reviewApi';
-import ChangePreview from './ChangePreview';
+import ChangePreview, { Empty, TextChecks } from './ChangePreview';
 import EditForm from './EditForm';
 import EvidenceBlock from './EvidenceBlock';
 import PlainText from './PlainText';
@@ -32,11 +31,13 @@ import {
   PROPOSER_KIND_LABEL,
   STATUS_LABEL,
   STATUS_TONE,
+  cardActions,
   displayValue,
   editableFields,
   fieldLabel,
   formatDateTime,
   kindLabel,
+  needsSourceCheck,
 } from './reviewModel';
 import { formatDate } from '../../theme';
 
@@ -61,37 +62,45 @@ export interface DecisionResult {
 
 export type ConflictChoice = 'this' | 'other';
 
+/** One stable object of callbacks for every card, so a memoised card re-renders only when its own data changes. */
+export interface CardHandlers {
+  onSelect: (id: string, checked: boolean) => void;
+  onFocusCard: (id: string) => void;
+  onArm: (id: string, armed: boolean) => void;
+  onEdit: (id: string, editing: boolean) => void;
+  onAccept: (p: ChangeProposal) => void;
+  onAcceptEdits: (p: ChangeProposal, edits: Record<string, PatchValue>, drop: string[]) => void;
+  onRequestReject: (p: ChangeProposal) => void;
+  onRequestReopen: (p: ChangeProposal) => void;
+  onPickOther: (p: ChangeProposal, other: ProposalConflict) => void;
+  onChoose: (p: ChangeProposal, choice: ConflictChoice | null) => void;
+  onAcknowledge: (p: ChangeProposal, value: boolean) => void;
+  onSourceCheck: (p: ChangeProposal, value: boolean) => void;
+}
+
 interface ProposalCardProps {
   proposal: ChangeProposal;
   settings: ReviewSettings | null;
-  now: number;
+  /** The backend re-reads current values whenever the record changes (PR 67). */
+  valuesFollowTarget: boolean;
   busy: boolean;
   notice?: CardNotice;
   result?: DecisionResult;
   readOnly: string | null;
   contact?: ContactInfo;
-  contactNames: Record<string, string>;
+  relatedName?: string;
+  /** The conflicting suggestions, once their full rows are loaded. */
+  partners?: ChangeProposal[];
   selected: boolean;
   focused: boolean;
+  /** Changes when the page asks this card to take focus (after a decision or a refresh). */
+  focusNonce: number;
   editing: boolean;
   serverErrors?: Record<string, string>;
-  onSelect: (id: string, checked: boolean) => void;
-  onFocusCard: (id: string) => void;
-  onArm: (id: string, armed: boolean) => void;
-  onEdit: (id: string, editing: boolean) => void;
-  onAccept: (p: ChangeProposal, conflictChoice?: ConflictChoice) => void;
-  onAcceptEdits: (
-    p: ChangeProposal,
-    edits: Record<string, PatchValue>,
-    drop: string[],
-    conflictChoice?: ConflictChoice,
-  ) => void;
-  onRequestReject: (p: ChangeProposal) => void;
-  onRequestReopen: (p: ChangeProposal) => void;
-  onPickOther: (p: ChangeProposal, other: ProposalConflict) => void;
-  /** Look again acknowledged for a changed record; the page keeps it per seen_version. */
   acknowledged: boolean;
-  onAcknowledge: (p: ChangeProposal, value: boolean) => void;
+  conflictChoice: ConflictChoice | null;
+  sourceChecked: boolean;
+  handlers: CardHandlers;
 }
 
 /** Time a card must stay focused and on screen before the "a" key accepts it. */
@@ -142,60 +151,77 @@ const targetLabel = (p: ChangeProposal, contact?: ContactInfo): React.ReactNode 
   return <PlainText value={p.company_name} />;
 };
 
+const useExpired = (expiresAt: string, open: boolean): boolean => {
+  const at = Date.parse(expiresAt);
+  const [expired, setExpired] = useState(() => open && at <= Date.now());
+  useEffect(() => {
+    if (!open) return;
+    const ms = at - Date.now();
+    if (ms <= 0) {
+      setExpired(true);
+      return;
+    }
+    if (ms > 2_147_000_000) return; // further away than a timer can wait; a reload sees it
+    const timer = setTimeout(() => setExpired(true), ms);
+    return () => clearTimeout(timer);
+  }, [at, open]);
+  return expired;
+};
+
 const ProposalCard: React.FC<ProposalCardProps> = (props) => {
   const {
     proposal: p,
     settings,
-    now,
+    valuesFollowTarget,
     busy,
     notice,
     result,
     readOnly,
     contact,
-    contactNames,
+    relatedName,
+    partners,
     selected,
     focused,
+    focusNonce,
     editing,
     serverErrors,
-    onSelect,
-    onFocusCard,
-    onArm,
-    onEdit,
-    onAccept,
-    onAcceptEdits,
-    onRequestReject,
-    onRequestReopen,
-    onPickOther,
     acknowledged,
-    onAcknowledge,
+    conflictChoice,
+    sourceChecked,
+    handlers,
   } = props;
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(true);
   const [focusedHere, setFocusedHere] = useState(false);
-  const [conflictChoice, setConflictChoice] = useState<ConflictChoice | null>(null);
   const [showDetails, setShowDetails] = useState(false);
 
   const open = p.status === 'proposed';
-  const expiredOnScreen = open && new Date(p.expires_at).getTime() <= now;
+  const expired = useExpired(p.expires_at, open);
   const conflicts = open ? p.conflicts_with || [] : [];
-  const canDecide = open && !readOnly && !expiredOnScreen;
-  const needsAck = open && Boolean(p.target_changed_at) && !acknowledged;
-  const needsChoice = conflicts.length > 0 && conflictChoice !== 'this';
-  const acceptBlocked = !canDecide || busy || needsAck || needsChoice;
+  const partnerFor = (id: string) => (partners || []).find((r) => r.id === id);
+  const partnersShown = conflicts.every((c) => Boolean(partnerFor(c.id)));
+  const actions = cardActions(p, {
+    readOnly,
+    expired,
+    busy,
+    decided: Boolean(result),
+    editing,
+    acknowledged,
+    conflictChoice,
+    partnersShown,
+    sourceChecked,
+  });
+  const canTouch = open && !readOnly && !expired && !result;
   const editable = editableFields(settings, p.kind, p.target_collection);
   const outsideAllowlist = editable ? Object.keys(p.patch || {}).filter((k) => !editable.includes(k)) : [];
   const link = recordLink(p);
   const changesEmail = Object.prototype.hasOwnProperty.call(p.patch || {}, 'email');
   const roleContact =
     p.target_collection === 'contact' && contact && (contact.is_primary || contact.contact_type === 'Billing');
-  // The server refuses an email change on a contact that gets invoices or payment emails.
   const billingRecipient =
     p.target_collection === 'contact' &&
     contact &&
     (contact.receives_invoice_emails || contact.receives_payment_emails);
-
-  // Reset the conflict choice whenever what is shown changes.
-  useEffect(() => setConflictChoice(null), [p.seen_version]);
 
   // The "a" key works only after the card has been focused, and on screen, for a moment.
   useEffect(() => {
@@ -206,10 +232,12 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [result, showDetails]);
 
+  const armable = focusedHere && visible && actions.accept.ok;
+  const { onArm } = handlers;
   useEffect(() => {
-    if (!focusedHere || !visible || !canDecide) {
+    if (!armable) {
       onArm(p.id, false);
       return;
     }
@@ -218,19 +246,16 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
       clearTimeout(timer);
       onArm(p.id, false);
     };
-  }, [focusedHere, visible, canDecide, p.id, p.seen_version, onArm]);
+  }, [armable, p.id, p.seen_version, onArm]);
 
   useEffect(() => {
-    if (
-      focused &&
-      ref.current &&
-      document.activeElement !== ref.current &&
-      !ref.current.contains(document.activeElement)
-    ) {
-      ref.current.focus({ preventScroll: false });
-      if (typeof ref.current.scrollIntoView === 'function') ref.current.scrollIntoView({ block: 'nearest' });
+    const el = ref.current;
+    if (!el || !focused) return;
+    if (document.activeElement !== el && !el.contains(document.activeElement)) {
+      el.focus({ preventScroll: false });
+      if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest' });
     }
-  }, [focused]);
+  }, [focused, focusNonce]);
 
   const decidedLine = () => {
     const last = [...(p.history || [])].reverse().find((h) => h.action !== 'reopened');
@@ -248,10 +273,12 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
       <Paper
         ref={ref}
         tabIndex={-1}
+        role="article"
+        aria-label="Decision result"
         data-proposal-id={p.id}
         data-testid="proposal-result"
         variant="outlined"
-        sx={{ px: 2, py: 1.25, display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}
+        sx={{ px: 2, py: 1.25, display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', outline: 'none' }}
       >
         {result.tone === 'success' ? (
           <CheckCircleOutline color="success" fontSize="small" />
@@ -271,16 +298,19 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
     );
   }
 
+  const disabledReason = open && !readOnly && !editing && !actions.accept.ok ? actions.accept.reason : undefined;
+
   return (
     <Paper
       ref={ref}
       tabIndex={0}
+      role="article"
       data-proposal-id={p.id}
       data-testid="proposal-card"
       aria-label={`${kindLabel(p.kind)} suggestion for ${p.company_name}`}
       onFocus={() => {
         setFocusedHere(true);
-        onFocusCard(p.id);
+        handlers.onFocusCard(p.id);
       }}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node)) setFocusedHere(false);
@@ -292,16 +322,16 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
         borderColor: focused ? 'primary.main' : selected ? alpha(theme.palette.error.main, 0.6) : 'divider',
         boxShadow: focused ? `0 0 0 2px ${alpha(theme.palette.primary.main, 0.35)}` : 'none',
         transition: 'box-shadow 120ms, border-color 120ms',
-        opacity: open || showDetails ? 1 : 0.92,
       })}
     >
       {/* Header: what and where */}
       <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, flexWrap: 'wrap' }}>
-        {open && canDecide && (
+        {canTouch && (
           <Checkbox
             size="small"
             checked={selected}
-            onChange={(e) => onSelect(p.id, e.target.checked)}
+            disabled={!actions.select.ok}
+            onChange={(e) => handlers.onSelect(p.id, e.target.checked)}
             inputProps={{ 'aria-label': 'Select for rejecting together' }}
             sx={{ p: 0.5, mt: -0.25 }}
           />
@@ -313,10 +343,11 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
               {targetLabel(p, contact)}
             </Typography>
             <NewTabLink href={link.href}>{link.label}</NewTabLink>
+            <TextChecks value={p.company_name} only={['lookalike', 'invisible']} />
           </Box>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Suggested by <PlainText value={p.proposer_username || 'unknown'} /> (
-            {PROPOSER_KIND_LABEL[p.proposer_kind] || p.proposer_kind})
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }} component="div">
+            Suggested by <PlainText value={p.proposer_username || 'unknown'} />{' '}
+            <span data-testid="proposer-kind">({PROPOSER_KIND_LABEL[p.proposer_kind] || p.proposer_kind})</span>
             {p.model ? (
               <>
                 {' '}
@@ -326,16 +357,15 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
             {typeof p.confidence === 'number' ? ` · confidence ${Math.round(p.confidence * 100)}%` : ''}
             {` · ${formatDateTime(p.created_at)}`}
             {open ? ` · expires ${formatDate(p.expires_at)}` : ''}
+            <TextChecks value={p.proposer_username || ''} only={['lookalike', 'invisible']} />
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          {!open && <Chip size="small" color={STATUS_TONE[p.status]} label={STATUS_LABEL[p.status] || p.status} />}
-        </Box>
+        {!open && <Chip size="small" color={STATUS_TONE[p.status]} label={STATUS_LABEL[p.status] || p.status} />}
       </Box>
 
       {/* Warnings that must be seen before deciding */}
       <Box sx={{ display: 'grid', gap: 1, mt: 1.5 }}>
-        {expiredOnScreen && (
+        {open && expired && (
           <Alert severity="warning" data-testid="expired-on-screen">
             This suggestion expired while it was on screen. Nothing can be applied; it will show as expired.
           </Alert>
@@ -351,8 +381,8 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
                   <Checkbox
                     size="small"
                     checked={acknowledged}
-                    disabled={!canDecide}
-                    onChange={(e) => onAcknowledge(p, e.target.checked)}
+                    disabled={!canTouch || busy}
+                    onChange={(e) => handlers.onAcknowledge(p, e.target.checked)}
                   />
                 }
                 label={<Typography variant="body2">I have compared the current values</Typography>}
@@ -364,9 +394,9 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
           <Alert severity="warning" icon={false} data-testid="conflict">
             <AlertTitle>Another open suggestion changes the same field</AlertTitle>
             <Typography variant="body2" sx={{ mb: 1 }}>
-              Pick one. Accepting this one rejects the other; nothing is left open by accident.
+              Pick one. Keeping this one rejects the other when you accept; nothing is left open by accident.
             </Typography>
-            <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
+            <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' } }}>
               <ConflictOption
                 title="This suggestion"
                 by={p.proposer_username}
@@ -374,24 +404,37 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
                 patch={Object.fromEntries(
                   Object.keys(conflicts[0].patch || {}).map((k) => [k, (p.patch || {})[k] ?? null]),
                 )}
+                evidence={<EvidenceBlock proposal={p} compact />}
                 chosen={conflictChoice === 'this'}
-                disabled={!canDecide || busy}
+                disabled={!canTouch || busy || editing}
                 actionLabel="Keep this one"
-                onChoose={() => setConflictChoice('this')}
+                onChoose={() => handlers.onChoose(p, conflictChoice === 'this' ? null : 'this')}
               />
-              {conflicts.map((c) => (
-                <ConflictOption
-                  key={c.id}
-                  title="The other suggestion"
-                  by={c.proposer_username}
-                  when={c.evidence_occurred_at || c.created_at}
-                  patch={c.patch}
-                  chosen={false}
-                  disabled={!canDecide || busy}
-                  actionLabel="Keep the other one"
-                  onChoose={() => onPickOther(p, c)}
-                />
-              ))}
+              {conflicts.map((c) => {
+                const row = partnerFor(c.id);
+                return (
+                  <ConflictOption
+                    key={c.id}
+                    title="The other suggestion"
+                    by={c.proposer_username}
+                    when={c.evidence_occurred_at || c.created_at}
+                    patch={c.patch}
+                    evidence={
+                      row ? (
+                        <EvidenceBlock proposal={row} compact />
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">
+                          Loading its evidence…
+                        </Typography>
+                      )
+                    }
+                    chosen={false}
+                    disabled={!canTouch || busy || editing || !row}
+                    actionLabel="Keep the other one"
+                    onChoose={() => handlers.onPickOther(p, c)}
+                  />
+                );
+              })}
             </Box>
           </Alert>
         )}
@@ -422,7 +465,27 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
             to change it on the contact.
           </Alert>
         )}
-        {open && changesEmail && (
+        {open && needsSourceCheck(p) && (
+          <Alert severity="info" variant="outlined" data-testid="source-check">
+            This changes an email address or phone number, and its evidence is not from captured mail. An address or
+            number taken from a message can be forged: confirm it with the customer (for example by phone) before
+            accepting.
+            <Box>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={sourceChecked}
+                    disabled={!canTouch || busy}
+                    onChange={(e) => handlers.onSourceCheck(p, e.target.checked)}
+                  />
+                }
+                label={<Typography variant="body2">I checked this against the source myself</Typography>}
+              />
+            </Box>
+          </Alert>
+        )}
+        {open && changesEmail && !needsSourceCheck(p) && (
           <Alert severity="info" variant="outlined" data-testid="email-caution">
             An email address taken from a message can be forged. If it is new to you, confirm it with the customer by
             phone before accepting.
@@ -445,19 +508,21 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
         }}
       >
         <Box sx={{ minWidth: 0 }}>
-          {editing && canDecide ? (
+          {editing && canTouch ? (
             <EditForm
               proposal={p}
               editable={editable}
               busy={busy}
+              blockedReason={actions.acceptEdits.ok ? null : actions.acceptEdits.reason}
               serverErrors={serverErrors}
-              onCancel={() => onEdit(p.id, false)}
-              onSubmit={(edits, drop) => onAcceptEdits(p, edits, drop, conflictChoice || undefined)}
+              onCancel={() => handlers.onEdit(p.id, false)}
+              onSubmit={(edits, drop) => handlers.onAcceptEdits(p, edits, drop)}
             />
           ) : (
             <ChangePreview
               proposal={p.status === 'edited' && p.applied_patch ? { ...p, patch: p.applied_patch } : p}
-              contactNames={contactNames}
+              relatedName={relatedName}
+              valuesFollowTarget={valuesFollowTarget}
             />
           )}
         </Box>
@@ -469,7 +534,7 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
                 Why the {PROPOSER_KIND_LABEL[p.proposer_kind]?.toLowerCase() || 'proposer'} suggests it
               </Typography>
               <Typography variant="body2" component="div">
-                <PlainText value={p.rationale} multiline clampAt={400} />
+                <PlainText value={p.rationale} clampAt={400} />
               </Typography>
             </Box>
           )}
@@ -485,7 +550,7 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
           {p.decision_note && (
             <Typography variant="body2" color="text.secondary" component="div">
               {p.status === 'rejected' ? 'Reason: ' : 'Note: '}
-              <PlainText value={p.decision_note} multiline />
+              <PlainText value={p.decision_note} />
             </Typography>
           )}
           {p.status === 'edited' && p.applied_patch && (
@@ -494,7 +559,8 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
               {Object.entries(p.patch || {}).map(([k, v], i) => (
                 <React.Fragment key={k}>
                   {i > 0 && '; '}
-                  {fieldLabel(k)} = <PlainText value={displayValue(v) || 'empty'} clampAt={120} />
+                  {fieldLabel(k)} ={' '}
+                  {displayValue(v) ? <PlainText value={displayValue(v)} clampAt={120} edges /> : <Empty />}
                 </React.Fragment>
               ))}
             </Typography>
@@ -546,50 +612,45 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
       )}
 
       {/* Decisions */}
-      {open && canDecide && !editing && (
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 2, alignItems: 'center' }}>
-          <Tooltip
-            title={
-              needsAck
-                ? 'Tick “I have compared the current values” first.'
-                : needsChoice
-                  ? 'Pick which of the two suggestions to keep first.'
-                  : 'Accept (key A once the card has been in focus for a moment)'
-            }
-          >
-            <span>
-              <Button
-                variant="contained"
-                startIcon={<CheckCircleOutline />}
-                disabled={acceptBlocked}
-                onClick={() => onAccept(p, conflictChoice || undefined)}
-              >
-                {busy ? 'Saving…' : conflicts.length ? 'Accept and reject the other' : 'Accept'}
-              </Button>
-            </span>
-          </Tooltip>
-          <Button
-            variant="outlined"
-            startIcon={<EditOutlined />}
-            disabled={busy || needsAck || needsChoice}
-            onClick={() => onEdit(p.id, true)}
-          >
-            Edit
-          </Button>
-          <Button
-            variant="outlined"
-            color="error"
-            startIcon={<CancelOutlined />}
-            disabled={busy}
-            onClick={() => onRequestReject(p)}
-          >
-            Reject
-          </Button>
-        </Box>
+      {canTouch && !editing && (
+        <>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 2, alignItems: 'center' }}>
+            <Button
+              variant="contained"
+              startIcon={<CheckCircleOutline />}
+              disabled={!actions.accept.ok}
+              onClick={() => handlers.onAccept(p)}
+            >
+              {busy ? 'Saving…' : conflicts.length ? 'Accept and reject the other' : 'Accept'}
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<EditOutlined />}
+              disabled={!actions.edit.ok}
+              onClick={() => handlers.onEdit(p.id, true)}
+            >
+              Edit
+            </Button>
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<CancelOutlined />}
+              disabled={!actions.reject.ok}
+              onClick={() => handlers.onRequestReject(p)}
+            >
+              Reject
+            </Button>
+          </Box>
+          {disabledReason && !busy && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }} data-testid="accept-blocked-reason">
+              {disabledReason}
+            </Typography>
+          )}
+        </>
       )}
-      {p.status === 'rejected' && !readOnly && !result && (
+      {p.status === 'rejected' && actions.reopen.ok && (
         <Box sx={{ mt: 1.5 }}>
-          <Button size="small" startIcon={<ReplayOutlined />} disabled={busy} onClick={() => onRequestReopen(p)}>
+          <Button size="small" startIcon={<ReplayOutlined />} onClick={() => handlers.onRequestReopen(p)}>
             Reopen
           </Button>
         </Box>
@@ -610,11 +671,12 @@ const ConflictOption: React.FC<{
   by: string;
   when: string;
   patch: Record<string, PatchValue>;
+  evidence: React.ReactNode;
   chosen: boolean;
   disabled: boolean;
   actionLabel: string;
   onChoose: () => void;
-}> = ({ title, by, when, patch, chosen, disabled, actionLabel, onChoose }) => (
+}> = ({ title, by, when, patch, evidence, chosen, disabled, actionLabel, onChoose }) => (
   <Box
     sx={(theme) => ({
       p: 1.25,
@@ -623,6 +685,7 @@ const ConflictOption: React.FC<{
       borderColor: chosen ? 'success.main' : 'divider',
       bgcolor: chosen ? alpha(theme.palette.success.main, 0.08) : 'background.paper',
       minWidth: 0,
+      color: 'text.primary',
     })}
   >
     <Typography variant="caption" color="text.secondary" component="div">
@@ -630,12 +693,10 @@ const ConflictOption: React.FC<{
     </Typography>
     {Object.entries(patch || {}).map(([k, v]) => (
       <Typography variant="body2" key={k} component="div" sx={{ mt: 0.25 }}>
-        {fieldLabel(k)}:{' '}
-        <strong>
-          <PlainText value={displayValue(v) || 'empty'} />
-        </strong>
+        {fieldLabel(k)}: <strong>{displayValue(v) ? <PlainText value={displayValue(v)} edges /> : <Empty />}</strong>
       </Typography>
     ))}
+    <Box sx={{ mt: 1 }}>{evidence}</Box>
     <Button
       size="small"
       sx={{ mt: 0.75 }}
@@ -649,4 +710,4 @@ const ConflictOption: React.FC<{
   </Box>
 );
 
-export default ProposalCard;
+export default React.memo(ProposalCard);

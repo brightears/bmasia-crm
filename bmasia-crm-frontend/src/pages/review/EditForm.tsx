@@ -9,6 +9,8 @@ interface EditFormProps {
   /** Fields the allowlist lets this kind change; null when unknown (then every proposed field). */
   editable: string[] | null;
   busy: boolean;
+  /** Why accepting is not possible right now (the same rule as the Accept button), or null. */
+  blockedReason?: string | null;
   /** Server-side errors from the last attempt, by field. */
   serverErrors?: Record<string, string>;
   onSubmit: (edits: Record<string, PatchValue>, dropFields: string[]) => void;
@@ -19,7 +21,15 @@ interface EditFormProps {
  * Edit then accept: change or drop the proposed values. Only fields in the proposal can be edited
  * (the API refuses anything else), and only those the allowlist still permits.
  */
-const EditForm: React.FC<EditFormProps> = ({ proposal: p, editable, busy, serverErrors = {}, onSubmit, onCancel }) => {
+const EditForm: React.FC<EditFormProps> = ({
+  proposal: p,
+  editable,
+  busy,
+  blockedReason = null,
+  serverErrors = {},
+  onSubmit,
+  onCancel,
+}) => {
   const keys = Object.keys(p.patch || {});
   const original = useMemo(
     () => Object.fromEntries(keys.map((k) => [k, displayValue(p.patch[k])])) as Record<string, string>,
@@ -51,7 +61,7 @@ const EditForm: React.FC<EditFormProps> = ({ proposal: p, editable, busy, server
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     setSubmitted(true);
-    if (blocked || busy) return;
+    if (blocked || busy || blockedReason) return;
     onSubmit(edits, dropped);
   };
 
@@ -148,8 +158,13 @@ const EditForm: React.FC<EditFormProps> = ({ proposal: p, editable, busy, server
           Every field is left out, so nothing would be applied. Reject the suggestion instead.
         </Alert>
       )}
+      {blockedReason && (
+        <Typography variant="body2" color="text.secondary" data-testid="edit-blocked-reason">
+          {blockedReason}
+        </Typography>
+      )}
       <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-        <Button type="submit" variant="contained" disabled={busy}>
+        <Button type="submit" variant="contained" disabled={busy || Boolean(blockedReason)}>
           {busy ? 'Saving…' : 'Accept with edits'}
         </Button>
         <Button onClick={onCancel} disabled={busy}>

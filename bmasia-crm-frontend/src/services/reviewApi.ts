@@ -194,9 +194,8 @@ const params = (filters: ProposalFilters) => {
   return search;
 };
 
+/** Open proposals are read 200 at a time; the reviewer loads more when more exist. */
 export const OPEN_PAGE_SIZE = 200;
-/** Upper bound on how many open proposals one load reads (5 pages). */
-export const OPEN_LOAD_LIMIT = 1000;
 
 const reviewApi = {
   getSettings: (): Promise<ReviewSettings> => call(() => authApi.get<ReviewSettings>(`${BASE}allowlist/`)),
@@ -204,22 +203,14 @@ const reviewApi = {
   list: (filters: ProposalFilters): Promise<Page<ChangeProposal>> =>
     call(() => authApi.get<Page<ChangeProposal>>(BASE, { params: params(filters) })),
 
-  /** Every open proposal matching the filters, up to OPEN_LOAD_LIMIT. `truncated` says when more exist. */
-  async listAllOpen(
-    filters: Omit<ProposalFilters, 'status' | 'page' | 'page_size'>,
-  ): Promise<{ rows: ChangeProposal[]; count: number; truncated: boolean }> {
-    const rows: ChangeProposal[] = [];
-    let page = 1;
-    let count = 0;
-    for (;;) {
-      const data = await reviewApi.list({ ...filters, status: ['proposed'], page, page_size: OPEN_PAGE_SIZE });
-      count = data.count;
-      rows.push(...data.results);
-      if (!data.next || rows.length >= OPEN_LOAD_LIMIT) break;
-      page += 1;
-    }
-    return { rows, count, truncated: rows.length < count };
-  },
+  /** One page of open proposals: newest first, or soonest to expire first. */
+  listOpen: (page: number, sort: 'newest' | 'expiring' = 'newest'): Promise<Page<ChangeProposal>> =>
+    reviewApi.list({
+      status: ['proposed'],
+      page,
+      page_size: OPEN_PAGE_SIZE,
+      ordering: sort === 'expiring' ? 'expires_at' : '-created_at',
+    }),
 
   openCount: async (company?: string): Promise<number> =>
     (await reviewApi.list({ status: ['proposed'], company, page_size: 1 })).count,
@@ -257,7 +248,8 @@ const reviewApi = {
     call(() => authApi.post<BulkRejectResult>(`${BASE}bulk-reject/`, { items, reason })),
 
   /** Name and role flags of a contact a proposal targets (for the record label and warnings). */
-  getContact: (id: string): Promise<Record<string, any>> => call(() => authApi.get(`/contacts/${id}/`)),
+  getContact: (id: string): Promise<Record<string, any>> =>
+    call(() => authApi.get(`/contacts/${encodeURIComponent(id)}/`)),
 };
 
 export default reviewApi;

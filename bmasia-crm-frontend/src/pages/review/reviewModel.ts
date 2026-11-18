@@ -3,6 +3,7 @@
  * grouping and URL state. No React here, so all of it is unit-tested directly.
  */
 import { formatDate } from '../../theme';
+import { hasInvisible, hasUnusualSpaces, lookalikeScripts, mixesDirections, safeHttpUrl } from './textSafety';
 import type { ChangeProposal, EvidenceState, ProposalStatus, ReviewSettings } from '../../services/reviewApi';
 
 // ------------------------------------------------------------------ labels
@@ -201,64 +202,16 @@ export const editableFields = (
 
 // ------------------------------------------------------------------ text safety
 
-/** Characters that change how text displays without showing themselves (bidi controls, zero-width, BOM, soft hyphen). */
-const INVISIBLE_CHARS =
-  '\\u00AD\\u061C\\u115F\\u1160\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2064\\u2066-\\u206F\\u3164\\uFEFF\\uFFA0';
-const CONTROL_CHARS = '\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F\\u2028\\u2029';
-const INVISIBLE = new RegExp(`[${INVISIBLE_CHARS}]`);
-const CONTROL = new RegExp(`[${CONTROL_CHARS}]`);
-const CONTROL_OR_INVISIBLE_GLOBAL = new RegExp(`[${CONTROL_CHARS}${INVISIBLE_CHARS}]`, 'g');
-
-export const hasInvisible = (text: string): boolean => INVISIBLE.test(text) || CONTROL.test(text);
-
-export interface TextSegment {
-  text: string;
-  /** The code point, for characters shown as a visible marker instead of themselves. */
-  hidden?: string;
-}
-
-/** Splits text so invisible and control characters can be shown as visible markers ("U+202E"). */
-export const segmentText = (text: string): TextSegment[] => {
-  const out: TextSegment[] = [];
-  let last = 0;
-  CONTROL_OR_INVISIBLE_GLOBAL.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = CONTROL_OR_INVISIBLE_GLOBAL.exec(text)) !== null) {
-    if (match.index > last) out.push({ text: text.slice(last, match.index) });
-    const code = match[0].charCodeAt(0).toString(16).toUpperCase().padStart(4, '0');
-    out.push({ text: '', hidden: `U+${code}` });
-    last = match.index + match[0].length;
-  }
-  if (last < text.length) out.push({ text: text.slice(last) });
-  return out;
-};
-
-const scriptTest = (script: string): RegExp | null => {
-  try {
-    return new RegExp(`\\p{Script=${script}}`, 'u');
-  } catch {
-    return null; // very old browser: the check is skipped, the server's warning still shows
-  }
-};
-const LOOKALIKE_SCRIPTS = ['Latin', 'Cyrillic', 'Greek', 'Armenian'].map((s) => [s, scriptTest(s)] as const);
-
-/** Scripts whose letters look alike, when more than one appears in one value (e.g. Latin "a" next to the Cyrillic U+0430). */
-export const lookalikeScripts = (text: string): string[] => {
-  const found = LOOKALIKE_SCRIPTS.filter(([, re]) => re && re.test(text)).map(([name]) => name);
-  return found.length > 1 ? found : [];
-};
-
-/** A link only from an explicit URL field, only http(s), never anything that merely looks like one. */
-export const safeHttpUrl = (value?: string | null): string | null => {
-  if (!value || typeof value !== 'string') return null;
-  if (!/^https?:\/\//.test(value) || hasInvisible(value) || /\s/.test(value)) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
-  } catch {
-    return null;
-  }
-};
+export {
+  hasInvisible,
+  hasUnusualSpaces,
+  segmentText,
+  lookalikeScripts,
+  mixesDirections,
+  describeLink,
+  safeHttpUrl,
+} from './textSafety';
+export type { TextSegment, LinkInfo } from './textSafety';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UUID_RE = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
@@ -330,10 +283,21 @@ export interface CompanyGroup {
  * Groups by company, then by source batch, newest evidence first at every level.
  * A proposal without a batch key forms its own group.
  */
-export const groupProposals = (rows: ChangeProposal[]): CompanyGroup[] => {
-  const sorted = [...rows].sort(
-    (a, b) => evidenceTime(b) - evidenceTime(a) || b.created_at.localeCompare(a.created_at),
+/** Newest evidence first, or soonest to expire first. */
+export const sortProposals = (rows: ChangeProposal[], sort: 'newest' | 'expiring' = 'newest'): ChangeProposal[] =>
+  [...rows].sort((a, b) =>
+    sort === 'expiring'
+      ? Date.parse(a.expires_at) - Date.parse(b.expires_at) || a.created_at.localeCompare(b.created_at)
+      : evidenceTime(b) - evidenceTime(a) || b.created_at.localeCompare(a.created_at),
   );
+
+/** Groups rows by company, then by batch, in the order given by `sortProposals` (or as given when presorted). */
+export const groupProposals = (
+  rows: ChangeProposal[],
+  sort: 'newest' | 'expiring' = 'newest',
+  presorted = false,
+): CompanyGroup[] => {
+  const sorted = presorted ? rows : sortProposals(rows, sort);
   const companies = new Map<string, CompanyGroup>();
   sorted.forEach((p) => {
     let company = companies.get(p.company_id);
@@ -382,33 +346,129 @@ export const displayValue = (value: unknown): string => {
   }
 };
 
-/** Mixed-script warnings for one field: from the API when it sends them, else from the local check. */
-export const fieldWarnings = (p: ChangeProposal, key: string, value: string): string[] => {
-  const out: string[] = [];
+export type ValueWarning = 'lookalike' | 'direction' | 'server_mixed' | 'invisible' | 'spaces';
+
+/**
+ * What to flag on one proposal-supplied value. Look-alike alphabets and mixed writing directions
+ * are told apart; when the server flags a value the local checks cannot explain, that is shown too.
+ */
+export const textWarnings = (value: string, serverFlag = false): ValueWarning[] => {
+  const out: ValueWarning[] = [];
+  const lookalike = lookalikeScripts(value).length > 0;
+  const direction = mixesDirections(value);
+  if (lookalike) out.push('lookalike');
+  if (direction) out.push('direction');
+  if (serverFlag && !lookalike && !direction) out.push('server_mixed');
+  if (hasInvisible(value)) out.push('invisible');
+  if (hasUnusualSpaces(value)) out.push('spaces');
+  return out;
+};
+
+export const fieldWarnings = (p: ChangeProposal, key: string, value: string): ValueWarning[] => {
   const fromApi = (p.warnings || []).filter((w) => !w.field || w.field === key).map((w) => w.code);
   const ms = p.mixed_script;
-  const apiMixed =
+  const apiMixed = Boolean(
     fromApi.includes('mixed_script') ||
     ms === true ||
     (Array.isArray(ms) && ms.includes(key)) ||
-    (ms && typeof ms === 'object' && !Array.isArray(ms) && key in ms);
-  if (apiMixed || lookalikeScripts(value).length) out.push('mixed_script');
-  if (hasInvisible(value)) out.push('invisible');
-  return out;
+    (ms && typeof ms === 'object' && !Array.isArray(ms) && key in ms),
+  );
+  return textWarnings(value, apiMixed);
+};
+
+// ------------------------------------------------------------------ what can be done to a card
+
+/** Fields whose change can redirect messages: they need a check against the source when unverified. */
+export const CONTACT_ROUTE_FIELDS = ['email', 'phone', 'mobile'];
+
+/** Accepting needs the reviewer's own check against the source: evidence not from captured mail, and an email or phone change. */
+export const needsSourceCheck = (p: ChangeProposal): boolean =>
+  p.evidence !== 'verified_captured' && Object.keys(p.patch || {}).some((k) => CONTACT_ROUTE_FIELDS.includes(k));
+
+export interface CardState {
+  /** One line of why this user may not decide, or null. */
+  readOnly: string | null;
+  /** Expired by the clock, while on screen. */
+  expired: boolean;
+  busy: boolean;
+  /** A decision on this card has already been answered on this page. */
+  decided: boolean;
+  editing: boolean;
+  /** The "I have compared the current values" tick, for the version shown. */
+  acknowledged: boolean;
+  /** Which of two conflicting suggestions to keep, for the version shown. */
+  conflictChoice: 'this' | 'other' | null;
+  /** The other suggestions' evidence is on screen. */
+  partnersShown: boolean;
+  /** The "I checked this against the source myself" tick, for the version shown. */
+  sourceChecked: boolean;
+}
+
+export interface Allowed {
+  ok: boolean;
+  /** Why not, in one visible line. */
+  reason?: string;
+}
+
+export interface CardActions {
+  accept: Allowed;
+  edit: Allowed;
+  acceptEdits: Allowed;
+  reject: Allowed;
+  select: Allowed;
+  reopen: Allowed;
+}
+
+const no = (reason: string): Allowed => ({ ok: false, reason });
+const yes: Allowed = { ok: true };
+
+/**
+ * The one place that decides what can be done to a card right now. The buttons, the edit form and
+ * the keyboard shortcuts all ask this, so they cannot disagree.
+ */
+export const cardActions = (p: ChangeProposal, s: CardState): CardActions => {
+  const conflicts = p.status === 'proposed' ? (p.conflicts_with || []).length : 0;
+  let base: Allowed = yes;
+  if (s.decided) base = no('Already decided on this page.');
+  else if (p.status !== 'proposed') base = no('This suggestion is closed.');
+  else if (s.readOnly) base = no(s.readOnly);
+  else if (s.expired) base = no('This suggestion has expired.');
+  else if (s.busy) base = no('Waiting for the answer to the last decision.');
+
+  let gate: Allowed = yes;
+  if (p.target_changed_at && !s.acknowledged) gate = no('Tick “I have compared the current values” first.');
+  else if (conflicts && !s.partnersShown) gate = no('Wait until the other suggestion’s evidence is shown.');
+  else if (conflicts && s.conflictChoice !== 'this') gate = no('Choose which of the two suggestions to keep first.');
+  else if (needsSourceCheck(p) && !s.sourceChecked) gate = no('Tick “I checked this against the source myself” first.');
+
+  const accepting = !base.ok ? base : !gate.ok ? gate : yes;
+  return {
+    accept: !accepting.ok ? accepting : s.editing ? no('Finish or cancel the edit first.') : yes,
+    edit: !accepting.ok ? accepting : s.editing ? no('Already editing.') : yes,
+    acceptEdits: !accepting.ok ? accepting : s.editing ? yes : no('Open the edit form first.'),
+    reject: base,
+    select: !base.ok ? base : s.editing ? no('Finish or cancel the edit first.') : yes,
+    reopen:
+      p.status === 'rejected' && !s.readOnly && !s.busy && !s.decided
+        ? yes
+        : no(s.readOnly || 'Only a rejected suggestion can be reopened.'),
+  };
 };
 
 // ------------------------------------------------------------------ URL state
 
 export type ReviewTab = 'open' | 'look' | 'decided';
 export const TABS: ReviewTab[] = ['open', 'look', 'decided'];
+export type ReviewSort = 'newest' | 'expiring';
 
+/** Tab and filters kept in the URL. The proposer filter stays in the page, so no user name goes into the URL. */
 export interface ReviewQuery {
   tab: ReviewTab;
   company: string;
   kind: string;
-  proposer: string;
   evidence: string;
   decided: string;
+  sort: ReviewSort;
 }
 
 export const readQuery = (search: URLSearchParams): ReviewQuery => {
@@ -417,20 +477,24 @@ export const readQuery = (search: URLSearchParams): ReviewQuery => {
     tab: TABS.includes(tab) ? tab : 'open',
     company: search.get('company') || '',
     kind: search.get('kind') || '',
-    proposer: search.get('proposer') || '',
     evidence: search.get('evidence') || '',
     decided: search.get('decided') || '',
+    sort: search.get('sort') === 'expiring' ? 'expiring' : 'newest',
   };
 };
 
 export const writeQuery = (query: ReviewQuery): URLSearchParams => {
   const out = new URLSearchParams();
   if (query.tab !== 'open') out.set('tab', query.tab);
-  (['company', 'kind', 'proposer', 'evidence', 'decided'] as const).forEach((key) => {
+  (['company', 'kind', 'evidence', 'decided'] as const).forEach((key) => {
     if (query[key]) out.set(key, query[key]);
   });
+  if (query.sort !== 'newest') out.set('sort', query.sort);
   return out;
 };
+
+/** The API refuses a bulk reject of more than this many (BULK_REJECT_MAX). */
+export const BULK_REJECT_MAX = 200;
 
 export const DECIDED_STATUSES: ProposalStatus[] = ['accepted', 'edited', 'rejected', 'expired', 'superseded', 'failed'];
 
