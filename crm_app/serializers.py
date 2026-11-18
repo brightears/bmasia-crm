@@ -566,6 +566,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
+        self._refuse_backward_status(attrs.get('status'))
         if self.instance is not None and {'billing_entity', 'company'} & set(attrs):
             from types import SimpleNamespace
             from crm_app.services.document_context import effective_billing_entity
@@ -591,6 +592,28 @@ class InvoiceSerializer(serializers.ModelSerializer):
                     ),
                 })
         return attrs
+
+    def _refuse_backward_status(self, value):
+        """A plain update never moves an invoice backwards.
+
+        Draft cannot be re-entered once left, and Paid is left only for Refunded; undoing a
+        payment is the admin's "Mark selected invoices as unpaid". Saving the current status is
+        always allowed. (Paid itself is reached only through mark_paid, see validate_status.)
+        """
+        current = self.instance.status if self.instance is not None else None
+        if value is None or current is None or value == current:
+            return
+        if current == 'Paid' and value != 'Refunded':
+            raise serializers.ValidationError({'status': (
+                f'A paid invoice cannot be set to {value} by an edit. Paid can change only to Refunded; '
+                'to undo a payment recorded by mistake, use the admin action "Mark selected invoices as '
+                'unpaid" (it keeps the receipt number).'
+            )})
+        if value == 'Draft':
+            raise serializers.ValidationError({'status': (
+                f'An invoice that is {current} cannot go back to Draft. Use Cancelled for one that '
+                'should not stand.'
+            )})
 
     def create(self, validated_data):
         """Create invoice with nested line items"""
