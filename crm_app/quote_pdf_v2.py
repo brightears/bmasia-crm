@@ -5,7 +5,9 @@ from __future__ import annotations
 from decimal import Decimal
 from xml.sax.saxutils import escape
 
-from reportlab.platypus import KeepTogether, Paragraph, Spacer
+from reportlab.platypus import KeepTogether, Spacer
+
+from crm_app.pdf_thai import ThaiAwareParagraph as Paragraph
 
 from crm_app.commercial_pdf import (
     CONTENT_WIDTH,

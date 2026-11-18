@@ -31,11 +31,13 @@ from reportlab.platypus import (
     FrameBreak,
     KeepTogether,
     PageTemplate,
-    Paragraph,
     Spacer,
     Table,
     TableStyle,
 )
+
+# Thai runs print in Sarabun; everything else is the plain ReportLab Paragraph.
+from crm_app.pdf_thai import ThaiAwareParagraph as Paragraph
 
 
 PAGE_SIZE = A4

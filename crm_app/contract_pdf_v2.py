@@ -22,6 +22,7 @@ from crm_app.commercial_pdf import (
     document_styles, entity_profile_for, html_text, identity_cards,
     metadata_table,
 )
+from crm_app.pdf_thai import ThaiAwareParagraph
 from crm_app.services.document_context import customer_legal_entity_name, effective_billing_entity
 from crm_app.contract_signature_layouts import (
     SIGNATURE_LAYOUT_SLOTS,
@@ -449,7 +450,9 @@ def _paragraph(item, styles, *, cell=False, bold=False, alignment=None):
     # Keep product name on one line; table width is independently constrained.
     text = text.replace('Beat Breeze', 'Beat&#160;Breeze')
     text = text.replace('Soundtrack Your Brand', 'Soundtrack Your&#160;Brand')
-    paragraph = Paragraph(text, style)
+    # Every contract body paragraph and table cell is printed from here. The
+    # markup is already escaped; Thai runs switch font after parsing.
+    paragraph = ThaiAwareParagraph(text, style)
     paragraph._bmasia_source_style = name
     return paragraph
 
