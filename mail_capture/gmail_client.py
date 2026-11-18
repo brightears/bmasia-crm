@@ -42,6 +42,7 @@ QUOTA_UNITS = {
     'list_messages': 5,
     'list_history': 2,
     'get_message': 20,
+    'get_message_minimal': 20,
     'get_message_full': 60,
     'get_attachment': 20,
 }
@@ -104,7 +105,7 @@ class GmailClient(Protocol):
         labelRemoved: history [...], nextPageToken, historyId."""
 
     def get_message(self, message_id, format='metadata', metadata_headers=None) -> dict:
-        """users.messages.get."""
+        """users.messages.get with format metadata, minimal (labels only) or full."""
 
     def get_attachment(self, message_id, attachment_id) -> dict:
         """users.messages.attachments.get."""
@@ -352,6 +353,8 @@ class FakeGmailClient:
         message = self._messages[message_id]
         if format == 'full':
             return copy.deepcopy(message)
+        if format == 'minimal':
+            return {k: copy.deepcopy(message.get(k)) for k in ('id', 'threadId', 'labelIds', 'internalDate')}
         return _metadata_view(message, metadata_headers)
 
     def get_attachment(self, message_id, attachment_id):
@@ -359,3 +362,23 @@ class FakeGmailClient:
         if message_id not in self._messages:
             raise GmailNotFound(404, 'message not found')
         return {'size': 0, 'data': ''}
+
+
+def fake_factory(clients):
+    """A client factory that can only hand out ``FakeGmailClient`` objects.
+
+    The sync engine accepts nothing else while capture is switched off, and
+    it checks the marker before calling the factory, so no credential can be
+    minted on that path. ``clients`` maps mailbox addresses to fakes.
+    """
+    by_email = {}
+    for client in (clients.values() if isinstance(clients, dict) else clients):
+        if type(client) is not FakeGmailClient and not isinstance(client, FakeGmailClient):
+            raise TypeError('fake_factory takes FakeGmailClient objects only')
+        by_email[client.mailbox_email] = client
+
+    def factory(mailbox):
+        return by_email[mailbox.email]
+
+    factory.fake_only_factory = True
+    return factory

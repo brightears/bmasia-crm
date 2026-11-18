@@ -9,8 +9,10 @@ from crm_app.models import Contract, EmailLog, Invoice, Quote
 from mail_capture import rules as capture_rules
 from mail_capture import sync
 from mail_capture.gmail_client import FakeGmailClient
+from django.core.exceptions import ValidationError
+
 from mail_capture.models import (
-    CaptureMailbox, CaptureRule, CaptureRun, CompanyDomain, MailboxAccessLog, MailboxCopy,
+    CaptureFailure, CaptureMailbox, CaptureRule, CaptureRun, CompanyDomain, MailboxAccessLog, MailboxCopy,
     MailConversation, MailMatch, MailMessage, MailParticipant, UnmatchedSender,
 )
 from mail_capture.sync import sync_mailbox
@@ -107,33 +109,71 @@ class TestStorage:
 
 class TestCursor:
     def test_crash_mid_batch_does_not_advance_cursor(self, lagoon, monkeypatch):
+        """A crash of the page itself (after the messages, before the cursor
+        is saved) rolls the whole page back and leaves the cursor alone."""
         mb = make_mailbox()
         client = primed(mb)
+        client.add_message(inbound('old', message_id='<old@mail.example.org>'))
+        run(mb, client)
+        mb.refresh_from_db()
         start = mb.history_id
         for i in range(3):
             client.add_message(inbound(f'g{i}', message_id=f'<c{i}@mail.example.org>'))
-        real_store = sync._Runner._store
-        calls = {'n': 0}
+        client.delete_message('old')              # gives the page a deletion to crash on
+        real = sync.drop_copies
 
-        def flaky(self, plan, now):
-            calls['n'] += 1
-            if calls['n'] == 2:
-                raise RuntimeError('simulated crash')
-            return real_store(self, plan, now)
+        def crash(*args, **kwargs):
+            raise RuntimeError('simulated crash')
 
-        monkeypatch.setattr(sync._Runner, '_store', flaky)
+        monkeypatch.setattr(sync, 'drop_copies', crash)
         with pytest.raises(RuntimeError):
             run(mb, client)
         mb.refresh_from_db()
         assert mb.history_id == start
-        assert MailMessage.objects.count() == 0       # the whole page rolled back
+        assert MailMessage.objects.count() == 1       # the whole page rolled back
         assert mb.lease_token == ''                    # lease released
-        assert CaptureRun.objects.get().outcome == 'error'
+        run_row = CaptureRun.objects.order_by('-pk').first()
+        assert run_row.outcome == 'error' and run_row.stored == 0   # rolled-back rows not counted
 
-        monkeypatch.setattr(sync._Runner, '_store', real_store)
+        monkeypatch.setattr(sync, 'drop_copies', real)
         assert run(mb, client).counts['stored'] == 3
         mb.refresh_from_db()
         assert mb.history_id == client.history_id
+        assert not MailMessage.objects.filter(rfc_message_id='old@mail.example.org').exists()
+
+    def test_one_failing_message_is_skipped_retried_then_parked(self, lagoon, monkeypatch):
+        """A message that still fails is recorded by Gmail id, the cursor moves
+        on, the others are stored; it is retried on later runs, then parked."""
+        mb = make_mailbox()
+        client = primed(mb)
+        for i in range(3):
+            client.add_message(inbound(f'g{i}', message_id=f'<f{i}@mail.example.org>'))
+        real = sync._Runner._store
+
+        def poison(self, plan, now, queue_ops):
+            if plan.parsed.gmail_id == 'g1':
+                raise ValueError('simulated database refusal')
+            return real(self, plan, now, queue_ops)
+
+        monkeypatch.setattr(sync._Runner, '_store', poison)
+        first = run(mb, client)
+        mb.refresh_from_db()
+        assert first.outcome == 'ok' and first.counts['stored'] == 2 and first.counts['failed'] == 1
+        assert first.counts['matched'] == 2                  # the failed one is not counted
+        assert mb.history_id == client.history_id            # the cursor moved on
+        assert CaptureRun.objects.get(pk=first.run_id).failed_gmail_ids == ['g1']
+        failure = CaptureFailure.objects.get()
+        assert (failure.gmail_id, failure.attempts, failure.parked, failure.error) == ('g1', 1, False, 'ValueError')
+        run(mb, client)
+        third = run(mb, client)
+        failure.refresh_from_db()
+        assert failure.attempts == 3 and failure.parked and third.counts['parked'] == 1
+        run(mb, client)                                      # parked: not fetched again
+        assert CaptureFailure.objects.get().attempts == 3
+        monkeypatch.setattr(sync._Runner, '_store', real)
+        CaptureFailure.objects.update(parked=False)
+        run(mb, client)
+        assert MailMessage.objects.count() == 3 and CaptureFailure.objects.count() == 0
 
     def test_cursor_advances_page_by_page(self, lagoon):
         mb = make_mailbox()
@@ -238,7 +278,8 @@ class TestClassification:
         monkeypatch.setattr(capture_rules, 'FREEMAIL_DOMAINS',
                             capture_rules.FREEMAIL_DOMAINS | {'freemail.test'})
         company = make_company('Freemail Domain Company')
-        CompanyDomain.objects.create(company=company, domain='freemail.test')
+        with pytest.raises(ValidationError):
+            CompanyDomain.objects.create(company=company, domain='freemail.test')
         mb = make_mailbox(body_mode='body')
         client = primed(mb)
         client.add_message(inbound('g1', frm='Some One <some.one@freemail.test>', subject='Hello'))
@@ -247,7 +288,7 @@ class TestClassification:
         assert MailMessage.objects.count() == 0
         row = UnmatchedSender.objects.get()
         assert (row.address, row.reason, row.status) == ('some.one@freemail.test', 'freemail', 'open')
-        assert row.sample_subjects == ['Hello'] and row.message_count == 1
+        assert [s['s'] for s in row.samples] == ['Hello'] and row.message_count == 1
         assert row.expires_at - row.last_seen == timedelta(days=30)
         assert not [c for c in client.calls if c[1].get('format') == 'full']   # no body read
 
@@ -385,7 +426,7 @@ class TestCrmSentMail:
         log = self._log(company, contact, message_id='<crm-1@ourco.example>')
         mb = make_mailbox()
         client = primed(mb)
-        client.add_message(gmail_message('g1', SALES, ['pat@lagoon.test'], date=recent(),
+        client.add_message(gmail_message('g1', SALES, ['pat@lagoon.test'], labels=('SENT',), date=recent(),
                                          message_id='<crm-1@ourco.example>'))
         run(mb, client)
         message = MailMessage.objects.get()
@@ -400,9 +441,9 @@ class TestCrmSentMail:
         quote_log = self._log(company, contact, email_type='quote_send', quote=quote, sent_at=when)
         mb = make_mailbox()
         client = primed(mb)
-        client.add_message(gmail_message('g1', SALES, ['pat@lagoon.test'], date=when,
+        client.add_message(gmail_message('g1', SALES, ['pat@lagoon.test'], labels=('SENT',), date=when,
                                          extra=[('X-BMAsia-Email-ID', str(log.pk))]))
-        client.add_message(gmail_message('g2', SALES, ['Pat@Lagoon.test'], date=when,
+        client.add_message(gmail_message('g2', SALES, ['Pat@Lagoon.test'], labels=('SENT',), date=when,
                                          message_id='<q@ourco.example>',
                                          extra=[('X-BMAsia-Email-ID', f'quote_{quote.pk}')]))
         run(mb, client)
@@ -427,7 +468,7 @@ class TestConversationTimes:
         ca, cb = primed(a), primed(b)
         t1, t2, t3 = recent(30), recent(20), recent(10)
         ca.add_message(inbound('a1', when=t1, message_id='<t-root@mail.example.org>'))
-        cb.add_message(gmail_message('b1', OPS, ['pat@lagoon.test'], date=t2,
+        cb.add_message(gmail_message('b1', OPS, ['pat@lagoon.test'], labels=('SENT',), date=t2,
                                      message_id='<t-reply@ourco.example>',
                                      in_reply_to='<t-root@mail.example.org>'))
         ca.add_message(inbound('a2', when=t3, message_id='<t-again@mail.example.org>',
@@ -443,7 +484,7 @@ class TestConversationTimes:
         mb = make_mailbox()
         client = primed(mb)
         client.add_message(inbound('g1', when=recent(3), message_id='<j1@mail.example.org>'))
-        client.add_message(gmail_message('g2', SALES, ['pat@lagoon.test'], date=recent(2),
+        client.add_message(gmail_message('g2', SALES, ['pat@lagoon.test'], labels=('SENT',), date=recent(2),
                                          message_id='<j2@ourco.example>', in_reply_to='<j1@mail.example.org>'))
         client.add_message(inbound('g3', when=recent(1), message_id='<j3@mail.example.org>',
                                    in_reply_to='<j2@ourco.example>'))
@@ -474,7 +515,7 @@ class TestBodies:
         assert len(message.body_sha256) == 64
         full = [c for c in client.calls if c[0] == 'get_message' and c[1]['format'] == 'full']
         assert [c[1]['message_id'] for c in full] == ['g1']
-        assert MailboxAccessLog.objects.filter(purpose='body', bodies_read=1).count() == 1
+        assert MailboxAccessLog.objects.filter(purpose='poll', bodies_read=1).count() == 1
 
     def test_default_headers_only_reads_no_body(self, lagoon):
         mb = make_mailbox()

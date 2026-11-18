@@ -129,3 +129,47 @@ def test_same_message_from_two_mailboxes_at_once_is_stored_once(contact):
     assert all(getattr(r, 'outcome', r) == 'ok' for r in outcomes), outcomes
     assert MailMessage.objects.count() == 1
     assert MailboxCopy.objects.count() == 2
+
+
+def test_a_runner_that_outlives_its_lease_cannot_write(contact):
+    """Runner A stalls past its lease; runner B takes the mailbox and moves
+    the cursor; A then ends busy and writes nothing, so B's cursor stays."""
+    import time
+
+    class Slow(FakeGmailClient):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.entered, self.release = threading.Event(), threading.Event()
+
+        def get_message(self, *a, **k):
+            if not self.entered.is_set():
+                self.entered.set()
+                self.release.wait(WAIT)
+            return super().get_message(*a, **k)
+
+    mb = make_mailbox()
+    slow = Slow(mb.email)
+    CaptureMailbox.objects.filter(pk=mb.pk).update(history_id=slow.history_id)
+    slow.add_message(gmail_message('L1', 'pat@lagoon.test', [SALES], date=recent(),
+                                   message_id='<L1@lagoon.test>'))
+    results = {}
+    thread = _in_thread(lambda: sync_mailbox(mb.pk, factory_for(slow), sleep=lambda s: None,
+                                             lease_seconds=1), results, 'a')
+    assert slow.entered.wait(WAIT)
+    time.sleep(1.5)                       # A's lease has expired
+    fast = FakeGmailClient(mb.email)
+    fast._history_id = slow._history_id
+    fast._oldest_valid_history = slow._oldest_valid_history
+    fast._history = list(slow._history)
+    fast._messages = dict(slow._messages)
+    fast._order = list(slow._order)
+    fast.add_message(gmail_message('L2', 'pat@lagoon.test', [SALES], date=recent(),
+                                   message_id='<L2@lagoon.test>'))
+    results['b'] = sync_mailbox(mb.pk, factory_for(fast), sleep=lambda s: None)
+    cursor_after_b = CaptureMailbox.objects.get(pk=mb.pk).history_id
+    slow.release.set()
+    thread.join(WAIT)
+    assert results['b'].outcome == 'ok'
+    assert results['a'].outcome == 'busy'
+    assert CaptureMailbox.objects.get(pk=mb.pk).history_id == cursor_after_b
+    assert MailMessage.objects.count() == 2

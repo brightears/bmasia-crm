@@ -30,7 +30,7 @@ def captured(capture_on):
     mb = make_mailbox()
     client = primed(mb)
     client.add_message(gmail_message('g1', 'pat@lagoon.test', [SALES], date=recent(2)))
-    client.add_message(gmail_message('g2', SALES, ['pat@lagoon.test'], date=recent(1),
+    client.add_message(gmail_message('g2', SALES, ['pat@lagoon.test'], labels=('SENT',), date=recent(1),
                                      message_id='<crm-7@ourco.example>'))
     sync_mailbox(mb.pk, factory_for(client), sleep=lambda s: None)
     assert MailMessage.objects.count() == 2
