@@ -131,10 +131,11 @@ def test_a_requested_ordering_still_decides_for_rows_that_do_not_tie():
 
 def _list_querysets(params):
     """Each router list endpoint's queryset, filtered as its list action filters it."""
+    from agent_inbox.urls import router as inbox_router
     from crm_app.urls import router
 
     user = User.objects.create(username=f'ordering-check-{len(params)}', role='Admin')
-    for prefix, viewset, _ in router.registry:
+    for prefix, viewset, _ in router.registry + inbox_router.registry:
         if not hasattr(viewset, 'list') or not hasattr(viewset, 'get_queryset'):
             continue
         request = Request(APIRequestFactory().get('/', params))
