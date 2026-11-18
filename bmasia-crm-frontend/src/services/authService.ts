@@ -1,15 +1,7 @@
 import axios, { AxiosResponse } from 'axios';
 import { LoginCredentials, AuthResponse, RefreshTokenResponse, User, JWTPayload } from '../types';
 
-// Log environment variables for debugging
-console.log('=== Environment Variables ===');
-console.log('process.env.REACT_APP_API_URL:', process.env.REACT_APP_API_URL);
-console.log('process.env.REACT_APP_BYPASS_AUTH:', process.env.REACT_APP_BYPASS_AUTH);
-console.log('process.env.NODE_ENV:', process.env.NODE_ENV);
-console.log('============================\n');
-
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://bmasia-crm.onrender.com';
-console.log('Using API_BASE_URL:', API_BASE_URL);
 
 /**
  * A failed token refresh. `sessionRejected` is true only when the server refused the refresh
@@ -77,11 +69,6 @@ class AuthService {
   }
 
   constructor() {
-    console.log('=== AuthService Constructor ===');
-    console.log('API_BASE_URL:', API_BASE_URL);
-    console.log('Configured baseURL:', `${API_BASE_URL}/api/v1`);
-    console.log('Axios defaults transformResponse:', this.api.defaults.transformResponse);
-    console.log('===============================\n');
     this.setupInterceptors();
   }
 

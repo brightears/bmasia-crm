@@ -120,9 +120,7 @@ const CampaignCreate: React.FC = () => {
         contact_ids: selectedContactIds,
       };
 
-      console.log('Creating campaign:', campaignData);
       const createdCampaign = await ApiService.createCampaign(campaignData);
-      console.log('Campaign created:', createdCampaign);
 
       setSuccessMessage('Campaign created successfully!');
 
@@ -131,7 +129,8 @@ const CampaignCreate: React.FC = () => {
         navigate(`/campaigns/${createdCampaign.id}`);
       }, 1500);
     } catch (err: any) {
-      console.error('Campaign creation error:', err);
+      // Not the error object itself: it carries the request body (recipients and email text).
+      console.error('Campaign creation failed:', err.response?.status ?? err.message);
       setError(`Failed to create campaign: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);

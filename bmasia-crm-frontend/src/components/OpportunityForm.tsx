@@ -619,9 +619,9 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
                     activities={recentActivities}
                     compact={true}
                     showFilters={false}
-                    onEditActivity={(activity) => {
-                      // Could open activity form in edit mode
-                      console.log('Edit activity:', activity);
+                    onEditActivity={() => {
+                      // Editing an activity from here is not built yet (it used to log the
+                      // activity, with its contact details, to the console).
                     }}
                   />
                 </Grid>
