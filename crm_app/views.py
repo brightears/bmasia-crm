@@ -2049,6 +2049,23 @@ class ContractViewSet(BaseModelViewSet):
 
         return blockers
 
+    def _template_layout_pieces(self, content):
+        """The parts of a full template body laid out as separate Paragraphs.
+
+        Mirrors the splits in _generate_principal_terms_pdf: the zones table,
+        the signature layouts, page-break markers and the heading kept with
+        the zones table.
+        """
+        from crm_app.contract_signature_layouts import SIGNATURE_LAYOUT_TOKEN_PATTERN
+        zones = r'\{\{\s*zones_table\s*\}\}'
+        page_break = r'(?:<br/>)*\s*(?:<b>)?---(?:</b>)?\s*(?:<br/>)*'
+        pieces = re.split(zones + '|' + SIGNATURE_LAYOUT_TOKEN_PATTERN + '|' + page_break, content)
+        for before in re.split(zones, content)[:-1]:
+            before = re.split(SIGNATURE_LAYOUT_TOKEN_PATTERN, before)[-1]
+            bulk, heading, _ = self._split_template_zones_preamble(before)
+            pieces += re.split(page_break, bulk) + [heading]
+        return [piece for piece in pieces if piece]
+
     @staticmethod
     def _split_template_zones_preamble(content):
         """Separate the final zones heading and preserve an intentional page break."""
@@ -3156,14 +3173,27 @@ class ContractViewSet(BaseModelViewSet):
         if contract.preamble_template:
             # FULL TEMPLATE MODE: Template contains complete contract text
             # Skip all hardcoded clauses and render only template content
-            from crm_app.contract_pdf_v2 import tailored_template_content, ContractTailoringClarification
+            from crm_app.contract_pdf_v2 import (
+                ContractTailoringClarification, markup_as_text, tailored_template_content,
+            )
             try:
-                source_content, _ = full_template_source(contract)
+                source_content, full_body_override = full_template_source(contract)
                 template_source = tailored_template_content(
                     contract, self._substitute_template_variables(
                         source_content, contract, escape_for_paragraph=False))
             except ContractTailoringClarification as exc:
                 return Response(exc.payload(), status=422)
+            # The body is markup by design. Guard it once before the layout
+            # splits it at the zones table, the signature blocks, page-break
+            # markers and the zones heading; the values filled in above are
+            # already escaped.
+            template_source = stored_markup(
+                template_source,
+                field='Contract.preamble_custom' if full_body_override else 'ContractTemplate.content',
+                record=getattr(contract if full_body_override else contract.preamble_template, 'pk', None),
+                pieces=self._template_layout_pieces,
+                fallback=markup_as_text,
+            )
             template_content = re.sub(
                 r'\{\{\s*zones_table\s*\}\}',
                 '{{zones_table}}',

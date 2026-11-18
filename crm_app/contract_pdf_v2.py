@@ -326,28 +326,41 @@ logger = logging.getLogger(__name__)
 _MARKUP_CHECK_STYLE = ParagraphStyle('stored-markup-check')
 
 
-def _markup_parses(text):
-    try:
-        Paragraph(text, _MARKUP_CHECK_STYLE)
-    except Exception:
-        return False
+def _markup_parses(text, pieces=None):
+    for piece in [text] + (list(pieces(text)) if pieces else []):
+        try:
+            Paragraph(piece or '', _MARKUP_CHECK_STYLE)
+        except Exception:
+            return False
     return True
 
 
-def stored_markup(value, *, field, record=None):
+def markup_as_text(value):
+    """Print guarded markup's formatting tags as text; keep entities and <br/>.
+
+    The plain-text form of a body that already holds escaped values (a full
+    template after its slots are filled), where paragraph_text() would escape
+    those values a second time.
+    """
+    return re.sub(r'<(?!br/>)', '&lt;', paragraph_markup(value))
+
+
+def stored_markup(value, *, field, record=None, pieces=None, fallback=paragraph_text):
     """paragraph_markup() for one stored wording field, sure to render.
 
     Guarded formatting tags can still fail to pair up (an unclosed <b>, tags
     closed out of order). Such a value prints as plain text instead, so a
-    malformed value can no longer stop a PDF from rendering. The warning names
-    the field and the record, never the wording.
+    malformed value can no longer stop a PDF from rendering. ``pieces`` returns
+    the parts the layout turns into separate paragraphs; each must then render
+    on its own as well. The warning names the field and the record, never the
+    wording.
     """
     text = paragraph_markup(value)
-    if _markup_parses(text):
+    if _markup_parses(text, pieces):
         return text
     logger.warning('Contract PDF: %s on record %s has formatting tags that do not pair up; '
                    'printed as plain text.', field, record)
-    return paragraph_text(value)
+    return fallback(value)
 
 
 def _markup(text):
