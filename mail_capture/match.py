@@ -10,19 +10,28 @@ changes. It reads nothing and writes nothing. Order, first decisive rule wins:
    address on contacts of more than one company is not decided: the result
    is ``ambiguous`` with every candidate company proposed.
    2b. Mail the CRM itself sent (an ``EmailLog`` row, resolved before
-   matching and only for outbound mail) links to that row's company.
-3. Document numbers in the subject (and body when stored) in the CRM's real
-   numbering: TH-CT26001, HK-QT26001, TH-IV26001, INV-TH-2026-0001,
-   REC-HK-2026-0001 and the older BMAT-26-C-0001 / BMAL-26-C-0001 contract
-   form. When rule 2 already decided, a number of the same company is linked
-   automatically and one of another company is only proposed.
-4. Thread inheritance: a conversation a person confirmed to a company.
+   matching, only for a copy with Gmail's SENT label and only when the log's
+   recipient is among the message's To/Cc) links to that row's company.
+3. Document numbers in the subject (and body when stored) in the CRM's
+   numbering, shown here with the impossible year 99: TH-CT99001, HK-QT99001,
+   TH-IV99001, INV-TH-2099-0001, REC-HK-2099-0001 and the older
+   BMAT-99-C-0001 / BMAL-99-C-0001 contract form. When rule 2 already
+   decided, a number of the same company is linked automatically and one of
+   another company is only proposed.
+4. Thread inheritance: a conversation a person confirmed to a company, but
+   only when an external participant is on one of that company's domains. A
+   stranger on the thread (a forward to an outsider, a reply from someone
+   unknown) gets the company only as a low-confidence proposal (ambiguous).
 5. Company domain: a non-freemail domain on exactly one company matches
    with medium confidence. A shared domain (marked shared, or on more than one
    company) never matches; its ranked candidates go to the queue.
 6. Nothing: unmatched (queue row, headers only, never a body).
 
 Links a person rejected for the conversation are never proposed again.
+
+Direction comes from Gmail, not from the From header: ``outbound`` needs the
+SENT label on the copy being processed; a From that only claims an internal
+sender is ``claimed_internal``.
 """
 import re
 from dataclasses import dataclass, field
@@ -41,12 +50,12 @@ _DOC_PATTERNS = (
      lambda m: f'{m.group(1).upper()}-QT{m.group(2)}'),
     ('invoice', re.compile(r'(?<![A-Za-z0-9])(TH|HK)[-\s]?IV\s?(\d{5,})(?![0-9])', re.I),
      lambda m: f'{m.group(1).upper()}-IV{m.group(2)}'),
-    # Invoice and receipt numbers made by the invoice views: INV-TH-2026-0001
+    # Invoice and receipt numbers made by the invoice views: INV-TH-2099-0001
     ('invoice', re.compile(r'(?<![A-Za-z0-9])INV[-\s]?(TH|HK)[-\s]?(\d{4})[-\s]?(\d{4,})(?![0-9])', re.I),
      lambda m: f'INV-{m.group(1).upper()}-{m.group(2)}-{m.group(3)}'),
     ('receipt', re.compile(r'(?<![A-Za-z0-9])REC[-\s]?(TH|HK)[-\s]?(\d{4})[-\s]?(\d{4,})(?![0-9])', re.I),
      lambda m: f'REC-{m.group(1).upper()}-{m.group(2)}-{m.group(3)}'),
-    # Older contract form still in the database: BMAT-26-C-0867 / BMAL-26-C-0867
+    # Older contract form still in the database: BMAT-99-C-0001 / BMAL-99-C-0001
     ('contract', re.compile(r'(?<![A-Za-z0-9])(BMA[TL])[-\s]?(\d{2})[-\s]?C[-\s]?(\d{3,})(?![0-9])', re.I),
      lambda m: f'{m.group(1).upper()}-{m.group(2)}-C-{m.group(3)}'),
 )
@@ -150,6 +159,7 @@ class MatchResult:
     confidence: str = ''
     rule_action: str = None
     contacts: dict = field(default_factory=dict)       # address -> contact id
+    companies: tuple = ()           # every company matched at message level
     links: list = field(default_factory=list)
     candidates: tuple = ()
     unmatched_reason: str = ''
@@ -173,7 +183,8 @@ def _priority(parsed, internal_flags, direction):
     """External participants in the order that decides the primary company:
     the sender for inbound mail, the recipients (To, Cc) for outbound."""
     ordered = []
-    roles = ('from', 'reply_to', 'to', 'cc') if direction == 'inbound' else ('to', 'cc', 'reply_to', 'from')
+    roles = ('from', 'reply_to', 'to', 'cc') if direction == 'inbound' \
+        else ('to', 'cc', 'reply_to', 'from')
     by_role = {}
     for role, item in parsed.participants():
         by_role.setdefault(role, []).append(item)
@@ -187,8 +198,24 @@ def _priority(parsed, internal_flags, direction):
     return ordered
 
 
-def match_message(parsed, snapshot, mailbox_id=None, conversation_key=None, body_text=''):
-    """Match one ``parse.ParsedMessage`` against ``snapshot``. Pure."""
+def message_direction(parsed, internal_domains, internal_addresses=(), sent=None):
+    """outbound (SENT label on this copy), claimed_internal (From claims one
+    of our addresses, unverified) or inbound."""
+    if sent is None:
+        sent = parsed.sent_label
+    if sent:
+        return 'outbound'
+    sender = parsed.from_address
+    if sender is not None and is_internal(sender, internal_domains, internal_addresses):
+        return 'claimed_internal'
+    return 'inbound'
+
+
+def match_message(parsed, snapshot, mailbox_id=None, conversation_key=None, body_text='', sent=None):
+    """Match one ``parse.ParsedMessage`` against ``snapshot``. Pure.
+
+    ``sent`` is whether this mailbox's copy carries Gmail's SENT label
+    (defaults to the parsed copy's labels)."""
     conversation_key = conversation_key or parsed.conversation_key
     rejected = snapshot.rejected.get(conversation_key, frozenset())
     addresses = parsed.addresses()
@@ -197,10 +224,7 @@ def match_message(parsed, snapshot, mailbox_id=None, conversation_key=None, body
         for a in addresses
     }
     sender = parsed.from_address
-    if sender is not None:
-        direction = 'outbound' if internal_flags.get(sender.address) else 'inbound'
-    else:
-        direction = 'inbound'
+    direction = message_direction(parsed, snapshot.internal_domains, snapshot.internal_addresses, sent)
 
     # 1. classify
     if not addresses:
@@ -254,6 +278,7 @@ def match_message(parsed, snapshot, mailbox_id=None, conversation_key=None, body
         result.decision = MATCHED
         result.company_id = matched_companies[0]
         result.method, result.confidence = 'contact_email', 'high'
+        result.companies = tuple(matched_companies)
     elif ambiguous_companies:
         result.decision = AMBIGUOUS
         result.candidates = tuple(ambiguous_companies)
@@ -262,18 +287,18 @@ def match_message(parsed, snapshot, mailbox_id=None, conversation_key=None, body
             _add_link(links, Link('company', company_id, 'contact_email', 'low', 'proposed'))
 
     # 2b. sent by the CRM
-    sent = snapshot.crm_sent.get(parsed.message_id) if direction == 'outbound' else None
-    if sent is not None:
-        result.email_log_id = sent.email_log_id
-        if not result.decision and sent.company_id and allowed('company', sent.company_id):
+    crm = snapshot.crm_sent.get(parsed.message_id) if direction == 'outbound' else None
+    if crm is not None:
+        result.email_log_id = crm.email_log_id
+        if not result.decision and crm.company_id and allowed('company', crm.company_id):
             result.decision = MATCHED
-            result.company_id = sent.company_id
+            result.company_id = crm.company_id
             result.method, result.confidence = 'crm_sent', 'high'
-            matched_companies.append(sent.company_id)
-            _add_link(links, Link('company', sent.company_id, 'crm_sent', 'high', 'auto'))
-        for target_type, target_id in sent.documents:
+            matched_companies.append(crm.company_id)
+            _add_link(links, Link('company', crm.company_id, 'crm_sent', 'high', 'auto'))
+        for target_type, target_id in crm.documents:
             if allowed(target_type, target_id):
-                status = 'auto' if result.company_id == sent.company_id else 'proposed'
+                status = 'auto' if result.company_id == crm.company_id else 'proposed'
                 _add_link(links, Link(target_type, str(target_id), 'crm_sent', 'high', status))
 
     # 3. document numbers
@@ -315,14 +340,24 @@ def match_message(parsed, snapshot, mailbox_id=None, conversation_key=None, body
                     _add_link(links, Link(ref.target_type, ref.target_id, 'doc_number', 'medium',
                                           'proposed', (('number', ref.number),)))
 
-    # 4. thread inheritance
+    # 4. thread inheritance, only with evidence that the people belong there
     if not result.decision:
         company_id = snapshot.confirmed_conversations.get(conversation_key)
         if company_id and allowed('company', company_id):
-            result.decision = MATCHED
-            result.company_id = company_id
-            result.method, result.confidence = 'thread', 'high'
-            _add_link(links, Link('company', company_id, 'thread', 'high', 'auto'))
+            evidence = any(
+                r.company_id == company_id
+                for item in externals for r in snapshot.domains.get(item.domain, ())
+            )
+            if evidence:
+                result.decision = MATCHED
+                result.company_id = company_id
+                result.method, result.confidence = 'thread', 'high'
+                _add_link(links, Link('company', company_id, 'thread', 'high', 'auto'))
+            else:
+                result.decision = AMBIGUOUS
+                result.candidates = (company_id,)
+                result.method, result.confidence = 'thread', 'low'
+                _add_link(links, Link('company', company_id, 'thread', 'low', 'proposed'))
 
     # 5. company domain
     shared_candidates = []

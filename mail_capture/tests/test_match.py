@@ -94,7 +94,7 @@ class TestOrder:
             'one@lagoon.test': (ContactRef('c1', 'A'),),
             'two@harbour.test': (ContactRef('c2', 'B'),),
         })
-        result = match_message(msg(SALES, ('two@harbour.test',), ('one@lagoon.test',)), s)
+        result = match_message(msg(SALES, ('two@harbour.test',), ('one@lagoon.test',)), s, sent=True)
         assert result.direction == 'outbound' and result.company_id == 'B'
         assert {l.target_id for l in result.links if l.target_type == 'company'} == {'A', 'B'}
 
@@ -120,10 +120,30 @@ class TestOrder:
         result = match_message(msg('x@lagoon.test', subject='TH-CT99001 / TH-CT99002'), s)
         assert result.decision == match.AMBIGUOUS and set(result.candidates) == {'A', 'B'}
 
-    def test_thread_inheritance(self):
-        s = snap(confirmed_conversations={'root@x.test': 'A'})
-        result = match_message(msg('new@elsewhere.test', references='<root@x.test>'), s)
+    def test_thread_inheritance_needs_a_participant_on_the_company_domain(self):
+        s = snap(confirmed_conversations={'root@x.test': 'A'},
+                 domains={'lagoon.test': (DomainRef('A'),)})
+        result = match_message(msg('new@lagoon.test', references='<root@x.test>'), s)
         assert (result.decision, result.method, result.company_id) == (match.MATCHED, 'thread', 'A')
+
+    def test_stranger_on_a_confirmed_thread_is_only_proposed(self):
+        s = snap(confirmed_conversations={'root@x.test': 'A'})
+        result = match_message(msg('lawyer@other-firm.test', references='<root@x.test>'), s)
+        assert result.decision == match.AMBIGUOUS and result.company_id is None
+        assert [(l.target_id, l.method, l.status, l.confidence) for l in result.links] == [
+            ('A', 'thread', 'proposed', 'low')]
+
+    def test_contact_beats_thread(self):
+        s = snap(confirmed_conversations={'root@x.test': 'A'},
+                 contacts={'sam@harbour.test': (ContactRef('c9', 'B'),)})
+        result = match_message(msg('sam@harbour.test', references='<root@x.test>'), s)
+        assert (result.decision, result.method, result.company_id) == (match.MATCHED, 'contact_email', 'B')
+
+    def test_direction_needs_the_sent_label(self):
+        forged = msg(f'Sales <{SALES}>', ('who@stranger.test',))
+        assert match_message(forged, snap()).direction == 'claimed_internal'
+        assert match_message(forged, snap(), sent=True).direction == 'outbound'
+        assert match_message(msg('pat@lagoon.test'), snap()).direction == 'inbound'
 
     def test_unique_domain_matches_medium_and_suggests_contact(self):
         s = snap(domains={'lagoon.test': (DomainRef('A'),)})
@@ -167,11 +187,13 @@ class TestOrder:
 
     def test_crm_sent_links_outbound_only(self):
         s = snap(crm_sent={'m1@mail.example.org': CrmSentRef('log1', 'A', (('quote', 'q1'),))})
-        out = match_message(msg(SALES, ('unknown@lagoon.test',)), s)
+        out = match_message(msg(SALES, ('unknown@lagoon.test',)), s, sent=True)
         assert (out.decision, out.method, out.email_log_id) == (match.MATCHED, 'crm_sent', 'log1')
         assert ('quote', 'q1', 'auto') in {(l.target_type, l.target_id, l.status) for l in out.links}
         inbound = match_message(msg('unknown@lagoon.test'), s)
         assert inbound.email_log_id is None and inbound.decision == match.UNMATCHED
+        forged = match_message(msg(SALES, ('unknown@lagoon.test',)), s)   # no SENT label
+        assert forged.email_log_id is None and forged.direction == 'claimed_internal'
 
     def test_pure_and_repeatable(self):
         s = snap(contacts={'pat@lagoon.test': (ContactRef('c1', 'A'),)})

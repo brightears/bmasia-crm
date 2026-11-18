@@ -18,7 +18,7 @@ from .match import (
 )
 from .models import CaptureRule, CompanyDomain, MailConversation, MailMatch, MailParticipant
 from .parse import is_internal, match_key, normalise_message_id
-from .rules import rule_from_row
+from .rules import extra_freemail, rule_from_row, rule_problem
 
 
 # X-BMAsia-Email-ID values set by crm_app.services.email_service:
@@ -42,7 +42,19 @@ def _uuid_or_none(value):
 
 
 def load_rules():
-    return tuple(rule_from_row(row) for row in CaptureRule.objects.all())
+    """Every rule that blocks capture. A refused value (see
+    ``rules.rule_problem``) is never applied, however it got into the table."""
+    return tuple(
+        rule_from_row(row) for row in CaptureRule.objects.all()
+        if not rule_problem(row.kind, row.value)
+    )
+
+
+def _recipients_match(row, parsed):
+    """The EmailLog's recipient must be among the message's To/Cc."""
+    recipients = {a.address for a in parsed.to + parsed.cc} | {a.match_key for a in parsed.to + parsed.cc}
+    to_email = (row.to_email or '').strip().lower()
+    return bool(to_email) and (to_email in recipients or match_key(to_email) in recipients)
 
 
 def _email_log_documents(row):
@@ -57,6 +69,10 @@ def _email_log_documents(row):
 def resolve_crm_sent(parsed):
     """The ``EmailLog`` row for a message the CRM sent, or None.
 
+    Only for a copy with Gmail's SENT label (checked by the caller), and only
+    when the log's recipient is among the message's To/Cc: anyone can write
+    the header, and every recipient of CRM mail has seen an id.
+
     1. ``X-BMAsia-Email-ID`` holding an EmailLog id (generic sender).
     2. ``X-BMAsia-Email-ID`` holding ``quote_/contract_/invoice_/receipt_`` and
        a document id: the EmailLog row for that document and the message's
@@ -70,7 +86,7 @@ def resolve_crm_sent(parsed):
         log_id = _uuid_or_none(header)
         if log_id:
             row = EmailLog.objects.filter(pk=log_id).first()
-            if row is not None:
+            if row is not None and _recipients_match(row, parsed):
                 return row
         for prefix, target_type, email_type in _CRM_HEADER_PREFIXES:
             if not header.startswith(prefix):
@@ -102,7 +118,7 @@ def resolve_crm_sent(parsed):
     if parsed.message_id and not parsed.message_id_synthetic:
         candidates = {parsed.message_id, f'<{parsed.message_id}>'}
         for row in EmailLog.objects.filter(message_id__in=candidates)[:5]:
-            if normalise_message_id(row.message_id) == parsed.message_id:
+            if normalise_message_id(row.message_id) == parsed.message_id and _recipients_match(row, parsed):
                 return row
     return None
 
@@ -203,8 +219,7 @@ def build_snapshot(parsed_messages, conversation_keys=(), body_texts=(), rules=N
 
     crm_sent = {}
     for parsed in parsed_messages:
-        sender = parsed.from_address
-        if sender is None or not is_internal(sender, domains_internal, addresses_internal):
+        if not parsed.sent_label:
             continue
         row = resolve_crm_sent(parsed)
         if row is not None:
@@ -224,6 +239,7 @@ def build_snapshot(parsed_messages, conversation_keys=(), body_texts=(), rules=N
         shared_domain_ranking=ranking,
         crm_sent=crm_sent,
         rules=load_rules() if rules is None else tuple(rules),
+        extra_freemail=extra_freemail(),
     )
 
 
