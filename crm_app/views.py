@@ -7111,7 +7111,9 @@ class QuoteViewSet(BaseModelViewSet):
         queryset = super().get_queryset()
 
         if self.action == 'list':
-            queryset = queryset.prefetch_related('line_items')
+            queryset = queryset.prefetch_related(
+                'line_items', 'attachments__uploaded_by', 'activities__user',
+            )
         elif self.action == 'retrieve':
             queryset = queryset.prefetch_related(
                 'line_items',

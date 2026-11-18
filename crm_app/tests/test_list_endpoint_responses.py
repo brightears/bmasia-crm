@@ -94,6 +94,7 @@ QUERY_CASES = {
     'tickets': ('/api/v1/tickets/', 7, 7),
     'zones': ('/api/v1/zones/', 9, 3),
     'notes': ('/api/v1/notes/', 14, 2),
+    'quotes': ('/api/v1/quotes/', 7, 7),
     # Lists that were already flat before the query-count work.
     'contacts': ('/api/v1/contacts/', 21, 2),
     'invoices': ('/api/v1/invoices/', 21, 3),
