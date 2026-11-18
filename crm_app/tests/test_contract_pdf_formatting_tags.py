@@ -51,6 +51,17 @@ def test_text_that_only_looks_like_a_formatting_tag_prints_as_written(value):
     assert printed(paragraph_markup(value)) == value
 
 
+@pytest.mark.parametrize('value', [
+    '<ſtrong>x</ſtrong>',  # long s
+    '<İ>x</İ>',  # capital I with dot above
+    '<ı>x</ı>',  # dotless i
+    '<b >x',  # no-break space inside the tag
+    '<ſpan>x</ſpan>',
+])
+def test_only_ascii_letters_spell_a_formatting_tag(value):
+    assert printed(paragraph_markup(value)) == value
+
+
 @pytest.mark.parametrize('tag', ['para', 'a', 'img', 'link', 'seq', 'unichar', 'strike', 'sup', 'p', 'Ops'])
 def test_other_tags_print_as_literal_text(tag):
     value = f'Before <{tag}>inside</{tag}> then <{tag} name="x"/> after'

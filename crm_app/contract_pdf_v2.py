@@ -282,13 +282,14 @@ _BARE_AMPERSAND = re.compile(r'&(?!#[0-9]+;|#[xX][0-9a-fA-F]+;|[A-Za-z][A-Za-z0-
 _CHARACTER_REFERENCE = re.compile(r'&#(?:([0-9]+)|[xX]([0-9a-fA-F]+));')
 # The formatting tags contract text fields accept. An opening tag may carry
 # name="value" attributes (they are dropped); anything else, such as the prose
-# "A<B and C>D", is text.
+# "A<B and C>D", is text. Tag names and spacing are ASCII only (re.A), so no
+# other letter or space case-folds into an allowed tag.
 _TAG_ATTRIBUTES = r'''(?:\s+[A-Za-z_:][-\w:.]*\s*=\s*(?:"[^"<>]*"|'[^'<>]*'))*'''
 _FORMATTING_TAG = re.compile(
     r'<(?:/(b|i|u|strong|em|super|sub)\s*|(b|i|u|strong|em|super|sub)' + _TAG_ATTRIBUTES + r'\s*)>'
-    r'|<br' + _TAG_ATTRIBUTES + r'\s*/?\s*>', re.I)
+    r'|<br' + _TAG_ATTRIBUTES + r'\s*/?\s*>', re.I | re.A)
 # Pasted Word formatting; the document, not the paste, owns typography.
-_PASTED_FONT_TAG = re.compile(r'</?(?:font|span)\b[^<>]*>', re.I)
+_PASTED_FONT_TAG = re.compile(r'</?(?:font|span)\b[^<>]*>', re.I | re.A)
 
 
 def _character_reference(match):
@@ -625,8 +626,8 @@ def _flowables(source, width, styles, *, cell=False):
                 parts.append((part, len(re.findall(r'<br\s*/?>', following, flags=re.I))))
             # Inline emphasis may span a paragraph boundary. Keep that one
             # balanced paragraph intact rather than feed malformed fragments.
-            if any(len(re.findall(r'<(?:b|i|u|strong|em|super|sub)>', part, re.I)) !=
-                   len(re.findall(r'</(?:b|i|u|strong|em|super|sub)>', part, re.I)) for part, _ in parts):
+            if any(len(re.findall(r'<(?:b|i|u|strong|em|super|sub)>', part, re.I | re.A)) !=
+                   len(re.findall(r'</(?:b|i|u|strong|em|super|sub)>', part, re.I | re.A)) for part, _ in parts):
                 parts = [(item.text, 0)]
             explicit_group = object()
             for part, break_count in parts:
