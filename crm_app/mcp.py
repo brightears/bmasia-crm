@@ -68,7 +68,7 @@ contracttemplate.
 Use these 3 generic tools for all write operations:
 - `create_record(collection, data)` — create a new record (data is a JSON string)
 - `update_record(collection, id, data)` — partial update (only include changed fields)
-- `delete_record(collection, id)` — delete a record
+- `delete_record(collection, id)` — permanently delete a line item or other minor record; refused for company, contact, contract, quote and invoice (the refusal names the update_record to use instead)
 
 Supported collections: company, contact, contract, invoice, quote, opportunity,
 task, zone, clienttechdetail, device, ticket, kbarticle, quotelineitem,
@@ -2077,16 +2077,14 @@ def delete_record(collection: str, id: str) -> str:
 
     Returns: Confirmation message or error.
     """
-    from crm_app.services.delete_guards import MCP_DELETE_ALTERNATIVES
+    from crm_app.services.delete_guards import mcp_delete_refusal
 
     if collection not in _COLLECTION_MAP:
         return f"Error: Unknown collection '{collection}'. Valid: {', '.join(sorted(_COLLECTION_MAP))}"
     _agent_gate.observe(tool='delete_record', verb='delete', collection=collection, record_id=id)
-    if collection in MCP_DELETE_ALTERNATIVES:
-        return (
-            f"Error: Deleting a {collection} is blocked because it would erase customer history. "
-            f"Use {MCP_DELETE_ALTERNATIVES[collection]}"
-        )
+    refusal = mcp_delete_refusal(collection)
+    if refusal:
+        return refusal
     if collection == 'contracttemplate':
         return (
             "Error: Generic contract-template deletion is blocked. "

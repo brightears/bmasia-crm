@@ -365,6 +365,14 @@ class BaseModelViewSet(viewsets.ModelViewSet):
         changes = serialize_audit_changes(changes)
         self.log_action('UPDATE', instance, changes)
     
+    def destroy(self, request, *args, **kwargs):
+        """DELETE /{id}/ under the rules in crm_app/services/delete_guards.py (409 when refused)."""
+        from crm_app.services.delete_guards import destroy_one
+        deleted, refusal = destroy_one(self, self.get_object())
+        if not deleted:
+            return Response(refusal, status=status.HTTP_409_CONFLICT)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     @transaction.atomic
     def perform_destroy(self, instance):
         """Add audit logging on delete (one transaction: a refused delete leaves no audit row)"""
@@ -416,11 +424,8 @@ class BaseModelViewSet(viewsets.ModelViewSet):
         queryset = self.get_queryset().filter(id__in=ids)
         
         if action_type == 'delete':
-            count = queryset.count()
-            for obj in queryset:
-                self.log_action('DELETE', obj)
-            queryset.delete()
-            return Response({'message': f'{count} records deleted'})
+            from crm_app.services.delete_guards import bulk_delete
+            return bulk_delete(self, queryset, ids)
         
         elif action_type == 'update_status':
             count = queryset.update(**data)
@@ -706,18 +711,6 @@ class CompanyViewSet(BaseModelViewSet):
 
     # list(): errors are answered by crm_app.api_errors.api_exception_handler (generic message
     # and a request id; an invalid page is a 404 again instead of a 500).
-
-    def destroy(self, request, *args, **kwargs):
-        """Refuse (409) to delete a company that still has contracts, invoices or quotes.
-
-        Deleting a company cascades to all of them (and to its contacts, zones, notes and
-        tasks). Deactivating it (is_active=false) keeps the history.
-        """
-        from crm_app.services.delete_guards import company_delete_refusal
-        refusal = company_delete_refusal(self.get_object())
-        if refusal:
-            return Response(refusal, status=status.HTTP_409_CONFLICT)
-        return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=['get'], url_path='simple')
     def simple_list(self, request):

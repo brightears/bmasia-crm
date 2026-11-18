@@ -260,6 +260,7 @@ def test_delete_is_logged_with_summary_and_cascade_counts():
     row = AuditLog.objects.get(record_id=task_id)
     assert (row.action, row.model_name, row.user) == ('DELETE', 'Task', caller)
     assert row.additional_data['deleted']['id'] == task_id
+    assert row.additional_data['deleted']['title'] == 'Delete Me Task'
     assert row.additional_data['cascade']['crm_app.TaskComment'] == 2
     assert row.additional_data['cascade']['crm_app.Task'] == 1
 

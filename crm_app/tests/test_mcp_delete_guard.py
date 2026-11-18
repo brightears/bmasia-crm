@@ -1,4 +1,6 @@
 """MCP delete_record refuses records whose delete would erase customer history."""
+import json
+import re
 from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
@@ -8,7 +10,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from mcp_server.djangomcp import django_request_ctx
 
-from crm_app.mcp import delete_record
+from crm_app.mcp import delete_record, update_record
 from crm_app.models import (
     AuditLog, Company, Contact, Contract, Invoice, Quote, QuoteLineItem, Task,
 )
@@ -45,23 +47,41 @@ def _records(company):
     return {'company': company, 'contract': contract, 'quote': quote, 'invoice': invoice, 'contact': contact}
 
 
-@pytest.mark.parametrize('collection, alternative', [
-    ('company', '{"is_active": false}'),
-    ('contact', '{"is_active": false}'),
-    ('contract', '{"status": "Cancelled"}'),
-    ('quote', '{"status": "Rejected"}'),
-    ('invoice', '{"status": "Cancelled"}'),
+@pytest.mark.parametrize('collection, field, value', [
+    ('company', 'is_active', False),
+    ('contact', 'is_active', False),
+    ('contract', 'status', 'Cancelled'),
+    ('quote', 'status', 'Rejected'),
+    ('invoice', 'status', 'Cancelled'),
 ])
-def test_history_records_are_not_deleted_and_the_alternative_is_named(company, collection, alternative):
+def test_history_records_are_not_deleted_and_the_named_alternative_works(company, collection, field, value):
     record = _records(company)[collection]
     with as_agent():
         message = delete_record(collection, str(record.pk))
 
     assert message.startswith(f'Error: Deleting a {collection} is blocked')
-    assert f"update_record('{collection}', id, {alternative})" in message
     assert type(record).objects.filter(pk=record.pk).exists()
     assert Company.objects.filter(pk=company.pk).exists()
     assert not AuditLog.objects.filter(action='DELETE').exists()
+
+    # The message names one update_record call; carry it out exactly as written.
+    match = re.search(r"update_record\('(\w+)', id, '(\{.*?\})'\)", message)
+    assert match, message
+    assert match.group(1) == collection
+    with as_agent():
+        result = json.loads(update_record(collection, str(record.pk), match.group(2)))
+    assert result.get('updated') is True, result
+    record.refresh_from_db()
+    assert getattr(record, field) == value
+
+
+def test_no_refusal_suggests_a_field_the_agents_cannot_write():
+    from crm_app.mcp import _COLLECTION_MAP, _get_serializer_class
+    from crm_app.services.delete_guards import ALTERNATIVE_FIELDS, MCP_COLLECTIONS
+    for collection, model in MCP_COLLECTIONS.items():
+        serializer = _get_serializer_class(_COLLECTION_MAP[collection][1])()
+        writable = {name for name, f in serializer.fields.items() if not f.read_only}
+        assert set(ALTERNATIVE_FIELDS[model]) <= writable, collection
 
 
 def test_refusal_happens_before_looking_the_record_up():
