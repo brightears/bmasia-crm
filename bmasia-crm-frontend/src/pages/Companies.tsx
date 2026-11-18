@@ -188,7 +188,8 @@ const Companies: React.FC = () => {
       setCompanyToDelete(null);
     } catch (err: any) {
       console.error('Delete company error:', err);
-      setError(`Failed to delete company: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
+      // A company with contracts, invoices or quotes is refused (409) with an explanation in `error`.
+      setError(`Failed to delete company: ${err.response?.data?.error || err.response?.data?.detail || err.message || 'Unknown error'}`);
     } finally {
       setDeleteLoading(false);
     }
