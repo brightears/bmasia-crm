@@ -7362,26 +7362,21 @@ class QuoteViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=['post'])
     def add_attachment(self, request, pk=None):
-        """Add attachment to quote"""
-        quote = self.get_object()
-        file = request.FILES.get('file')
+        """Refused for now: uploaded files would sit on the web container's temporary disk.
 
-        if not file:
-            return Response(
-                {'error': 'No file provided'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        attachment = QuoteAttachment.objects.create(
-            quote=quote,
-            name=file.name,
-            file=file,
-            size=file.size,
-            uploaded_by=request.user if request.user.is_authenticated else None
+        No MEDIA_ROOT or storage backend is configured and the service has no persistent
+        disk, so a stored file disappears on the next deploy or restart. Re-enable this
+        once uploads go to persistent storage.
+        """
+        self.get_object()  # 404 for an unknown quote, as before
+        return Response(
+            {
+                'error': 'Quote attachments are not available yet: the server cannot keep '
+                         'uploaded files. Send the file to the customer by email instead.',
+                'code': 'attachments_unavailable',
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
-
-        serializer = QuoteAttachmentSerializer(attachment)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
