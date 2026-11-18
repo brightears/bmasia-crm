@@ -2,6 +2,25 @@ from rest_framework import permissions
 from django.db.models import Q
 
 
+class PersonSignedInToWebsite(permissions.BasePermission):
+    """The request comes from a person signed in to the website (JWT or session).
+
+    API tokens are refused, and so are agent accounts named in the agent policy
+    or in AGENT_INBOX_AGENT_USERNAMES. Used for user-management writes, which
+    decide who can sign in and with which role.
+    """
+
+    message = 'User management needs a website sign-in by a person; API tokens are not accepted here.'
+
+    def has_permission(self, request, view):
+        from crm_app.auth_observability import JWT, SESSION, auth_method
+
+        if auth_method(request) not in (JWT, SESSION):
+            return False
+        from agent_inbox.policy import is_agent_by_name
+        return not is_agent_by_name(request.user)
+
+
 class CommercialDocumentPreviewPermission(permissions.BasePermission):
     """Match existing document-read access while rejecting inactive users.
 

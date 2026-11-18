@@ -361,6 +361,9 @@ AGENT_ACTIVITY_DAILY_CAP = config('AGENT_ACTIVITY_DAILY_CAP', default='2000')
 # Extra CRM usernames treated as agent accounts (comma list), on top of the
 # principals in crm_app/agent_policy.py. Agent accounts cannot decide proposals.
 AGENT_INBOX_AGENT_USERNAMES = config('AGENT_INBOX_AGENT_USERNAMES', default='', cast=Csv())
+# The people who may accept or reject change proposals (comma list of CRM
+# usernames). Empty means nobody can review yet. Agent names are ignored.
+CHANGE_PROPOSAL_REVIEWER_USERNAMES = config('CHANGE_PROPOSAL_REVIEWER_USERNAMES', default='', cast=Csv())
 # Dotted path of the mail-capture app's "message purged" signal. When it exists,
 # activities and proposals citing a purged message are redacted
 # (agent_inbox/redaction.py); when it does not, nothing is connected.

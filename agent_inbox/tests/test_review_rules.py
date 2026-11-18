@@ -60,9 +60,16 @@ def test_a_token_account_gets_the_agent_read_rules(person, company):
     holder = make_user('admin', role='Admin')
     activity, _ = record_activity(person, activity_body(company), via='ui')
     create_proposal(person, phone(company, evidence_quote=''), via='ui')
+    restricted, _ = record_activity(person, activity_body(company, idempotency_key='test:restricted-1',
+                                                          source_ref='', restricted=True), via='ui')
+    theirs, _ = record_activity(make_user('theo'), activity_body(company, idempotency_key='test:agent-row-1',
+                                                                 source_ref=''), via='rest')
     client = token_client(holder)
-    detail = client.get(f'/api/v1/activities/{activity.pk}/').json()
-    assert 'body' not in detail and 'source_url' not in detail
+    # A person's activity is readable by agents unless restricted; another agent's is not.
+    assert 'body' in client.get(f'/api/v1/activities/{activity.pk}/').json()
+    for hidden in (restricted, theirs):
+        detail = client.get(f'/api/v1/activities/{hidden.pk}/').json()
+        assert 'body' not in detail and 'source_url' not in detail
     assert client.get(PROPOSALS).json()['count'] == 0
     refused = client.post(f'/api/v1/activities/{activity.pk}/void/', {'reason': 'x'}, format='json')
     assert refused.status_code == 403

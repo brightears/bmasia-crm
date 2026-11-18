@@ -77,3 +77,14 @@ def test_role_and_active_flag_are_still_ignored(user):
     assert response.status_code == 200
     user.refresh_from_db()
     assert (user.role, user.is_active) == ('Sales', True)
+
+
+def test_a_multipart_password_change_behaves_like_json(user):
+    client = client_for(user)
+    wrong = client.patch(ME, {'password': 'new-pass-4567890', 'current_password': 'not-it'}, format='multipart')
+    assert wrong.status_code == 400 and 'current_password' in wrong.json()
+    right = client.patch(ME, {'password': 'new-pass-4567890', 'current_password': 'current-pass-123'},
+                         format='multipart')
+    assert right.status_code == 200, right.content
+    user.refresh_from_db()
+    assert user.check_password('new-pass-4567890')
