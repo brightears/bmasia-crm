@@ -573,4 +573,79 @@ def test_query_count_does_not_grow_with_rows():
     few = _queries_for(2, 'a')
     many = _queries_for(10, 'b')
     assert few == many
-    assert many[0] <= 16 and many[1] <= 16
+    assert many[0] <= 24 and many[1] <= 24
+
+
+# ---------------------------------------------------------------------------
+# Unlinked live candidates: the Needs fixing exclusions, and one candidate per term
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize('extra,expected', [
+    ({}, 'live_unlinked'),
+    ({'lifecycle_type': 'addon'}, 'lapsed'),
+    ({'lifecycle_type': 'churn'}, 'lapsed'),
+    ({'service_type': 'one_time_setup'}, 'lapsed'),
+    ({'service_type': 'consulting'}, 'lapsed'),
+    ({'service_type': 'maintenance'}, 'lapsed'),
+    ({'contract_type': 'One-time'}, 'lapsed'),
+    ({'billing_frequency': 'One-time'}, 'lapsed'),
+    ({'billing_frequency': 'once'}, 'lapsed'),
+    ({'end': date(2026, 6, 29)}, 'lapsed'),                               # ends on the term's end
+    ({'end': date(2026, 6, 20), 'start': date(2026, 5, 1)}, 'lapsed'),   # ends before the term's end
+])
+def test_live_candidate_passes_the_needs_fixing_exclusions(extra, expected):
+    co = company('Exclusion Hotel')
+    term = contract(co, date(2026, 6, 29), status='Expired')
+    kw = dict(extra)
+    end = kw.pop('end', date(2027, 6, 29))
+    kw.setdefault('start', date(2026, 6, 30))
+    contract_type = kw.pop('contract_type', None)
+    candidate = contract(co, end, **kw)
+    if contract_type:
+        Contract.objects.filter(pk=candidate.pk).update(contract_type=contract_type)
+    state = rows_by_number(view(year=2026, month=6, basis='calendar'))[term.contract_number]['renewal']['state']
+    assert state == expected
+
+
+@pytest.mark.parametrize('ends,start,winner', [
+    # (end dates of the terms, candidate start, index of the term that gets it)
+    ((date(2026, 6, 29), date(2026, 6, 15)), date(2026, 6, 30), 0),   # closest end before the start
+    ((date(2026, 6, 15), date(2026, 6, 29)), date(2026, 6, 30), 1),
+    ((date(2026, 6, 29), date(2026, 7, 10)), date(2026, 7, 5), 0),    # ending before beats ending after
+    ((date(2026, 7, 10), date(2026, 7, 20)), date(2026, 7, 5), 0),    # both after: the nearer
+])
+def test_one_candidate_stands_for_one_term(ends, start, winner):
+    co = company('Shared Candidate Hotel')
+    terms = [contract(co, end, status='Expired') for end in ends]
+    contract(co, date(2027, 7, 1), start=start)
+    states = {}
+    for t in terms:
+        rows = rows_by_number(view(year=t.end_date.year, month=t.end_date.month, basis='calendar'))
+        states[t.contract_number] = rows[t.contract_number]['renewal']['state']
+    for i, t in enumerate(terms):
+        assert states[t.contract_number] == ('live_unlinked' if i == winner else 'lapsed'), (i, states)
+
+
+def test_equal_claims_are_settled_by_contract_id():
+    co = company('Tie Hotel')
+    a = contract(co, date(2026, 6, 29), status='Expired', contract_number='HK-CT99901')
+    b = contract(co, date(2026, 6, 29), status='Expired', contract_number='HK-CT99902')
+    contract(co, date(2027, 6, 29), start=date(2026, 6, 30))
+    data = view(year=2026, month=6, basis='calendar')
+    rows = rows_by_number(data)
+    first, second = sorted([a, b], key=lambda c: str(c.pk))
+    assert rows[first.contract_number]['renewal']['state'] == 'live_unlinked'
+    assert rows[second.contract_number]['renewal']['state'] == 'lapsed'
+    jun = data['months'][5]
+    assert (jun['unlinked'], jun['lost']) == (1, 1)
+
+
+def test_a_term_with_its_own_renewal_does_not_claim_a_candidate():
+    co = company('Linked Claim Hotel')
+    linked = contract(co, date(2026, 6, 29), status='Expired')
+    renewal_of(linked, status='Cancelled', start=date(2026, 7, 15))   # declined: lost, takes no candidate
+    other = contract(co, date(2026, 6, 20), status='Expired')
+    contract(co, date(2027, 6, 29), start=date(2026, 6, 30))
+    rows = rows_by_number(view(year=2026, month=6, basis='calendar'))
+    assert rows[linked.contract_number]['renewal']['state'] == 'lost'
+    assert rows[other.contract_number]['renewal']['state'] == 'live_unlinked'

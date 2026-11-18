@@ -36,6 +36,7 @@ from django.db.models import Prefetch, Q
 from django.utils import timezone
 
 from crm_app.services.renewal_book_service import _row_of  # one source for the term's book row
+from crm_app.services.renewal_candidates import ends_after_term, exclude_one_offs, is_one_off
 
 # ---------------------------------------------------------------------------
 # Renewal states
@@ -528,14 +529,22 @@ def _platforms(contract):
 def live_unlinked_match(term, candidate):
     """Whether ``candidate`` (same company, live, not linked here) looks like this term's renewal.
 
-    It must start in the renewal window, not be another contract's renewal, and
-    not name a different property or product than the term.
+    It must start in the renewal window, not be another contract's renewal, not
+    be a one-off or add-on and end after the term (the Needs fixing check's
+    exclusions, crm_app/services/renewal_candidates.py), and not name a
+    different property or product than the term.
     """
     if candidate.pk == term.pk or candidate.status not in LIVE_STATUSES:
         return False
     if candidate.renewed_from_id is not None:
         return False
+    if is_one_off(candidate.service_type, candidate.lifecycle_type, candidate.contract_type,
+                  candidate.billing_frequency):
+        return False
     if not in_renewal_window(term.start_date, term.end_date, candidate.start_date):
+        return False
+    if term.end_date and candidate.start_date and not ends_after_term(
+            term.end_date, candidate.start_date, candidate.end_date):
         return False
     a, b = (term.property_name or '').strip().lower(), (candidate.property_name or '').strip().lower()
     if a and b and a != b:
@@ -567,7 +576,7 @@ def _invoice_facts(contract):
     return [InvoiceFacts(i.status, i.amount, i.currency) for i in contract.invoices.all()]
 
 
-def _evaluate(contract, today, r3_ids, company_live):
+def _evaluate(contract, today, r3_ids, assigned):
     days = (today - contract.end_date).days if contract.end_date else None
     successors = list(contract.renewals.all())
     facts = []
@@ -587,8 +596,7 @@ def _evaluate(contract, today, r3_ids, company_live):
             key=str(s.pk),
         ))
     has_live_link = any(f.link in RENEWAL_LINKS and f.status != 'Cancelled' for f in facts)
-    candidates = [] if has_live_link else [
-        c for c in company_live.get(contract.company_id, ()) if live_unlinked_match(contract, c)]
+    candidates = [] if has_live_link else list(assigned.get(contract.pk, ()))
     placeholder = is_placeholder(contract, r3_ids)
     term = TermFacts(contract.status, bool(contract.auto_renew), ended=days is not None and days > 0,
                      placeholder=placeholder, live_unlinked=bool(candidates))
@@ -628,20 +636,64 @@ def _r3_placeholder_ids(contract_ids):
     ).values_list('record_id', flat=True))
 
 
-def _company_live_contracts(company_ids):
-    """Live (Active, Sent, Draft) contracts of these companies, by company id: one query plus locations."""
+def claim_key(term, candidate):
+    """Order of the terms that could claim one candidate: the term ending closest before the
+    candidate's start first (a term ending after it starts comes after all that end before),
+    then by contract id."""
+    days = (candidate.start_date - term.end_date).days
+    return (0 if days > 0 else 1, abs(days), str(term.pk))
+
+
+def assign_live_candidates(company_ids, today):
+    """{term id: [unlinked live contracts it stands for]}, one candidate to one term.
+
+    Claimants are every term of these companies that could end up "Live term not
+    linked": not Draft, Cancelled or Renewed, not a closed placeholder, and with no
+    linked contract that is the renewal (any status). A candidate goes to the
+    claimant ``claim_key`` puts first; the other claimants keep their own state.
+    Every term of the company takes part, not only the rows on screen, so the
+    answer does not depend on the month shown.
+    """
     from crm_app.models import Contract
 
     ids = list(set(company_ids))
     if not ids:
         return {}
-    by_company = {}
-    for c in (Contract.objects.filter(company_id__in=ids, status__in=LIVE_STATUSES)
+    live = {}
+    for c in (exclude_one_offs(Contract.objects.filter(company_id__in=ids, status__in=LIVE_STATUSES,
+                                                       renewed_from__isnull=True))
               .only('id', 'company_id', 'contract_number', 'status', 'start_date', 'end_date', 'renewed_from_id',
-                    'property_name', 'service_type')
+                    'property_name', 'service_type', 'lifecycle_type', 'contract_type', 'billing_frequency')
               .prefetch_related('service_locations')):
-        by_company.setdefault(c.company_id, []).append(c)
-    return by_company
+        live.setdefault(c.company_id, []).append(c)
+    if not live:
+        return {}
+    terms = list(
+        Contract.objects.filter(company_id__in=list(live), end_date__isnull=False)
+        .exclude(status__in=('Draft', 'Cancelled', 'Renewed'))
+        .only('id', 'company_id', 'status', 'start_date', 'end_date', 'value', 'notes', 'property_name',
+              'service_type')
+        .prefetch_related('service_locations',
+                          Prefetch('renewals', queryset=Contract.objects.only(
+                              'id', 'renewed_from_id', 'status', 'start_date', 'end_date', 'value', 'lifecycle_type'))))
+    r3_ids = _r3_placeholder_ids(t.pk for t in terms)
+    claimants = {}
+    for t in terms:
+        if is_placeholder(t, r3_ids):
+            continue
+        if any(classify_link(t.start_date, t.end_date, s.start_date, s.lifecycle_type or '',
+                             link_months=term_months(s.start_date, s.end_date), link_value=s.value,
+                             term_value=t.value) in RENEWAL_LINKS for s in t.renewals.all()):
+            continue
+        claimants.setdefault(t.company_id, []).append(t)
+    assigned = {}
+    for company_id, candidates in live.items():
+        for c in sorted(candidates, key=lambda c: (c.start_date, str(c.pk))):
+            claiming = [t for t in claimants.get(company_id, ()) if live_unlinked_match(t, c)]
+            if claiming:
+                winner = min(claiming, key=lambda t: claim_key(t, c))
+                assigned.setdefault(winner.pk, []).append(c)
+    return assigned
 
 
 _SUCCESSOR_FIELDS = ('id', 'renewed_from_id', 'company_id', 'contract_number', 'status', 'start_date', 'end_date',
@@ -738,11 +790,11 @@ def _owner_of(contract):
     return None, None
 
 
-def renewals_row(contract, today, r3_ids=frozenset(), company_live=None):
+def renewals_row(contract, today, r3_ids=frozenset(), assigned=None):
     """The Renewal Book row for ``contract`` (its renewal fields under ``book``) plus ``renewal``."""
     row = _row_of(contract)
     book = {key: row.pop(key) for key in BOOK_RENEWAL_FIELDS}
-    ev = _evaluate(contract, today, r3_ids, company_live or {})
+    ev = _evaluate(contract, today, r3_ids, assigned or {})
     result = ev.result
     chosen = None
     if result.successor is not None:
@@ -839,7 +891,7 @@ def _strip(year, basis, entity, today):
     _, end = month_window(year, 12, basis)
     contracts = list(_in_window(_entity_filter(_strip_queryset(), entity), start, end))
     r3_ids = _r3_placeholder_ids(c.pk for c in contracts)
-    company_live = _company_live_contracts(c.company_id for c in contracts)
+    assigned = assign_live_candidates((c.company_id for c in contracts), today)
     months = {m: {'year': year, 'month': m, 'label': date(year, m, 1).strftime('%b %Y'), 'count': 0,
                   'attention': 0, 'placeholders': 0, **{b: 0 for b in STRIP_BUCKETS}}
               for m in range(1, 13)}
@@ -847,7 +899,7 @@ def _strip(year, basis, entity, today):
         y, m = month_of(c.end_date, basis)
         if y != year:
             continue
-        ev = _evaluate(c, today, r3_ids, company_live)
+        ev = _evaluate(c, today, r3_ids, assigned)
         cell = months[m]
         if ev.result.state == PLACEHOLDER:
             cell['placeholders'] += 1
@@ -896,8 +948,8 @@ def build_renewals_view(*, year, month=None, view='month', entity='', basis='fun
         start, end = month_window(sy, sm, basis)[0], month_window(ey, em, basis)[1]
     contracts = list(_in_window(_entity_filter(_rows_queryset(), entity), start, end))
     r3_ids = _r3_placeholder_ids(c.pk for c in contracts)
-    company_live = _company_live_contracts(c.company_id for c in contracts)
-    rows = [renewals_row(c, today, r3_ids, company_live) for c in contracts]
+    assigned = assign_live_candidates((c.company_id for c in contracts), today)
+    rows = [renewals_row(c, today, r3_ids, assigned) for c in contracts]
     if view == 'open':
         rows = [r for r in rows if r['renewal']['state'] == PLACEHOLDER
                 or r['renewal']['group'] == 'open' or r['renewal']['attention']]

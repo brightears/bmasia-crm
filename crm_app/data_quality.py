@@ -44,6 +44,10 @@ from django.utils import timezone
 from crm_app.models import (
     Company, Contact, Contract, ContractServiceLocation, ContractZone, Invoice, Quote, Task, start_of_local_day,
 )
+from crm_app.services.renewal_candidates import (  # noqa: F401  (ONE_OFF_* stay importable from here)
+    ONE_OFF_BILLING, ONE_OFF_LIFECYCLE_TYPES, ONE_OFF_SERVICE_TYPES, ends_after_term, exclude_one_offs,
+    is_one_off_billing,
+)
 
 SEVERITY_ORDER = {'high': 0, 'medium': 1, 'low': 2}
 
@@ -59,10 +63,8 @@ ENDING_WINDOW_DAYS = 60
 # E - 90 days and E + 60 days (see EndingWithoutSuccessor).
 SUCCESSOR_START_BEFORE_END_DAYS = 90
 SUCCESSOR_START_AFTER_END_DAYS = 60
-# Contracts that are never the next term of a subscription.
-ONE_OFF_SERVICE_TYPES = ('one_time_setup', 'consulting', 'maintenance')
-ONE_OFF_LIFECYCLE_TYPES = ('addon', 'churn')
-ONE_OFF_BILLING = ('one-time', 'one time', 'onetime', 'once')
+# Contracts that are never the next term of a subscription: ONE_OFF_* and the helpers in
+# crm_app/services/renewal_candidates.py, shared with the Renewals page.
 
 _email_validator = EmailValidator()
 # Addresses that match this pattern and are at most 64 characters long always pass Django's
@@ -463,11 +465,8 @@ class EndingWithoutSuccessor(ListCheck):
                       expired_renewal=latest_renewal('contract_number', status='Expired'))
             .order_by('end_date', 'contract_number', 'pk'))
         candidates = list(
-            Contract.objects.filter(company_id__in=companies, status__in=OPEN_CONTRACT_STATUSES,
-                                    renewed_from__isnull=True)
-            .exclude(service_type__in=ONE_OFF_SERVICE_TYPES)
-            .exclude(lifecycle_type__in=ONE_OFF_LIFECYCLE_TYPES)
-            .exclude(contract_type='One-time')
+            exclude_one_offs(Contract.objects.filter(company_id__in=companies, status__in=OPEN_CONTRACT_STATUSES,
+                                                     renewed_from__isnull=True))
             .values('id', 'company_id', 'contract_number', 'start_date', 'end_date', 'service_type',
                     'billing_frequency', 'property_name', 'company__contracted_product')
             .order_by('start_date', 'contract_number', 'id'))
@@ -525,9 +524,9 @@ class EndingWithoutSuccessor(ListCheck):
             return False
         if start <= e.start_date:
             return False
-        if end is not None and (end <= e.end_date or end <= start):
+        if not ends_after_term(e.end_date, start, end):
             return False
-        if (c['billing_frequency'] or '').strip().lower() in ONE_OFF_BILLING:
+        if is_one_off_billing(c['billing_frequency']):
             return False
         theirs = product_of(c['service_type'], c['company__contracted_product'])
         return theirs == product or 'Other' in (theirs, product)
