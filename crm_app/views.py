@@ -68,7 +68,7 @@ def _unicode_base_fonts(styles):
     return styles
 
 from .models import (
-    User, Company, Contact, Note, Task, AuditLog,
+    User, Company, Contact, Note, Task, AuditLog, start_of_local_day,
     Opportunity, OpportunityActivity, Contract, Invoice, InvoiceLineItem, ContractZone,
     Quote, QuoteLineItem, QuoteAttachment, QuoteActivity,
     EmailTemplate, EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution,
@@ -777,8 +777,8 @@ class CompanyViewSet(BaseModelViewSet):
                 'opportunities_value': opportunities.aggregate(Sum('expected_value'))['expected_value__sum'] or 0,
                 'contracts_count': contracts.count(),
                 'contracts_value': contracts.aggregate(Sum('value'))['value__sum'] or 0,
-                'open_tasks': tasks.filter(status__in=['Pending', 'In Progress']).count(),
-                'overdue_tasks': sum(1 for task in tasks if task.is_overdue),
+                'open_tasks': tasks.open().count(),
+                'overdue_tasks': tasks.overdue().count(),
             },
             'recent_activities': self.get_recent_activities(company),
             'upcoming_tasks': self.get_upcoming_tasks(company),
@@ -817,9 +817,8 @@ class CompanyViewSet(BaseModelViewSet):
     
     def get_upcoming_tasks(self, company):
         """Get upcoming tasks for a company"""
-        upcoming = company.tasks.filter(
-            status__in=['Pending', 'In Progress'],
-            due_date__gte=timezone.now().date()
+        upcoming = company.tasks.open().filter(
+            due_date__gte=start_of_local_day(timezone.localdate())
         ).order_by('due_date')[:5]
 
         return TaskSerializer(upcoming, many=True).data
@@ -989,7 +988,7 @@ class TaskViewSet(BaseModelViewSet):
         tasks = self.get_queryset()
         if request.user.role in ('Sales',):
             tasks = tasks.filter(assigned_to=request.user)
-        tasks = tasks.filter(status__in=['To Do', 'In Progress'])
+        tasks = tasks.open()
         serializer = self.get_serializer(tasks, many=True)
         return Response(serializer.data)
 
@@ -7553,7 +7552,7 @@ class DashboardViewSet(viewsets.ViewSet):
             'opportunities_value': opportunities.aggregate(Sum('expected_value'))['expected_value__sum'] or 0,
             'active_contracts': contracts.count(),
             'contracts_value': contracts.aggregate(Sum('value'))['value__sum'] or 0,
-            'overdue_tasks': sum(1 for task in tasks if task.is_overdue),
+            'overdue_tasks': tasks.overdue().count(),
             'overdue_invoices': sum(1 for invoice in invoices if invoice.is_overdue),
             'pending_renewals': sum(1 for contract in contracts if contract.is_expiring_soon),
         }
@@ -7798,7 +7797,8 @@ class ActionCenterViewSet(viewsets.ViewSet):
     def list(self, request):
         user = request.user
         now = timezone.now()
-        today = now.date()
+        # The business day in Bangkok, not the UTC date.
+        today = timezone.localdate()
         tomorrow = today + timedelta(days=1)
         day_after_tomorrow = today + timedelta(days=2)
         week_end = today + timedelta(days=7)
@@ -7813,9 +7813,9 @@ class ActionCenterViewSet(viewsets.ViewSet):
         if user.role == 'Sales':
             task_qs = task_qs.filter(assigned_to=user)
 
-        # --- OVERDUE TASKS ---
-        for t in task_qs.filter(status__in=['To Do', 'In Progress'], due_date__lt=now):
-            days = (today - t.due_date.date()).days
+        # --- OVERDUE TASKS (the shared rule: open, due on an earlier Bangkok day) ---
+        for t in task_qs.overdue(today):
+            days = (today - timezone.localdate(t.due_date)).days
             contact = t.related_contact or self._get_primary_contact(t.company)
             items.append({
                 'id': str(t.id), 'type': 'task', 'urgency': 'overdue',
@@ -7877,10 +7877,10 @@ class ActionCenterViewSet(viewsets.ViewSet):
                 'meta': {'stage': opp.stage, 'owner': opp.owner.get_full_name() if opp.owner else None},
             })
 
-        # --- TASKS DUE TODAY & TOMORROW ---
-        tomorrow_end = now.replace(hour=23, minute=59, second=59) + timedelta(days=1)
-        for t in task_qs.filter(status__in=['To Do', 'In Progress'], due_date__gte=now, due_date__lte=tomorrow_end):
-            is_today = t.due_date.date() == today
+        # --- TASKS DUE TODAY & TOMORROW (Bangkok days, including earlier today) ---
+        for t in task_qs.open().filter(due_date__gte=start_of_local_day(today),
+                                       due_date__lt=start_of_local_day(today + timedelta(days=2))):
+            is_today = timezone.localdate(t.due_date) == today
             contact = t.related_contact or self._get_primary_contact(t.company)
             items.append({
                 'id': str(t.id), 'type': 'task', 'urgency': 'today',
@@ -7939,10 +7939,9 @@ class ActionCenterViewSet(viewsets.ViewSet):
             })
 
         # --- TASKS DUE THIS WEEK (not today/tomorrow) ---
-        week_start = now + timedelta(days=2)
-        week_end_dt = now.replace(hour=23, minute=59, second=59) + timedelta(days=7)
-        for t in task_qs.filter(status__in=['To Do', 'In Progress'], due_date__gt=tomorrow_end, due_date__lte=week_end_dt):
-            days_until = (t.due_date.date() - today).days
+        for t in task_qs.open().filter(due_date__gte=start_of_local_day(today + timedelta(days=2)),
+                                       due_date__lt=start_of_local_day(today + timedelta(days=8))):
+            days_until = (timezone.localdate(t.due_date) - today).days
             contact = t.related_contact or self._get_primary_contact(t.company)
             items.append({
                 'id': str(t.id), 'type': 'task', 'urgency': 'upcoming',

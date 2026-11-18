@@ -53,6 +53,7 @@ import BalanceSheet from './pages/BalanceSheet';
 import RevenueAccrual from './pages/RevenueAccrual';
 import ContractTemplates from './pages/ContractTemplates';
 import ActionCenter from './pages/ActionCenter';
+import NeedsFixing from './pages/NeedsFixing';
 import ProspectSequences from './pages/ProspectSequences';
 import AIEmailDrafts from './pages/AIEmailDrafts';
 // import LoadingSkeleton from './components/LoadingSkeleton';
@@ -305,6 +306,7 @@ function App() {
 
         {/* New navigation routes */}
         <Route path="/today" element={<ActionCenter />} />
+        <Route path="/needs-fixing/:key?" element={<NeedsFixing />} />
         <Route path="/quick-actions" element={<Navigate to="/today" replace />} />
         <Route
           path="/contacts"
