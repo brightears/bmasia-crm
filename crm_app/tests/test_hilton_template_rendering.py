@@ -201,9 +201,15 @@ def test_hilton_dynamic_values_are_escaped_without_changing_template_markup():
         '<b>HOAN KIEM T&amp;T CO., LTD</b> '
         '(trading as Hilton Garden Inn A&amp;B)'
     )
+    # Escaping is the default; plain substitution must be requested.
     assert ContractViewSet()._substitute_template_variables(
         contract.preamble_template.content,
         contract,
+    ) == rendered
+    assert ContractViewSet()._substitute_template_variables(
+        contract.preamble_template.content,
+        contract,
+        escape_for_paragraph=False,
     ) == (
         '<b>HOAN KIEM T&T CO., LTD</b> '
         '(trading as Hilton Garden Inn A&B)'

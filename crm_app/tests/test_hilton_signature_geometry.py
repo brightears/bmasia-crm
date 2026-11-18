@@ -244,7 +244,9 @@ def test_hilton_per_contract_execution_body_retains_contact_title_when_source_al
     view = ContractViewSet()
     view.request = SimpleNamespace(user=SimpleNamespace(is_authenticated=False))
 
-    rendered = view._substitute_template_variables(contract.preamble_custom, contract)
+    rendered = view._substitute_template_variables(
+        contract.preamble_custom, contract, escape_for_paragraph=False,
+    )
     response = view._generate_principal_terms_pdf(contract)
 
     assert 'Operations Administrator, Food & Beverage Department' in rendered
