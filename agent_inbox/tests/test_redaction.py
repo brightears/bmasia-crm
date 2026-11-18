@@ -24,7 +24,7 @@ def captured(agent, person, company):
     job = make_user('capture-job')
     activity, _ = record_activity(job, activity_body(
         company, source_ref=f'<{MESSAGE_ID}>', body=MAIL_TEXT, summary='Reception number changed',
-        source_url='https://mail.example.com/m/1'), via='job')
+        source_url='https://mail.google.com/mail/u/0/#inbox/m-1'), via='job')
     open_one, _ = create_proposal(agent, {
         'kind': 'field_update', 'target_collection': 'company', 'target_id': str(company.pk),
         'patch': {'phone': '+66 2 111 2222'}, 'evidence_quote': 'our new reception number',

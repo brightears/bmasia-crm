@@ -18,7 +18,7 @@ def post(client, body):
 def test_create_returns_201_and_stores_every_field(agent, company, contact, contract):
     response = post(token_client(agent), activity_body(
         company, contact_id=str(contact.pk), contract_id=str(contract.pk),
-        source_url='https://mail.example.com/thread/1',
+        source_url='https://mail.google.com/mail/u/0/#inbox/thread-1',
     ))
     assert response.status_code == 201, response.content
     data = response.json()

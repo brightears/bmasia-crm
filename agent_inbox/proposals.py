@@ -380,7 +380,7 @@ def _evidence(body, user, proposer_kind, company):
         if ref and is_redacted_source(ref):
             raise ServiceError(409, 'source_redacted',
                                'This source was removed under the mail-capture rules and cannot be cited')
-        url = url_field(body, 'evidence_source_url', SOURCE_URL_MAX)
+        url = url_field(body, 'evidence_source_url', SOURCE_URL_MAX, system)
         occurred_at = (past_datetime(body['evidence_occurred_at'], 'evidence_occurred_at')
                        if body.get('evidence_occurred_at') not in (None, '') else None)
     verified = False
