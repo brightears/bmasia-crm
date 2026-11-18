@@ -10,6 +10,7 @@ from .rene_views import ReneTokenCapabilitiesView
 from .cara_api import CaraCapabilitiesView, CaraCustomerCareView
 from .cara_care_writes import CaraCareSummaryView, CaraTouchCreateView
 from .timeline_views import CompanyTimelineView
+from .renewals_views import RenewalsView
 from .data_quality_views import DataQualityCheckView, DataQualitySummaryView
 
 # Create a router and register our viewsets
@@ -126,6 +127,8 @@ urlpatterns = [
         CompanyTimelineView.as_view(),
         name='company-timeline',
     ),
+    # Renewals page (read-only); see renewals_views.py.
+    path('v1/renewals/', RenewalsView.as_view(), name='renewals'),
     # Read-only data-quality checks (Today's "Needs fixing" card and page).
     path('v1/data-quality/', DataQualitySummaryView.as_view(), name='data-quality'),
     path('v1/data-quality/<slug:key>/', DataQualityCheckView.as_view(), name='data-quality-check'),
