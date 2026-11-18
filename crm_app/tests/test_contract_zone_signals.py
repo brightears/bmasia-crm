@@ -72,7 +72,7 @@ class TestContractTerminationSignal:
             end_date=None
         )
 
-        today = timezone.now().date()
+        today = timezone.localdate()  # the Bangkok business day, not the UTC date
 
         # Terminate the contract
         contract.status = 'Cancelled'
@@ -100,7 +100,7 @@ class TestContractTerminationSignal:
             contract=contract,
             zone=inactive_zone,
             is_active=False,
-            end_date=date.today() - timedelta(days=30)
+            end_date=timezone.localdate() - timedelta(days=30)
         )
 
         # Terminate the contract
@@ -119,7 +119,7 @@ class TestContractTerminationSignal:
         inactive_link.refresh_from_db()
         assert inactive_zone.status == 'offline'  # Unchanged
         assert inactive_link.is_active is False  # Already was False
-        assert inactive_link.end_date == date.today() - timedelta(days=30)  # Unchanged
+        assert inactive_link.end_date == timezone.localdate() - timedelta(days=30)  # Unchanged
 
     def test_signal_does_not_affect_already_terminated(self):
         """Test signal does not affect already terminated zones"""
@@ -231,7 +231,7 @@ class TestContractTerminationSignal:
             assert zone.status == 'cancelled'
 
         # All links should be inactive with end_date
-        today = timezone.now().date()
+        today = timezone.localdate()  # the Bangkok business day, not the UTC date
         for link in links:
             link.refresh_from_db()
             assert link.is_active is False
@@ -252,9 +252,9 @@ class TestContractTerminationSignal:
         # Contract 2 with same zones (renewal scenario)
         contract2 = ContractFactory(company=company, status='Active')
         link2_1 = ContractZoneFactory(contract=contract2, zone=zone1, is_active=True,
-                                       start_date=date.today() + timedelta(days=365))
+                                       start_date=timezone.localdate() + timedelta(days=365))
         link2_2 = ContractZoneFactory(contract=contract2, zone=zone2, is_active=True,
-                                       start_date=date.today() + timedelta(days=365))
+                                       start_date=timezone.localdate() + timedelta(days=365))
 
         # Terminate contract1 only
         contract1.status = 'Cancelled'

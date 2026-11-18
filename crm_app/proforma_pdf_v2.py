@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import date
 from decimal import Decimal
 from xml.sax.saxutils import escape
 
@@ -10,6 +9,7 @@ from reportlab.platypus import KeepTogether, Spacer
 
 from crm_app.pdf_thai import ThaiAwareParagraph as Paragraph
 
+from crm_app.dates import business_today
 from crm_app.commercial_pdf import (
     CONTENT_WIDTH,
     PRODUCT_COLUMN_WIDTH,
@@ -77,7 +77,7 @@ def build_proforma_pdf_v2(
     preview=False,
 ):
     """Render an A4 proforma from a contract without accounting-side effects."""
-    issue_date = issue_date or date.today()
+    issue_date = issue_date or business_today()
     company = contract.company
     currency = getattr(contract, "currency", "USD") or "USD"
     contract_number = contract.contract_number or str(contract.id)[:8]

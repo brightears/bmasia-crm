@@ -35,6 +35,8 @@ from typing import Dict, List, Optional, Tuple
 from django.db import transaction
 from django.db.models import Sum, Q, Count
 
+from crm_app.dates import business_today
+
 logger = logging.getLogger(__name__)
 
 # Product classification keywords (reuses pattern from quickbooks_export_service.py)
@@ -808,7 +810,7 @@ class RevenueRecognitionService:
         schedule.save()
 
         # Remove entries from future quarters
-        today = date.today()
+        today = business_today()
         current_quarter = (today.month - 1) // 3 + 1
         deleted_count = self.Entry.objects.filter(
             schedule=schedule,

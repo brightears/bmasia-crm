@@ -7,7 +7,7 @@ describe('menu by role (display only)', () => {
   const all = paths('Admin');
 
   it('shows everything to Admin and to unknown or missing roles', () => {
-    expect(all.length).toBe(30);
+    expect(all.length).toBe(31);
     expect(paths(undefined)).toEqual(all);
     expect(paths('Someone new')).toEqual(all);
   });
