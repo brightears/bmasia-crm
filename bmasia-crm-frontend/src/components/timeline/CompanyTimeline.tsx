@@ -311,10 +311,13 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
     [typesKey, from, to, actor, search, recordType, recordId, pageSize]
   );
 
-  // Keep the filters in the address (replacing the entry, so Back is not flooded).
+  // Keep the filters in the address (replacing the entry, so Back is not flooded). Only a change of
+  // the filters writes: moving to another page must not carry this feed's filters onto it.
+  const setParams = useRef(setSearchParams);
+  setParams.current = setSearchParams;
   useEffect(() => {
     if (!urlState) return;
-    setSearchParams(
+    setParams.current(
       (prev) => {
         const next = new URLSearchParams(prev);
         const values: Record<string, string | undefined> = {
@@ -329,7 +332,7 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
       },
       { replace: true }
     );
-  }, [urlState, setSearchParams, typesKey, search, from, to, actor]);
+  }, [urlState, typesKey, search, from, to, actor]);
 
   useEffect(() => {
     const id = ++request.current;
@@ -902,6 +905,14 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
   );
 };
 
-export default CompanyTimeline;
+/**
+ * A new company or record starts a new feed: its filters come from the address it opens
+ * with, never from the one shown before (the page component itself may stay mounted).
+ */
+const CompanyTimelineFor: React.FC<CompanyTimelineProps> = (props) => (
+  <CompanyTimeline key={`${props.companyId}|${props.record?.type || ''}|${props.record?.id || ''}`} {...props} />
+);
+
+export default CompanyTimelineFor;
 
 export type { TimelineRecordType };

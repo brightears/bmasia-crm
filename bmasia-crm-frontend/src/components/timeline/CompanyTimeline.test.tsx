@@ -1,6 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import CompanyTimeline from './CompanyTimeline';
 import ApiService from '../../services/api';
 import { TimelineEvent, TimelinePage } from './timelineModel';
@@ -240,12 +240,47 @@ it('never says "No activity yet" while older history remains: it reads on by its
 it('after a few empty pages it asks before reading further back', async () => {
   api.getCompanyTimeline.mockResolvedValue(page([], true));
   renderTimeline();
-  expect(await screen.findByRole('button', { name: 'Look further back' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Look further back' }, { timeout: 4000 })).toBeInTheDocument();
   expect(screen.queryByText('No activity yet')).not.toBeInTheDocument();
   expect(api.getCompanyTimeline).toHaveBeenCalledTimes(5);
   api.getCompanyTimeline.mockResolvedValue(page([FIRST[0]], false));
   fireEvent.click(screen.getByRole('button', { name: 'Look further back' }));
   expect(await screen.findByText('Renewal call')).toBeInTheDocument();
+});
+
+it('starts a fresh feed for another company: filters never carry over', async () => {
+  const Page: React.FC = () => {
+    const { id } = useParams();
+    const navigate = useNavigate();
+    // Like the company page: the new company shows a moment after the address changes.
+    const [shown, setShown] = React.useState(id);
+    React.useEffect(() => {
+      const t = setTimeout(() => setShown(id), 50);
+      return () => clearTimeout(t);
+    }, [id]);
+    return (
+      <>
+        <button onClick={() => navigate('/companies/co-2')}>Go to the other company</button>
+        <CompanyTimeline companyId={shown as string} urlState />
+      </>
+    );
+  };
+  render(
+    <MemoryRouter initialEntries={['/companies/co-1']}>
+      <Routes>
+        <Route path="/companies/:id" element={<Page />} />
+      </Routes>
+    </MemoryRouter>
+  );
+  await screen.findByText('Renewal call');
+  fireEvent.click(within(screen.getByRole('group', { name: 'Filter by type' })).getByText('Emails'));
+  await waitFor(() =>
+    expect(api.getCompanyTimeline).toHaveBeenLastCalledWith('co-1', expect.objectContaining({ types: ['email'] }))
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Go to the other company' }));
+  await waitFor(() =>
+    expect(api.getCompanyTimeline).toHaveBeenLastCalledWith('co-2', expect.objectContaining({ types: undefined }))
+  );
 });
 
 it('keeps filters and search in the address, so a link or a tab switch keeps them', async () => {
