@@ -14,8 +14,8 @@ Where none of this has been loaded (detail pages, updates, other callers) the
 serializers and properties keep querying exactly as before, so a record that was just
 changed is never served from a stale prefetch.
 """
-from django.db.models import Count, IntegerField, OuterRef, Prefetch, Subquery, Sum
-from django.db.models.functions import Coalesce
+from django.db.models import Count, F, IntegerField, OuterRef, Prefetch, Subquery, Sum, Window
+from django.db.models.functions import Coalesce, DenseRank
 
 
 def count_of(model, fk, **filters):
@@ -104,6 +104,10 @@ def company_list_queryset(queryset):
     zones = Zone.objects.select_related('device').prefetch_related(zone_links_prefetch())
     active_contracts = Contract.objects.filter(is_active=True).only(
         'id', 'company_id', 'contract_type', 'currency', 'value', 'start_date',
+    ).annotate(
+        # The rank of the contract's currency in the database's own ORDER BY currency
+        # (its collation, not Python's code-point order), for active_contract_value_by_currency.
+        _currency_order=Window(expression=DenseRank(), order_by=F('currency').asc()),
     )
     return (
         queryset

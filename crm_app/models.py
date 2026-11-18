@@ -325,19 +325,21 @@ class Company(TimestampedModel):
         Same contracts as total_contract_value (is_active=True). Returns a list sorted by
         currency, e.g. [{'currency': 'THB', 'total': '108000.00'}, {'currency': 'USD', 'total': '2160.00'}].
         The company list prefetches the active contracts (services/list_querysets.py); they
-        are grouped and sorted here the way the query below groups and sorts them.
+        are grouped here the way the query below groups them, and sorted by the rank the
+        database gave each currency in ORDER BY currency (its collation), not by Python.
         """
         prefetched = getattr(self, '_prefetched_active_contracts', None)
         if prefetched is not None:
-            totals = {}
+            totals, rank = {}, {}
             for contract in prefetched:
+                rank[contract.currency] = contract._currency_order
                 if contract.value is not None:  # SUM skips NULL
                     totals[contract.currency] = totals.get(contract.currency, 0) + contract.value
                 else:
                     totals.setdefault(contract.currency, 0)
             return [
                 {'currency': currency or 'USD', 'total': f"{totals[currency]:.2f}"}
-                for currency in sorted(totals)
+                for currency in sorted(totals, key=rank.__getitem__)
             ]
         rows = (
             self.contracts.filter(is_active=True)
