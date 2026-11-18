@@ -31,6 +31,7 @@ import {
   ArticleOutlined,
   CalendarMonthOutlined,
   FactCheckOutlined,
+  AutorenewOutlined,
 } from '@mui/icons-material';
 
 export interface NavItem {
@@ -82,6 +83,7 @@ export const buildNavGroups = (
       { text: 'Opportunities', icon: <TrendingUp />, path: '/opportunities' },
       { text: 'Quotes', icon: <RequestQuoteOutlined />, path: '/quotes' },
       { text: 'Contracts', icon: <HistoryEduOutlined />, path: '/contracts' },
+      { text: 'Renewals', icon: <AutorenewOutlined />, path: '/renewals' },
       { text: 'Tasks', icon: <TaskAltOutlined />, path: '/tasks' },
       {
         text: 'AI email drafts',

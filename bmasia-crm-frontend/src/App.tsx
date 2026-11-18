@@ -15,6 +15,7 @@ import OpportunityDetail from './pages/OpportunityDetail';
 import Tasks from './pages/Tasks';
 import Contracts from './pages/Contracts';
 import ContractDetail from './pages/ContractDetail';
+import Renewals from './pages/Renewals';
 import Invoices from './pages/Invoices';
 import Contacts from './pages/Contacts';
 import Quotes from './pages/Quotes';
@@ -237,6 +238,14 @@ function App() {
           element={
             <ProtectedRoute requiredModule="contracts">
               <ContractDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/renewals"
+          element={
+            <ProtectedRoute requiredModule="contracts">
+              <Renewals />
             </ProtectedRoute>
           }
         />
