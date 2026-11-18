@@ -14,7 +14,7 @@ import pytest
 
 from crm_app.models import ContractTemplate
 from crm_app.tests.test_contract_pdf_stored_text_escaping import (  # noqa: F401
-    BMA_SIGNER_NAME, LEGAL_NAME, ZONE_NAME, _render, agreement,
+    BMA_SIGNER_NAME, LEGAL_NAME, SERVICE_ITEM_DESCRIPTION, SERVICE_ITEM_NAME, ZONE_NAME, _render, agreement,
 )
 
 pytestmark = pytest.mark.django_db
@@ -61,6 +61,8 @@ def test_body_whose_tags_do_not_pair_up_prints_tags_as_text(agreement, override,
     # once, and the zones table and the signature blocks still render.
     assert f'<b>Client:</b> {LEGAL_NAME}' in text
     assert ZONE_NAME in text and BMA_SIGNER_NAME in text
+    # Values the body already holds escaped are not escaped a second time.
+    assert f'Services: {SERVICE_ITEM_NAME}: {SERVICE_ITEM_DESCRIPTION}' in text
     field, record = (('Contract.preamble_custom', agreement.pk) if override
                      else ('ContractTemplate.content', template.pk))
     messages = [r.getMessage() for r in caplog.records]

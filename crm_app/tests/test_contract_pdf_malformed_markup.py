@@ -95,3 +95,15 @@ def test_formatting_that_spans_a_line_break_still_renders(agreement):  # noqa: F
     text = _render(agreement)
     assert 'first line' in text and 'second line' in text
     assert '<strong>' not in text and '<super>' not in text
+
+
+# Upper case, an attribute, an entity and a bare "&": the fallback prints the
+# stored wording itself, not the guarded form of it.
+MALFORMED_WITH_ENTITIES = 'Fee <B class="x">A &amp; B & C'
+
+
+def test_malformed_field_falls_back_from_the_stored_wording(agreement):  # noqa: F811
+    agreement.payment_custom = MALFORMED_WITH_ENTITIES
+    agreement.save()
+    text = _render(agreement)
+    assert 'Fee <B class="x">A &amp; B & C' in text
