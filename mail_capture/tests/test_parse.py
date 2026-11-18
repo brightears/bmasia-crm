@@ -127,7 +127,7 @@ class TestParsedMessage:
         assert p.from_address.display_name == 'Pat Example'
         assert [a.address for a in p.to] == ['sales@ourco.example', 'ops@ourco.example']
         assert p.subject == 'A long subject'
-        assert p.sent_at == datetime(2099, 1, 5, 9, 0, tzinfo=dt_timezone.utc)
+        assert p.claimed_date == datetime(2099, 1, 5, 9, 0, tzinfo=dt_timezone.utc)
 
     def test_missing_message_id_gets_stable_synthetic_key(self):
         headers = [

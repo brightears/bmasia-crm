@@ -10,8 +10,12 @@ from django.conf import settings
 
 DISABLED_FLAG = 'GOOGLE_CAPTURE_ENABLED is off'
 DISABLED_NO_DOMAINS = 'CAPTURE_INTERNAL_DOMAINS is empty'
+DISABLED_BAD_DOMAINS = 'CAPTURE_INTERNAL_DOMAINS holds a public suffix or a freemail domain'
 DISABLED_NO_MAILBOX = 'no mailbox is enabled'
 DISABLED_MAILBOX = 'this mailbox is not enabled'
+
+DEFAULT_RUN_RETENTION_DAYS = 90
+DEFAULT_ACCESS_LOG_RETENTION_DAYS = 365
 
 
 @dataclass(frozen=True)
@@ -43,14 +47,36 @@ def flag_enabled():
     return bool(getattr(settings, 'GOOGLE_CAPTURE_ENABLED', False))
 
 
-def capture_state():
-    """Global switch: the flag must be on and our own domains must be known.
+def _days(name, default):
+    try:
+        value = int(getattr(settings, name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
 
-    Without internal domains every message would look external, so capture
-    refuses to run rather than store internal mail.
-    """
+
+def run_retention_days():
+    return _days('CAPTURE_RUN_RETENTION_DAYS', DEFAULT_RUN_RETENTION_DAYS)
+
+
+def access_log_retention_days():
+    return _days('CAPTURE_ACCESS_LOG_RETENTION_DAYS', DEFAULT_ACCESS_LOG_RETENTION_DAYS)
+
+
+def domains_state():
+    """Our own domains must be known, and none may be a public suffix or a
+    freemail domain (that would make every customer there look internal)."""
+    from .rules import internal_domain_problem
+    domains = internal_domains()
+    if not domains:
+        return CaptureState(False, DISABLED_NO_DOMAINS)
+    if any(internal_domain_problem(d) for d in domains):
+        return CaptureState(False, DISABLED_BAD_DOMAINS)
+    return CaptureState(True)
+
+
+def capture_state():
+    """Global switch: the flag must be on and our own domains must be sound."""
     if not flag_enabled():
         return CaptureState(False, DISABLED_FLAG)
-    if not internal_domains():
-        return CaptureState(False, DISABLED_NO_DOMAINS)
-    return CaptureState(True)
+    return domains_state()
