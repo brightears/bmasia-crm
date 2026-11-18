@@ -645,6 +645,8 @@ def _flowables(source, width, styles, *, cell=False):
         else:
             grouped.append(item)
         index = end
+    if not cell:
+        grouped = _keep_commencement_with_duration(grouped, width)
     # If a signing pair has to move, bring its short closing context with it.
     # A signature-only continuation page has no contractual context. Standard
     # templates end with numbered Contacts; Hilton uses an execution sentence.
@@ -667,6 +669,63 @@ def _flowables(source, width, styles, *, cell=False):
                     grouped[start:position + 1] = [KeepTogether(closing)]
                 break
     return grouped
+
+
+_NUMBERED_CLAUSE = re.compile(r'\d+\.\s+')
+_COMMENCEMENT_CLAUSE = re.compile(r'\d+\.\s*Commencement Date\b', re.I)
+_DURATION_CLAUSE = re.compile(r'\d+\.\s*Duration\b', re.I)
+# Points. Same bound as a short service-package list: small enough that moving
+# the joint to the next page never leaves a large gap behind it.
+_COMMENCEMENT_JOINT_MAX_HEIGHT = 200
+
+
+def _keep_commencement_with_duration(items, width):
+    """Never leave the Commencement Date clause alone at the foot of a page.
+
+    18 Nov 2026, DRAFT-0078 (defect sd-e915228b9697d948): clause 3 (one
+    line) ended page 1 and clause 4 (Duration, with its "[under: duration]"
+    renewal wording) began page 2. Keep the commencement clause, including
+    wording placed under it, with the duration line and the first paragraph
+    under that line. Later duration paragraphs still flow normally. A long
+    commencement block keeps only its last paragraph in the joint. Only page
+    flow changes; no text is added, removed or reordered.
+    """
+    def text(item):
+        return item.getPlainText().strip() if isinstance(item, Paragraph) else ''
+
+    def height(group):
+        return sum(p.wrap(width, 10000)[1] + p.getSpaceBefore() + p.getSpaceAfter() for p in group)
+
+    output, index = [], 0
+    while index < len(items):
+        item = items[index]
+        duration = None
+        if _COMMENCEMENT_CLAUSE.match(text(item)):
+            # Wording under clause 3 (and gaps) up to the next numbered clause.
+            duration = index + 1
+            while (duration < len(items) and isinstance(items[duration], (Paragraph, Spacer))
+                   and not _NUMBERED_CLAUSE.match(text(items[duration]))):
+                duration += 1
+            if duration >= len(items) or not _DURATION_CLAUSE.match(text(items[duration])):
+                duration = None
+        if duration is None:
+            output.append(item)
+            index += 1
+            continue
+        end = duration + 1
+        group = getattr(items[duration], '_bmasia_explicit_group', None)
+        if (end < len(items) and group is not None and
+                getattr(items[end], '_bmasia_explicit_group', None) is group and
+                not _NUMBERED_CLAUSE.match(text(items[end]))):
+            end += 1
+        start = index
+        if height(items[start:end]) > _COMMENCEMENT_JOINT_MAX_HEIGHT:
+            start = max(position for position in range(index, duration)
+                        if isinstance(items[position], Paragraph))
+        output.extend(items[index:start])
+        output.append(KeepTogether(items[start:end]))
+        index = end
+    return output
 
 
 def build_contract_pdf(contract, body, *, title, logo_path=None, preview=False):
