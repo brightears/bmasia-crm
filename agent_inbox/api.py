@@ -117,7 +117,7 @@ class ActivityViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets
 
 
 class ChangeProposalFilter(django_filters.FilterSet):
-    status = django_filters.MultipleChoiceFilter(choices=PROPOSAL_STATUS_CHOICES)
+    status = django_filters.MultipleChoiceFilter(choices=PROPOSAL_STATUS_CHOICES, method='filter_status')
     kind = django_filters.MultipleChoiceFilter(choices=PROPOSAL_KIND_CHOICES)
     target_collection = django_filters.ChoiceFilter(choices=PROPOSAL_TARGET_CHOICES)
     target_id = django_filters.CharFilter()
@@ -134,6 +134,10 @@ class ChangeProposalFilter(django_filters.FilterSet):
     class Meta:
         model = ChangeProposal
         fields = []
+
+    def filter_status(self, queryset, name, value):
+        # Read-only: an open proposal past its expiry counts as expired here.
+        return proposal_service.with_effective_status(queryset, value) if value else queryset
 
 
 class ChangeProposalViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
@@ -164,7 +168,6 @@ class ChangeProposalViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, vi
         return context
 
     def list(self, request, *args, **kwargs):
-        proposal_service.expire_due()
         queryset = self.filter_queryset(self.get_queryset())
         page = self.paginate_queryset(queryset)
         rows = list(page if page is not None else queryset)
@@ -199,7 +202,11 @@ class ChangeProposalViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, vi
             proposal, reply = proposal_service.accept(request, pk, _body(request), with_edits=with_edits)
         except ServiceError as exc:
             return _error(exc)
-        return Response({**self.get_serializer(proposal).data, 'apply_result': reply})
+        data = {**self.get_serializer(proposal).data, 'apply_result': reply}
+        if proposal.kind == 'new_contact':
+            data['created_contact_id'] = proposal.applied_record_id
+            data['apply_note'] = proposal_service.NEW_CONTACT_INACTIVE_NOTE
+        return Response(data)
 
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):

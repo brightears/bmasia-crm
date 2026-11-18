@@ -113,11 +113,35 @@ def _iso(value):
 
 
 def expire_due():
-    """Mark open proposals past their expiry as expired. Returns the number changed."""
+    """Mark open proposals past their expiry as expired. Returns the number changed.
+
+    Run on writes (a new proposal) and by ``manage.py expire_change_proposals``,
+    never on a read: reads show a due proposal as expired (``effective_status``).
+    """
     now = timezone.now()
     return ChangeProposal.objects.filter(status=OPEN_STATUS, expires_at__lte=now).update(
         status='expired', updated_at=now,
     )
+
+
+def effective_status(proposal):
+    """The status a reader sees: an open proposal past its expiry reads as expired."""
+    if proposal.status == OPEN_STATUS and proposal.expires_at and proposal.expires_at <= timezone.now():
+        return 'expired'
+    return proposal.status
+
+
+def with_effective_status(queryset, statuses):
+    """Filter by the statuses a reader sees, without writing."""
+    from django.db.models import Q
+
+    now = timezone.now()
+    condition = Q(status__in=[s for s in statuses if s not in ('proposed', 'expired')])
+    if 'proposed' in statuses:
+        condition |= Q(status=OPEN_STATUS, expires_at__gt=now)
+    if 'expired' in statuses:
+        condition |= Q(status='expired') | Q(status=OPEN_STATUS, expires_at__lte=now)
+    return queryset.filter(condition)
 
 
 # ------------------------------------------------------------------ what the reviewer saw
@@ -751,13 +775,23 @@ def _keep_error(proposal, error):
     return _Refusal(error)
 
 
+NEW_CONTACT_INACTIVE_NOTE = (
+    'Contact created inactive: activate it on the contact page once you have checked it. '
+    'Until then it receives no email.'
+)
+
+
 def _new_contact_data(company_id, applied):
-    """A contact created from a proposal receives no automated or document email and is not primary."""
+    """A contact created from a proposal is inactive, receives no email and is not primary.
+
+    Every default-recipient choice in the CRM picks active contacts only, so nothing
+    is sent to it until a person has checked it and activated it.
+    """
     from crm_app.serializers import ContactSerializer
 
     flags = {name: False for name, field in ContactSerializer().fields.items()
              if name.startswith('receives_') and not field.read_only}
-    return {'company': str(company_id), **applied, **flags, 'is_primary': False}
+    return {'company': str(company_id), **applied, **flags, 'is_primary': False, 'is_active': False}
 
 
 def _apply(request, proposal, applied):
@@ -828,7 +862,7 @@ def _apply(request, proposal, applied):
     if proposal.kind == 'new_contact':
         # Model fields the serializer does not expose follow the same rule.
         flags = {field.name: False for field in Contact._meta.concrete_fields if field.name.startswith('receives_')}
-        Contact.objects.filter(pk=record_id).update(**flags, is_primary=False)
+        Contact.objects.filter(pk=record_id).update(**flags, is_primary=False, is_active=False)
     audit = _tag_audit(model.__name__, record_id, before, proposal, request)
     return record_id, audit, detail
 
