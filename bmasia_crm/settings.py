@@ -348,6 +348,18 @@ CAPTURE_EXTRA_FREEMAIL_DOMAINS = config('CAPTURE_EXTRA_FREEMAIL_DOMAINS', defaul
 # How long capture keeps its run rows and its mailbox access log (days).
 CAPTURE_RUN_RETENTION_DAYS = config('CAPTURE_RUN_RETENTION_DAYS', default=90, cast=int)
 CAPTURE_ACCESS_LOG_RETENTION_DAYS = config('CAPTURE_ACCESS_LOG_RETENTION_DAYS', default=365, cast=int)
+# Gmail credentials for capture (mail_capture/credentials.py). Mode off (the
+# default) makes no credential. keyless: workload identity federation signs as
+# GOOGLE_CAPTURE_SERVICE_ACCOUNT (no key stored). key_file: a service-account
+# key at GOOGLE_CAPTURE_KEY_FILE (a Render secret file path; never the key
+# itself in an environment variable). GOOGLE_CAPTURE_SCOPE is metadata
+# (headers only) or readonly (bodies). GOOGLE_CAPTURE_NEVER_MAILBOXES is a hard
+# deny-list that overrides the mailbox table.
+GOOGLE_CAPTURE_CREDENTIALS_MODE = config('GOOGLE_CAPTURE_CREDENTIALS_MODE', default='off')
+GOOGLE_CAPTURE_SERVICE_ACCOUNT = config('GOOGLE_CAPTURE_SERVICE_ACCOUNT', default='')
+GOOGLE_CAPTURE_KEY_FILE = config('GOOGLE_CAPTURE_KEY_FILE', default='')
+GOOGLE_CAPTURE_SCOPE = config('GOOGLE_CAPTURE_SCOPE', default='metadata')
+GOOGLE_CAPTURE_NEVER_MAILBOXES = config('GOOGLE_CAPTURE_NEVER_MAILBOXES', default='', cast=Csv())
 # Activity log and change-proposal review queue (agent_inbox). Both write
 # surfaces are off by default; while off they answer "not enabled" and the
 # read endpoints still work. Accepting a proposal is always a person's click.
