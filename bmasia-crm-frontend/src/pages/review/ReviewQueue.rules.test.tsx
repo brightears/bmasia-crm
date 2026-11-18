@@ -570,3 +570,224 @@ describe('Decided tab', () => {
     expect(screen.getByRole('button', { name: /Load 25 more \(38 not loaded\)/ })).toBeInTheDocument();
   });
 });
+
+// ------------------------------------------------------------------ confirmation round
+
+describe('ticks and focus', () => {
+  it('the source tick belongs to the version shown and resets on refresh', async () => {
+    const p = makeProposal({ seen_version: 'v1', evidence: 'verified_agent_recorded' });
+    withOpen([p]);
+    api.reject.mockRejectedValueOnce(
+      new ReviewApiError(409, 'stale_view', 'stale', {
+        code: 'stale_view',
+        proposal: {
+          id: p.id,
+          seen_version: 'v2',
+          status: 'proposed',
+          patch: p.patch,
+          current_values: p.current_values,
+          expected_version: 'z',
+          target_changed_at: null,
+        },
+      }),
+    );
+    api.get.mockResolvedValue({ ...p, seen_version: 'v2' });
+    renderPage();
+    const card = await findCard(p);
+    fireEvent.click(card.getByLabelText('I checked this against the source myself'));
+    expect(card.getByRole('button', { name: 'Accept' })).toBeEnabled();
+    fireEvent.click(card.getByRole('button', { name: 'Reject' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Wrong record' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reject' }));
+    await waitFor(() => expect(api.get).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(within(cardEl(p)).getByLabelText('I checked this against the source myself')).not.toBeChecked(),
+    );
+    await waitFor(() => expect(within(cardEl(p)).getByRole('button', { name: 'Accept' })).toBeDisabled());
+  });
+
+  it('a does nothing unless focus is inside a card', async () => {
+    const p = makeProposal();
+    withOpen([p]);
+    renderPage();
+    await focusAndArm(p);
+    // Focus moves to the company heading link above the card (outside it).
+    const outside = screen.getAllByRole('link', { name: /Open company/ })[0];
+    expect(cardEl(p).contains(outside)).toBe(false);
+    act(() => outside.focus());
+    key('a');
+    expect(api.accept).not.toHaveBeenCalled();
+    // r, x and e do not depend on the dwell, so they pin the focus rule on its own.
+    key('r');
+    key('x');
+    key('e');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-bar')).not.toBeInTheDocument();
+    expect(within(cardEl(p)).queryByLabelText('Phone')).not.toBeInTheDocument();
+  });
+});
+
+describe('after accepting a new contact (later backend)', () => {
+  it('says the contact was created inactive and links to where it can be activated', async () => {
+    const p = makeProposal({
+      kind: 'new_contact',
+      target_collection: 'contact',
+      target_id: '',
+      evidence: 'verified_captured',
+      patch: { name: 'Dana Example', email: 'dana@example.com' },
+      current_values: {},
+    });
+    withOpen([p], { ...settingsOn, you_can_review: true });
+    api.accept.mockResolvedValue({
+      ...p,
+      status: 'accepted',
+      applied_patch: p.patch,
+      created_contact_id: 'k-new',
+      apply_note: 'Contact created inactive.',
+    });
+    renderPage();
+    const card = await findCard(p);
+    expect(card.getByText(/It is created inactive/)).toBeInTheDocument();
+    fireEvent.click(card.getByRole('button', { name: 'Accept' }));
+    const result = await screen.findByTestId('proposal-result');
+    expect(result).toHaveTextContent(
+      'Contact created, inactive. Activate it on the contact page once you have checked it.',
+    );
+    expect(within(result).getByRole('link', { name: /Open company contacts/ })).toHaveAttribute(
+      'href',
+      `/companies/${p.company_id}`,
+    );
+  });
+
+  it('keeps today’s text without those fields', async () => {
+    const p = makeProposal({
+      kind: 'new_contact',
+      target_collection: 'contact',
+      target_id: '',
+      patch: { name: 'Dana Example', email: 'd@example.com' },
+      current_values: {},
+    });
+    withOpen([p]);
+    api.accept.mockResolvedValue({ ...p, status: 'accepted', applied_patch: p.patch });
+    renderPage();
+    fireEvent.click((await findCard(p)).getByRole('button', { name: 'Accept' }));
+    expect(await screen.findByTestId('proposal-result')).toHaveTextContent('Accepted: contact “Dana Example” created');
+  });
+});
+
+describe('expiry visibility', () => {
+  it('says how many expire within 7 days when not everything is loaded, and switches the order', async () => {
+    const soon = new Date(Date.now() + 2 * 24 * 3600 * 1000).toISOString();
+    const later = new Date(Date.now() + 20 * 24 * 3600 * 1000).toISOString();
+    const rows = [makeProposal()];
+    api.getSettings.mockResolvedValue(settingsOn);
+    api.listOpen.mockImplementation(async (_page, sort) =>
+      sort === 'expiring'
+        ? page(
+            [
+              makeProposal({ expires_at: soon }),
+              makeProposal({ expires_at: soon }),
+              makeProposal({ expires_at: later }),
+            ],
+            900,
+          )
+        : page(rows, 900),
+    );
+    renderPage();
+    const line = await screen.findByTestId('expiring-soon');
+    expect(line).toHaveTextContent('2 open suggestions expire within 7 days');
+    fireEvent.click(within(line).getByRole('button', { name: 'Show expiring soonest first' }));
+    await waitFor(() => expect(api.listOpen).toHaveBeenCalledWith(1, 'expiring'));
+    await waitFor(() => expect(screen.queryByTestId('expiring-soon')).not.toBeInTheDocument());
+  });
+});
+
+describe('failed look-ups are said out loud', () => {
+  it('a contact that could not be checked needs its own tick before Accept', async () => {
+    const p = makeProposal({
+      target_collection: 'contact',
+      target_id: 'k-1',
+      patch: { title: 'Owner' },
+      current_values: { title: 'GM' },
+    });
+    withOpen([p]);
+    api.getContact.mockRejectedValue(new ReviewApiError(500, undefined, 'down'));
+    renderPage();
+    const card = await findCard(p);
+    expect(await card.findByTestId('contact-unchecked')).toHaveTextContent(
+      'Could not check whether this is the primary or billing contact',
+    );
+    expect(card.getByRole('button', { name: 'Accept' })).toBeDisabled();
+    fireEvent.click(card.getByLabelText('I have checked this contact myself'));
+    expect(card.getByRole('button', { name: 'Accept' })).toBeEnabled();
+  });
+
+  it('a conflict partner that cannot be read says so, offers Retry, and blocks Accept', async () => {
+    const other = makeProposal({
+      proposer_username: 'other-bot',
+      patch: { phone: '+66 2 999 9999' },
+      evidence_quote: 'the other number is +66 2 999 9999',
+    });
+    const p = makeProposal({
+      conflicts_with: [
+        {
+          id: other.id,
+          proposer_username: 'other-bot',
+          patch: other.patch,
+          evidence_occurred_at: null,
+          created_at: '',
+        },
+      ],
+    });
+    withOpen([p]);
+    api.get.mockRejectedValueOnce(new ReviewApiError(500, undefined, 'down')).mockResolvedValueOnce(other);
+    renderPage('/review?tab=look');
+    const card = await findCard(p);
+    expect(await card.findByText('Could not load the other suggestion’s evidence.')).toBeInTheDocument();
+    expect(card.getByTestId('accept-blocked-reason')).toHaveTextContent(
+      'Could not load the other suggestion’s evidence',
+    );
+    fireEvent.click(card.getByRole('button', { name: 'Retry' }));
+    expect(await card.findByText(other.evidence_quote)).toBeInTheDocument();
+    expect(api.get).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('plain refusals', () => {
+  it('says reviewing is not set up, without the setting name', async () => {
+    const p = makeProposal();
+    withOpen([p], {
+      ...settingsOn,
+      you_can_review: false,
+      reviewing_configured: false,
+      review_refusal: 'Reviewing is not configured on this server: no reviewer is listed in SOME_SETTING_NAME.',
+    });
+    renderPage();
+    const banner = await screen.findByTestId('page-read-only');
+    expect(banner).toHaveTextContent('Reviewing is not set up yet. Ask an administrator.');
+    expect(banner).not.toHaveTextContent('SOME_SETTING_NAME');
+  });
+
+  it('turns a 403 not_a_reviewer into plain words', async () => {
+    const p = makeProposal();
+    withOpen([p]);
+    api.accept.mockRejectedValueOnce(
+      new ReviewApiError(403, 'not_a_reviewer', 'Your account is not on the reviewer list (SOME_SETTING_NAME).'),
+    );
+    renderPage();
+    fireEvent.click((await findCard(p)).getByRole('button', { name: 'Accept' }));
+    const banner = await screen.findByTestId('page-read-only');
+    expect(banner).toHaveTextContent('not on the list of reviewers');
+    expect(banner).not.toHaveTextContent('SOME_SETTING_NAME');
+  });
+
+  it('with the later backend, the caption under "Now" says the values follow the record', async () => {
+    const p = makeProposal();
+    withOpen([p], { ...settingsOn, you_can_review: true });
+    renderPage();
+    expect((await findCard(p)).getByTestId('values-as-of')).toHaveTextContent(
+      'Current values: the server re-reads them whenever the record changes.',
+    );
+  });
+});

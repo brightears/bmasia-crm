@@ -1,6 +1,7 @@
 import {
   CardState,
   cardActions,
+  friendlyRefusal,
   describeLink,
   hasUnusualSpaces,
   mixesDirections,
@@ -329,5 +330,55 @@ describe('text checks', () => {
       expect(info.href).toBeNull();
       expect(info.refused).toMatch(reason as RegExp);
     });
+  });
+});
+
+describe('confirmation round', () => {
+  it('reads "Open in Gmail" only for exactly mail.google.com', () => {
+    expect(describeLink('https://mail.google.com/mail/u/0/')!.label).toBe('Open in Gmail');
+    expect(describeLink('https://accounts.google.com/x')!.label).toBe('Open link');
+    expect(describeLink('https://mail.google.com.other.example/x')!.label).toBe('Open link');
+    expect(describeLink('https://mail.google.com./x')!.label).toBe('Open link');
+  });
+
+  it('a trailing dot does not make "com." the owner', () => {
+    expect(describeLink('https://mail.google.com./x')).toMatchObject({ registrable: 'google.com', prefix: 'mail.' });
+  });
+
+  it('puts refusals in plain words, without setting names', () => {
+    expect(friendlyRefusal('anything', 'review_not_configured')).toBe(
+      'Reviewing is not set up yet. Ask an administrator.',
+    );
+    expect(friendlyRefusal('x', undefined, false)).toBe('Reviewing is not set up yet. Ask an administrator.');
+    expect(friendlyRefusal('Your account is not on the reviewer list (SOME_SETTING_NAME).')).toBe(
+      'Your account is not on the reviewer list.',
+    );
+    expect(friendlyRefusal('A reviewer must be a different person from the proposer.')).toBe(
+      'A reviewer must be a different person from the proposer.',
+    );
+  });
+
+  it('a failed contact look-up or a failed partner blocks accepting until resolved', () => {
+    const base: CardState = {
+      readOnly: null,
+      expired: false,
+      busy: false,
+      decided: false,
+      editing: false,
+      acknowledged: false,
+      conflictChoice: null,
+      partnersShown: true,
+      sourceChecked: false,
+    };
+    const p = makeProposal({ target_collection: 'contact', patch: { title: 'X' } });
+    expect(cardActions(p, { ...base, contactCheck: 'pending' }).accept.reason).toMatch(/Checking whether/);
+    expect(cardActions(p, { ...base, contactCheck: 'failed' }).accept.reason).toMatch(/checked this contact myself/);
+    expect(cardActions(p, { ...base, contactCheck: 'failed', contactChecked: true }).accept.ok).toBe(true);
+    const c = makeProposal({
+      conflicts_with: [{ id: 'o', proposer_username: 'o', patch: {}, evidence_occurred_at: null, created_at: '' }],
+    });
+    expect(cardActions(c, { ...base, partnersShown: false, partnersFailed: true }).accept.reason).toMatch(
+      /Retry first/,
+    );
   });
 });

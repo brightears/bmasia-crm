@@ -134,3 +134,23 @@ describe('switched on', () => {
     expect(api.openCount).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('people who may not review', () => {
+  it('see the entry without a count, and nothing is polled for them', async () => {
+    jest.useFakeTimers();
+    api.getSettings.mockResolvedValue({ ...settingsOn, you_can_review: false });
+    api.openCount.mockResolvedValue(9);
+    render(<Menu />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const text = screen.getByTestId('menu').textContent || '';
+    expect(text).toContain('/review');
+    expect(text).not.toContain('/review:');
+    await act(async () => {
+      jest.advanceTimersByTime(5 * 60_000);
+    });
+    expect(api.openCount).not.toHaveBeenCalled();
+  });
+});
