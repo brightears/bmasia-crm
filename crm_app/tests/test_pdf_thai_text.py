@@ -133,7 +133,8 @@ def test_mixed_line_switches_font_per_run_and_keeps_escaped_text_exact():
     assert paragraph.getPlainText() == value
     for frag in paragraph.frags:
         if THAI_CHAR.search(frag.text):
-            assert frag.fontName == pdf_thai.THAI_FONT, frag.text
+            # Sarabun, or a Sarabun variant (the mark of ฝ่าย is ".narrow").
+            assert frag.fontName.split('.')[0] == pdf_thai.THAI_FONT, frag.text
             assert not re.search(r'[A-Za-z&<>]', frag.text), frag.text
         else:
             assert frag.fontName == BODY_FONT, frag.text
@@ -152,17 +153,19 @@ def test_bold_text_uses_the_thai_bold_face():
     assert {frag.fontName for frag in inline.frags} == {BODY_FONT, pdf_thai.THAI_FONT}
 
 
-def test_only_tone_marks_over_an_upper_vowel_or_sara_am_are_lifted():
+def test_only_marks_sarabun_moves_are_redrawn():
+    # Where each mark lands is measured in test_pdf_thai_geometry.py; this
+    # pins which marks are touched at all.
     style = document_styles()['body']
-    paragraph = ThaiAwareParagraph(html_text(THAI_STACKED + ' ป่า กา'), style)
-    assert paragraph.getPlainText() == THAI_STACKED + ' ป่า กา'
+    text = THAI_STACKED + ' ป่า กา ไม่'
+    paragraph = ThaiAwareParagraph(html_text(text), style)
+    assert paragraph.getPlainText() == text
     lifted = [frag.text for frag in paragraph.frags if getattr(frag, 'rise', 0) > 0]
     # ที่ (over sara ii), ชื่อ (over sara uee), น้ำ (before sara am), ปั้น (over mai han-akat).
     assert lifted == ['่', '่', '้', '้']
-    for frag in paragraph.frags:
-        if getattr(frag, 'rise', 0):
-            assert frag.fontSize == pytest.approx(style.fontSize * pdf_thai.STACKED_MARK_SCALE)
-            assert frag.rise == pytest.approx(style.fontSize * pdf_thai.STACKED_MARK_RISE)
+    narrow = [frag.text for frag in paragraph.frags if frag.fontName.endswith('.narrow')]
+    # ปั้น: the vowel, and the tone above it; ป่า: the tone.
+    assert narrow == ['ั', '้', '่']
 
 
 def _wrapped_lines(paragraph, width):
