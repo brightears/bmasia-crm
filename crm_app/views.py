@@ -9448,6 +9448,10 @@ class TicketViewSet(viewsets.ModelViewSet):
         queryset = queryset.select_related(
             'company', 'contact', 'zone', 'assigned_to', 'created_by'
         ).prefetch_related('comments', 'attachments')
+        if self.action == 'list':
+            # Comment authors, uploaders and comment counts once per page (no per-row queries).
+            from crm_app.services.list_querysets import ticket_list_queryset
+            queryset = ticket_list_queryset(queryset)
 
         return queryset
 

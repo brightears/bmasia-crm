@@ -91,6 +91,7 @@ def test_list_and_detail_bodies_are_unchanged():
 QUERY_CASES = {
     'companies': ('/api/v1/companies/', 7, 9),
     'contracts': ('/api/v1/contracts/', 21, 12),
+    'tickets': ('/api/v1/tickets/', 7, 7),
     # Lists that were already flat before the query-count work.
     'contacts': ('/api/v1/contacts/', 21, 2),
     'invoices': ('/api/v1/invoices/', 21, 3),

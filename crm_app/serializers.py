@@ -2079,10 +2079,14 @@ class TicketSerializer(serializers.ModelSerializer):
 
     def get_comments_count(self, obj):
         """Count public comments (exclude internal notes)"""
+        if hasattr(obj, '_list_comments_count'):  # annotated by the ticket list
+            return obj._list_comments_count
         return obj.comments.filter(is_internal=False).count()
 
     def get_internal_notes_count(self, obj):
         """Count internal notes"""
+        if hasattr(obj, '_list_internal_notes_count'):  # annotated by the ticket list
+            return obj._list_internal_notes_count
         return obj.comments.filter(is_internal=True).count()
 
     def create(self, validated_data):

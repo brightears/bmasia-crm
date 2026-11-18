@@ -82,6 +82,16 @@ def contract_list_queryset(queryset):
     )
 
 
+def ticket_list_queryset(queryset):
+    """Tickets for /tickets/ (TicketSerializer), on top of the view's own optimisation."""
+    from crm_app.models import TicketComment
+
+    return queryset.prefetch_related('comments__author', 'attachments__uploaded_by').annotate(
+        _list_comments_count=count_of(TicketComment, 'ticket', is_internal=False),
+        _list_internal_notes_count=count_of(TicketComment, 'ticket', is_internal=True),
+    )
+
+
 def company_list_queryset(queryset):
     """Companies for /companies/ (CompanySerializer)."""
     from crm_app.models import Contact, Contract, Opportunity, Zone
