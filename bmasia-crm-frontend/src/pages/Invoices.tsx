@@ -223,6 +223,24 @@ const Invoices: React.FC = () => {
     }
   }, [searchParams, setSearchParams]);
 
+  // ?open=<id> shows that invoice (invoices have no page of their own; Today links here).
+  const invoiceToOpen = searchParams.get('open');
+  useEffect(() => {
+    if (!invoiceToOpen) return;
+    // The parameter is removed at once (so closing the invoice does not reopen it); the
+    // request is therefore not cancelled when the address changes.
+    ApiService.getInvoice(invoiceToOpen)
+      .then((invoice) => {
+        setSelectedInvoice(invoice);
+        setDetailOpen(true);
+      })
+      .catch(() => setError('Could not open that invoice'));
+    const next = new URLSearchParams(searchParams);
+    next.delete('open');
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoiceToOpen]);
+
   const handleSearchChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     searchBox.onChange(event.target.value);
   };

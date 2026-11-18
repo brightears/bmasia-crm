@@ -24,10 +24,12 @@ import {
   CheckCircle,
   ChevronRight,
 } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import { Link as RouterLink } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import ApiService from '../services/api';
 import { PageHeader, EmptyState } from '../components/ui';
+import NeedsFixingCard from '../components/NeedsFixingCard';
+import { formatMoney } from '../theme/format';
 
 interface ActionItem {
   id: string;
@@ -63,13 +65,32 @@ interface ActionCenterData {
   };
 }
 
+/** The record a Today row is about: its own page, not the list it belongs to. */
+export const recordPath = (item: Pick<ActionItem, 'type' | 'link_id' | 'link_url'>): string => {
+  if (!item.link_id) return item.link_url;
+  const id = encodeURIComponent(item.link_id);
+  switch (item.type) {
+    case 'contract':
+      return `/contracts/${id}`;
+    case 'opportunity':
+      return `/opportunities/${id}`;
+    case 'task':
+      return `/tasks/${id}`;
+    case 'invoice':
+      // Invoices have no page of their own; the list opens the invoice.
+      return `/invoices?open=${id}`;
+    default:
+      return item.link_url;
+  }
+};
+
 const ActionCenter: React.FC = () => {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const [data, setData] = useState<ActionCenterData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const fetchActionItems = async () => {
     setLoading(true);
@@ -88,6 +109,11 @@ const ActionCenter: React.FC = () => {
   useEffect(() => {
     fetchActionItems();
   }, []);
+
+  const refreshAll = () => {
+    fetchActionItems();
+    setRefreshKey((k) => k + 1);
+  };
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -113,10 +139,6 @@ const ActionCenter: React.FC = () => {
 
   const urgencyTone = (urgency: ActionItem['urgency']): 'error' | 'warning' | 'info' =>
     urgency === 'overdue' ? 'error' : urgency === 'today' ? 'warning' : 'info';
-
-  const handleItemClick = (item: ActionItem) => {
-    navigate(item.link_url);
-  };
 
   const renderSummary = () => {
     if (!data) return null;
@@ -174,8 +196,9 @@ const ActionCenter: React.FC = () => {
 
     return (
       <ButtonBase
-        key={item.id}
-        onClick={() => handleItemClick(item)}
+        key={`${item.type}-${item.id}`}
+        component={RouterLink}
+        to={recordPath(item)}
         sx={{
           width: '100%',
           textAlign: 'left',
@@ -257,7 +280,7 @@ const ActionCenter: React.FC = () => {
               variant="body2"
               sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', display: { xs: 'none', sm: 'block' } }}
             >
-              {item.currency} {item.amount.toLocaleString()}
+              {formatMoney(item.amount, item.currency)}
             </Typography>
           )}
           {item.priority && (
@@ -300,7 +323,7 @@ const ActionCenter: React.FC = () => {
       <Paper component="section" sx={{ mb: 3, overflow: 'hidden' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 2.5, py: 1.75 }}>
           <Box sx={{ color: `${tone}.main`, display: 'flex', '& svg': { fontSize: 20 } }}>{icon}</Box>
-          <Typography variant="h6" component="h2">
+          <Typography variant="h6" component="h2" sx={{ whiteSpace: 'nowrap' }}>
             {title}
           </Typography>
           <Chip label={items.length} size="small" color={tone} sx={{ ml: 0.5 }} />
@@ -315,6 +338,24 @@ const ActionCenter: React.FC = () => {
     );
   };
 
+  // Today's own items on the left, the data-quality card on the right (below them on phones).
+  // The card loads on its own, so it still shows when Today's items fail to load.
+  const withCard = (content: React.ReactNode) => (
+    <Box
+      sx={{
+        display: 'grid',
+        gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 1fr) 340px', xl: 'minmax(0, 1fr) 380px' },
+        columnGap: 3,
+        alignItems: 'start',
+      }}
+    >
+      <Box sx={{ minWidth: 0 }}>{content}</Box>
+      <Box sx={{ minWidth: 0, mb: 3 }}>
+        <NeedsFixingCard refreshKey={refreshKey} />
+      </Box>
+    </Box>
+  );
+
   if (loading) {
     return (
       <Box>
@@ -324,7 +365,7 @@ const ActionCenter: React.FC = () => {
             <Skeleton key={i} variant="rounded" height={72} />
           ))}
         </Box>
-        <Skeleton variant="rounded" height={260} />
+        {withCard(<Skeleton variant="rounded" height={260} sx={{ mb: 3 }} />)}
       </Box>
     );
   }
@@ -333,16 +374,19 @@ const ActionCenter: React.FC = () => {
     return (
       <Box>
         <PageHeader title="Today" />
-        <Alert
-          severity="error"
-          action={
-            <Button color="inherit" size="small" onClick={fetchActionItems}>
-              Try again
-            </Button>
-          }
-        >
-          Could not load today's items: {error}
-        </Alert>
+        {withCard(
+          <Alert
+            severity="error"
+            sx={{ mb: 3 }}
+            action={
+              <Button color="inherit" size="small" onClick={refreshAll}>
+                Try again
+              </Button>
+            }
+          >
+            Could not load today's items: {error}
+          </Alert>
+        )}
       </Box>
     );
   }
@@ -364,7 +408,7 @@ const ActionCenter: React.FC = () => {
               Updated {lastRefreshed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </Typography>
             <Tooltip title="Refresh">
-              <IconButton onClick={fetchActionItems} aria-label="Refresh" sx={{ border: 1, borderColor: 'divider' }}>
+              <IconButton onClick={refreshAll} aria-label="Refresh" sx={{ border: 1, borderColor: 'divider' }}>
                 <Refresh fontSize="small" />
               </IconButton>
             </Tooltip>
@@ -374,27 +418,29 @@ const ActionCenter: React.FC = () => {
 
       {renderSummary()}
 
-      {data.items.length === 0 ? (
-        <Paper>
-          <EmptyState
-            icon={<CheckCircle />}
-            title="All caught up!"
-            description="No urgent items need your attention right now."
-          />
-        </Paper>
-      ) : (
-        <>
-          {renderSection('Overdue', <ErrorOutline />, 'error', overdueItems)}
-          {/* Groups as the server defines them (see ActionCenterViewSet in views.py). */}
-          {renderSection('Due soon', <Today />, 'warning', todayItems, 'Tasks due today or tomorrow, invoices due within 7 days')}
-          {renderSection(
-            'Coming up',
-            <CalendarMonth />,
-            'info',
-            upcomingItems,
-            'Tasks this week, follow-ups in the next 2 weeks, contracts ending within 60 days'
-          )}
-        </>
+      {withCard(
+        data.items.length === 0 ? (
+          <Paper sx={{ mb: 3 }}>
+            <EmptyState
+              icon={<CheckCircle />}
+              title="All caught up!"
+              description="No urgent items need your attention right now."
+            />
+          </Paper>
+        ) : (
+          <>
+            {renderSection('Overdue', <ErrorOutline />, 'error', overdueItems)}
+            {/* Groups as the server defines them (see ActionCenterViewSet in views.py). */}
+            {renderSection('Due soon', <Today />, 'warning', todayItems, 'Tasks due today or tomorrow, invoices due within 7 days')}
+            {renderSection(
+              'Coming up',
+              <CalendarMonth />,
+              'info',
+              upcomingItems,
+              'Tasks this week, follow-ups in the next 2 weeks, contracts ending within 60 days'
+            )}
+          </>
+        )
       )}
     </Box>
   );
