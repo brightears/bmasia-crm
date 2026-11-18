@@ -140,3 +140,28 @@ it('an overdue invoice says how many days', async () => {
   renderAt('/invoices');
   expect(await screen.findByText('12 days overdue')).toBeInTheDocument();
 });
+
+it('"Mark as Paid" opens the record-payment dialog, which offers to record without sending', async () => {
+  api.getInvoices.mockResolvedValue({ results: [invoice({ status: 'Sent' })], count: 1 });
+  renderAt('/invoices');
+  fireEvent.click(await screen.findByRole('button', { name: /more actions for invoice INV-TEST-1/i }));
+  fireEvent.click(within(await screen.findByRole('menu')).getByText('Mark as Paid'));
+  const dialog = await screen.findByRole('dialog', { name: 'Record payment' });
+  expect(within(dialog).getByText(/THB 108,000/)).toBeInTheDocument();
+  expect(within(dialog).getByRole('button', { name: 'Record without sending' })).toBeInTheDocument();
+  expect(within(dialog).getByRole('button', { name: 'Record and email receipt' })).toBeInTheDocument();
+});
+
+it('"Send via Email" closes the menu at once and cannot be clicked again while sending', async () => {
+  api.sendInvoice = jest.fn(() => new Promise(() => {}));
+  renderAt('/invoices');
+  fireEvent.click(await screen.findByRole('button', { name: /more actions for invoice INV-TEST-1/i }));
+  fireEvent.click(within(await screen.findByRole('menu')).getByText('Send via Email'));
+  await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: /more actions for invoice INV-TEST-1/i }));
+  const item = within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Send via Email' });
+  expect(item).toHaveAttribute('aria-disabled', 'true');
+  fireEvent.click(item);
+  expect(api.sendInvoice).toHaveBeenCalledTimes(1);
+  delete api.sendInvoice;
+});

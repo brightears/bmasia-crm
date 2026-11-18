@@ -53,9 +53,10 @@ import {
   Sort,
 } from '@mui/icons-material';
 import { Invoice, ApiResponse, Company, Contract } from '../types';
-import ApiService from '../services/api';
+import ApiService, { MarkInvoicePaidResult } from '../services/api';
 import InvoiceForm from '../components/InvoiceForm';
 import InvoiceDetail from '../components/InvoiceDetail';
+import MarkPaidDialog, { describeMarkPaidResult } from '../components/MarkPaidDialog';
 import { formatDate as formatDisplayDate, formatMoney, statusTone, visuallyHidden } from '../theme';
 import { PageHeader, EmptyState } from '../components/ui';
 import { useListState, optionValues, idFromList } from '../hooks/useListState';
@@ -138,11 +139,10 @@ const Invoices: React.FC = () => {
   const [initialCompanyId, setInitialCompanyId] = useState('');
   const [initialContractId, setInitialContractId] = useState('');
 
-  // Payment dialog
+  // Record payment ("Mark as Paid"); the dialog asks whether to email the receipt
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState('');
-  const [transactionId, setTransactionId] = useState('');
-  const [paymentNotes, setPaymentNotes] = useState('');
+  // A send in progress, so a second click on the menu cannot send the invoice twice
+  const [sendingInvoiceId, setSendingInvoiceId] = useState<string | null>(null);
 
   // QuickBooks export dialog
   const [qbExportOpen, setQbExportOpen] = useState(false);
@@ -274,14 +274,18 @@ const Invoices: React.FC = () => {
   };
 
   const handleSendInvoice = async (invoice: Invoice) => {
+    if (sendingInvoiceId) return;
+    setSendingInvoiceId(invoice.id);
+    setActionMenuAnchor(null); // close the menu first so the item cannot be clicked again
     try {
       await ApiService.sendInvoice(invoice.id);
       setSuccess('Invoice sent successfully');
       loadInvoices();
     } catch (err) {
       setError('Failed to send invoice');
+    } finally {
+      setSendingInvoiceId(null);
     }
-    setActionMenuAnchor(null);
   };
 
   const handleMarkAsSent = async (invoice: Invoice) => {
@@ -318,24 +322,10 @@ const Invoices: React.FC = () => {
     setActionMenuAnchor(null);
   };
 
-  const handlePaymentSubmit = async () => {
-    if (!selectedInvoice) return;
-
-    try {
-      await ApiService.markInvoicePaid(selectedInvoice.id, {
-        payment_method: paymentMethod,
-        transaction_id: transactionId,
-        notes: paymentNotes,
-      });
-      setSuccess('Invoice marked as paid successfully');
-      setPaymentDialogOpen(false);
-      setPaymentMethod('');
-      setTransactionId('');
-      setPaymentNotes('');
-      loadInvoices();
-    } catch (err) {
-      setError('Failed to mark invoice as paid');
-    }
+  const handlePaymentRecorded = (result: MarkInvoicePaidResult) => {
+    setPaymentDialogOpen(false);
+    setSuccess(describeMarkPaidResult(result));
+    loadInvoices();
   };
 
   const handleInvoiceSave = (invoice: Invoice) => {
@@ -697,7 +687,7 @@ const Invoices: React.FC = () => {
           <ListItemText>Download PDF</ListItemText>
         </MenuItem>
         {actionMenuInvoice?.status === 'Draft' && (
-          <MenuItem onClick={() => handleSendInvoice(actionMenuInvoice!)}>
+          <MenuItem onClick={() => handleSendInvoice(actionMenuInvoice!)} disabled={Boolean(sendingInvoiceId)}>
             <ListItemIcon>
               <Send fontSize="small" />
             </ListItemIcon>
@@ -780,53 +770,13 @@ const Invoices: React.FC = () => {
         onInvoiceUpdate={loadInvoices}
       />
 
-      {/* Payment Dialog */}
-      <Dialog open={paymentDialogOpen} onClose={() => setPaymentDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Mark Invoice as Paid</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 1 }}>
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>Payment Method</InputLabel>
-              <Select
-                value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value)}
-                label="Payment Method"
-              >
-                {paymentMethods.slice(1).map((method) => (
-                  <MenuItem key={method.value} value={method.value}>
-                    {method.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField
-              fullWidth
-              label="Transaction ID"
-              value={transactionId}
-              onChange={(e) => setTransactionId(e.target.value)}
-              sx={{ mb: 2 }}
-            />
-            <TextField
-              fullWidth
-              label="Notes"
-              value={paymentNotes}
-              onChange={(e) => setPaymentNotes(e.target.value)}
-              multiline
-              rows={3}
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setPaymentDialogOpen(false)}>Cancel</Button>
-          <Button
-            onClick={handlePaymentSubmit}
-            variant="contained"
-            disabled={!paymentMethod}
-          >
-            Mark as Paid
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* Record payment */}
+      <MarkPaidDialog
+        open={paymentDialogOpen}
+        invoice={selectedInvoice}
+        onClose={() => setPaymentDialogOpen(false)}
+        onRecorded={handlePaymentRecorded}
+      />
 
       {/* QuickBooks Export Dialog */}
       <Dialog

@@ -18,11 +18,6 @@ import {
   Divider,
   IconButton,
   Alert,
-  TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   GridLegacy as Grid,
   Card,
   CardContent,
@@ -32,15 +27,6 @@ import {
   ListItemText,
 } from '@mui/material';
 import {
-  Timeline,
-  TimelineItem,
-  TimelineOppositeContent,
-  TimelineSeparator,
-  TimelineDot,
-  TimelineConnector,
-  TimelineContent,
-} from '@mui/lab';
-import {
   Close,
   Send,
   GetApp,
@@ -49,19 +35,15 @@ import {
   Receipt,
   Business,
   Schedule,
-  Add,
-  History,
   Description,
   CheckCircle,
   Cancel,
   Email,
 } from '@mui/icons-material';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Invoice, EmailLogEntry, Contact } from '../types';
-import ApiService from '../services/api';
+import ApiService, { MarkInvoicePaidResult } from '../services/api';
 import EmailSendDialog, { EmailSendData } from './EmailSendDialog';
+import MarkPaidDialog, { describeMarkPaidResult } from './MarkPaidDialog';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 interface InvoiceDetailProps {
@@ -70,15 +52,6 @@ interface InvoiceDetailProps {
   invoice: Invoice | null;
   onInvoiceUpdate: () => void;
 }
-
-const paymentMethods = [
-  { value: 'Cash', label: 'Cash' },
-  { value: 'Check', label: 'Check' },
-  { value: 'Credit Card', label: 'Credit Card' },
-  { value: 'Bank Transfer', label: 'Bank Transfer' },
-  { value: 'Online Payment', label: 'Online Payment' },
-  { value: 'Other', label: 'Other' },
-];
 
 const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
   open,
@@ -95,20 +68,8 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
   const [receiptEmailDialogOpen, setReceiptEmailDialogOpen] = useState(false);
   const [companyContacts, setCompanyContacts] = useState<Contact[]>([]);
 
-  // Payment form
-  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
-  const [paymentAmount, setPaymentAmount] = useState(0);
-  const [paymentMethod, setPaymentMethod] = useState('');
-  const [paymentDate, setPaymentDate] = useState<Date | null>(new Date());
-  const [transactionId, setTransactionId] = useState('');
-  const [paymentNotes, setPaymentNotes] = useState('');
-
-  useEffect(() => {
-    if (invoice && paymentDialogOpen) {
-      // Set default payment amount to remaining amount
-      setPaymentAmount(invoice.remaining_amount || invoice.total_amount);
-    }
-  }, [invoice, paymentDialogOpen]);
+  // Record payment ("Mark as Paid"): the dialog asks whether to email the receipt.
+  const [markPaidOpen, setMarkPaidOpen] = useState(false);
 
   useEffect(() => {
     if (open && invoice) {
@@ -164,31 +125,15 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
     }
   };
 
-  const handleMarkPaid = async () => {
+  const handlePaymentRecorded = (result: MarkInvoicePaidResult) => {
     if (!invoice) return;
-
-    try {
-      setLoading(true);
-      const result = await ApiService.markInvoicePaid(invoice.id);
-      const receiptMsg = result.receipt_number
-        ? ` Receipt ${result.receipt_number} generated.`
-        : '';
-      const emailMsg = result.receipt_email_status === 'sent'
-        ? ' Receipt email sent automatically.'
-        : result.receipt_email_status?.startsWith('failed')
-          ? ' Receipt email failed — use Send Receipt to retry.'
-          : '';
-      setSuccess(`Invoice marked as paid.${receiptMsg}${emailMsg}`);
-      onInvoiceUpdate();
-      // Reload email logs to show receipt email attempt
-      ApiService.getEmailLogs({ invoice: invoice.id })
-        .then(setEmailLogs)
-        .catch(() => {});
-    } catch (err) {
-      setError('Failed to mark invoice as paid');
-    } finally {
-      setLoading(false);
-    }
+    setMarkPaidOpen(false);
+    setSuccess(describeMarkPaidResult(result));
+    onInvoiceUpdate();
+    // Reload email logs to show a receipt email, if one was sent
+    ApiService.getEmailLogs({ invoice: invoice.id })
+      .then(setEmailLogs)
+      .catch(() => {});
   };
 
   const handlePreviewPDF = async () => {
@@ -273,55 +218,6 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
     onInvoiceUpdate();
   };
 
-  const handleAddPayment = async () => {
-    if (!invoice) return;
-
-    try {
-      setLoading(true);
-      setError('');
-
-      if (!paymentAmount || paymentAmount <= 0) {
-        setError('Payment amount must be greater than 0');
-        return;
-      }
-
-      if (!paymentMethod) {
-        setError('Payment method is required');
-        return;
-      }
-
-      if (!paymentDate) {
-        setError('Payment date is required');
-        return;
-      }
-
-      await ApiService.addInvoicePayment(invoice.id, {
-        amount: paymentAmount,
-        payment_method: paymentMethod,
-        payment_date: paymentDate.toISOString().split('T')[0],
-        transaction_id: transactionId,
-        notes: paymentNotes,
-      });
-
-      setSuccess('Payment added successfully');
-      setPaymentDialogOpen(false);
-      resetPaymentForm();
-      onInvoiceUpdate();
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to add payment');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const resetPaymentForm = () => {
-    setPaymentAmount(0);
-    setPaymentMethod('');
-    setPaymentDate(new Date());
-    setTransactionId('');
-    setPaymentNotes('');
-  };
-
   // Amounts use the invoice's own currency (was always shown in dollars).
   const formatCurrency = (value: number): string => formatMoney(value, invoice?.currency || 'USD');
 
@@ -363,345 +259,290 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
       </DialogTitle>
 
       <DialogContent>
-        <LocalizationProvider dateAdapter={AdapterDateFns}>
-          <Box sx={{ mt: 2 }}>
-            {error && (
-              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
-                {error}
-              </Alert>
-            )}
+        <Box sx={{ mt: 2 }}>
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
+              {error}
+            </Alert>
+          )}
 
-            {success && (
-              <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>
-                {success}
-              </Alert>
-            )}
+          {success && (
+            <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>
+              {success}
+            </Alert>
+          )}
 
-            {/* Invoice Header */}
-            <Grid container spacing={3} sx={{ mb: 3 }}>
-              <Grid item xs={12} md={8}>
-                <Card>
-                  <CardContent>
-                    <Typography variant="h5" gutterBottom>
-                      {invoice.invoice_number}
-                    </Typography>
-                    <List dense>
+          {/* Invoice Header */}
+          <Grid container spacing={3} sx={{ mb: 3 }}>
+            <Grid item xs={12} md={8}>
+              <Card>
+                <CardContent>
+                  <Typography variant="h5" gutterBottom>
+                    {invoice.invoice_number}
+                  </Typography>
+                  <List dense>
+                    <ListItem>
+                      <ListItemIcon>
+                        <Business />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary="Company"
+                        secondary={invoice.company_name}
+                      />
+                    </ListItem>
+                    <ListItem>
+                      <ListItemIcon>
+                        <Description />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary="Contract"
+                        secondary={invoice.contract_number}
+                      />
+                    </ListItem>
+                    <ListItem>
+                      <ListItemIcon>
+                        <Schedule />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary="Issue Date"
+                        secondary={formatDate(invoice.issue_date)}
+                      />
+                    </ListItem>
+                    <ListItem>
+                      <ListItemIcon>
+                        <Schedule />
+                      </ListItemIcon>
+                      <ListItemText
+                        primary="Due Date"
+                        secondary={
+                          <Box>
+                            {formatDate(invoice.due_date)}
+                            {invoice.is_overdue && (
+                              <Typography variant="caption" color="error" display="block">
+                                {invoice.days_overdue} days overdue
+                              </Typography>
+                            )}
+                          </Box>
+                        }
+                      />
+                    </ListItem>
+                    {invoice.receipt_number && (
                       <ListItem>
                         <ListItemIcon>
-                          <Business />
+                          <Receipt />
                         </ListItemIcon>
                         <ListItemText
-                          primary="Company"
-                          secondary={invoice.company_name}
+                          primary="Receipt No."
+                          secondary={invoice.receipt_number}
                         />
                       </ListItem>
+                    )}
+                    {invoice.status === 'Paid' && invoice.paid_date && (
                       <ListItem>
                         <ListItemIcon>
-                          <Description />
+                          <Payment />
                         </ListItemIcon>
                         <ListItemText
-                          primary="Contract"
-                          secondary={invoice.contract_number}
+                          primary="Paid Date"
+                          secondary={formatDate(invoice.paid_date)}
                         />
                       </ListItem>
+                    )}
+                    {invoice.status === 'Paid' && (
                       <ListItem>
                         <ListItemIcon>
-                          <Schedule />
+                          <Payment />
                         </ListItemIcon>
                         <ListItemText
-                          primary="Issue Date"
-                          secondary={formatDate(invoice.issue_date)}
+                          primary="Payment Method"
+                          secondary={invoice.payment_method || '-'}
                         />
                       </ListItem>
+                    )}
+                    {invoice.status === 'Paid' && invoice.transaction_id && (
                       <ListItem>
                         <ListItemIcon>
-                          <Schedule />
+                          <Payment />
                         </ListItemIcon>
                         <ListItemText
-                          primary="Due Date"
+                          primary="Payment Reference"
+                          secondary={invoice.transaction_id}
+                        />
+                      </ListItem>
+                    )}
+                    {invoice.status === 'Paid' && invoice.receipt_number && (
+                      <ListItem>
+                        <ListItemIcon>
+                          <Email />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary="Receipt Email"
                           secondary={
-                            <Box>
-                              {formatDate(invoice.due_date)}
-                              {invoice.is_overdue && (
-                                <Typography variant="caption" color="error" display="block">
-                                  {invoice.days_overdue} days overdue
-                                </Typography>
-                              )}
-                            </Box>
+                            <Chip
+                              label={invoice.receipt_sent ? 'Sent' : 'Not Sent'}
+                              color={invoice.receipt_sent ? 'success' : 'default'}
+                              variant="outlined"
+                              size="small"
+                            />
                           }
                         />
                       </ListItem>
-                      {invoice.receipt_number && (
-                        <ListItem>
-                          <ListItemIcon>
-                            <Receipt />
-                          </ListItemIcon>
-                          <ListItemText
-                            primary="Receipt No."
-                            secondary={invoice.receipt_number}
-                          />
-                        </ListItem>
-                      )}
-                      {invoice.status === 'Paid' && invoice.paid_date && (
-                        <ListItem>
-                          <ListItemIcon>
-                            <Payment />
-                          </ListItemIcon>
-                          <ListItemText
-                            primary="Paid Date"
-                            secondary={formatDate(invoice.paid_date)}
-                          />
-                        </ListItem>
-                      )}
-                      {invoice.status === 'Paid' && (
-                        <ListItem>
-                          <ListItemIcon>
-                            <Payment />
-                          </ListItemIcon>
-                          <ListItemText
-                            primary="Payment Method"
-                            secondary={invoice.payment_method || '-'}
-                          />
-                        </ListItem>
-                      )}
-                      {invoice.status === 'Paid' && invoice.receipt_number && (
-                        <ListItem>
-                          <ListItemIcon>
-                            <Email />
-                          </ListItemIcon>
-                          <ListItemText
-                            primary="Receipt Email"
-                            secondary={
-                              <Chip
-                                label={invoice.receipt_sent ? 'Sent' : 'Not Sent'}
-                                color={invoice.receipt_sent ? 'success' : 'default'}
-                                variant="outlined"
-                                size="small"
-                              />
-                            }
-                          />
-                        </ListItem>
-                      )}
-                    </List>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12} md={4}>
-                <Card>
-                  <CardContent>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                      <Typography variant="h6">Status</Typography>
-                      <Box sx={{ ml: 'auto' }}>
-                        <Chip
-                          label={invoice.status}
-                          sx={{
-                            backgroundColor: getStatusColor(invoice.status),
-                            color: 'white',
-                            fontWeight: 600
-                          }}
-                        />
-                      </Box>
-                    </Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2">Subtotal:</Typography>
-                      <Typography variant="body2">{formatCurrency(invoice.amount)}</Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2">Tax:</Typography>
-                      <Typography variant="body2">{formatCurrency(invoice.tax_amount)}</Typography>
-                    </Box>
-                    {invoice.discount_amount > 0 && (
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                        <Typography variant="body2">Discount:</Typography>
-                        <Typography variant="body2" color="error">
-                          -{formatCurrency(invoice.discount_amount)}
-                        </Typography>
-                      </Box>
                     )}
-                    <Divider sx={{ my: 1 }} />
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-                      <Typography variant="h6">Total:</Typography>
-                      <Typography variant="h6" color="primary">
-                        {formatCurrency(invoice.total_amount)}
+                  </List>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Card>
+                <CardContent>
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                    <Typography variant="h6">Status</Typography>
+                    <Box sx={{ ml: 'auto' }}>
+                      <Chip
+                        label={invoice.status}
+                        sx={{
+                          backgroundColor: getStatusColor(invoice.status),
+                          color: 'white',
+                          fontWeight: 600
+                        }}
+                      />
+                    </Box>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                    <Typography variant="body2">Subtotal:</Typography>
+                    <Typography variant="body2">{formatCurrency(invoice.amount)}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                    <Typography variant="body2">Tax:</Typography>
+                    <Typography variant="body2">{formatCurrency(invoice.tax_amount)}</Typography>
+                  </Box>
+                  {invoice.discount_amount > 0 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                      <Typography variant="body2">Discount:</Typography>
+                      <Typography variant="body2" color="error">
+                        -{formatCurrency(invoice.discount_amount)}
                       </Typography>
                     </Box>
-                    {invoice.remaining_amount > 0 && (
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="body1" fontWeight="medium">Remaining:</Typography>
-                        <Typography variant="body1" fontWeight="medium" color="warning.main">
-                          {formatCurrency(invoice.remaining_amount)}
-                        </Typography>
-                      </Box>
-                    )}
-                  </CardContent>
-                </Card>
-              </Grid>
+                  )}
+                  <Divider sx={{ my: 1 }} />
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+                    <Typography variant="h6">Total:</Typography>
+                    <Typography variant="h6" color="primary">
+                      {formatCurrency(invoice.total_amount)}
+                    </Typography>
+                  </Box>
+                  {invoice.remaining_amount > 0 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Typography variant="body1" fontWeight="medium">Remaining:</Typography>
+                      <Typography variant="body1" fontWeight="medium" color="warning.main">
+                        {formatCurrency(invoice.remaining_amount)}
+                      </Typography>
+                    </Box>
+                  )}
+                </CardContent>
+              </Card>
             </Grid>
+          </Grid>
 
-            {/* Line Items */}
+          {/* Line Items */}
+          <Paper sx={{ p: 3, mb: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              Line Items
+            </Typography>
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Description</TableCell>
+                    <TableCell align="right">Quantity</TableCell>
+                    <TableCell align="right">Unit Price</TableCell>
+                    <TableCell align="right">Tax Rate</TableCell>
+                    <TableCell align="right">Total</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {invoice.line_items.map((item, index) => (
+                    <TableRow key={index}>
+                      <TableCell>{item.description}</TableCell>
+                      <TableCell align="right">{item.quantity}</TableCell>
+                      <TableCell align="right">{formatCurrency(item.unit_price)}</TableCell>
+                      <TableCell align="right">{item.tax_rate}%</TableCell>
+                      <TableCell align="right">{formatCurrency(item.total)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+
+          {/* Notes */}
+          {invoice.notes && (
             <Paper sx={{ p: 3, mb: 3 }}>
               <Typography variant="h6" gutterBottom>
-                Line Items
+                Notes
               </Typography>
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Description</TableCell>
-                      <TableCell align="right">Quantity</TableCell>
-                      <TableCell align="right">Unit Price</TableCell>
-                      <TableCell align="right">Tax Rate</TableCell>
-                      <TableCell align="right">Total</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {invoice.line_items.map((item, index) => (
-                      <TableRow key={index}>
-                        <TableCell>{item.description}</TableCell>
-                        <TableCell align="right">{item.quantity}</TableCell>
-                        <TableCell align="right">{formatCurrency(item.unit_price)}</TableCell>
-                        <TableCell align="right">{item.tax_rate}%</TableCell>
-                        <TableCell align="right">{formatCurrency(item.total)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Paper>
-
-            {/* Payment History */}
-            <Paper sx={{ p: 3, mb: 3 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6">
-                  Payment History
-                </Typography>
-                {invoice.status !== 'Paid' && invoice.remaining_amount > 0 && (
-                  <Button
-                    variant="outlined"
-                    startIcon={<Add />}
-                    onClick={() => setPaymentDialogOpen(true)}
-                    size="small"
-                  >
-                    Add Payment
-                  </Button>
-                )}
-              </Box>
-
-              {invoice.payments && invoice.payments.length > 0 ? (
-                <Timeline>
-                  {invoice.payments.map((payment, index) => (
-                    <TimelineItem key={payment.id}>
-                      <TimelineOppositeContent sx={{ m: 'auto 0' }} variant="body2" color="text.secondary">
-                        {formatDate(payment.payment_date)}
-                      </TimelineOppositeContent>
-                      <TimelineSeparator>
-                        <TimelineDot color="primary">
-                          <Payment />
-                        </TimelineDot>
-                        {index < invoice.payments.length - 1 && <TimelineConnector />}
-                      </TimelineSeparator>
-                      <TimelineContent sx={{ py: '12px', px: 2 }}>
-                        <Typography variant="h6" component="span">
-                          {formatCurrency(payment.amount)}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          {payment.payment_method}
-                          {payment.transaction_id && ` - ${payment.transaction_id}`}
-                        </Typography>
-                        {payment.notes && (
-                          <Typography variant="body2" color="text.secondary">
-                            {payment.notes}
-                          </Typography>
-                        )}
-                        <Typography variant="caption" color="text.secondary" display="block">
-                          Added by {payment.created_by_name}
-                        </Typography>
-                      </TimelineContent>
-                    </TimelineItem>
-                  ))}
-                </Timeline>
-              ) : (
-                <Box sx={{ py: 4, textAlign: 'center' }}>
-                  <History sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                  <Typography variant="h6" color="text.secondary">
-                    No payments recorded
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Add a payment to track payment history
-                  </Typography>
-                </Box>
-              )}
-            </Paper>
-
-            {/* Notes */}
-            {invoice.notes && (
-              <Paper sx={{ p: 3, mb: 3 }}>
-                <Typography variant="h6" gutterBottom>
-                  Notes
-                </Typography>
-                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                  {invoice.notes}
-                </Typography>
-              </Paper>
-            )}
-
-            {/* Email History */}
-            <Paper sx={{ p: 2, mt: 2 }}>
-              <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Email fontSize="small" />
-                Email History
+              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                {invoice.notes}
               </Typography>
-              {emailLogs.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">
-                  No emails sent for this invoice yet
-                </Typography>
-              ) : (
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                  {emailLogs.map((log) => (
-                    <Box key={log.id} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, p: 1.5, borderRadius: 1, bgcolor: 'grey.50' }}>
-                      <Box sx={{ mt: 0.5 }}>
-                        {log.status === 'sent' && <CheckCircle color="success" fontSize="small" />}
-                        {log.status === 'opened' && <Visibility color="info" fontSize="small" />}
-                        {log.status === 'failed' && <Cancel color="error" fontSize="small" />}
-                        {log.status === 'pending' && <Schedule color="disabled" fontSize="small" />}
-                      </Box>
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                          <Typography variant="body2" fontWeight="medium">
-                            {log.email_type_display}
-                          </Typography>
-                          <Chip
-                            label={log.status_display}
-                            size="small"
-                            color={log.status === 'sent' ? 'success' : log.status === 'opened' ? 'info' : log.status === 'failed' ? 'error' : 'default'}
-                            variant="outlined"
-                          />
-                          {log.opened_at && (
-                            <Chip label={`Opened ${new Date(log.opened_at).toLocaleString()}`} size="small" color="info" />
-                          )}
-                        </Box>
-                        <Typography variant="body2" color="text.secondary" noWrap>
-                          To: {log.to_email}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" noWrap>
-                          From: {log.from_email}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {log.sent_at ? new Date(log.sent_at).toLocaleString() : log.created_at ? new Date(log.created_at).toLocaleString() : ''}
-                        </Typography>
-                        {log.status === 'failed' && log.error_message && (
-                          <Typography variant="caption" color="error" display="block">
-                            Error: {log.error_message}
-                          </Typography>
-                        )}
-                      </Box>
+            </Paper>
+          )}
+
+          {/* Email History */}
+          <Paper sx={{ p: 2, mt: 2 }}>
+            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Email fontSize="small" />
+              Email History
+            </Typography>
+            {emailLogs.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                No emails sent for this invoice yet
+              </Typography>
+            ) : (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                {emailLogs.map((log) => (
+                  <Box key={log.id} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5, p: 1.5, borderRadius: 1, bgcolor: 'grey.50' }}>
+                    <Box sx={{ mt: 0.5 }}>
+                      {log.status === 'sent' && <CheckCircle color="success" fontSize="small" />}
+                      {log.status === 'opened' && <Visibility color="info" fontSize="small" />}
+                      {log.status === 'failed' && <Cancel color="error" fontSize="small" />}
+                      {log.status === 'pending' && <Schedule color="disabled" fontSize="small" />}
                     </Box>
-                  ))}
-                </Box>
-              )}
-            </Paper>
-          </Box>
-        </LocalizationProvider>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                        <Typography variant="body2" fontWeight="medium">
+                          {log.email_type_display}
+                        </Typography>
+                        <Chip
+                          label={log.status_display}
+                          size="small"
+                          color={log.status === 'sent' ? 'success' : log.status === 'opened' ? 'info' : log.status === 'failed' ? 'error' : 'default'}
+                          variant="outlined"
+                        />
+                        {log.opened_at && (
+                          <Chip label={`Opened ${new Date(log.opened_at).toLocaleString()}`} size="small" color="info" />
+                        )}
+                      </Box>
+                      <Typography variant="body2" color="text.secondary" noWrap>
+                        To: {log.to_email}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary" noWrap>
+                        From: {log.from_email}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {log.sent_at ? new Date(log.sent_at).toLocaleString() : log.created_at ? new Date(log.created_at).toLocaleString() : ''}
+                      </Typography>
+                      {log.status === 'failed' && log.error_message && (
+                        <Typography variant="caption" color="error" display="block">
+                          Error: {log.error_message}
+                        </Typography>
+                      )}
+                    </Box>
+                  </Box>
+                ))}
+              </Box>
+            )}
+          </Paper>
+        </Box>
       </DialogContent>
 
       <DialogActions sx={{ p: 3, pt: 0 }}>
@@ -747,7 +588,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
         )}
         {invoice && (invoice.status === 'Sent' || invoice.status === 'Overdue') && (
           <Button
-            onClick={handleMarkPaid}
+            onClick={() => setMarkPaidOpen(true)}
             variant="contained"
             color="success"
             startIcon={<CheckCircle />}
@@ -789,92 +630,12 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
         )}
       </DialogActions>
 
-      {/* Add Payment Dialog */}
-      <Dialog
-        open={paymentDialogOpen}
-        onClose={() => setPaymentDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Add Payment</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 1 }}>
-            <Grid container spacing={2}>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Payment Amount"
-                  type="number"
-                  value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(parseFloat(e.target.value) || 0)}
-                  inputProps={{ min: 0, step: 0.01 }}
-                  InputProps={{
-                    startAdornment: <Typography sx={{ mr: 1 }}>$</Typography>,
-                  }}
-                  required
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <FormControl fullWidth required>
-                  <InputLabel>Payment Method</InputLabel>
-                  <Select
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
-                    label="Payment Method"
-                  >
-                    {paymentMethods.map((method) => (
-                      <MenuItem key={method.value} value={method.value}>
-                        {method.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <DatePicker
-                  label="Payment Date"
-                  value={paymentDate}
-                  onChange={setPaymentDate}
-                  slotProps={{
-                    textField: {
-                      fullWidth: true,
-                      required: true,
-                    },
-                  }}
-                />
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  fullWidth
-                  label="Transaction ID"
-                  value={transactionId}
-                  onChange={(e) => setTransactionId(e.target.value)}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Notes"
-                  value={paymentNotes}
-                  onChange={(e) => setPaymentNotes(e.target.value)}
-                  multiline
-                  rows={3}
-                />
-              </Grid>
-            </Grid>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setPaymentDialogOpen(false)}>Cancel</Button>
-          <Button
-            onClick={handleAddPayment}
-            variant="contained"
-            disabled={loading || !paymentAmount || !paymentMethod}
-          >
-            Add Payment
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <MarkPaidDialog
+        open={markPaidOpen}
+        invoice={invoice}
+        onClose={() => setMarkPaidOpen(false)}
+        onRecorded={handlePaymentRecorded}
+      />
 
       {/* Receipt Email Dialog */}
       {invoice && invoice.status === 'Paid' && invoice.receipt_number && (
