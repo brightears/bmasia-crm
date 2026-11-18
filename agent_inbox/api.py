@@ -174,7 +174,16 @@ class ChangeProposalViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, vi
         proposal_service.refresh_snapshots(rows)
         context = {**self.get_serializer_context(), 'conflicts': proposal_service.conflicts_for(rows)}
         data = ChangeProposalSerializer(rows, many=True, context=context).data
-        return self.get_paginated_response(data) if page is not None else Response(data)
+        # Open proposals the caller can see that expire within a week, whatever the filters (one query).
+        expiring = proposal_service.expiring_soon_count(self.get_queryset())
+        if page is None:
+            return Response(data, headers={'X-Open-Expiring-Within-7-Days': str(expiring)})
+        response = self.get_paginated_response(data)
+        response.data['summary'] = {
+            'open_expiring_within_days': proposal_service.EXPIRY_WARNING_DAYS,
+            'open_expiring_count': expiring,
+        }
+        return response
 
     def retrieve(self, request, *args, **kwargs):
         proposal = self.get_object()

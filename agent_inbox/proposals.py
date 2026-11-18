@@ -148,6 +148,16 @@ def effective_status(proposal):
     return proposal.status
 
 
+EXPIRY_WARNING_DAYS = 7
+
+
+def expiring_soon_count(queryset, days=EXPIRY_WARNING_DAYS):
+    """How many of ``queryset`` are open and expire within ``days`` (one COUNT query)."""
+    now = timezone.now()
+    return queryset.filter(status=OPEN_STATUS, expires_at__gt=now,
+                           expires_at__lte=now + timedelta(days=days)).count()
+
+
 def with_effective_status(queryset, statuses):
     """Filter by the statuses a reader sees, without writing."""
     from django.db.models import Q
@@ -800,7 +810,7 @@ def _require_person(request, proposal=None):
             code = 'reviewer_is_party'
         else:
             code = 'human_review_required'
-        raise ServiceError(403, code, refusal)
+        raise ServiceError(403, code, policy.refusal_text(request, refusal))
 
 
 def _locked(proposal_id):

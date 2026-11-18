@@ -83,7 +83,7 @@ def test_with_no_reviewer_list_nobody_reviews(agent, person, company):
         response = decide(session_client(person), proposal.pk, 'accept')
         status = session_client(person).get(f'{PROPOSALS}allowlist/').json()
     assert response.status_code == 403 and response.json()['code'] == 'review_not_configured'
-    assert 'not configured' in response.json()['detail']
+    assert response.json()['detail'] == 'Reviewing is not set up yet.'  # no setting name for non-staff
     assert status['you_can_review'] is False and status['reviewing_configured'] is False
 
 
