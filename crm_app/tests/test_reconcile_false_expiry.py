@@ -39,8 +39,8 @@ def _run(**kwargs):
 
 @pytest.mark.django_db
 def test_dry_run_makes_no_change(tmp_path):
-    c = _false_expired("HK-CT269419")
-    vf = _write(tmp_path, {"HK-CT269419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
+    c = _false_expired("HK-CT00419")
+    vf = _write(tmp_path, {"HK-CT00419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
     out = _run(verified_file=vf)  # no --execute
     assert "WOULD-FIX" in out and "DRY-RUN" in out
     c.refresh_from_db()
@@ -51,8 +51,8 @@ def test_dry_run_makes_no_change(tmp_path):
 
 @pytest.mark.django_db
 def test_execute_fixes_status_dates_notes_and_audits(tmp_path):
-    c = _false_expired("HK-CT269419")
-    vf = _write(tmp_path, {"HK-CT269419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
+    c = _false_expired("HK-CT00419")
+    vf = _write(tmp_path, {"HK-CT00419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
     _run(verified_file=vf, execute=True)
     c.refresh_from_db()
     assert c.status == "Active"
@@ -67,8 +67,8 @@ def test_execute_fixes_status_dates_notes_and_audits(tmp_path):
 
 @pytest.mark.django_db
 def test_idempotent_second_run_is_noop(tmp_path):
-    c = _false_expired("HK-CT269419")
-    vf = _write(tmp_path, {"HK-CT269419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
+    c = _false_expired("HK-CT00419")
+    vf = _write(tmp_path, {"HK-CT00419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
     _run(verified_file=vf, execute=True)
     out = _run(verified_file=vf, execute=True)
     assert "already Active" in out or "already-ok=1" in out
@@ -78,9 +78,9 @@ def test_idempotent_second_run_is_noop(tmp_path):
 @pytest.mark.django_db
 def test_status_only_correction_keeps_dates(tmp_path):
     # Dates already fixed earlier, only status needs flipping.
-    c = ContractFactory(contract_number="HK-CT269282", status="Expired",
+    c = ContractFactory(contract_number="HK-CT00282", status="Expired",
                         start_date=REAL_START, end_date=REAL_END, notes="")
-    vf = _write(tmp_path, {"HK-CT269282": {}})  # no dates supplied
+    vf = _write(tmp_path, {"HK-CT00282": {}})  # no dates supplied
     _run(verified_file=vf, execute=True)
     c.refresh_from_db()
     assert c.status == "Active"
@@ -89,9 +89,9 @@ def test_status_only_correction_keeps_dates(tmp_path):
 
 @pytest.mark.django_db
 def test_contract_not_in_allowlist_is_untouched(tmp_path):
-    keep = _false_expired("HK-CT269419")
-    other = _false_expired("HK-CT26999")
-    vf = _write(tmp_path, {"HK-CT269419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
+    keep = _false_expired("HK-CT00419")
+    other = _false_expired("HK-CT00999")
+    vf = _write(tmp_path, {"HK-CT00419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
     _run(verified_file=vf, execute=True)
     other.refresh_from_db()
     assert other.status == "Expired"  # not in the list -> never touched
@@ -100,9 +100,9 @@ def test_contract_not_in_allowlist_is_untouched(tmp_path):
 
 @pytest.mark.django_db
 def test_refuses_to_reactivate_a_cancelled_contract(tmp_path):
-    c = ContractFactory(contract_number="HK-CT26500", status="Cancelled",
+    c = ContractFactory(contract_number="HK-CT00500", status="Cancelled",
                         start_date=PLACEHOLDER_START, end_date=PLACEHOLDER_END)
-    vf = _write(tmp_path, {"HK-CT26500": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
+    vf = _write(tmp_path, {"HK-CT00500": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
     out = _run(verified_file=vf, execute=True)
     c.refresh_from_db()
     assert c.status == "Cancelled"  # never reactivated
@@ -112,8 +112,8 @@ def test_refuses_to_reactivate_a_cancelled_contract(tmp_path):
 @pytest.mark.django_db
 def test_limit_caps_the_number_processed(tmp_path):
     for n in (1, 2, 3):
-        _false_expired(f"HK-CT2650{n}")
-    vf = _write(tmp_path, {f"HK-CT2650{n}": {"start_date": "2026-07-29", "end_date": "2027-07-28"} for n in (1, 2, 3)})
+        _false_expired(f"HK-CT0050{n}")
+    vf = _write(tmp_path, {f"HK-CT0050{n}": {"start_date": "2026-07-29", "end_date": "2027-07-28"} for n in (1, 2, 3)})
     _run(verified_file=vf, execute=True, limit=1)
-    fixed = Contract.objects.filter(contract_number__in=["HK-CT26501", "HK-CT26502", "HK-CT26503"], status="Active").count()
+    fixed = Contract.objects.filter(contract_number__in=["HK-CT00501", "HK-CT00502", "HK-CT00503"], status="Active").count()
     assert fixed == 1
