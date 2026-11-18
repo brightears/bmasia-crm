@@ -59,10 +59,15 @@ def _filters(request):
     return dq.Filters(company_id=_uuid(request, 'company'), owner_id=_uuid(request, 'owner', allow_none=True))
 
 
+# A text cell starting with one of these is prefixed with an apostrophe, so no spreadsheet
+# reads it as a formula (full-width forms and leading spaces or quotes included).
+_CSV_RISKY_START = ('=', '+', '-', '@', '\t', '\r', '\n', ' ', '\u00a0', '"', "'", '\uff1d', '\uff0b', '\uff0d', '\uff20')
+
+
 def _csv_cell(value):
     """Plain text for spreadsheets: a cell never starts with a formula character."""
     text = '' if value is None else str(value)
-    return "'" + text if text[:1] in ('=', '+', '-', '@', '\t', '\r') else text
+    return "'" + text if text.startswith(_CSV_RISKY_START) else text
 
 
 def _no_store(response):
@@ -104,7 +109,7 @@ class DataQualityCheckView(APIView):
         except BadRequest as e:
             return Response({'detail': str(e)}, status=400)
         ctx = dq.Context()
-        if request.query_params.get('export') == 'csv':
+        if (request.query_params.get('export') or '').lower() == 'csv':
             return self._csv(check, ctx, filters)
         count = check.count(ctx, filters)
         rows = check.rows(ctx, filters, (page - 1) * page_size, page_size)
@@ -121,9 +126,13 @@ class DataQualityCheckView(APIView):
         writer = csv.writer(buffer)
         writer.writerow(CSV_COLUMNS)
         for r in check.rows(ctx, filters):
-            writer.writerow([_csv_cell(v) for v in (
-                check.title, r['record_type'], r['label'], r['company_name'], r['fact'], r['owner_name'],
-                r['date'], r['amount'], r['currency'], r['link'], r['id'], r['company_id'])])
+            # The amount is a number the server wrote (it may be negative), so it is not escaped.
+            writer.writerow([
+                *[_csv_cell(v) for v in (check.title, r['record_type'], r['label'], r['company_name'], r['fact'],
+                                         r['owner_name'], r['date'])],
+                r['amount'] or '',
+                *[_csv_cell(v) for v in (r['currency'], r['link'], r['id'], r['company_id'])],
+            ])
         response = HttpResponse('﻿' + buffer.getvalue(), content_type='text/csv; charset=utf-8')
         response['Content-Disposition'] = f'attachment; filename="needs-fixing-{check.key}-{ctx.today.isoformat()}.csv"'
         return _no_store(response)

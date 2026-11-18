@@ -14,8 +14,9 @@ stands for several records (duplicate emails, lookalike company names).
 
 Nothing here writes. Every check runs a fixed number of queries whatever the number of rows:
 the ORM checks annotate instead of reading per row (one query for the count and one for a
-page), and the two checks that need Python (email validation, name normalisation) read their
-table once and keep the result for the request.
+page), and the checks that need Python (successors, email validation, name normalisation)
+read their tables once and keep the result for the request. Every ordering ends in the
+primary key, so paging is stable on any database and collation.
 
 "Today" is the Bangkok calendar day (``timezone.localdate()``; ``TIME_ZONE`` is Asia/Bangkok).
 Statuses follow the model's choices and the lifecycle rule in ``services/contract_lifecycle.py``:
@@ -28,33 +29,56 @@ from its opportunity's owner, else from the creator of the quote it came from; a
 uses its contract's owner; companies and contacts have none. Most rows will therefore show
 no owner until companies get an account manager (gap audit backlog B12).
 """
-import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta
+from datetime import date, timedelta
 
 from django.core.exceptions import ValidationError
 from django.core.validators import EmailValidator
 from django.db.models import (
     Case, CharField, Count, Exists, F, IntegerField, OuterRef, Q, Subquery, Value, When,
 )
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, Length, Lower, Trim
 from django.utils import timezone
 
-from crm_app.models import Company, Contact, Contract, ContractServiceLocation, ContractZone, Invoice, Quote, Task
+from crm_app.models import (
+    Company, Contact, Contract, ContractServiceLocation, ContractZone, Invoice, Quote, Task, start_of_local_day,
+)
 
 SEVERITY_ORDER = {'high': 0, 'medium': 1, 'low': 2}
 
-# Checks that list contracts read "open" successors in these statuses.
+# Statuses in which a contract can be the next term of another.
 OPEN_CONTRACT_STATUSES = ('Draft', 'Sent', 'Active')
-# A task is open until it is Done or Cancelled (On Hold is paused, not finished).
-OPEN_TASK_STATUSES = ('To Do', 'In Progress', 'On Hold')
 # Invoices the customer has been asked to pay and has not paid.
 UNPAID_INVOICE_STATUSES = ('Sent', 'Overdue')
 
 SENT_UNSIGNED_DAYS = 30
 DRAFT_STALE_DAYS = 60
 ENDING_WINDOW_DAYS = 60
+# An unlinked contract can be the renewal of one that ends on day E only if it starts between
+# E - 90 days and E + 60 days (see EndingWithoutSuccessor).
+SUCCESSOR_START_BEFORE_END_DAYS = 90
+SUCCESSOR_START_AFTER_END_DAYS = 60
+# Contracts that are never the next term of a subscription.
+ONE_OFF_SERVICE_TYPES = ('one_time_setup', 'consulting', 'maintenance')
+ONE_OFF_LIFECYCLE_TYPES = ('addon', 'churn')
+ONE_OFF_BILLING = ('one-time', 'one time', 'onetime', 'once')
+
+_email_validator = EmailValidator()
+# Addresses that match this pattern and are at most 64 characters long always pass Django's
+# EmailValidator (dot-atom local part; domain labels of letters, digits and inner hyphens; a
+# letter-only top-level domain of 2+ letters; within 64 characters no label can exceed 63). The
+# database sets those aside and Python validates only the rest. The pattern has no bounded
+# repeats such as {0,61}: those make PostgreSQL's regex engine about 15 times slower.
+_ATOM = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
+CERTAINLY_VALID_EMAIL = (rf'^{_ATOM}(\.{_ATOM})*@([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+'
+                         r'[A-Za-z][A-Za-z]+$')
+CERTAINLY_VALID_MAX_LENGTH = 64
+
+
+def certainly_valid_email(prefix=''):
+    """A filter for emails the database can vouch for (see CERTAINLY_VALID_EMAIL)."""
+    return Q(**{f'{prefix}email__regex': CERTAINLY_VALID_EMAIL}) & Q(**{f'{prefix}email_length__lte': CERTAINLY_VALID_MAX_LENGTH})
 
 
 # --- small helpers -----------------------------------------------------------------------
@@ -80,7 +104,16 @@ def days_ago(n):
 
 def start_of_day(day):
     """The first instant of a Bangkok calendar day, as an aware datetime."""
-    return timezone.make_aware(datetime.combine(day, time.min))
+    return start_of_local_day(day)
+
+
+def is_valid_email(value):
+    """Django's EmailValidator on the stored value (spaces included make it invalid)."""
+    try:
+        _email_validator(value)
+    except ValidationError:
+        return False
+    return True
 
 
 def user_name(user):
@@ -123,6 +156,16 @@ def product_case():
     )
 
 
+def product_of(service_type, contracted_product):
+    """product_case() in Python, for rows already read."""
+    st = (service_type or '').strip().lower()
+    if 'beat' in st or st == 'lim':
+        return 'Beat Breeze'
+    if 'sound' in st or 'syb' in st:
+        return 'Soundtrack'
+    return {'beatbreeze': 'Beat Breeze', 'soundtrack': 'Soundtrack'}.get((contracted_product or '').lower(), 'Other')
+
+
 def contract_owner_ref(prefix=''):
     """Owner id of a contract: its opportunity's owner, else the creator of its quote."""
     return Coalesce(F(f'{prefix}opportunity__owner_id'), F(f'{prefix}quote__created_by_id'))
@@ -162,7 +205,8 @@ class Check:
 
 
 class QuerysetCheck(Check):
-    """A check whose rows are one queryset: one query to count, one per page of rows."""
+    """A check whose rows are one queryset: one query to count, one per page of rows.
+    ``queryset`` must order by fields ending in ``pk``."""
     company_field = 'company_id'
     owner_field = None  # an annotation or field holding the owner's user id
 
@@ -195,10 +239,10 @@ class QuerysetCheck(Check):
 
 
 class ListCheck(Check):
-    """A check computed in Python from one read of its table, kept for the request."""
+    """A check computed in Python from a fixed number of reads, kept for the request.
+    ``build`` returns rows in their final, deterministic order, each with ``_company_ids``."""
 
     def build(self, ctx):
-        """Return every row of the check (dicts as described in the module docstring)."""
         raise NotImplementedError
 
     def all_rows(self, ctx):
@@ -212,8 +256,9 @@ class ListCheck(Check):
         if filters and filters.company_id:
             wanted = str(filters.company_id)
             rows = [r for r in rows if wanted in r['_company_ids']]
-        if filters and filters.owner_id and filters.owner_id != 'none':
-            rows = []  # these records have no owner
+        if filters and filters.owner_id:
+            wanted = None if filters.owner_id == 'none' else str(filters.owner_id)
+            rows = [r for r in rows if r['owner_id'] == wanted]
         return rows
 
     def count(self, ctx, filters=None):
@@ -250,8 +295,9 @@ def contract_row(c, fact, day=None):
                amount=c.value, currency=c.currency)
 
 
-def latest_renewal(field_name):
-    renewals = Contract.objects.filter(renewed_from=OuterRef('pk')).order_by('-start_date', '-created_at')
+def latest_renewal(field_name, **filters):
+    renewals = (Contract.objects.filter(renewed_from=OuterRef('pk'), **filters)
+                .order_by('-start_date', '-created_at', '-pk'))
     return Subquery(renewals.values(field_name)[:1])
 
 
@@ -259,6 +305,12 @@ def renewal_note(c):
     if getattr(c, 'renewal_number', None):
         return f'renewal {c.renewal_number} is {c.renewal_status}'
     return 'no renewal recorded'
+
+
+def ends_phrase(c, today):
+    days = (c.end_date - today).days
+    when = 'Ends today' if days == 0 else f'Ends in {plural(days, "day")}'
+    return f'{when} ({fmt_date(c.end_date)})'
 
 
 # --- contract checks --------------------------------------------------------------------
@@ -279,13 +331,14 @@ class ActivePastEnd(QuerysetCheck):
     severity = 'high'
     record_type = 'contract'
     owner_field = 'owner_ref'
+    auto_renew = False
 
     def queryset(self, ctx):
-        return (Contract.objects.filter(status='Active', end_date__lt=ctx.today, auto_renew=False)
+        return (Contract.objects.filter(status='Active', end_date__lt=ctx.today, auto_renew=self.auto_renew)
                 .select_related('company', *CONTRACT_OWNER_RELATED)
                 .annotate(owner_ref=contract_owner_ref(), renewal_number=latest_renewal('contract_number'),
                           renewal_status=latest_renewal('status'))
-                .order_by('-end_date', 'contract_number'))
+                .order_by('-end_date', 'contract_number', 'pk'))
 
     def describe(self, c, ctx):
         days = (ctx.today - c.end_date).days
@@ -305,13 +358,7 @@ class AutoRenewPastEnd(ActivePastEnd):
     title = 'Auto-renewing contracts with an end date in the past'
     why = 'The contract renews by itself, but the CRM holds no new term or end date for it.'
     severity = 'low'
-
-    def queryset(self, ctx):
-        return (Contract.objects.filter(status='Active', end_date__lt=ctx.today, auto_renew=True)
-                .select_related('company', *CONTRACT_OWNER_RELATED)
-                .annotate(owner_ref=contract_owner_ref(), renewal_number=latest_renewal('contract_number'),
-                          renewal_status=latest_renewal('status'))
-                .order_by('-end_date', 'contract_number'))
+    auto_renew = True
 
     def describe(self, c, ctx):
         days = (ctx.today - c.end_date).days
@@ -319,49 +366,157 @@ class AutoRenewPastEnd(ActivePastEnd):
                                f'{renewal_note(c)}', c.end_date)
 
 
-class EndingWithoutSuccessor(QuerysetCheck):
+class ActiveNoEndDate(QuerysetCheck):
+    """Active contracts with no end date.
+
+    Definition: status Active and end_date empty. The model allows an open-ended term, but
+    nothing else in the CRM can tell when such a contract must be renewed or has lapsed: the
+    past-end and ending-soon checks, the renewal book and Today all work from the end date.
+    Each one must be given an end date, or confirmed as open-ended, by a person. With this
+    check every Active contract is covered by a term check: an end date before today, from
+    today to 60 days ahead, later, or none. Oldest start first.
+    """
+    key = 'contract_active_no_end_date'
+    title = 'Active contracts with no end date'
+    why = 'Without an end date the CRM cannot warn before the renewal or notice a lapse.'
+    severity = 'low'
+    record_type = 'contract'
+    owner_field = 'owner_ref'
+
+    def queryset(self, ctx):
+        return (Contract.objects.filter(status='Active', end_date__isnull=True)
+                .select_related('company', *CONTRACT_OWNER_RELATED)
+                .annotate(owner_ref=contract_owner_ref())
+                .order_by('start_date', 'contract_number', 'pk'))
+
+    def describe(self, c, ctx):
+        return contract_row(c, f'Started {fmt_date(c.start_date)}; no end date recorded', c.start_date)
+
+
+def _norm_place(value):
+    return ' '.join((value or '').casefold().split())
+
+
+class EndingWithoutSuccessor(ListCheck):
     """Active contracts ending within 60 days with no successor.
 
     Definition: status Active, end_date from today to today + 60 days inclusive (Bangkok), and
-    no successor. A successor is (a) any contract linked through renewed_from, in any status
-    (a Cancelled one records a declined renewal, which is an outcome), or (b) another contract
-    of the same company in Draft, Sent or Active that starts later and ends later than this
-    one (or has no end date) and whose product matches. A parallel contract of the same
-    company that ends at the same time or earlier (an add-on, another venue's term) is not a
-    successor. Products are labelled as the renewal book does (service_type,
-    then the company's contracted_product); a contract whose product cannot be told ("Other")
-    matches any product, so an unlabelled draft for the same company still counts as the
-    renewal. Auto-renewing contracts are included: the next term still has to be recorded and
-    invoiced. Soonest first.
+    no successor. Auto-renewing contracts are included: the next term still has to be recorded
+    and invoiced. Soonest end first.
+
+    A successor is either
+    (a) a contract linked through renewed_from in status Draft, Sent, Active, Renewed or
+        Expired. A linked renewal that was Cancelled does not clear the row: the contract is
+        still Active and ending, so someone must decide; the fact says "renewal X was
+        cancelled"; or
+    (b) an unlinked contract of the same company (not linked to any other contract either) that
+        - is Draft, Sent or Active;
+        - starts between 90 days before and 60 days after this contract's end, and after its
+          start. A renewal normally starts the day after the old term; it is sometimes dated
+          up to a quarter early (an early renewal, or a term moved to the calendar year) or a
+          few weeks late (a short lapse while the customer decides). A contract that starts
+          earlier runs alongside this one (another venue, a multi-year term); one that starts
+          more than two months after the end is a new sale, not this renewal;
+        - ends after this contract's end, or has no end date;
+        - is not a one-off or add-on: service type one-time setup, consulting or maintenance,
+          contract type One-time, billing One-time, lifecycle type addon or churn, or a term
+          that ends on or before its start;
+        - has a matching product (as the renewal book labels it; "Other" matches any), and
+        - covers the same place: where both contracts record places (service-location names,
+          zone links or zone names, property name), they share at least one.
+    When an otherwise qualifying contract cannot be compared because one of the two records
+    no places, the row is still listed, with "possible renewal: X (not linked)": a false alarm
+    costs a glance; a hidden gap costs a customer. Generic location names ("Lobby") shared by
+    two venues of one company record count as the same place.
     """
     key = 'contract_ending_no_successor'
     title = 'Contracts ending within 60 days with no renewal'
     why = 'Nobody has started the renewal, and the customer may lapse or be invoiced late.'
     severity = 'high'
     record_type = 'contract'
-    owner_field = 'owner_ref'
 
-    def queryset(self, ctx):
-        later = (Contract.objects.filter(company_id=OuterRef('company_id'), status__in=OPEN_CONTRACT_STATUSES,
-                                         start_date__gt=OuterRef('start_date'))
-                 .filter(Q(end_date__isnull=True) | Q(end_date__gt=OuterRef('end_date')))
-                 .exclude(pk=OuterRef('pk'))
-                 .annotate(successor_product=product_case()))
-        return (Contract.objects
-                .filter(status='Active', end_date__gte=ctx.today,
-                        end_date__lte=ctx.today + timedelta(days=ENDING_WINDOW_DAYS))
-                .select_related('company', *CONTRACT_OWNER_RELATED)
-                .annotate(owner_ref=contract_owner_ref(), product=product_case())
-                .filter(~Exists(Contract.objects.filter(renewed_from=OuterRef('pk'))))
-                .filter(~Exists(later.filter(Q(successor_product=OuterRef('product')) | Q(successor_product='Other'))))
-                .exclude(Q(product='Other') & Exists(later))
-                .order_by('end_date', 'contract_number'))
+    def build(self, ctx):
+        window = dict(status='Active', end_date__gte=ctx.today,
+                      end_date__lte=ctx.today + timedelta(days=ENDING_WINDOW_DAYS))
+        companies = Contract.objects.filter(**window).values('company_id')
+        ending = list(
+            Contract.objects.filter(**window)
+            .select_related('company', *CONTRACT_OWNER_RELATED)
+            .annotate(open_renewal=Exists(Contract.objects.filter(renewed_from=OuterRef('pk'))
+                                          .exclude(status='Cancelled')),
+                      cancelled_renewal=latest_renewal('contract_number', status='Cancelled'))
+            .order_by('end_date', 'contract_number', 'pk'))
+        candidates = list(
+            Contract.objects.filter(company_id__in=companies, status__in=OPEN_CONTRACT_STATUSES,
+                                    renewed_from__isnull=True)
+            .exclude(service_type__in=ONE_OFF_SERVICE_TYPES)
+            .exclude(lifecycle_type__in=ONE_OFF_LIFECYCLE_TYPES)
+            .exclude(contract_type='One-time')
+            .values('id', 'company_id', 'contract_number', 'start_date', 'end_date', 'service_type',
+                    'billing_frequency', 'property_name', 'company__contracted_product')
+            .order_by('start_date', 'contract_number', 'id'))
+        places = {}
+        for contract_id, name in (ContractServiceLocation.objects.filter(contract__company_id__in=companies)
+                                  .values_list('contract_id', 'location_name')):
+            places.setdefault(contract_id, set()).add(('name', _norm_place(name)))
+        for contract_id, zone_id, zone_name in (ContractZone.objects.filter(contract__company_id__in=companies)
+                                                .values_list('contract_id', 'zone_id', 'zone__name')):
+            places.setdefault(contract_id, set()).update({('zone', zone_id), ('name', _norm_place(zone_name))})
+        for c in candidates:
+            if c['property_name'].strip():
+                places.setdefault(c['id'], set()).add(('property', _norm_place(c['property_name'])))
+        by_company = {}
+        for c in candidates:
+            by_company.setdefault(c['company_id'], []).append(c)
 
-    def describe(self, c, ctx):
-        days = (c.end_date - ctx.today).days
-        when = 'Ends today' if days == 0 else f'Ends in {plural(days, "day")}'
-        extra = '; auto-renews' if c.auto_renew else ''
-        return contract_row(c, f'{when} ({fmt_date(c.end_date)}); no renewal drafted{extra}', c.end_date)
+        rows = []
+        for e in ending:
+            if e.open_renewal:
+                continue
+            mine = set(places.get(e.pk, ()))
+            if e.property_name.strip():
+                mine.add(('property', _norm_place(e.property_name)))
+            product = product_of(e.service_type, e.company.contracted_product)
+            possible, confirmed = [], False
+            for c in by_company.get(e.company_id, ()):
+                if c['id'] == e.pk or not self._could_follow(e, c, product):
+                    continue
+                theirs = places.get(c['id'], set())
+                if mine and theirs:
+                    if mine & theirs:
+                        confirmed = True
+                        break
+                    continue  # both record places and none is shared: another venue's term
+                possible.append(c['contract_number'])
+            if confirmed:
+                continue
+            notes = []
+            if e.cancelled_renewal:
+                notes.append(f'renewal {e.cancelled_renewal} was cancelled')
+            if possible:
+                notes.append(f'possible renewal: {", ".join(possible)} (not linked)')
+            if not notes:
+                notes.append('no renewal drafted')
+            if e.auto_renew:
+                notes.append('auto-renews')
+            rows.append(contract_row(e, f'{ends_phrase(e, ctx.today)}; {"; ".join(notes)}', e.end_date)
+                        | {'_company_ids': {str(e.company_id)}})
+        return rows
+
+    @staticmethod
+    def _could_follow(e, c, product):
+        start, end = c['start_date'], c['end_date']
+        if not (e.end_date - timedelta(days=SUCCESSOR_START_BEFORE_END_DAYS) <= start
+                <= e.end_date + timedelta(days=SUCCESSOR_START_AFTER_END_DAYS)):
+            return False
+        if start <= e.start_date:
+            return False
+        if end is not None and (end <= e.end_date or end <= start):
+            return False
+        if (c['billing_frequency'] or '').strip().lower() in ONE_OFF_BILLING:
+            return False
+        theirs = product_of(c['service_type'], c['company__contracted_product'])
+        return theirs == product or 'Other' in (theirs, product)
 
 
 class SentNotSigned(QuerysetCheck):
@@ -384,7 +539,7 @@ class SentNotSigned(QuerysetCheck):
                 .filter(status='Sent', start_date__lt=ctx.today - timedelta(days=SENT_UNSIGNED_DAYS))
                 .select_related('company', *CONTRACT_OWNER_RELATED)
                 .annotate(owner_ref=contract_owner_ref())
-                .order_by('start_date', 'contract_number'))
+                .order_by('start_date', 'contract_number', 'pk'))
 
     def describe(self, c, ctx):
         days = (ctx.today - c.start_date).days
@@ -414,7 +569,7 @@ class StaleDraft(QuerysetCheck):
         return (Contract.objects.filter(status='Draft', updated_at__lt=cutoff)
                 .select_related('company', *CONTRACT_OWNER_RELATED)
                 .annotate(owner_ref=contract_owner_ref())
-                .order_by('updated_at', 'contract_number'))
+                .order_by('updated_at', 'contract_number', 'pk'))
 
     def describe(self, c, ctx):
         changed = timezone.localdate(c.updated_at)
@@ -428,35 +583,41 @@ class StaleDraft(QuerysetCheck):
 class NoServiceLocations(QuerysetCheck):
     """Active contracts with no service locations.
 
-    Definition: status Active and no ContractServiceLocation row. Service locations are the
-    authoritative record of what the customer is contracted for: they drive the contract PDF
-    and the renewal book's zone count, while ContractZone links are the support team's
-    Soundtrack-synced zone tracking (research/01 §8.10, renewal_book_service). The fact says
-    whether zone links exist. A contract missing both is listed here only, not again under
-    ``contract_no_zone_links``.
+    Definition: status Active and no ContractServiceLocation row. Service-location rows are
+    where the CRM records each venue's product and per-zone price, and where the renewal book
+    counts zones. Without them:
+    - the renewal book takes the zone count from the company's funnel-sourced
+      contracted_zone_count, one figure for all of the company's contracts;
+    - the contract PDF falls back to the contract's zone links (views.py
+      ``_build_zones_table`` and the zone-count clauses), so a contract with zone links still
+      prints its zones, but one with neither has no zone schedule at all.
+    The fact says which case applies. A contract missing both is listed here only, not again
+    under ``contract_no_zone_links``.
     """
     key = 'contract_no_service_locations'
     title = 'Active contracts with no service locations'
-    why = 'The CRM does not know which venues and zones the customer pays for, so PDFs, renewals and zone counts are guesses.'
+    why = ('Which venues and zones the customer pays for is not recorded on the contract, so the renewal '
+           'book falls back to the company-wide zone count.')
     severity = 'medium'
     record_type = 'contract'
     owner_field = 'owner_ref'
 
     def queryset(self, ctx):
-        active_links = (ContractZone.objects.filter(contract=OuterRef('pk'), is_active=True)
-                        .values('contract').annotate(n=Count('pk')).values('n'))
+        links = (ContractZone.objects.filter(contract=OuterRef('pk'))
+                 .values('contract').annotate(n=Count('pk')).values('n'))
         return (Contract.objects.filter(status='Active')
                 .filter(~Exists(ContractServiceLocation.objects.filter(contract=OuterRef('pk'))))
                 .select_related('company', *CONTRACT_OWNER_RELATED)
                 .annotate(owner_ref=contract_owner_ref(),
-                          active_links=Coalesce(Subquery(active_links, output_field=IntegerField()), 0))
-                .order_by('company__name', 'contract_number'))
+                          zone_links=Coalesce(Subquery(links, output_field=IntegerField()), 0))
+                .order_by('company__name', 'contract_number', 'pk'))
 
     def describe(self, c, ctx):
-        if c.active_links:
-            fact = f'No service locations; {plural(c.active_links, "active zone link")}'
+        if c.zone_links:
+            fact = (f'No service locations; the PDF lists its {plural(c.zone_links, "linked zone")}, '
+                    f'the renewal book uses the company-wide zone count')
         else:
-            fact = 'No service locations and no zone links'
+            fact = 'No service locations and no zone links: the PDF has no zone schedule'
         return contract_row(c, fact, c.end_date)
 
 
@@ -483,7 +644,7 @@ class NoZoneLinks(QuerysetCheck):
                 .select_related('company', *CONTRACT_OWNER_RELATED)
                 .annotate(owner_ref=contract_owner_ref(),
                           locations=Subquery(locations, output_field=IntegerField()))
-                .order_by('company__name', 'contract_number'))
+                .order_by('company__name', 'contract_number', 'pk'))
 
     def describe(self, c, ctx):
         return contract_row(c, f'{plural(c.locations, "service location")}; no active zone link', c.end_date)
@@ -491,54 +652,83 @@ class NoZoneLinks(QuerysetCheck):
 
 # --- companies and contacts -------------------------------------------------------------
 
-class CompanyWithoutEmailContact(QuerysetCheck):
-    """Companies with an Active contract but no contact with an email address.
-
-    Definition: the company has at least one contract in status Active, and none of its own
-    contacts is active (Contact.is_active) with an email containing "@". Contacts of a parent
-    company are not counted, because renewal, invoice and contract emails go to the company's
-    own contacts.
-    """
-    key = 'company_no_email_contact'
-    title = 'Customers with no contact email'
-    why = 'Renewal notices, invoices and contracts have nobody to go to.'
-    severity = 'medium'
-    record_type = 'company'
-    company_field = 'pk'
-
-    def queryset(self, ctx):
-        active = (Contract.objects.filter(company=OuterRef('pk'), status='Active')
-                  .values('company').annotate(n=Count('pk')).values('n'))
-        contacts = Contact.objects.filter(company=OuterRef('pk')).values('company').annotate(n=Count('pk')).values('n')
-        return (Company.objects
-                .filter(Exists(Contract.objects.filter(company=OuterRef('pk'), status='Active')))
-                .filter(~Exists(Contact.objects.filter(company=OuterRef('pk'), is_active=True, email__contains='@')))
-                .annotate(active_contracts=Subquery(active, output_field=IntegerField()),
-                          contact_count=Coalesce(Subquery(contacts, output_field=IntegerField()), 0))
-                .order_by('name'))
-
-    def describe(self, co, ctx):
-        who = 'no contacts' if not co.contact_count else f'{plural(co.contact_count, "contact")}, none active with an email'
-        return row(id=co.pk, record_type='company', label=co.name, link=f'/companies/{co.pk}',
-                   fact=f'{plural(co.active_contracts, "Active contract")}; {who}', company=co)
-
-
 class _CompanyRef:
     """The two fields of a company a row needs, without loading the company."""
     def __init__(self, pk, name):
         self.pk, self.name = pk, name
 
 
+class CompanyWithoutEmailContact(ListCheck):
+    """Companies with an Active contract but no contact with a valid email address.
+
+    Definition: the company has at least one contract in status Active, and none of its own
+    active contacts (Contact.is_active) has an email that passes the same validator as
+    ``contact_email_problem`` (so "n/a@" does not count). Unsubscribed contacts still count as
+    reachable: whether they want automated mail is a different question from whether the
+    company can be written to. Contacts of a parent company are not counted, because renewal,
+    invoice and contract emails go to the company's own contacts.
+    """
+    key = 'company_no_email_contact'
+    title = 'Customers with no contact email'
+    why = 'Renewal notices, invoices and contracts have nobody to go to.'
+    severity = 'medium'
+    record_type = 'company'
+
+    def build(self, ctx):
+        with_active = Contract.objects.filter(status='Active').values('company_id')
+        # Companies with an active contact whose email the database can vouch for are reachable;
+        # only the others are read, and their contacts' emails validated in Python.
+        vouched = (Contact.objects.filter(company=OuterRef('pk'), is_active=True)
+                   .annotate(email_length=Length('email')).filter(certainly_valid_email()))
+        suspects = Company.objects.filter(pk__in=with_active).filter(~Exists(vouched))
+        active = (Contract.objects.filter(company=OuterRef('pk'), status='Active')
+                  .values('company').annotate(n=Count('pk')).values('n'))
+        contacts = Contact.objects.filter(company=OuterRef('pk')).values('company').annotate(n=Count('pk')).values('n')
+        companies = list(suspects
+                         .annotate(active_contracts=Subquery(active, output_field=IntegerField()),
+                                   contact_count=Coalesce(Subquery(contacts, output_field=IntegerField()), 0))
+                         .values_list('pk', 'name', 'active_contracts', 'contact_count')
+                         .order_by('name', 'pk'))
+        reachable = {company_id for company_id, email in
+                     Contact.objects.filter(company__in=suspects, is_active=True).exclude(email='')
+                     .values_list('company_id', 'email').order_by() if is_valid_email(email)}
+        rows = []
+        for pk, name, active_contracts, contact_count in companies:
+            if pk in reachable:
+                continue
+            who = ('no contacts' if not contact_count
+                   else f'{plural(contact_count, "contact")}, none active with a valid email')
+            rows.append(row(id=pk, record_type='company', label=name, link=f'/companies/{pk}',
+                            fact=f'{plural(active_contracts, "Active contract")}; {who}',
+                            company=_CompanyRef(pk, name)) | {'_company_ids': {str(pk)}})
+        return rows
+
+
+def corporate_root(company_id, parents):
+    """The top of a company's parent chain. A cycle in the chain is cut at its smallest id, so
+    every member of the cycle gets the same root."""
+    seen, current = [], company_id
+    while current is not None and current not in seen:
+        seen.append(current)
+        current = parents.get(current)
+    if current is None:
+        return seen[-1]
+    cycle = seen[seen.index(current):]
+    return min(cycle, key=str)
+
+
 class ContactEmailProblem(ListCheck):
     """Contacts whose email address is invalid or shared across companies.
 
     Definition, over active contacts with a non-blank email:
-    - invalid: the stored value fails Django's EmailValidator (which also rejects spaces);
-      one row per contact;
-    - shared: the same address (trimmed, case-insensitive) belongs to active contacts of two
-      or more corporate groups, a group being a company together with its parent. The same
-      person at a parent and its venues, or at sister venues, is expected and not listed.
-      One row per address, linking every company that holds it.
+    - invalid: the stored value fails Django's EmailValidator (which also rejects spaces, so
+      "gm@example.com " is listed); one row per contact. The database sets aside addresses of
+      a shape that always passes, and Python validates the rest;
+    - shared: the same address (trimmed, case-insensitive), valid, held by active contacts of
+      two or more corporate groups. A group is a company with everything above it in its
+      parent chain (any depth; a cycle is cut). The same person at a head office and its
+      venues, or at sister venues, is expected and not listed. One row per address, linking
+      every company that holds it; the database finds addresses held by more than one company.
     Contacts have no page of their own, so rows open the company.
     """
     key = 'contact_email_problem'
@@ -548,73 +738,154 @@ class ContactEmailProblem(ListCheck):
     record_type = 'contact'
 
     def build(self, ctx):
-        validate = EmailValidator()
-        contacts = list(Contact.objects.filter(is_active=True).exclude(email='')
-                        .values_list('id', 'name', 'email', 'company_id', 'company__name',
-                                     'company__parent_company_id')
-                        .order_by('company__name', 'name', 'id'))
-        invalid, by_address = [], {}
-        for pk, name, email, company_id, company_name, parent_id in contacts:
-            try:
-                validate(email)
-            except ValidationError:
-                invalid.append(row(id=pk, record_type='contact', label=name or email,
-                                   link=f'/companies/{company_id}', company=_CompanyRef(company_id, company_name),
-                                   fact=f'Email "{email}" is not a valid address')
-                               | {'_company_ids': {str(company_id)}})
-                continue
-            by_address.setdefault(email.strip().lower(), []).append(
-                (pk, name, company_id, company_name, parent_id or company_id))
-        shared = []
-        for address, holders in sorted(by_address.items()):
-            if len({h[4] for h in holders}) < 2:
+        live = Contact.objects.filter(is_active=True).exclude(email='')
+        rows = []
+        for pk, name, email, company_id, company_name in (
+                live.annotate(email_length=Length('email')).exclude(certainly_valid_email())
+                .values_list('id', 'name', 'email', 'company_id', 'company__name')
+                .order_by('company__name', 'name', 'id')):
+            if not is_valid_email(email):
+                rows.append(row(id=pk, record_type='contact', label=name or email, link=f'/companies/{company_id}',
+                                company=_CompanyRef(company_id, company_name),
+                                fact=f'Email "{email}" is not a valid address')
+                            | {'_company_ids': {str(company_id)}})
+
+        normalised = live.annotate(address=Lower(Trim('email')))
+        shared_addresses = list(normalised.order_by().values('address')
+                                .annotate(companies=Count('company_id', distinct=True))
+                                .filter(companies__gt=1).values_list('address', flat=True))
+        # [''] keeps the query (and so the query count) when no address is shared; a blank
+        # address never passes validation below.
+        holders = list(normalised.filter(address__in=shared_addresses or [''])
+                       .values_list('id', 'email', 'address', 'company_id', 'company__name')
+                       .order_by('address', 'company__name', 'company_id', 'id'))
+        parents = dict(Company.objects.filter(parent_company__isnull=False).values_list('id', 'parent_company_id'))
+        by_address = {}
+        for pk, email, address, company_id, company_name in holders:
+            if is_valid_email(email):
+                by_address.setdefault(address, []).append((pk, company_id, company_name))
+        for address, members in by_address.items():
+            if len({corporate_root(company_id, parents) for _, company_id, _ in members}) < 2:
                 continue
             companies = {}
-            for _, _, company_id, company_name, _ in holders:
+            for _, company_id, company_name in members:
                 companies.setdefault(company_id, company_name)
-            first_pk, first_name, first_company, first_company_name, _ = holders[0]
-            others = [(cid, cname) for cid, cname in companies.items() if cid != first_company]
-            shared.append(row(
+            first_pk, first_company, first_name = members[0]
+            rows.append(row(
                 id=first_pk, record_type='contact', label=address, link=f'/companies/{first_company}',
-                company=_CompanyRef(first_company, first_company_name),
+                company=_CompanyRef(first_company, first_name),
                 fact=f'Same email at {plural(len(companies), "company", "companies")}: ' + ', '.join(companies.values()),
-                related=[{'label': cname, 'link': f'/companies/{cid}'} for cid, cname in others],
+                related=[{'label': n, 'link': f'/companies/{cid}'} for cid, n in companies.items() if cid != first_company],
             ) | {'_company_ids': {str(c) for c in companies}})
-        return invalid + shared
+        return rows
 
 
-# Normalised the same way as the names (NFKC splits the Thai SARA AM in จำกัด).
-SUFFIX_WORDS = {unicodedata.normalize('NFKC', w).casefold() for w in (
+def _nfkc(word):
+    return unicodedata.normalize('NFKC', word).casefold()
+
+
+# Legal-form words. A run of them at the start or end of a name is dropped when it holds at
+# least one "strong" word; "sa", "public" and "private" are dropped only inside such a run, so
+# "Sa Sa Cosmetics" and "Private Room" keep their words.
+STRONG_LEGAL_WORDS = {_nfkc(w) for w in (
     'co', 'company', 'ltd', 'limited', 'inc', 'incorporated', 'corp', 'corporation', 'plc', 'llc', 'llp',
-    'pte', 'pvt', 'private', 'sdn', 'bhd', 'pt', 'tbk', 'jsc', 'gmbh', 'sa', 'ag', 'bv', 'nv', 'kk',
-    'public', 'the', 'hotel', 'hotels', 'บริษัท', 'จำกัด', 'มหาชน',
+    'pte', 'pvt', 'sdn', 'bhd', 'pt', 'tbk', 'jsc', 'gmbh', 'ag', 'bv', 'nv', 'kk', 'juristic',
+    'บริษัท', 'จำกัด', 'มหาชน', 'นิติบุคคล',
 )}
+# "Condominium Juristic Person" is the legal form of a Thai condominium; "condominium" and
+# "person" alone are ordinary words.
+WEAK_LEGAL_WORDS = {'sa', 'public', 'private', 'person', 'condominium'}
+# Thai legal words are often written without spaces; they are split off before reading words.
+THAI_LEGAL_WORDS = [_nfkc(w) for w in ('บริษัท', 'จำกัด', 'มหาชน')]
+LEGAL_WORDS = STRONG_LEGAL_WORDS | WEAK_LEGAL_WORDS
+_ASCII_WORD_CHARS = frozenset('abcdefghijklmnopqrstuvwxyz0123456789')
+
+
+def _keep(ch):
+    """Letters, digits and combining marks are part of words; everything else separates."""
+    return ch in _ASCII_WORD_CHARS or (ch > '\x7f' and unicodedata.category(ch)[0] in 'LNM')
+
+
+def _strip_legal_run(words, from_end):
+    seq = list(reversed(words)) if from_end else list(words)
+    run = 0
+    while run < len(seq) and seq[run] in LEGAL_WORDS:
+        run += 1
+    if any(w in STRONG_LEGAL_WORDS for w in seq[:run]):
+        seq = seq[run:]
+    return list(reversed(seq)) if from_end else seq
+
+
+def _drop_latin_accents(text):
+    """'Meliá' and 'Mövenpick' read as 'melia' and 'movenpick'. Only marks on Latin letters go;
+    Thai vowel and tone marks are part of the word and stay."""
+    if text.isascii():
+        return text
+    out = []
+    for ch in unicodedata.normalize('NFD', text):
+        if unicodedata.combining(ch) and out and out[-1].isascii() and out[-1].isalpha():
+            continue
+        out.append(ch)
+    return unicodedata.normalize('NFC', ''.join(out))
+
+
+def _name_words(name):
+    text = _drop_latin_accents(_nfkc(name or ''))
+    if any('\u0e00' <= ch <= '\u0e7f' for ch in text):
+        for word in THAI_LEGAL_WORDS:
+            text = text.replace(word, f' {word} ')
+    text = text.replace('&', ' and ')
+    text = ''.join(ch if _keep(ch) else ' ' for ch in text)
+    words = text.split()
+    if words and words[0] == 'the':
+        words = words[1:]
+    words = _strip_legal_run(words, from_end=False)
+    if words and words[0] == 'the':
+        words = words[1:]
+    words = _strip_legal_run(words, from_end=True)
+    # "& Spa" after a resort or hotel adds nothing: "X Resort & Spa" = "X Resort Spa" = "X Resort".
+    words = [w for i, w in enumerate(words)
+             if not (w == 'spa' and i > 0 and words[i - 1] in ('resort', 'hotel', 'and'))]
+    # "and", "the" and the singular "hotel" are dropped anywhere ("Hotel X" = "X Hotel" = "X",
+    # "Mall of the X" = "Mall of X"); the plural is kept, so a group "X Hotels" does not match
+    # its property "Hotel X".
+    return [w for w in words if w not in ('and', 'the', 'hotel')]
+
+
+def company_name_keys(name):
+    """The two exact keys a company name is compared on: its words sorted (word order ignored)
+    and its words joined without spaces (spacing ignored, e.g. Thai names). Empty when the
+    name has fewer than 3 letters or digits left."""
+    words = _name_words(name)
+    joined = ''.join(words)
+    if len(joined) < 3:
+        return ()
+    return (' '.join(sorted(words)), joined)
 
 
 def normalise_company_name(name):
-    """Lower-case letters, digits and marks only, legal-form words (and "hotel") removed at
-    either end, the remaining words sorted: "The Lumen Bay Co., Ltd.", "lumen-bay" and
-    "Bay Lumen Hotel" all become "bay lumen"."""
-    text = unicodedata.normalize('NFKC', name or '').casefold().replace('&', ' and ')
-    text = ''.join(ch if unicodedata.category(ch)[0] in 'LNM' else ' ' for ch in text)
-    words = text.split()
-    while words and words[0] in SUFFIX_WORDS:
-        words.pop(0)
-    while words and words[-1] in SUFFIX_WORDS:
-        words.pop()
-    return ' '.join(sorted(words))
+    """The word-order-free key of a company name (see company_name_keys)."""
+    keys = company_name_keys(name)
+    return keys[0] if keys else ''
+
+
+def names_look_alike(a, b):
+    return bool(set(company_name_keys(a)) & set(company_name_keys(b)))
 
 
 class LookalikeCompanyNames(ListCheck):
     """Company records whose names are the same once normalised.
 
-    Definition: two or more companies whose names are equal after Unicode normalisation,
-    case folding, replacing "&" with "and", dropping punctuation, removing legal-form words
-    (Co, Ltd, Limited, Inc, Pte, Sdn Bhd, PT, the Thai บริษัท / จำกัด / มหาชน, ...) and the
-    word "hotel" at the start or end, and ignoring word order ("Ascott Taipei Nangang" and
-    "Ascott Nangang Taipei"). Exact matching on that key only: no fuzzy comparison of every
-    pair, so spelling variants are not found. One row per group, opening the oldest record
-    and linking the others. Keys shorter than 3 letters are ignored.
+    Definition: two or more companies that share a name key (company_name_keys). Names are
+    compared after Unicode normalisation and case folding, with accents on Latin letters
+    removed ("Meliá" = "Melia"), "&" read as "and", punctuation dropped, a run of legal-form
+    words at the start or end (Co, Ltd, Pte, Sdn Bhd, PT ... Tbk, Public Company Limited,
+    Condominium Juristic Person, the Thai บริษัท / จำกัด / มหาชน, also written without
+    spaces) and "& Spa" after a resort or hotel removed, and "and", "the" and "hotel"
+    dropped anywhere. Two keys are used: the words in sorted order ("Bay
+    Lumen Phuket" = "Lumen Bay Phuket") and the words joined without spaces ("Lumen Bay" =
+    "LumenBay"). Exact keys only: no fuzzy comparison of every pair, so spelling variants are
+    not found. One row per group, opening the oldest record and linking the others.
     """
     key = 'company_lookalike_names'
     title = 'Companies that may be duplicates'
@@ -623,13 +894,29 @@ class LookalikeCompanyNames(ListCheck):
     record_type = 'company'
 
     def build(self, ctx):
+        companies = list(Company.objects.values_list('id', 'name').order_by('created_at', 'id'))
+        parent = list(range(len(companies)))
+
+        def find(i):
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        first_with_key = {}
+        for i, (_, name) in enumerate(companies):
+            for key in company_name_keys(name):
+                if key in first_with_key:
+                    a, b = find(first_with_key[key]), find(i)
+                    if a != b:
+                        parent[max(a, b)] = min(a, b)
+                else:
+                    first_with_key[key] = i
         groups = {}
-        for pk, name, created in Company.objects.values_list('id', 'name', 'created_at').order_by('created_at', 'name'):
-            key = normalise_company_name(name)
-            if len(key.replace(' ', '')) >= 3:
-                groups.setdefault(key, []).append((pk, name))
+        for i in range(len(companies)):
+            groups.setdefault(find(i), []).append(companies[i])
         rows = []
-        for key, members in groups.items():
+        for members in groups.values():
             if len(members) < 2:
                 continue
             (first_pk, first_name), others = members[0], members[1:]
@@ -639,7 +926,7 @@ class LookalikeCompanyNames(ListCheck):
                 fact=f'{plural(len(members), "record")} with the same name: ' + '; '.join(n for _, n in members),
                 related=[{'label': n, 'link': f'/companies/{pk}'} for pk, n in others],
             ) | {'_company_ids': {str(pk) for pk, _ in members}})
-        rows.sort(key=lambda r: r['label'].casefold())
+        rows.sort(key=lambda r: (r['label'].casefold(), r['id']))
         return rows
 
 
@@ -665,7 +952,7 @@ class QuoteSentExpired(QuerysetCheck):
                 .filter(~Exists(Contract.objects.filter(quote=OuterRef('pk'))))
                 .select_related('company', 'created_by', 'opportunity__owner')
                 .annotate(owner_ref=Coalesce(F('created_by_id'), F('opportunity__owner_id')))
-                .order_by('valid_until', 'quote_number'))
+                .order_by('valid_until', 'quote_number', 'pk'))
 
     def describe(self, q, ctx):
         days = (ctx.today - q.valid_until).days
@@ -695,7 +982,7 @@ class InvoiceOverdue(QuerysetCheck):
         return (Invoice.objects.filter(status__in=UNPAID_INVOICE_STATUSES, due_date__lt=ctx.today)
                 .select_related('company', 'contract__opportunity__owner', 'contract__quote__created_by')
                 .annotate(owner_ref=contract_owner_ref('contract__'))
-                .order_by('due_date', 'invoice_number'))
+                .order_by('due_date', 'invoice_number', 'pk'))
 
     def describe(self, inv, ctx):
         days = (ctx.today - inv.due_date).days
@@ -708,10 +995,11 @@ class InvoiceOverdue(QuerysetCheck):
 class TaskOverdue(QuerysetCheck):
     """Open tasks past their due date.
 
-    Definition: status To Do, In Progress or On Hold (open: not Done and not Cancelled) and a
-    due date on an earlier Bangkok calendar day than today, so a task due later today is not
-    listed yet. The model has no 'Pending' status, and a Cancelled task is never overdue.
-    Owner: the person the task is assigned to. Oldest due date first.
+    Definition: the shared rule in crm_app.models (TaskQuerySet.overdue, also behind
+    Task.is_overdue, Today and the company dashboard): status To Do, In Progress or On Hold
+    (open: not Done and not Cancelled) and a due date on an earlier Bangkok calendar day than
+    today, so a task due later today is not listed yet. Owner: the person the task is assigned
+    to. Oldest due date first.
     """
     key = 'task_overdue'
     title = 'Overdue tasks'
@@ -721,9 +1009,9 @@ class TaskOverdue(QuerysetCheck):
     owner_field = 'assigned_to_id'
 
     def queryset(self, ctx):
-        return (Task.objects.filter(status__in=OPEN_TASK_STATUSES, due_date__lt=ctx.start_of_today)
+        return (Task.objects.overdue(ctx.today)
                 .select_related('company', 'assigned_to')
-                .order_by('due_date', 'title'))
+                .order_by('due_date', 'title', 'pk'))
 
     def describe(self, t, ctx):
         due = timezone.localdate(t.due_date)
@@ -746,6 +1034,7 @@ CHECKS = [
     StaleDraft(),
     NoZoneLinks(),
     AutoRenewPastEnd(),
+    ActiveNoEndDate(),
     ContactEmailProblem(),
     LookalikeCompanyNames(),
 ]

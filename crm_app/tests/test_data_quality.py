@@ -47,9 +47,16 @@ def company(name=None, **kw):
     return Company.objects.create(name=name or f'Test Venue {_n["c"]:03d}', soundtrack_account_id='', **kw)
 
 
+NO_END = object()
+
+
 def contract(co, status='Active', start=None, end=None, **kw):
-    end = end if end is not None else T + timedelta(days=200)
-    start = start or end - timedelta(days=364)
+    if end is NO_END:
+        end = None
+        start = start or T - timedelta(days=100)
+    else:
+        end = end if end is not None else T + timedelta(days=200)
+        start = start or end - timedelta(days=364)
     return Contract.objects.create(company=co, status=status, start_date=start, end_date=end,
                                    value=Decimal('108000'), currency='THB', **kw)
 
@@ -58,8 +65,8 @@ def location(c, name='Lobby'):
     return ContractServiceLocation.objects.create(contract=c, location_name=name, platform='soundtrack')
 
 
-def zone_link(c, active=True):
-    z = Zone.objects.create(company=c.company, name=f'Zone {Zone.objects.count() + 1}')
+def zone_link(c, active=True, zone=None):
+    z = zone or Zone.objects.create(company=c.company, name=f'Zone {Zone.objects.count() + 1}')
     return ContractZone.objects.create(contract=c, zone=z, start_date=c.start_date, is_active=active,
                                        end_date=None if active else c.start_date + timedelta(days=10))
 
@@ -119,46 +126,237 @@ def test_ending_without_successor_window():
                      'Ends in 60 days (18 Jan 2027); no renewal drafted']
 
 
-def test_ending_successor_rules():
-    soundtrack = 'soundtrack_unlimited_yearly'
-    # linked renewal in any status, even Cancelled (a declined renewal is an outcome)
-    a = company()
-    a1 = contract(a, end=T + timedelta(days=20), service_type=soundtrack)
-    contract(a, status='Cancelled', start=T + timedelta(days=21), end=T + timedelta(days=385), renewed_from=a1)
-    # unlinked draft, same company, later start, same product
-    b = company()
-    contract(b, end=T + timedelta(days=20), service_type=soundtrack)
-    contract(b, status='Draft', start=T + timedelta(days=21), end=T + timedelta(days=385), service_type=soundtrack)
-    # unlinked draft with unknown product counts as the renewal
-    c = company()
-    contract(c, end=T + timedelta(days=20), service_type=soundtrack)
-    contract(c, status='Draft', start=T + timedelta(days=21), end=T + timedelta(days=385))
-    # unlinked draft for another product does not
-    d = company()
-    d1 = contract(d, end=T + timedelta(days=20), service_type=soundtrack)
-    contract(d, status='Draft', start=T + timedelta(days=21), end=T + timedelta(days=385),
-             service_type='beat_breeze_yearly')
-    # a draft that starts earlier is not a successor; an Expired later one neither; nor a
-    # parallel Active contract that starts later but ends with this one
-    e = company()
-    e1 = contract(e, start=T - timedelta(days=300), end=T + timedelta(days=20), service_type=soundtrack)
-    contract(e, status='Draft', start=T - timedelta(days=400), end=T - timedelta(days=36), service_type=soundtrack)
-    contract(e, status='Expired', start=T + timedelta(days=21), end=T + timedelta(days=385), service_type=soundtrack)
-    contract(e, start=T - timedelta(days=100), end=T + timedelta(days=20), service_type=soundtrack)
-    # another company's draft does not count; auto-renewing contracts are included
-    f = company()
-    f1 = contract(f, end=T + timedelta(days=20), auto_renew=True)
-    contract(company(), status='Draft', start=T + timedelta(days=21), end=T + timedelta(days=385))
-    # a contract of unknown product matches any later contract of its company
-    g = company(contracted_product='')
-    contract(g, end=T + timedelta(days=20))
-    contract(g, status='Draft', start=T + timedelta(days=21), end=T + timedelta(days=385),
-             service_type='beat_breeze_yearly')
-    ending = set(ids('contract_ending_no_successor'))
-    assert {str(d1.pk), str(e1.pk), str(f1.pk)} <= ending
-    assert len(ending) == 4  # the parallel contract of e has no successor either
-    f_row = [r for r in dq.CHECKS_BY_KEY['contract_ending_no_successor'].rows(dq.Context()) if r['id'] == str(f1.pk)]
-    assert f_row[0]['fact'].endswith('; auto-renews')
+# Table-driven successor cases. Each builder returns (ending contract, listed?, fact ending).
+# The ending contract ends in 20 days (19 Nov + 20 = 9 Dec 2026) unless a case says otherwise.
+E_END = T + timedelta(days=20)
+SYB = 'soundtrack_unlimited_yearly'
+
+
+def _ending(co=None, place='Riverside Lobby', **kw):
+    e = contract(co or company(contracted_product='soundtrack'), end=kw.pop('end', E_END), **kw)
+    if place:
+        location(e, place)
+    return e
+
+
+def _next(e, status='Draft', start=None, end=None, place='Riverside Lobby', co=None, **kw):
+    start = start or e.end_date + timedelta(days=1)
+    c = contract(co or e.company, status=status, start=start, end=end or start + timedelta(days=364), **kw)
+    if place:
+        location(c, place)
+    return c
+
+
+def case_genuine_unlinked_renewal():
+    e = _ending()
+    _next(e)
+    return e, False, None
+
+
+def case_unlinked_sent_renewal():
+    e = _ending()
+    _next(e, status='Sent')
+    return e, False, None
+
+
+def case_unlinked_active_renewal_without_end_date():
+    e = _ending()
+    _next(e, status='Active', end=NO_END)
+    return e, False, None
+
+
+def case_renewal_without_places_is_listed_as_possible():
+    e = _ending()
+    n = _next(e, place=None)
+    return e, True, f'possible renewal: {n.contract_number} (not linked)'
+
+
+def case_neither_records_places():
+    e = _ending(place=None)
+    n = _next(e, place=None)
+    return e, True, f'possible renewal: {n.contract_number} (not linked)'
+
+
+def case_two_venues_on_staggered_terms():
+    e = _ending()
+    venue_b = contract(e.company, start=T - timedelta(days=120), end=T + timedelta(days=245))
+    location(venue_b, 'Hilltop Lobby')
+    return e, True, 'no renewal drafted'
+
+
+def case_other_venues_renewal_draft():
+    e = _ending()
+    _next(e, start=E_END - timedelta(days=10), place='Hilltop Lobby')
+    return e, True, 'no renewal drafted'
+
+
+def case_add_on():
+    e = _ending()
+    _next(e, start=E_END - timedelta(days=15), lifecycle_type='addon')
+    return e, True, 'no renewal drafted'
+
+
+def case_one_off_setup_draft():
+    e = _ending()
+    _next(e, start=T + timedelta(days=1), service_type='one_time_setup')
+    return e, True, 'no renewal drafted'
+
+
+def case_one_time_contract_type():
+    e = _ending()
+    _next(e, contract_type='One-time')
+    return e, True, 'no renewal drafted'
+
+
+def case_one_time_billing():
+    e = _ending()
+    _next(e, billing_frequency='One-time')
+    return e, True, 'no renewal drafted'
+
+
+def case_zero_duration_term():
+    e = _ending()
+    start = E_END + timedelta(days=1)
+    _next(e, start=start, end=start)
+    return e, True, 'no renewal drafted'
+
+
+def case_multi_year_renewal():
+    e = _ending(start=E_END - timedelta(days=3 * 365))
+    _next(e, end=E_END + timedelta(days=3 * 365))
+    return e, False, None
+
+
+def case_multi_year_parallel_contract():
+    e = _ending()
+    parallel = contract(e.company, start=T - timedelta(days=700), end=T + timedelta(days=400))
+    location(parallel, 'Riverside Lobby')
+    return e, True, 'no renewal drafted'
+
+
+def case_renewal_on_parent_company():
+    parent = company('Test Parent Group')
+    e = _ending(co=company(contracted_product='soundtrack', parent_company=parent))
+    _next(e, co=parent)
+    return e, True, 'no renewal drafted'
+
+
+def case_child_renewal_does_not_cover_parent():
+    parent = company('Test Parent Holdings', contracted_product='soundtrack')
+    e = _ending(co=parent)
+    _next(e, co=company(contracted_product='soundtrack', parent_company=parent))
+    return e, True, 'no renewal drafted'
+
+
+def case_other_product():
+    e = _ending(service_type=SYB)
+    _next(e, service_type='beat_breeze_yearly')
+    return e, True, 'no renewal drafted'
+
+
+def case_unknown_product_matches():
+    e = _ending(co=company(contracted_product=''))
+    _next(e, service_type='beat_breeze_yearly')
+    return e, False, None
+
+
+def case_linked_draft():
+    e = _ending()
+    _next(e, renewed_from=e, place=None)
+    return e, False, None
+
+
+def case_linked_cancelled_renewal():
+    e = _ending()
+    n = _next(e, status='Cancelled', renewed_from=e)
+    return e, True, f'renewal {n.contract_number} was cancelled'
+
+
+def case_cancelled_then_redrafted():
+    e = _ending()
+    _next(e, status='Cancelled', renewed_from=e)
+    _next(e, renewed_from=e)
+    return e, False, None
+
+
+def case_draft_linked_to_another_contract():
+    e = _ending()
+    other = contract(e.company, end=T - timedelta(days=200), status='Expired')
+    _next(e, renewed_from=other)
+    return e, True, 'no renewal drafted'
+
+
+def case_same_start_as_ending_contract():
+    e = _ending(start=T - timedelta(days=40))
+    _next(e, start=T - timedelta(days=40), end=T + timedelta(days=100))
+    return e, True, 'no renewal drafted'
+
+
+def case_start_90_days_before_end():
+    e = _ending()
+    _next(e, start=E_END - timedelta(days=90))
+    return e, False, None
+
+
+def case_start_91_days_before_end():
+    e = _ending()
+    _next(e, start=E_END - timedelta(days=91))
+    return e, True, 'no renewal drafted'
+
+
+def case_start_60_days_after_end():
+    e = _ending()
+    _next(e, start=E_END + timedelta(days=60))
+    return e, False, None
+
+
+def case_start_61_days_after_end():
+    e = _ending()
+    _next(e, start=E_END + timedelta(days=61))
+    return e, True, 'no renewal drafted'
+
+
+def case_ends_with_the_ending_contract():
+    e = _ending()
+    _next(e, start=E_END - timedelta(days=30), end=E_END)
+    return e, True, 'no renewal drafted'
+
+
+def case_shared_property_name():
+    e = _ending(place=None, property_name='Riverside Wing')
+    _next(e, place=None, property_name='riverside  wing')
+    return e, False, None
+
+
+def case_different_property_name():
+    e = _ending(place=None, property_name='Riverside Wing')
+    _next(e, place=None, property_name='Hilltop Wing')
+    return e, True, 'no renewal drafted'
+
+
+def case_shared_zone_link():
+    e = _ending(place=None)
+    link = zone_link(e)
+    n = _next(e, place=None)
+    zone_link(n, zone=link.zone)
+    return e, False, None
+
+
+def case_auto_renewing_contract_is_listed():
+    e = _ending(auto_renew=True)
+    return e, True, 'no renewal drafted; auto-renews'
+
+
+SUCCESSOR_CASES = [v for k, v in sorted(globals().items()) if k.startswith('case_')]
+
+
+@pytest.mark.parametrize('build', SUCCESSOR_CASES, ids=lambda f: f.__name__[5:])
+def test_successor_rule(build):
+    e, listed, fact_end = build()
+    rows = {r['id']: r for r in dq.CHECKS_BY_KEY['contract_ending_no_successor'].rows(dq.Context())}
+    assert (str(e.pk) in rows) is listed
+    if listed:
+        assert rows[str(e.pk)]['fact'] == f'Ends in 20 days (9 Dec 2026); {fact_end}'
 
 
 def test_product_falls_back_to_company_product():
@@ -167,6 +365,27 @@ def test_product_falls_back_to_company_product():
     contract(bb_company, status='Draft', start=T + timedelta(days=21), end=T + timedelta(days=385),
              service_type='soundtrack_essential_yearly')
     assert ids('contract_ending_no_successor') == [str(current.pk)]
+
+
+def test_ending_owner_filter():
+    co = company()
+    seller = User.objects.create_user(username='ending.owner', password='x', role='Sales')
+    owned = contract(co, end=T + timedelta(days=5),
+                     opportunity=Opportunity.objects.create(company=co, name='R', owner=seller))
+    unowned = contract(company(), end=T + timedelta(days=6))
+    assert ids('contract_ending_no_successor', owner_id=str(seller.pk)) == [str(owned.pk)]
+    assert ids('contract_ending_no_successor', owner_id='none') == [str(unowned.pk)]
+
+
+def test_active_without_end_date():
+    co = company()
+    open_ended = contract(co, end=NO_END, start=T - timedelta(days=100))
+    contract(co, status='Draft', end=NO_END)
+    assert ids('contract_active_no_end_date') == [str(open_ended.pk)]
+    assert only_row('contract_active_no_end_date')['fact'] == 'Started 11 Aug 2026; no end date recorded'
+    # it is in no other contract term check
+    for key in ('contract_active_past_end', 'contract_auto_renew_past_end', 'contract_ending_no_successor'):
+        assert str(open_ended.pk) not in ids(key)
 
 
 def test_sent_unsigned_boundary():
@@ -217,8 +436,9 @@ def test_zone_checks_split_by_authoritative_structure():
     assert set(ids('contract_no_service_locations')) == {str(neither.pk), str(links_only.pk)}
     assert set(ids('contract_no_zone_links')) == {str(locations_only.pk), str(closed_link.pk)}
     facts = {r['id']: r['fact'] for r in dq.CHECKS_BY_KEY['contract_no_service_locations'].rows(dq.Context())}
-    assert facts[str(neither.pk)] == 'No service locations and no zone links'
-    assert facts[str(links_only.pk)] == 'No service locations; 1 active zone link'
+    assert facts[str(neither.pk)] == 'No service locations and no zone links: the PDF has no zone schedule'
+    assert facts[str(links_only.pk)] == ('No service locations; the PDF lists its 1 linked zone, '
+                                         'the renewal book uses the company-wide zone count')
     facts = {r['id']: r['fact'] for r in dq.CHECKS_BY_KEY['contract_no_zone_links'].rows(dq.Context())}
     assert facts[str(locations_only.pk)] == '2 service locations; no active zone link'
 
@@ -230,16 +450,21 @@ def test_company_without_email_contact():
     contract(missing)
     Contact.objects.create(company=missing, name='Old Contact', email='old@example.com', is_active=False)
     Contact.objects.create(company=missing, name='No Email', email='')
+    Contact.objects.create(company=missing, name='Placeholder', email='n/a@')
     ok = company()
     contract(ok)
     Contact.objects.create(company=ok, name='Has Email', email='gm@example.com')
+    unsubscribed = company()
+    contract(unsubscribed)
+    Contact.objects.create(company=unsubscribed, name='Opted Out', email='gm@optout.example', unsubscribed=True,
+                           receives_notifications=False)
     no_contract = company()
     contract(no_contract, status='Expired', end=T - timedelta(days=30))
     bare = company()
     contract(bare)
     assert set(ids('company_no_email_contact')) == {str(missing.pk), str(bare.pk)}
     facts = {r['id']: r['fact'] for r in dq.CHECKS_BY_KEY['company_no_email_contact'].rows(dq.Context())}
-    assert facts[str(missing.pk)] == '1 Active contract; 2 contacts, none active with an email'
+    assert facts[str(missing.pk)] == '1 Active contract; 3 contacts, none active with a valid email'
     assert facts[str(bare.pk)] == '1 Active contract; no contacts'
     assert ids('company_no_email_contact', company_id=str(missing.pk)) == [str(missing.pk)]
 
@@ -275,6 +500,42 @@ def test_contact_email_problems():
     assert dq.CHECKS_BY_KEY['contact_email_problem'].count(dq.Context(), dq.Filters(owner_id=str(some_user.pk))) == 0
 
 
+def test_shared_email_whole_parent_chain_is_one_group():
+    hq = company('Test Chain HQ')
+    brand = company('Test Chain Brand', parent_company=hq)
+    venue = company('Test Chain Venue', parent_company=brand)
+    for c in (hq, brand, venue):
+        Contact.objects.create(company=c, name='Group Finance', email='finance@chain.example')
+    assert ids('contact_email_problem') == []
+    outsider = company('Test Unrelated Outsider')
+    Contact.objects.create(company=outsider, name='Group Finance', email='finance@chain.example')
+    assert only_row('contact_email_problem')['fact'].startswith('Same email at 4 companies: ')
+
+
+def test_corporate_root_survives_a_parent_cycle():
+    a, b, c = 'a', 'b', 'c'
+    assert dq.corporate_root(c, {c: b, b: a}) == a
+    assert dq.corporate_root(a, {a: b, b: a}) == dq.corporate_root(b, {a: b, b: a}) == a
+    assert dq.corporate_root(c, {c: c}) == c
+
+
+def test_invalid_email_found_whatever_its_shape():
+    co = company()
+    odd = ['n/a@', 'x@example.123', 'a..b@example.com', '.a@example.com', 'a@-example.com', 'gm@example.com ']
+    for email in odd + ['ok.person+tag@sub.example.co.th', "o'brien@example.com"]:
+        Contact.objects.create(company=co, name=email, email=email)
+    facts = {r['label']: r['fact'] for r in dq.CHECKS_BY_KEY['contact_email_problem'].rows(dq.Context())}
+    assert set(facts) == set(odd)
+
+
+@pytest.mark.parametrize('email', ['gm@example.com', 'first.last+tag@sub.example.co.th', "o'brien@example.org",
+                                   'x_y-z@example-hotel.travel'])
+def test_certainly_valid_pattern_implies_valid(email):
+    import re
+    assert re.match(dq.CERTAINLY_VALID_EMAIL, email)
+    assert dq.is_valid_email(email)
+
+
 def test_shared_email_fact_wording():
     a, b = company('Alpha Test Cafe'), company('Beta Test Cafe')
     Contact.objects.create(company=a, name='Front Desk', email='desk@cafes.example')
@@ -287,34 +548,68 @@ def test_shared_email_fact_wording():
     ('The Lumen Bay', 'LUMEN BAY LIMITED'),
     ('Orchid & Pine Pte. Ltd.', 'Orchid and Pine'),
     ('PT Kinara Resort Tbk', 'Kinara Resort'),
+    ('Kinara Probe Public Company Limited', 'Kinara Probe'),
     ('บริษัท สยาม ซาวด์ จำกัด (มหาชน)', 'สยาม ซาวด์'),
+    ('บริษัทสยามซาวด์จำกัด', 'สยาม ซาวด์'),
+    ('บริษัท สยามซาวด์ จำกัด', 'สยามซาวด์'),
     ('Ascott Test Nangang Taipei', 'Ascott Test Taipei Nangang'),
     ('AVANI Test Deira', 'Avani Test Deira Hotel'),
+    ('Probe Bay Hotel Phuket', 'Probe Bay Phuket Hotel'),
+    ('Hotel Probe Indigo', 'Probe Indigo'),
+    ('Probe Resort & Spa', 'Probe Resort Spa'),
+    ('Probe Resort and Spa Co., Ltd.', 'Probe Resort'),
+    ('LumenBay Resort', 'Lumen Bay Resort'),
+    ('Meliá Probe Retreat', 'Melia Probe Retreat'),
+    ('Mövenpick Probe Lodge', 'Movenpick Probe Lodge'),
+    ('Probe Mall of the Moon', 'Probe Mall of Moon'),
+    ('Probe Park Condominium Juristic Person', 'Probe Park'),
 ])
-def test_normalised_names_match(a, b):
-    assert dq.normalise_company_name(a) == dq.normalise_company_name(b)
+def test_names_that_look_alike(a, b):
+    assert dq.names_look_alike(a, b)
 
 
 @pytest.mark.parametrize('a,b', [
     ('Lumen Bay', 'Lumen Bayside'),
     ('Coralstone Mall', 'Coralstone Mall Penang'),
     ('Moonlit Garden Resort', 'Moonlit Garden Hotel'),
+    ('Sa Sa Probe Cosmetics', 'Probe Cosmetics Co., Ltd.'),
+    ('The Public Probe House', 'Probe House'),
+    ('Private Probe Room', 'Probe Room'),
+    ('Probe Hotels', 'Hotel Probe'),
+    ('Greenleaf Probe Spa', 'Greenleaf Probe'),
+    ('Probe (Thailand) Co., Ltd.', 'Probe'),
+    ('Person Probe Studio', 'Probe Studio'),
+    ('Probe Condominium', 'Probe'),
+    ('ส้มตำ โพรบ', 'สมตำ โพรบ'),
 ])
-def test_normalised_names_differ(a, b):
-    assert dq.normalise_company_name(a) != dq.normalise_company_name(b)
+def test_names_that_differ(a, b):
+    assert not dq.names_look_alike(a, b)
+
+
+def test_short_names_have_no_key():
+    assert dq.company_name_keys('Co.') == ()
+    assert dq.company_name_keys('The A Ltd') == ()
 
 
 def test_lookalike_companies_one_row_per_group():
-    first = company('Lumen Test Bay Co., Ltd.')
-    company('lumen-test-bay')
-    company('The Lumen Test Bay')
-    company('Lumen Test Bayside')
-    company('Co')  # normalises to nothing: ignored
-    company('Co.')
+    names = ['Lumen Test Bay Co., Ltd.', 'lumen-test-bay', 'The Lumen Test Bay', 'LumenTestBay', 'Lumen Test Bayside',
+             'Co', 'Co.']
+    made = [company(n) for n in names]
+    # distinct creation times, oldest first: the group never depends on name collation
+    for i, c in enumerate(made):
+        Company.objects.filter(pk=c.pk).update(created_at=at(T - timedelta(days=30 - i)))
     r = only_row('company_lookalike_names')
-    assert r['id'] == str(first.pk)
-    assert r['fact'] == '3 records with the same name: Lumen Test Bay Co., Ltd.; The Lumen Test Bay; lumen-test-bay'
-    assert [x['label'] for x in r['related']] == ['The Lumen Test Bay', 'lumen-test-bay']
+    assert r['id'] == str(made[0].pk)
+    assert r['fact'] == ('4 records with the same name: Lumen Test Bay Co., Ltd.; lumen-test-bay; '
+                         'The Lumen Test Bay; LumenTestBay')
+    assert [x['label'] for x in r['related']] == ['lumen-test-bay', 'The Lumen Test Bay', 'LumenTestBay']
+
+
+def test_lookalike_tie_on_creation_time_breaks_on_id():
+    made = [company(n) for n in ('Zeta Probe Lodge', 'zeta-probe-lodge', 'The Zeta Probe Lodge')]
+    Company.objects.filter(pk__in=[c.pk for c in made]).update(created_at=at(T - timedelta(days=3)))
+    first = min(made, key=lambda c: c.pk)
+    assert only_row('company_lookalike_names')['id'] == str(first.pk)
 
 
 # --- quotes, invoices, tasks ------------------------------------------------------------
@@ -401,8 +696,11 @@ def test_contract_owner_from_opportunity_then_quote_creator():
                       opportunity=Opportunity.objects.create(company=co, name='Deal', owner=seller))
     by_quote = contract(co, end=T - timedelta(days=4), quote=quote(co, 'Accepted', T, created_by=maker))
     nobody = contract(co, end=T - timedelta(days=5))
+    both = contract(co, end=T - timedelta(days=6), quote=quote(co, 'Accepted', T, created_by=maker),
+                    opportunity=Opportunity.objects.create(company=co, name='Deal 2', owner=seller))
     owners = {r['id']: r['owner_name'] for r in dq.CHECKS_BY_KEY['contract_active_past_end'].rows(dq.Context())}
-    assert owners == {str(by_opp.pk): 'Sam', str(by_quote.pk): 'Mai', str(nobody.pk): None}
+    assert owners == {str(by_opp.pk): 'Sam', str(by_quote.pk): 'Mai', str(nobody.pk): None, str(both.pk): 'Sam'}
+    assert ids('contract_active_past_end', owner_id=str(seller.pk)) == [str(by_opp.pk), str(both.pk)]
     assert ids('contract_active_past_end', owner_id=str(maker.pk)) == [str(by_quote.pk)]
     assert ids('contract_active_past_end', owner_id='none') == [str(nobody.pk)]
 
@@ -425,9 +723,19 @@ def _seed(n):
         quote(co, 'Sent', T - timedelta(days=3 + i))
         invoice(co, 'Sent', T - timedelta(days=3 + i), f'SEED-{n}-{i}')
         task(co, 'To Do', at(T - timedelta(days=2 + i)), f'Seed task {i}')
+        contract(co, end=NO_END)
+        twin = company(f'Seed {n}-{i} Other Group')
+        Contact.objects.create(company=co, name=f'Shared {i}', email=f'shared{n}.{i}@seed.example')
+        Contact.objects.create(company=twin, name=f'Shared {i}', email=f'Shared{n}.{i}@seed.example')
 
 
-EXPECTED_QUERIES = {check.key: (1 if isinstance(check, dq.ListCheck) else 2) for check in dq.CHECKS}
+# Queries per check (count and first page together); never more with more rows.
+EXPECTED_QUERIES = {check.key: 2 for check in dq.CHECKS} | {
+    'contract_ending_no_successor': 4,  # ending contracts, candidates, service locations, zone links
+    'company_no_email_contact': 2,  # companies with an Active contract, their contacts' emails
+    'contact_email_problem': 4,  # addresses SQL cannot vouch for, shared addresses, their holders, parent links
+    'company_lookalike_names': 1,  # all company names
+}
 
 
 def _queries(check):
@@ -524,6 +832,29 @@ def test_bad_parameters(api, query):
     assert api.get(f'/api/v1/data-quality/task_overdue/?{query}').status_code == 400
 
 
+@pytest.mark.parametrize('query', ['rows=21', 'rows=-1', 'rows=x', 'company=not-an-id', 'owner=someone', 'owner=NONE'])
+def test_bad_summary_parameters(api, query):
+    assert api.get(f'/api/v1/data-quality/?{query}').status_code == 400
+
+
+def test_summary_rows_cap_and_filters(api):
+    a, b = company('Summary Filter A'), company('Summary Filter B')
+    for i in range(25):
+        task(a, 'To Do', at(T - timedelta(days=2)), f'A{i:02d}')
+    task(b, 'To Do', at(T - timedelta(days=2)), 'B only')
+    tasks = next(c for c in api.get('/api/v1/data-quality/?rows=20').json()['checks'] if c['key'] == 'task_overdue')
+    assert tasks['count'] == 26 and len(tasks['rows']) == 20
+    tasks = next(c for c in api.get(f'/api/v1/data-quality/?company={b.pk}').json()['checks']
+                 if c['key'] == 'task_overdue')
+    assert tasks['count'] == 1 and [r['label'] for r in tasks['rows']] == ['B only']
+
+
+def test_check_page_is_not_cached(api):
+    assert api.get('/api/v1/data-quality/task_overdue/')['Cache-Control'] == 'no-store'
+    assert api.get('/api/v1/data-quality/task_overdue/?export=csv')['Cache-Control'] == 'no-store'
+    assert api.get('/api/v1/data-quality/task_overdue/?export=CSV')['Content-Type'].startswith('text/csv')
+
+
 def test_unknown_check(api):
     response = api.get('/api/v1/data-quality/no_such_check/')
     assert response.status_code == 404
@@ -548,6 +879,27 @@ def test_csv_export(api):
     assert rows[1][4] == 'Due 15 Nov 2026 (4 days ago)'
 
 
+@pytest.mark.parametrize('name', ['=SUM(A1)', '+1', '-1', '@cmd', '\tTab Venue', '\rCR Venue', ' Space Venue',
+                                  '"Quoted Venue', "'Apostrophe Venue", '\u00a0NBSP Venue', '\uff1dWide Venue'])
+def test_csv_escapes_risky_starts(api, name):
+    task(company(name), 'To Do', at(T - timedelta(days=2)), 'Chase')
+    text = api.get('/api/v1/data-quality/task_overdue/?export=csv').content.decode('utf-8').lstrip('\ufeff')
+    assert list(csv.reader(io.StringIO(text)))[1][3] == "'" + name
+
+
+def test_csv_keeps_negative_amounts_and_applies_filters(api):
+    co, other = company('Credit Test Venue'), company('Other Test Venue')
+    inv = invoice(co, 'Sent', T - timedelta(days=3), 'TEST-CREDIT-1')
+    Invoice.objects.filter(pk=inv.pk).update(total_amount=Decimal('-500.00'))
+    invoice(other, 'Sent', T - timedelta(days=4), 'TEST-CREDIT-2')
+    text = api.get(f'/api/v1/data-quality/invoice_overdue/?export=csv&company={co.pk}').content.decode('utf-8')
+    rows = list(csv.reader(io.StringIO(text.lstrip('\ufeff'))))
+    assert len(rows) == 2 and rows[1][2] == 'TEST-CREDIT-1' and rows[1][7] == '-500.00'
+    owner = User.objects.create_user(username='csv.owner', password='x', role='Sales')
+    text = api.get(f'/api/v1/data-quality/invoice_overdue/?export=csv&owner={owner.pk}').content.decode('utf-8')
+    assert len(list(csv.reader(io.StringIO(text.lstrip('\ufeff'))))) == 1
+
+
 # --- command --------------------------------------------------------------------------------
 
 def test_command_table_and_json():
@@ -568,10 +920,16 @@ def test_command_table_and_json():
     assert json.loads(out.getvalue())['today'] == '2026-11-16'
 
 
-def test_checks_never_write():
+def test_checks_api_and_command_never_write(api):
     _seed(2)
     with CaptureQueriesContext(connection) as captured:
         dq.summary(dq.Context(), rows_per_check=20)
         for check in dq.CHECKS:
             check.rows(dq.Context())
-    assert all(q['sql'].lstrip().upper().startswith('SELECT') for q in captured.captured_queries)
+            assert api.get(f'/api/v1/data-quality/{check.key}/').status_code == 200
+            assert api.get(f'/api/v1/data-quality/{check.key}/?export=csv').status_code == 200
+        assert api.get('/api/v1/data-quality/?rows=20').status_code == 200
+        call_command('data_quality_report', '--json', '--rows', '3', stdout=io.StringIO())
+    statements = [q['sql'].lstrip().upper() for q in captured.captured_queries]
+    assert statements and all(sql.startswith('SELECT') for sql in statements), \
+        [sql for sql in statements if not sql.startswith('SELECT')]
