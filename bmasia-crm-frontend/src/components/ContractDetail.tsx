@@ -64,7 +64,8 @@ import { Contract, Invoice, ContractZone, ServiceLocation, EmailLogEntry } from 
 import ApiService from '../services/api';
 import ContractDocuments from './ContractDocuments';
 import { formatDate as formatDisplayDate, formatMoney, statusTone } from '../theme';
-import { PageHeader } from './ui';
+import { PageHeader, SectionCard } from './ui';
+import CompanyTimeline from './timeline/CompanyTimeline';
 
 interface ContractDetailProps {
   open: boolean;
@@ -898,6 +899,17 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
           {/* Contract Documents */}
           <Grid item xs={12}>
             <ContractDocuments contractId={contract.id} />
+          </Grid>
+
+          {/* Everything that happened to this contract, from the company timeline */}
+          <Grid item xs={12}>
+            <SectionCard title="Activity" subtitle="Emails, invoices, tasks, status and field changes for this contract">
+              <CompanyTimeline
+                companyId={contract.company}
+                record={{ type: 'contract', id: contract.id }}
+                label={`Activity for ${contract.contract_number}`}
+              />
+            </SectionCard>
           </Grid>
         </Grid>
     </>

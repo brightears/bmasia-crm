@@ -325,16 +325,6 @@ class ApiService {
     await authApi.delete(`/opportunity-activities/${id}/`);
   }
 
-  async getActivitiesByOpportunity(opportunityId: string): Promise<OpportunityActivity[]> {
-    const response = await authApi.get<OpportunityActivity[]>(`/opportunities/${opportunityId}/activities/`);
-    return response.data;
-  }
-
-  async getActivitiesByContact(contactId: string): Promise<OpportunityActivity[]> {
-    const response = await authApi.get<OpportunityActivity[]>(`/contacts/${contactId}/activities/`);
-    return response.data;
-  }
-
   // Contracts
   async getContracts(params?: any): Promise<ApiResponse<Contract>> {
     if (this.useMockData) {
