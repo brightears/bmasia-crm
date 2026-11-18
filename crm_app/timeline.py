@@ -613,7 +613,9 @@ class EmailLogSource(RowSource):
             links.append(_link('contact', row.contact_id, row.contact.name))
         return self.event(
             row, ctx, type='email_failed' if failed else 'email_sent', title=f'{prefix}: {row.subject}',
-            detail=f'To {recipient}' if recipient else '', actor=SYSTEM_ACTOR, links=links,
+            # A contact already shows as a link; otherwise say who it went to.
+            detail='' if row.contact_id else (f'To {recipient}' if recipient else ''),
+            actor=SYSTEM_ACTOR, links=links,
             extra={'email_type': row.email_type, 'email_type_label': row.get_email_type_display(),
                    'status': row.status, 'status_label': row.get_status_display(),
                    'opened_at': row.opened_at.isoformat() if row.opened_at else None},
@@ -1181,7 +1183,7 @@ class AuditSource(RowSource):
             if pair is None:
                 continue
             old, new = pair
-            label = str(f.verbose_name)
+            label = re.sub(r'([a-z])(\d)', r'\1 \2', str(f.verbose_name))  # "address line1" -> "address line 1"
             label = label[:1].upper() + label[1:]
             if f.is_relation:
                 old_l, new_l = self._ref_label(f, old, ctx), self._ref_label(f, new, ctx)

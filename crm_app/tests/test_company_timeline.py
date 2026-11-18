@@ -388,6 +388,14 @@ def test_email_log_uses_send_time_and_never_exposes_the_body(admin, company):
     payload = str(events)
     assert 'SECRET' not in payload and 'SMTP refused' not in payload and 'crm@example.test' not in payload
     assert events[0]['actor'] == timeline.SYSTEM_ACTOR
+    assert events[0]['detail'] == 'To gm@example.test'  # no contact record, so the address the UI shows
+
+
+def test_field_labels_read_as_words(admin, company):
+    _audit(admin, 'Company', company.pk, {'address_line1': {'old': '', 'new': '88 Example Road'}}, BASE)
+    [event] = _all(admin, company)
+    assert event['changes'][0]['label'] == 'Address line 1'
+    assert event['title'] == 'Company details updated: address line 1'
 
 
 def test_care_touch_shows_only_what_the_care_card_shows(admin, company):
