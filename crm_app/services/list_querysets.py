@@ -54,6 +54,11 @@ def zone_links_prefetch(prefix=''):
     return Prefetch(f'{prefix}zone_contracts', queryset=links, to_attr='_prefetched_zone_links')
 
 
+def zone_list_queryset(queryset):
+    """Zones for /zones/ (ZoneSerializer). Keeps the view's select_related('company')."""
+    return queryset.select_related('device').prefetch_related(zone_links_prefetch())
+
+
 def contract_list_queryset(queryset):
     """Contracts for /contracts/ (ContractSerializer). Keeps the view's select_related."""
     from crm_app.models import Contract, ContractDocument, ContractZone, Invoice

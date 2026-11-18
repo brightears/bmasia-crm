@@ -11073,6 +11073,14 @@ class ZoneViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'company__name']
     ordering = ['company__name', 'name']
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.action == 'list':
+            # Device and contract links once per page (no per-row queries).
+            from crm_app.services.list_querysets import zone_list_queryset
+            queryset = zone_list_queryset(queryset)
+        return queryset
+
     @action(detail=False, methods=['get'])
     def by_company(self, request):
         """Get zones filtered by company - for equipment form dropdown"""

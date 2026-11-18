@@ -92,11 +92,49 @@ QUERY_CASES = {
     'companies': ('/api/v1/companies/', 7, 9),
     'contracts': ('/api/v1/contracts/', 21, 12),
     'tickets': ('/api/v1/tickets/', 7, 7),
+    'zones': ('/api/v1/zones/', 9, 3),
     # Lists that were already flat before the query-count work.
     'contacts': ('/api/v1/contacts/', 21, 2),
     'invoices': ('/api/v1/invoices/', 21, 3),
     'tasks': ('/api/v1/tasks/', 14, 4),
 }
+
+
+def test_prefetched_current_link_matches_the_query_on_ties():
+    """The list's in-memory choice of a zone's current link follows the query's ORDER BY,
+    down to the link id when status and both start dates are equal."""
+    from datetime import date
+    from decimal import Decimal
+    import uuid
+
+    from crm_app.models import Company, Contract, ContractZone, Zone
+    from crm_app.services.list_querysets import zone_links_prefetch
+
+    company = Company.objects.create(name='Tieco', billing_entity='BMAsia Limited')
+    zone = Zone.objects.create(company=company, name='Tie zone')
+    same_day = date(2026, 5, 1)
+    for n, (status, start, link_start) in enumerate([
+        ('Draft', same_day, same_day),
+        ('Draft', same_day, same_day),
+        ('Sent', same_day, same_day),
+        ('Draft', date(2026, 6, 1), same_day),
+    ]):
+        contract = Contract.objects.create(
+            company=company, contract_number=f'HK-CT8{n:04d}', status=status,
+            start_date=start, value=Decimal('1.00'),
+        )
+        # Ids chosen so that creation order and id order differ.
+        ContractZone.objects.create(
+            id=uuid.UUID(int=(9 << 96) | (7 - n)), contract=contract, zone=zone,
+            start_date=link_start, is_active=True,
+        )
+    for drop in [None, 'HK-CT80003', 'HK-CT80000']:
+        links = ContractZone.objects.filter(zone=zone)
+        if drop:
+            links.filter(contract__contract_number=drop).update(is_active=False)
+        queried = Zone.objects.get(pk=zone.pk).get_current_link()
+        prefetched = Zone.objects.prefetch_related(zone_links_prefetch()).get(pk=zone.pk)
+        assert prefetched.get_current_link().pk == queried.pk, drop
 
 
 def _queries(client, url):
