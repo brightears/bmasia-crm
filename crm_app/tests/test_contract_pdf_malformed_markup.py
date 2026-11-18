@@ -114,6 +114,23 @@ def test_malformed_field_falls_back_from_the_stored_wording(agreement):  # noqa:
     assert 'Fee <B class="x">A & B & C <D>' in text
 
 
+# A malformed value that also holds a bare "&" and a character reference
+# outside Unicode: the fallback prints both as written.
+MALFORMED_WITH_REFERENCE = 'Fee <b>open F&B &#99999999; and &#x110000; end'
+
+
+def test_malformed_value_prints_an_invalid_character_reference_as_written():
+    fallback = stored_markup(MALFORMED_WITH_REFERENCE, field='Contract.payment_custom', record=7)
+    assert Paragraph(fallback, ParagraphStyle('t')).getPlainText() == MALFORMED_WITH_REFERENCE
+
+
+def test_malformed_field_with_an_invalid_character_reference_renders(agreement):  # noqa: F811
+    agreement.payment_custom = MALFORMED_WITH_REFERENCE
+    agreement.save()
+    text = _render(agreement)
+    assert MALFORMED_WITH_REFERENCE in text
+
+
 def test_fallback_decodes_entities_and_keeps_line_breaks():
     value = 'One &amp; two <b>open<br/>next &#169; line'
     fallback = stored_markup(value, field='Contract.payment_custom', record=7)

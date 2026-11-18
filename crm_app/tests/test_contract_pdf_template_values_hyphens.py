@@ -64,3 +64,33 @@ def test_filled_values_print_their_hyphens_and_start_no_page(agreement, wrap):  
     for n, slot in enumerate(SLOTS):
         expected = 'alpha---beta@example.com' if slot.endswith('email') else 'Alpha---Beta'
         assert f'K{n:02d}:{expected}' in text, slot
+
+
+# The template itself writes hyphens directly beside a variable. A value that
+# starts or ends with a hyphen then sits next to them; together they print as
+# written and start no page.
+EDGE_TEMPLATE = (
+    'E1:A--{{company_name}}-B<br/>E2:A-{{company_name}}--B<br/>{{service_items}}<br/>'
+    '{{zones_table}}<br/>{{signature_blocks}}'
+)
+
+
+def _edge_template(agreement, value, *, mode):
+    agreement.company.name = value
+    agreement.company.save()
+    agreement.preamble_template = ContractTemplate.objects.create(
+        name='Example edge agreement', template_type='preamble', pdf_format='standard', content=EDGE_TEMPLATE,
+    )
+    agreement.preamble_custom = EDGE_TEMPLATE if mode == 'override' else ''
+    agreement.save()
+
+
+@pytest.mark.parametrize('mode', ['template', 'override'])
+def test_value_edge_hyphens_beside_template_hyphens_start_no_page(agreement, mode):  # noqa: F811
+    _edge_template(agreement, 'Alpha', mode=mode)
+    control_pages = _pages(agreement)
+    _edge_template(agreement, '-Alpha-', mode=mode)
+    assert _pages(agreement) == control_pages
+    text = _render(agreement)
+    assert 'E1:A---Alpha--B' in text
+    assert 'E2:A--Alpha---B' in text
