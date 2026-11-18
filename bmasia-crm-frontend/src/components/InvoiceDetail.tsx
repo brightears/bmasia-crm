@@ -597,6 +597,17 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
             Mark as Paid
           </Button>
         )}
+        {invoice && invoice.status === 'Paid' && !invoice.receipt_number && (
+          <Button
+            onClick={() => setMarkPaidOpen(true)}
+            variant="contained"
+            color="success"
+            startIcon={<Receipt />}
+            disabled={loading}
+          >
+            Issue Receipt
+          </Button>
+        )}
         {invoice && invoice.status === 'Paid' && invoice.receipt_number && (
           <>
             <Button
@@ -635,6 +646,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
         invoice={invoice}
         onClose={() => setMarkPaidOpen(false)}
         onRecorded={handlePaymentRecorded}
+        onConflict={onInvoiceUpdate}
       />
 
       {/* Receipt Email Dialog */}

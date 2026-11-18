@@ -710,6 +710,14 @@ const Invoices: React.FC = () => {
             <ListItemText>Mark as Paid</ListItemText>
           </MenuItem>
         )}
+        {actionMenuInvoice?.status === 'Paid' && !actionMenuInvoice?.receipt_number && (
+          <MenuItem onClick={() => handleMarkAsPaid(actionMenuInvoice!)}>
+            <ListItemIcon>
+              <Receipt fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Issue Receipt</ListItemText>
+          </MenuItem>
+        )}
         {actionMenuInvoice?.status === 'Paid' && actionMenuInvoice?.receipt_number && (
           <MenuItem onClick={async () => {
             try {
@@ -776,6 +784,7 @@ const Invoices: React.FC = () => {
         invoice={selectedInvoice}
         onClose={() => setPaymentDialogOpen(false)}
         onRecorded={handlePaymentRecorded}
+        onConflict={loadInvoices}
       />
 
       {/* QuickBooks Export Dialog */}

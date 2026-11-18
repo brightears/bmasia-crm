@@ -77,3 +77,12 @@ test('a paid invoice shows its payment reference', () => {
   expect(screen.getByText('BANK-REF-1')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Mark as Paid' })).not.toBeInTheDocument();
 });
+
+test('a paid invoice without a receipt offers "Issue Receipt"', () => {
+  render(
+    <InvoiceDetail open invoice={invoice({ status: 'Paid', paid_date: '2026-11-10', receipt_number: null })}
+      onClose={jest.fn()} onInvoiceUpdate={jest.fn()} />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Issue Receipt' }));
+  expect(screen.getByRole('dialog', { name: 'Issue receipt' })).toBeInTheDocument();
+});

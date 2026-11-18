@@ -1879,6 +1879,8 @@ export interface MarkInvoicePaidResult {
   message: string;
   receipt_number: string;
   paid_date: string;
+  /** true when the invoice was already Paid and only got its receipt number now */
+  receipt_only?: boolean;
   /** 'not_requested', 'sent' or 'failed: …' */
   receipt_email_status: string;
 }
