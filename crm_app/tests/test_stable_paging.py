@@ -187,3 +187,23 @@ def test_every_requested_ordering_ends_on_the_key():
                 assert order[0] == term, (prefix, term, order)
                 assert _ends_on_key(queryset), (prefix, term, order)
 
+
+def test_renewal_book_orders_ties_by_key_and_picks_the_same_successor():
+    from crm_app.services.renewal_book_service import build_renewal_book
+
+    company = Company.objects.create(name='Book tie', billing_entity='BMAsia Limited')
+    terms = []
+    for n in range(5):
+        terms.append(Contract.objects.create(
+            id=_id(51, n), company=company, contract_number=f'HK-CT5{n:04d}', status='Active',
+            start_date=date(2025, 3, 1), end_date=date(2026, 2, 28), value=Decimal('1.00')))
+    for n in range(3):
+        Contract.objects.create(
+            id=_id(52, n), company=company, contract_number=f'HK-CT5{n + 5:04d}', status='Draft',
+            start_date=date(2026, 3, 1), end_date=date(2027, 2, 28), value=Decimal('1.00'),
+            renewed_from=terms[0])
+    book = build_renewal_book(2026, 2)
+    assert [row['contract_id'] for row in book['rows']] == sorted(str(t.id) for t in terms)
+    lowest = min((c for c in Contract.objects.filter(renewed_from=terms[0])), key=lambda c: c.pk)
+    first = next(row for row in book['rows'] if row['contract_id'] == str(terms[0].id))
+    assert first['successor_contract'] == lowest.contract_number
