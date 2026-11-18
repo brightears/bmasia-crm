@@ -4259,15 +4259,25 @@ and<br/><br/>
         company = contract.company
 
         # Check if this contract should use Hilton HPA format
+        from django.core.exceptions import ObjectDoesNotExist
+        pdf_template = None
         if company and company.parent_company:
             try:
                 pdf_template = company.parent_company.pdf_template
-                if pdf_template.template_format == 'hilton_hpa':
-                    # Hilton HPA always generates combined Attachment A + Exhibit D
-                    return self._generate_hilton_combined_pdf(contract)
-            except Exception:
-                # If there's any issue accessing the template, fall back to standard format
+            except ObjectDoesNotExist:
+                # No corporate template: use the standard participation format.
                 pass
+        if pdf_template is not None and pdf_template.template_format == 'hilton_hpa':
+            # Hilton HPA always generates combined Attachment A + Exhibit D.
+            # A render error is reported, never replaced by another document.
+            try:
+                return self._generate_hilton_combined_pdf(contract)
+            except Exception:
+                logger.exception('Corporate participation PDF failed for contract %s', contract.pk)
+                return Response({
+                    'error': 'The corporate participation agreement could not be generated.',
+                    'code': 'CONTRACT_PDF_RENDER_FAILED',
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Standard participation agreement format
         if contract.preamble_template:
