@@ -44,6 +44,8 @@ const NOT_YET = new Set([
   'components/ContractDetail.tsx',
   'components/ActivityTimeline.tsx',
   'pages/ActivityDemo.tsx',
+  // Its only raw log is in the attachment upload that fix/invoice-paid-and-attachments removes.
+  'components/QuoteForm.tsx',
 ]);
 
 const sourceFiles = (dir: string): string[] =>

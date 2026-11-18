@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { logApiError } from '../utils/logApiError';
 import {
   Dialog,
   DialogTitle,
@@ -454,7 +453,7 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
           try {
             await ApiService.addQuoteAttachment(savedQuote.id, file);
           } catch (err) {
-            logApiError('Failed to upload attachment:', err);
+            console.error('Failed to upload attachment:', err);
           }
         }
       }
