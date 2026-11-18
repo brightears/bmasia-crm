@@ -118,8 +118,10 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
       await ApiService.updateInvoice(invoice.id, { status: 'Sent' });
       setSuccess('Invoice marked as sent');
       onInvoiceUpdate();
-    } catch (err) {
-      setError('Failed to update invoice status');
+    } catch (err: any) {
+      const data = err?.response?.data;
+      const reason = Array.isArray(data?.status) ? data.status.join(' ') : data?.status || data?.error;
+      setError(typeof reason === 'string' && reason ? reason : 'Failed to update invoice status');
     } finally {
       setLoading(false);
     }

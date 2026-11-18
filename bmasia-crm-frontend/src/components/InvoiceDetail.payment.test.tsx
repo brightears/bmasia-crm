@@ -8,6 +8,7 @@ jest.mock('../services/api', () => {
     getEmailLogs: () => Promise.resolve([]),
     getCompany: () => Promise.resolve({ contacts: [] }),
     markInvoicePaid: jest.fn(),
+    updateInvoice: jest.fn(),
   };
   return {
     __esModule: true,
@@ -85,4 +86,12 @@ test('a paid invoice without a receipt offers "Issue Receipt"', () => {
   );
   fireEvent.click(screen.getByRole('button', { name: 'Issue Receipt' }));
   expect(screen.getByRole('dialog', { name: 'Issue receipt' })).toBeInTheDocument();
+});
+
+test('a refused "Mark as Sent" shows the server\'s reason', async () => {
+  const reason = 'A paid invoice cannot be set to Sent by an edit.';
+  api.updateInvoice.mockRejectedValue({ response: { status: 400, data: { status: [reason] } } });
+  render(<InvoiceDetail open invoice={invoice({ status: 'Draft' })} onClose={jest.fn()} onInvoiceUpdate={jest.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Mark as Sent' }));
+  expect(await screen.findByText(reason)).toBeInTheDocument();
 });
