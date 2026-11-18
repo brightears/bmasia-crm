@@ -84,6 +84,12 @@ class ChangeProposalSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def to_representation(self, instance):
+        from agent_inbox.proposals import effective_status
+        data = super().to_representation(instance)
+        data['status'] = effective_status(instance)
+        return data
+
     def get_seen_version(self, proposal):
         from agent_inbox.proposals import seen_version
         return seen_version(proposal)
