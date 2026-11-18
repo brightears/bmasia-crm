@@ -9,6 +9,7 @@ from .login_throttle import ThrottledTokenObtainPairView, throttled_obtain_auth_
 from .rene_views import ReneTokenCapabilitiesView
 from .cara_api import CaraCapabilitiesView, CaraCustomerCareView
 from .cara_care_writes import CaraCareSummaryView, CaraTouchCreateView
+from .renewals_views import RenewalsView
 
 # Create a router and register our viewsets
 router = DefaultRouter()
@@ -118,6 +119,8 @@ urlpatterns = [
         ReneTokenCapabilitiesView.as_view(),
         name='rene-token-capabilities',
     ),
+    # Renewals page (read-only); see renewals_views.py.
+    path('v1/renewals/', RenewalsView.as_view(), name='renewals'),
     path('v1/', include(router.urls)),
 
     # Authentication endpoints
