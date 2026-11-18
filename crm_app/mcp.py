@@ -2057,7 +2057,19 @@ def get_commercial_document_context(collection: str, id: str) -> str:
 
 @mcp_server.tool()
 def delete_record(collection: str, id: str) -> str:
-    """Delete a record from a CRM collection.
+    """Delete a record from a CRM collection. The delete is permanent.
+
+    Refused for company, contact, contract, quote and invoice: deleting them erases
+    customer history (a company takes its contacts, contracts, quotes and invoices with
+    it). Instead use update_record:
+      company  -> {"is_active": false}
+      contact  -> {"is_active": false}
+      contract -> {"status": "Cancelled"}
+      quote    -> {"status": "Rejected"} (declined) or {"status": "Expired"}
+      invoice  -> {"status": "Cancelled"}
+    Contract templates and service locations have their own workflows (see the error).
+    Line items (quotelineitem, contractlineitem, invoicelineitem) and the other
+    collections can still be deleted.
 
     Args:
         collection: Collection name (same options as create_record)
@@ -2065,9 +2077,16 @@ def delete_record(collection: str, id: str) -> str:
 
     Returns: Confirmation message or error.
     """
+    from crm_app.services.delete_guards import MCP_DELETE_ALTERNATIVES
+
     if collection not in _COLLECTION_MAP:
         return f"Error: Unknown collection '{collection}'. Valid: {', '.join(sorted(_COLLECTION_MAP))}"
     _agent_gate.observe(tool='delete_record', verb='delete', collection=collection, record_id=id)
+    if collection in MCP_DELETE_ALTERNATIVES:
+        return (
+            f"Error: Deleting a {collection} is blocked because it would erase customer history. "
+            f"Use {MCP_DELETE_ALTERNATIVES[collection]}"
+        )
     if collection == 'contracttemplate':
         return (
             "Error: Generic contract-template deletion is blocked. "

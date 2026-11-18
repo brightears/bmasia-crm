@@ -143,10 +143,11 @@ def test_riff_terminal_ticket_status_is_flagged():
 
 @pytest.mark.django_db
 def test_delete_is_recorded_and_still_performed_in_observe():
-    contact = _contact()
+    from crm_app.models import Task
+    task = Task.objects.create(company=_company(), title='Gate task')
     with as_caller(_user('cira')):
-        delete_record('contact', str(contact.id))
-    assert not Contact.objects.filter(id=contact.id).exists()
+        delete_record('task', str(task.id))
+    assert not Task.objects.filter(id=task.id).exists()
     row = AgentRequest.objects.get()
     assert (row.verb, row.decision, row.reasons) == ('delete', 'would_deny', ['agents may not delete records'])
 

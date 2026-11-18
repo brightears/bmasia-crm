@@ -365,8 +365,9 @@ class BaseModelViewSet(viewsets.ModelViewSet):
         changes = serialize_audit_changes(changes)
         self.log_action('UPDATE', instance, changes)
     
+    @transaction.atomic
     def perform_destroy(self, instance):
-        """Add audit logging on delete"""
+        """Add audit logging on delete (one transaction: a refused delete leaves no audit row)"""
         self.log_action('DELETE', instance)
         instance.delete()
     
@@ -705,6 +706,18 @@ class CompanyViewSet(BaseModelViewSet):
 
     # list(): errors are answered by crm_app.api_errors.api_exception_handler (generic message
     # and a request id; an invalid page is a 404 again instead of a 500).
+
+    def destroy(self, request, *args, **kwargs):
+        """Refuse (409) to delete a company that still has contracts, invoices or quotes.
+
+        Deleting a company cascades to all of them (and to its contacts, zones, notes and
+        tasks). Deactivating it (is_active=false) keeps the history.
+        """
+        from crm_app.services.delete_guards import company_delete_refusal
+        refusal = company_delete_refusal(self.get_object())
+        if refusal:
+            return Response(refusal, status=status.HTTP_409_CONFLICT)
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=['get'], url_path='simple')
     def simple_list(self, request):
