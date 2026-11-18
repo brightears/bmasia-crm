@@ -165,7 +165,7 @@ def test_cancel_execute_releases_zones_and_journals_them(tmp_path, status):
     _reload(c, zone, link)
     assert c.status == 'Cancelled' and c.is_active is False
     # the link ends on the earlier of today and the contract's end date
-    assert link.is_active is False and link.end_date == min(timezone.now().date(), c.end_date)
+    assert link.is_active is False and link.end_date == min(timezone.localdate(), c.end_date)
     assert zone.status == 'cancelled'
     audit = _audits(c.pk).get()
     assert audit.changes['status'] == {'old': status, 'new': 'Cancelled'}
@@ -466,7 +466,7 @@ def test_create_from_active_old_term_closes_it_through_the_lifecycle_rule(tmp_pa
 def test_create_skips_a_number_already_held_by_an_imported_contract(tmp_path):
     old = _contract(_company(), status='Expired')
     region = document_region(old)
-    year = timezone.now().strftime('%y')
+    year = timezone.localdate().strftime('%y')
     seq, _ = DocumentSequence.objects.get_or_create(region=region, doc_type='CT', year=year,
                                                     defaults={'next_sequence': 1})
     seq.next_sequence = 700

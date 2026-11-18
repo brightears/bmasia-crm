@@ -4,6 +4,7 @@ from django.contrib.auth.models import AbstractUser
 from django.core.validators import EmailValidator, RegexValidator
 from django.utils import timezone
 from django.utils.text import slugify
+from crm_app.dates import business_today
 from django.contrib.postgres.search import SearchVectorField, SearchVector
 from django.db.models import signals
 import uuid
@@ -55,7 +56,7 @@ class DocumentSequence(models.Model):
         """
         from django.db import transaction
         if year is None:
-            year = timezone.now().strftime('%y')
+            year = business_today().strftime('%y')
         with transaction.atomic():
             seq, created = cls.objects.select_for_update().get_or_create(
                 region=region,
@@ -769,12 +770,12 @@ class Opportunity(TimestampedModel):
     def days_in_stage(self):
         """Calculate days since last stage change"""
         ref = self.stage_changed_at or self.updated_at
-        return (timezone.now().date() - ref.date()).days
+        return (business_today() - timezone.localdate(ref)).days
 
     @property
     def is_overdue(self):
         """Check if follow-up is overdue"""
-        return self.follow_up_date and self.follow_up_date < timezone.now().date()
+        return self.follow_up_date and self.follow_up_date < business_today()
 
 
 class OpportunityActivity(TimestampedModel):
@@ -1085,7 +1086,7 @@ class Contract(TimestampedModel):
         Deferred contract numbering: drafts get DRAFT-xxxx, real number
         (HK-CT26XXX / TH-CT26XXX) assigned only when status → Sent."""
         if self.status == 'Sent' and not self.sent_date:
-            self.sent_date = timezone.now().date()
+            self.sent_date = business_today()
 
         # Deferred numbering: assign real contract number when Sent, Active, or Renewed
         if self.status in ('Sent', 'Active', 'Renewed') and (not self.contract_number or self.contract_number.startswith('DRAFT-') or self.contract_number.startswith('C-')):
@@ -1119,7 +1120,7 @@ class Contract(TimestampedModel):
     def days_until_expiry(self):
         """Calculate days until contract expires"""
         if self.end_date:
-            return (self.end_date - timezone.now().date()).days
+            return (self.end_date - business_today()).days
         return 0
     
     @property
@@ -1697,8 +1698,8 @@ class Invoice(TimestampedModel):
     @property
     def days_overdue(self):
         """Calculate days overdue"""
-        if self.status != 'Paid' and self.due_date and self.due_date < timezone.now().date():
-            return (timezone.now().date() - self.due_date).days
+        if self.status != 'Paid' and self.due_date and self.due_date < business_today():
+            return (business_today() - self.due_date).days
         return 0
     
     @property
@@ -2811,13 +2812,13 @@ class Quote(TimestampedModel):
     @property
     def is_expired(self):
         """Check if quote has expired"""
-        return self.valid_until < timezone.now().date() and self.status not in ['Accepted', 'Rejected', 'Expired']
+        return self.valid_until < business_today() and self.status not in ['Accepted', 'Rejected', 'Expired']
 
     @property
     def days_until_expiry(self):
         """Calculate days until quote expires"""
         if self.valid_until:
-            return (self.valid_until - timezone.now().date()).days
+            return (self.valid_until - business_today()).days
         return 0
 
     @property
@@ -2833,13 +2834,13 @@ class Quote(TimestampedModel):
             # invent a sent_date: that is receipt-guarded bookkeeping (quote_send_receipts).
             previous_status = type(self).objects.filter(pk=self.pk).values_list('status', flat=True).first()
             if previous_status != 'Sent':
-                self.sent_date = timezone.now().date()
+                self.sent_date = business_today()
         elif self.status == 'Accepted' and not self.accepted_date:
-            self.accepted_date = timezone.now().date()
+            self.accepted_date = business_today()
         elif self.status == 'Rejected' and not self.rejected_date:
-            self.rejected_date = timezone.now().date()
+            self.rejected_date = business_today()
         elif self.status == 'Expired' and not self.expired_date:
-            self.expired_date = timezone.now().date()
+            self.expired_date = business_today()
 
         # Auto-generate quote number using atomic sequence
         if not self.quote_number or self.quote_number.startswith('Q-'):
@@ -3563,7 +3564,7 @@ class Ticket(TimestampedModel):
 
     def _generate_ticket_number(self):
         """Generate unique ticket number in format T-YYYYMMDD-NNNN"""
-        today = timezone.now().date()
+        today = business_today()
         date_prefix = f"T-{today.strftime('%Y%m%d')}"
 
         # Find the highest ticket number for today
@@ -3951,7 +3952,7 @@ class KBArticle(TimestampedModel):
 
     def _generate_article_number(self):
         """Generate unique article number in format KB-YYYYMMDD-NNNN"""
-        today = timezone.now().date()
+        today = business_today()
         date_prefix = f"KB-{today.strftime('%Y%m%d')}"
 
         # Find the highest article number for today
@@ -5105,14 +5106,14 @@ class ExpenseEntry(TimestampedModel):
         """Check if payment is overdue"""
         if self.status == 'paid' or not self.due_date:
             return False
-        return self.due_date < timezone.now().date()
+        return self.due_date < business_today()
 
     @property
     def days_overdue(self):
         """Calculate days overdue (0 if not overdue)"""
         if not self.is_overdue:
             return 0
-        return (timezone.now().date() - self.due_date).days
+        return (business_today() - self.due_date).days
 
 
 # =============================================================================

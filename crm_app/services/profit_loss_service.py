@@ -32,6 +32,8 @@ from decimal import Decimal
 from typing import Dict, Optional, List
 from django.db.models import Sum, Count, Q
 
+from crm_app.dates import business_today
+
 logger = logging.getLogger(__name__)
 
 
@@ -321,7 +323,7 @@ class ProfitLossService:
         Returns list of monthly summaries for trend charts.
         """
         trends = []
-        current_month = date.today().month if date.today().year == year else 12
+        current_month = business_today().month if business_today().year == year else 12
 
         for month in range(1, current_month + 1):
             pl = self.get_monthly_profit_loss(year, month, billing_entity, currency)

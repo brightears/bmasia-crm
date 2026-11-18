@@ -413,7 +413,7 @@ def test_draft_successor_gets_same_treatment_as_rest_activation(tmp_path):
 def test_draft_number_reservation_skips_numbers_already_taken(tmp_path):
     from crm_app.models import DocumentSequence
     old, new = _pair(successor_status='Draft', number='DRAFT-0903')
-    year = dj_timezone.now().strftime('%y')
+    year = dj_timezone.localdate().strftime('%y')
     DocumentSequence.objects.update_or_create(region='HK', doc_type='CT', year=year,
                                               defaults={'next_sequence': 501})
     _contract(old.company, status='Expired', number=f'HK-CT{year}501', start=date(2023, 11, 1))

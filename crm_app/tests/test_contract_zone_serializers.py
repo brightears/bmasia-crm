@@ -5,6 +5,8 @@ Tests ContractZoneSerializer and integration with ContractSerializer and ZoneSer
 import pytest
 from datetime import date, timedelta
 
+from django.utils import timezone
+
 from crm_app.serializers import (
     ContractZoneSerializer, ContractSerializer, ZoneSerializer
 )
@@ -30,7 +32,7 @@ class TestContractZoneSerializer:
         contract_zone = ContractZoneFactory(
             contract=contract,
             zone=zone,
-            start_date=date.today(),
+            start_date=timezone.localdate(),
             end_date=None,
             is_active=True,
             notes='Test note'
@@ -162,11 +164,11 @@ class TestContractZoneSerializer:
         """Test serializer with ended relationship (has end_date)"""
         contract = ContractFactory()
         zone = ZoneFactory(company=contract.company)
-        end_date = date.today() - timedelta(days=30)
+        end_date = timezone.localdate() - timedelta(days=30)
         contract_zone = ContractZoneFactory(
             contract=contract,
             zone=zone,
-            start_date=date.today() - timedelta(days=365),
+            start_date=timezone.localdate() - timedelta(days=365),
             end_date=end_date,
             is_active=False
         )
@@ -321,7 +323,7 @@ class TestZoneSerializerContractIntegration:
             contract=contract,
             zone=zone,
             is_active=False,
-            end_date=date.today() - timedelta(days=30)
+            end_date=timezone.localdate() - timedelta(days=30)
         )
 
         serializer = ZoneSerializer(zone)
