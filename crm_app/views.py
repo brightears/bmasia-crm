@@ -107,6 +107,7 @@ from .serializers import (
     ProspectSequenceSerializer, ProspectSequenceStepSerializer, ProspectEnrollmentSerializer,
     ProspectStepExecutionSerializer, ProspectReplySerializer, AIEmailDraftSerializer
 )
+from .services.delete_guards import GuardedDestroyMixin
 from .api_errors import (
     client_error_text, error_response, internal_error_text, mail_failure_text, safe_mail_message, smtp_error_text,
 )
@@ -368,11 +369,11 @@ class BaseModelViewSet(viewsets.ModelViewSet):
         self.log_action('UPDATE', instance, changes)
     
     def destroy(self, request, *args, **kwargs):
-        """DELETE /{id}/ under the rules in crm_app/services/delete_guards.py (409 when refused)."""
+        """DELETE /{id}/ under the rules in crm_app/services/delete_guards.py (409/403 when refused)."""
         from crm_app.services.delete_guards import destroy_one
-        deleted, refusal = destroy_one(self, self.get_object())
+        deleted, refusal, http_status = destroy_one(self, self.get_object())
         if not deleted:
-            return Response(refusal, status=status.HTTP_409_CONFLICT)
+            return Response(refusal, status=http_status)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @transaction.atomic
@@ -8913,7 +8914,7 @@ class EmailTemplateViewSet(BaseModelViewSet):
         })
 
 
-class EmailSequenceViewSet(viewsets.ModelViewSet):
+class EmailSequenceViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for EmailSequence model.
     Provides CRUD operations for email sequences.
@@ -8932,7 +8933,7 @@ class EmailSequenceViewSet(viewsets.ModelViewSet):
         serializer.save(created_by=self.request.user)
 
 
-class SequenceStepViewSet(viewsets.ModelViewSet):
+class SequenceStepViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for SequenceStep model.
     Provides CRUD operations for sequence steps.
@@ -8947,7 +8948,7 @@ class SequenceStepViewSet(viewsets.ModelViewSet):
     ordering = ['sequence', 'step_number']
 
 
-class SequenceEnrollmentViewSet(viewsets.ModelViewSet):
+class SequenceEnrollmentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for SequenceEnrollment model.
     Provides CRUD operations plus custom actions for enrollment management.
@@ -9134,7 +9135,7 @@ class SequenceStepExecutionViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['-scheduled_for']
 
 
-class CustomerSegmentViewSet(viewsets.ModelViewSet):
+class CustomerSegmentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for CustomerSegment model.
     Provides CRUD operations plus custom actions for segment management.
@@ -9394,7 +9395,7 @@ class CustomerSegmentViewSet(viewsets.ModelViewSet):
 
 
 # Support Ticket System ViewSets
-class TicketViewSet(viewsets.ModelViewSet):
+class TicketViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing support tickets with filtering, search, and custom actions.
     Provides comprehensive ticket management including assignment, comments, and statistics.
@@ -9575,7 +9576,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         })
 
 
-class TicketCommentViewSet(viewsets.ModelViewSet):
+class TicketCommentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing ticket comments.
     Supports filtering by ticket and auto-sets author from request user.
@@ -9599,7 +9600,7 @@ class TicketCommentViewSet(viewsets.ModelViewSet):
         return queryset
 
 
-class TicketAttachmentViewSet(viewsets.ModelViewSet):
+class TicketAttachmentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing ticket file attachments.
     Supports file uploads with metadata tracking.
@@ -9658,7 +9659,7 @@ class TicketAttachmentViewSet(viewsets.ModelViewSet):
 # Knowledge Base System ViewSets
 # ============================================================================
 
-class KBCategoryViewSet(viewsets.ModelViewSet):
+class KBCategoryViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing KB categories with hierarchical support.
     Supports parent/child relationships and active/inactive filtering.
@@ -9673,7 +9674,7 @@ class KBCategoryViewSet(viewsets.ModelViewSet):
     ordering = ['display_order', 'name']
 
 
-class KBTagViewSet(viewsets.ModelViewSet):
+class KBTagViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing KB tags.
     Simple CRUD operations for article tagging.
@@ -9686,7 +9687,7 @@ class KBTagViewSet(viewsets.ModelViewSet):
     ordering = ['name']
 
 
-class KBArticleViewSet(viewsets.ModelViewSet):
+class KBArticleViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing KB articles with full-text search and analytics.
     Supports custom actions for view tracking, ratings, and related articles.
@@ -10338,7 +10339,7 @@ class KBArticleViewViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['-viewed_at']
 
 
-class KBArticleRatingViewSet(viewsets.ModelViewSet):
+class KBArticleRatingViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing KB article ratings.
     Enforces unique constraint: one vote per user per article.
@@ -10367,7 +10368,7 @@ class KBArticleRatingViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
 
-class KBArticleRelationViewSet(viewsets.ModelViewSet):
+class KBArticleRelationViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing relationships between KB articles.
     Validates that articles cannot be related to themselves.
@@ -10380,7 +10381,7 @@ class KBArticleRelationViewSet(viewsets.ModelViewSet):
     ordering = ['from_article', 'display_order']
 
 
-class KBArticleAttachmentViewSet(viewsets.ModelViewSet):
+class KBArticleAttachmentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing KB article file attachments.
     Supports file uploads with metadata tracking.
@@ -10417,7 +10418,7 @@ class KBArticleAttachmentViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
 
-class TicketKBArticleViewSet(viewsets.ModelViewSet):
+class TicketKBArticleViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for linking KB articles to support tickets.
     Tracks which articles were helpful for resolving tickets.
@@ -10451,7 +10452,7 @@ class TicketKBArticleViewSet(viewsets.ModelViewSet):
 # ============================================================================
 
 
-class DeviceViewSet(viewsets.ModelViewSet):
+class DeviceViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for Device model - simple device tracking.
     """
@@ -10479,7 +10480,7 @@ class DeviceViewSet(viewsets.ModelViewSet):
 # Sales Automation ViewSets
 # ============================================================
 
-class ProspectSequenceViewSet(viewsets.ModelViewSet):
+class ProspectSequenceViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     queryset = ProspectSequence.objects.prefetch_related('steps').all()
     serializer_class = ProspectSequenceSerializer
     permission_classes = [IsAuthenticated]
@@ -10531,7 +10532,7 @@ class ProspectSequenceViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
-class ProspectEnrollmentViewSet(viewsets.ModelViewSet):
+class ProspectEnrollmentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     queryset = ProspectEnrollment.objects.select_related(
         'sequence', 'opportunity', 'opportunity__company', 'contact'
     ).prefetch_related('executions').all()
@@ -10599,7 +10600,7 @@ class ProspectReplyViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['-received_at']
 
 
-class AIEmailDraftViewSet(viewsets.ModelViewSet):
+class AIEmailDraftViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     queryset = AIEmailDraft.objects.select_related(
         'execution', 'execution__enrollment', 'execution__enrollment__opportunity',
         'execution__enrollment__opportunity__company', 'execution__enrollment__contact',
@@ -10784,7 +10785,7 @@ class AIEmailDraftViewSet(viewsets.ModelViewSet):
             enrollment.save()
 
 
-class ClientTechDetailViewSet(viewsets.ModelViewSet):
+class ClientTechDetailViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for ClientTechDetail model — per-outlet technical specifications.
     Stores remote access IDs, PC specs, audio equipment, etc.
@@ -11039,7 +11040,7 @@ class ClientTechDetailViewSet(viewsets.ModelViewSet):
         return response
 
 
-class ZoneViewSet(viewsets.ModelViewSet):
+class ZoneViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """ViewSet for Zone model with company filtering"""
     queryset = Zone.objects.select_related('company')
     serializer_class = ZoneSerializer
@@ -11316,7 +11317,7 @@ class ZoneViewSet(viewsets.ModelViewSet):
         return Response(conflicts)
 
 
-class StaticDocumentViewSet(viewsets.ModelViewSet):
+class StaticDocumentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing static documents (standard T&Cs, etc.)
     """
@@ -11363,7 +11364,7 @@ class StaticDocumentViewSet(viewsets.ModelViewSet):
 # Contract Content Management ViewSets
 # ============================================================================
 
-class ContractTemplateViewSet(viewsets.ModelViewSet):
+class ContractTemplateViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for ContractTemplate model.
     Manages reusable contract content templates (preamble, payment, activation).
@@ -11392,7 +11393,7 @@ class ServicePackageItemViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ['name', 'display_order']
 
 
-class CorporatePdfTemplateViewSet(viewsets.ModelViewSet):
+class CorporatePdfTemplateViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for CorporatePdfTemplate model.
     Manages company-specific PDF templates for contracts.
@@ -11407,7 +11408,7 @@ class CorporatePdfTemplateViewSet(viewsets.ModelViewSet):
     ordering = ['company__name', 'name']
 
 
-class ContractDocumentViewSet(viewsets.ModelViewSet):
+class ContractDocumentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for ContractDocument model.
     Manages uploaded contract documents (PDFs, scans, etc.).
@@ -11440,7 +11441,7 @@ class ContractDocumentViewSet(viewsets.ModelViewSet):
 # Settings ViewSets
 # ============================================================================
 
-class SeasonalTriggerDateViewSet(viewsets.ModelViewSet):
+class SeasonalTriggerDateViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for SeasonalTriggerDate model.
     Manages variable holiday trigger dates for seasonal email campaigns.

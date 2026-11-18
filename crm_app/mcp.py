@@ -2107,6 +2107,11 @@ def delete_record(collection: str, id: str) -> str:
     except model.DoesNotExist:
         return f"Error: {collection} with ID '{id}' not found."
 
+    from crm_app.services.delete_guards import mcp_record_refusal
+    refusal = mcp_record_refusal(instance, collection)  # the same rules as REST deletes
+    if refusal:
+        return refusal
+
     name = getattr(instance, 'name', None) or getattr(instance, 'contract_number', None) or str(id)
     deleted = _mcp_audit.summary(instance)
     with transaction.atomic():
