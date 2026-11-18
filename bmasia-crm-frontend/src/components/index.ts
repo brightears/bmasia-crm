@@ -1,6 +1,5 @@
 // Activity System Components
 export { default as ActivityForm } from './ActivityForm';
-export { default as ActivityTimeline } from './ActivityTimeline';
 export { default as QuickActivity } from './QuickActivity';
 
 // Task Management Components

@@ -7469,7 +7469,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['user__username', 'model_name', 'action']
     ordering_fields = ['timestamp', 'action', 'model_name']
     ordering = ['-timestamp']
-    filterset_fields = ['user', 'action', 'model_name']
+    filterset_fields = ['user', 'action', 'model_name', 'record_id']
 
 
 def _sum_by_currency(items, amount):
