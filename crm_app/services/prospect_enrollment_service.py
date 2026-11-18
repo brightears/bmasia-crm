@@ -21,6 +21,19 @@ from crm_app.models import (
 logger = logging.getLogger(__name__)
 
 
+def enrolment_contact(company, named=None):
+    """The contact a prospect sequence is enrolled with; only an active contact is chosen.
+
+    The named contact (a quote's own) if active, else the active primary contact,
+    else the first active contact with an email address.
+    """
+    if named is not None and named.is_active:
+        return named
+    active = Contact.objects.filter(company=company, is_active=True)
+    return (active.filter(is_primary=True).first()
+            or active.filter(email__isnull=False).exclude(email='').first())
+
+
 class ProspectEnrollmentService:
     """Service for auto-enrolling contacts into prospect sequences"""
 
@@ -35,18 +48,7 @@ class ProspectEnrollmentService:
         if not opportunity.company:
             return
 
-        # Find the primary contact for this company
-        contact = Contact.objects.filter(
-            company=opportunity.company,
-            is_primary=True,
-        ).first()
-
-        if not contact:
-            # Fall back to any contact with email
-            contact = Contact.objects.filter(
-                company=opportunity.company,
-                email__isnull=False,
-            ).exclude(email='').first()
+        contact = enrolment_contact(opportunity.company)
 
         if not contact or not contact.email:
             logger.info(
@@ -182,16 +184,7 @@ class ProspectEnrollmentService:
                 if already_enrolled:
                     continue
 
-                # Find primary contact
-                contact = Contact.objects.filter(
-                    company=opp.company,
-                    is_primary=True,
-                ).first()
-                if not contact:
-                    contact = Contact.objects.filter(
-                        company=opp.company,
-                        email__isnull=False,
-                    ).exclude(email='').first()
+                contact = enrolment_contact(opp.company)
 
                 if not contact or not contact.email:
                     continue
@@ -231,18 +224,9 @@ class ProspectEnrollmentService:
         if not quote.company:
             return 0
 
-        # Use the quote's contact if set, otherwise primary contact
-        contact = quote.contact if hasattr(quote, 'contact') and quote.contact else None
-        if not contact:
-            contact = Contact.objects.filter(
-                company=quote.company,
-                is_primary=True,
-            ).first()
-        if not contact:
-            contact = Contact.objects.filter(
-                company=quote.company,
-                email__isnull=False,
-            ).exclude(email='').first()
+        # The quote's own contact if it is active, otherwise as for any enrolment
+        named = quote.contact if hasattr(quote, 'contact') and quote.contact else None
+        contact = enrolment_contact(quote.company, named)
 
         if not contact or not contact.email:
             return 0
