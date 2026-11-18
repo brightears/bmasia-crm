@@ -286,6 +286,11 @@ def paragraph_address_multiline(company):
     return '<br/>'.join(paragraph_text(line) for line in _address_lines(company))
 
 
+def paragraph_lines(value):
+    """Escape multi-line stored plain text for Paragraph markup, one line per <br/>."""
+    return '<br/>'.join(paragraph_text(line) for line in str(value or '').split('\n'))
+
+
 def _address_lines(company):
     if not company:
         return []
@@ -6797,15 +6802,16 @@ class InvoiceViewSet(BaseModelViewSet):
             ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#E8910C')),
         ]))
 
-        # Create card-style BILL TO section
-        bill_to_lines = [f'<b>{company.legal_entity_name or company.name}</b>']
+        # Create card-style BILL TO section. Stored values are plain text;
+        # escape each once for Paragraph markup.
+        bill_to_lines = [f'<b>{paragraph_text(company.legal_entity_name or company.name)}</b>']
         if getattr(company, 'branch', ''):
-            bill_to_lines.append(f'({company.branch})')
+            bill_to_lines.append(f'({paragraph_text(company.branch)})')
         if getattr(invoice, 'property_name', ''):
-            bill_to_lines.append(f'Property: {invoice.property_name}')
+            bill_to_lines.append(f'Property: {paragraph_text(invoice.property_name)}')
         if getattr(company, 'tax_id', ''):
-            bill_to_lines.append(f'Tax ID: {company.tax_id}')
-        bill_addr = format_address_multiline(company)
+            bill_to_lines.append(f'Tax ID: {paragraph_text(company.tax_id)}')
+        bill_addr = paragraph_address_multiline(company)
         if bill_addr:
             bill_to_lines.append(bill_addr)
         bill_to_content = Paragraph('<br/>'.join(bill_to_lines), from_content_style)
@@ -6861,7 +6867,7 @@ class InvoiceViewSet(BaseModelViewSet):
             for item in line_items:
                 item_subtotal = item.quantity * item.unit_price
                 # Build description with optional per-line service period
-                desc_text = item.description.replace('\n', '<br/>') if item.description else ''
+                desc_text = paragraph_lines(item.description) if item.description else ''
                 period_start = getattr(item, 'service_period_start', None)
                 period_end = getattr(item, 'service_period_end', None)
                 if period_start and period_end:
@@ -6871,7 +6877,7 @@ class InvoiceViewSet(BaseModelViewSet):
 
                 row = []
                 if has_product:
-                    row.append(Paragraph(getattr(item, 'product_service', '') or '', body_style))
+                    row.append(Paragraph(paragraph_text(getattr(item, 'product_service', '') or ''), body_style))
                 row.extend([
                     Paragraph(desc_text, body_style),
                     f"{item.quantity:,.0f}" if item.quantity == int(item.quantity) else f"{item.quantity:,.2f}",
@@ -7015,7 +7021,7 @@ class InvoiceViewSet(BaseModelViewSet):
             pt_text = invoice.payment_terms_text
         else:
             pt_text = payment_terms_default
-        pt_formatted = pt_text.replace('\n', '<br/>')
+        pt_formatted = paragraph_lines(pt_text)
         payment_section.append(Paragraph(pt_formatted, body_style))
 
         elements.append(KeepTogether(payment_section))
@@ -7025,7 +7031,7 @@ class InvoiceViewSet(BaseModelViewSet):
         if invoice.notes:
             notes_section = []
             notes_section.append(Paragraph("Notes:", heading_style))
-            notes_text = invoice.notes.replace('\n', '<br/>')
+            notes_text = paragraph_lines(invoice.notes)
             notes_section.append(Paragraph(notes_text, body_style))
             elements.append(KeepTogether(notes_section))
             elements.append(Spacer(1, 0.2*inch))
