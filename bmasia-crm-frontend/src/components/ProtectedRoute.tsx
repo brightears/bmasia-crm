@@ -3,12 +3,15 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { Box, Typography, Paper } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 import { hasPermission, hasRole, canAccessModule } from '../utils/permissions';
+import { hasNoRole, PageModule } from '../utils/access';
+import NoRoleNotice from './NoRoleNotice';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
   requiredPermission?: string;
   requiredRole?: string | string[];
-  requiredModule?: string;
+  /** The page module from the role table in utils/access.ts. */
+  requiredModule?: PageModule;
   fallback?: React.ReactNode;
 }
 
@@ -40,8 +43,9 @@ const ProtectedRoute = ({
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Check module access
+  // Check module access. An account without a role gets one clear notice instead.
   if (requiredModule && !canAccessModule(user, requiredModule)) {
+    if (hasNoRole(user)) return <NoRoleNotice />;
     return (fallback || <UnauthorizedAccess />) as React.ReactElement;
   }
 
@@ -74,7 +78,7 @@ const UnauthorizedAccess = () => (
         Access Denied
       </Typography>
       <Typography variant="body1" color="text.secondary">
-        You don't have permission to access this resource.
+        Your role does not include this page.
         Please contact your administrator if you believe this is an error.
       </Typography>
     </Paper>

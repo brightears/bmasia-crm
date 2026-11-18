@@ -107,11 +107,11 @@ const openAndType = async (text: string) => {
 };
 
 it('only searches record types whose pages the user may open', async () => {
-  mockUser = { id: 'x', role: 'Tech Support', is_active: true, permissions: [] };
+  mockUser = { id: 'x', role: 'Tech', is_active: true, permissions: [] };
   renderSearch();
   await openAndType('fixture');
   await screen.findByText('TH-TEST-0001');
-  expect(api.getQuotes).not.toHaveBeenCalled(); // Tech Support cannot open quote pages
+  expect(api.getQuotes).not.toHaveBeenCalled(); // Tech cannot open quote pages
   expect(api.getContracts).toHaveBeenCalled();
 });
 
@@ -176,4 +176,37 @@ it('still says that search failed when every type failed but a menu page matched
   await openAndType('templates');
   expect(await screen.findByText(/only CRM pages are shown/i)).toBeInTheDocument();
   expect(screen.getByText('Contract templates')).toBeInTheDocument();
+});
+
+describe('record types searched follow the role table', () => {
+  const ALL = ['getCompanies', 'getContacts', 'getContracts', 'getQuotes', 'getInvoices'];
+  it.each([
+    ['Admin', ALL],
+    ['Sales', ALL],
+    ['Finance', ALL],
+    ['Tech', ['getCompanies', 'getContacts', 'getContracts']],
+    ['Music', ['getCompanies', 'getContacts', 'getContracts']],
+  ])('%s searches %j', async (role, expected) => {
+    mockUser = { id: 'x', role, is_active: true };
+    renderSearch();
+    await openAndType('fixture');
+    await waitFor(() => expect(api.getCompanies).toHaveBeenCalled());
+    expect(ALL.filter((k) => api[k].mock.calls.length > 0)).toEqual(expected);
+  });
+
+  it('an account with no role searches no records and is offered only Today', async () => {
+    mockUser = { id: 'x', role: '', is_active: true };
+    renderSearch();
+    await openAndType('to');
+    expect(await screen.findByText('Today')).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 400));
+    for (const k of ALL) expect(api[k]).not.toHaveBeenCalled();
+  });
+
+  it('Finance is offered the finance report pages, Sales is not', async () => {
+    mockUser = { id: 'x', role: 'Finance', is_active: true };
+    renderSearch();
+    await openAndType('balance');
+    expect(await screen.findByText('Balance sheet')).toBeInTheDocument();
+  });
 });
