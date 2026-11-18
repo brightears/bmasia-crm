@@ -5,10 +5,11 @@ from decimal import Decimal
 import pytest
 
 from crm_app.services.renewals_page_service import (
-    AUTO_RENEWS, AUTO_UNCONFIRMED, DRAFTED, INVOICED, LAPSED, LOST, NOT_STARTED, PAID, PART_PAID, PLACEHOLDER,
-    RENEWED_UNLINKED, SENT, SIGNED, STATES, InvoiceFacts as I, SuccessorFacts as S, TermFacts as T, attention_of,
-    calendar_window, classify_link, derive_renewal_state, due_so_far, funnel_window, in_rate, instalments_per_year,
-    invoice_state_of, month_of, pick_successor, product_display, summary_bucket, term_months, value_change,
+    AUTO_RENEWS, AUTO_UNCONFIRMED, DRAFTED, INVOICED, LAPSED, LIVE_UNLINKED, LOST, NOT_STARTED, PAID, PART_PAID,
+    PLACEHOLDER, RENEWED_UNLINKED, SENT, SIGNED, STATES, InvoiceFacts as I, SuccessorFacts as S, TermFacts as T,
+    attention_of, calendar_window, classify_link, derive_renewal_state, due_so_far, funnel_window, gap_days, in_rate,
+    instalments_per_year, invoice_state_of, month_of, pick_successor, product_display, summary_bucket, term_months,
+    value_change,
 )
 
 pytestmark = pytest.mark.unit
@@ -28,6 +29,17 @@ CASES = [
     ('renewed auto-renew, nothing linked', T('Renewed', auto_renew=True), [], RENEWED_UNLINKED, None),
     ('cancelled, nothing linked', T('Cancelled'), [], LOST, None),
     ('cancelled auto-renew', T('Cancelled', auto_renew=True), [], LOST, None),
+
+    # --- the company has a live term that is not linked ------------------------
+    ('expired, live term not linked', T('Expired', ended=True, live_unlinked=True), [], LIVE_UNLINKED, None),
+    ('ended active, live term not linked', T('Active', ended=True, live_unlinked=True), [], LIVE_UNLINKED, None),
+    ('ended auto-renew, live term not linked', T('Active', auto_renew=True, ended=True, live_unlinked=True), [],
+     LIVE_UNLINKED, None),
+    ('renewed, live term not linked: still renewed-not-linked', T('Renewed', live_unlinked=True), [],
+     RENEWED_UNLINKED, None),
+    ('cancelled, live term not linked: still lost', T('Cancelled', live_unlinked=True), [], LOST, None),
+    ('declined renewal, live term not linked: still lost', T('Expired', live_unlinked=True),
+     [S('Cancelled', JAN, key='a')], LOST, None),
 
     # --- placeholders --------------------------------------------------------
     ('placeholder, Expired', T('Expired', placeholder=True, ended=True), [], PLACEHOLDER, None),
@@ -88,6 +100,8 @@ CASES = [
      [S('Active', JAN, link='addon', key='a')], RENEWED_UNLINKED, None),
     ('unmarked add-on starting mid-term is not the renewal', T('Active'),
      [S('Active', JAN, link='mid_term', key='a')], NOT_STARTED, None),
+    ('overlapping full term is not the renewal', T('Renewed'),
+     [S('Active', JAN, link='overlap', key='a')], RENEWED_UNLINKED, None),
     ('linked contract starting long after the end still is the renewal', T('Active'),
      [S('Active', JAN, link='late', key='a')], SIGNED, 'a'),
     ('renewal beats a late link', T('Active'),
@@ -110,8 +124,9 @@ def test_every_state_is_reachable_and_labelled():
 # --- money ------------------------------------------------------------------
 
 @pytest.mark.parametrize('freq,expected', [
-    ('Annually', 1), ('Annual', 1), ('', 1), ('Quarterly', 4), ('Semi-Annual', 2), ('Biannually', 2),
-    ('Bi-annually', 2), ('Half-yearly', 2), ('Monthly', 12), ('One-time', None), ('full term', None),
+    ('Annually', 1), ('Annual', 1), ('', 1), ('Quarterly', 4), ('Semi-annually', 2), ('Semi-Annual', 2),
+    ('Biannually', 2), ('Bi-annually', 2), ('Half-yearly', 2), ('Monthly', 12), ('One-time', None),
+    ('full term', None), ('Every month or so', 1), ('Bimonthly', 1)  # free text is never read as monthly
 ])
 def test_instalments_per_year(freq, expected):
     assert instalments_per_year(freq) == expected
@@ -147,6 +162,7 @@ def test_due_so_far(value, freq, start, end, today, expected):
     ([I('Paid', 300, 'USD')], 1200, 'part_paid'),                  # one quarterly instalment of four, all due
     ([I('Paid', 300, 'USD')], 300, 'paid'),                        # one quarter, only one due so far
     ([I('Paid', 600, 'USD'), I('Sent', 600, 'USD')], 1200, 'part_paid'),
+    ([I('Paid', 1200, 'USD'), I('Sent', 300, 'USD')], 1200, 'part_paid'),  # covered, but not every one paid
     ([I('Paid', 1200, 'USD'), I('Draft', 50, 'USD')], 1200, 'paid'),
     ([I('Paid', 0, 'USD')], 1200, 'none'),                         # zero-value invoices do not count
     ([I('Paid', 0, 'USD'), I('Sent', 1200, 'USD')], 1200, 'invoiced'),
@@ -171,9 +187,29 @@ TS, TE = date(2025, 12, 1), date(2026, 11, 30)
     (date(2027, 1, 30), '', 'late'),
     (date(2026, 12, 1), 'addon', 'addon'),
     (date(2026, 12, 1), 'renewal', 'renewal'),
+    (date(2025, 11, 30), '', 'mid_term'),        # before the term's start
 ])
 def test_classify_link(start, lifecycle, expected):
     assert classify_link(TS, TE, start, lifecycle) == expected
+
+
+def test_link_on_or_before_the_start_of_a_short_term_is_mid_term():
+    start, end = date(2026, 11, 1), date(2026, 11, 30)   # a one-month term: end - 90 is before its start
+    assert classify_link(start, end, date(2026, 11, 1), '') == 'mid_term'
+    assert classify_link(start, end, date(2026, 10, 15), '') == 'mid_term'
+    assert classify_link(start, end, date(2026, 11, 2), '') == 'renewal'
+
+
+@pytest.mark.parametrize('months,value,expected', [
+    (12, 1200, 'overlap'),     # a full term at the same value: a second record, check the dates
+    (12, 1205, 'overlap'),
+    (12, 1000, 'mid_term'),    # different value: a possible add-on
+    (6, 1200, 'mid_term'),     # shorter: a possible add-on
+    (None, 1200, 'mid_term'),
+])
+def test_mid_term_link_that_is_a_full_term_is_an_overlap(months, value, expected):
+    assert classify_link(TS, TE, date(2026, 4, 1), '', link_months=months, link_value=value,
+                         term_value=1200) == expected
 
 
 def test_pick_successor_ignores_non_renewal_links_and_cancelled():
@@ -183,9 +219,27 @@ def test_pick_successor_ignores_non_renewal_links_and_cancelled():
 
 # --- attention, totals, rate --------------------------------------------------
 
-def test_attention_names_a_mid_term_link_on_a_term_marked_renewed():
-    assert attention_of(RENEWED_UNLINKED, 30, False, True) == 'renewed_link_mid_term'
-    assert attention_of(NOT_STARTED, 30, False, True) == 'ended_nothing_sent'
+def test_attention_names_a_mid_term_or_overlapping_link_on_a_term_marked_renewed():
+    assert attention_of(RENEWED_UNLINKED, 30, mid_term_link=True) == 'renewed_link_mid_term'
+    assert attention_of(RENEWED_UNLINKED, 30, mid_term_link=True, overlap_link=True) == 'renewed_link_overlap'
+    assert attention_of(NOT_STARTED, 30, mid_term_link=True) == 'ended_nothing_sent'
+
+
+def test_attention_for_live_unlinked_and_recent_gap():
+    assert attention_of(LIVE_UNLINKED, 30) == 'link_the_renewal'
+    assert attention_of(LIVE_UNLINKED, -10) == 'link_the_renewal'
+    assert attention_of(SIGNED, 200, recent_gap=True) == 'renewed_after_gap'
+    assert attention_of(SIGNED, 200, refunded=True, recent_gap=True) == 'invoice_refunded'
+
+
+@pytest.mark.parametrize('end,start,expected', [
+    (date(2026, 6, 29), date(2026, 6, 30), 0),
+    (date(2026, 6, 29), date(2026, 7, 1), 1),
+    (date(2025, 12, 31), date(2026, 5, 3), 122),
+    (None, date(2026, 1, 1), None),
+])
+def test_gap_days(end, start, expected):
+    assert gap_days(end, start) == expected
 
 
 @pytest.mark.parametrize('state,days,refunded,expected', [
@@ -213,13 +267,16 @@ def test_attention_of(state, days, refunded, expected):
     assert attention_of(state, days, refunded) == expected
 
 
-@pytest.mark.parametrize('state,never,expected', [
-    (NOT_STARTED, False, 'open'), (AUTO_UNCONFIRMED, False, 'open'), (PAID, False, 'renewed'),
-    (AUTO_RENEWS, False, 'auto'), (LAPSED, False, 'lost'), (LOST, False, 'lost'), (LOST, True, 'excluded'),
-    (NOT_STARTED, True, 'open'), (PLACEHOLDER, False, 'excluded'),
+@pytest.mark.parametrize('state,never,y2025,expected', [
+    (NOT_STARTED, False, False, 'open'), (AUTO_UNCONFIRMED, False, False, 'open'), (PAID, False, False, 'renewed'),
+    (AUTO_RENEWS, False, False, 'auto'), (LAPSED, False, False, 'lost'), (LOST, False, False, 'lost'),
+    (LOST, True, False, 'excluded'), (NOT_STARTED, True, False, 'open'), (PLACEHOLDER, False, False, 'excluded'),
+    (LIVE_UNLINKED, False, False, 'unlinked'), (LIVE_UNLINKED, False, True, 'unlinked'),
+    (LAPSED, False, True, 'history'), (LOST, False, True, 'history'), (SIGNED, False, True, 'renewed'),
+    (NOT_STARTED, False, True, 'open'),
 ])
-def test_summary_bucket(state, never, expected):
-    assert summary_bucket(state, never) == expected
+def test_summary_bucket(state, never, y2025, expected):
+    assert summary_bucket(state, never, y2025) == expected
 
 
 @pytest.mark.parametrize('state,days,never,expected', [
@@ -233,9 +290,15 @@ def test_summary_bucket(state, never, expected):
     (LAPSED, 30, True, False),           # never activated
     (SIGNED, 30, True, False),
     (NOT_STARTED, None, False, False),
+    (LIVE_UNLINKED, 30, False, False),   # probably renewed, not proven: out of the rate
 ])
 def test_in_rate(state, days, never, expected):
     assert in_rate(state, days, never) is expected
+
+
+def test_2025_placeholder_terms_are_never_in_the_rate():
+    assert in_rate(SIGNED, 300, False, True) is False
+    assert in_rate(LAPSED, 300, False, True) is False
 
 
 # --- months -----------------------------------------------------------------
@@ -299,18 +362,16 @@ def test_term_months(start, end, months):
     assert term_months(start, end) == months
 
 
-@pytest.mark.parametrize('old,old_m,new,new_m,same,expected', [
-    (108000, 12, 120000, 12, True, (12000.0, 'term')),
-    (1200, 12, 1000, 12, True, (-200.0, 'term')),
-    (1200, 12, 1300, 13, True, (100.0, 'term')),            # a month either way is the same term
-    (1200, None, 1300, 12, True, (100.0, 'term')),
-    (12000, 36, 12000, 12, True, (None, 'different_length')),  # no figure across term lengths
-    (1200, 12, 1200, 24, True, (None, 'different_length')),
-    (1200, 12, 1300, 12, False, (None, None)),              # never across currencies
-    (1200, 12, None, 12, True, (None, None)),
+@pytest.mark.parametrize('old,new,same,expected', [
+    (108000, 120000, True, 12000.0),
+    (1200, 1000, True, -200.0),
+    (12000, 12000, True, 0.0),      # 36-month term renewed for 12 months at the same annual price
+    (12000, 13200, True, 1200.0),   # ... at a higher annual price
+    (1200, 1300, False, None),      # never across currencies
+    (1200, None, True, None),
 ])
-def test_value_change(old, old_m, new, new_m, same, expected):
-    assert value_change(old, old_m, new, new_m, same) == expected
+def test_value_change_compares_annual_values(old, new, same, expected):
+    assert value_change(old, new, same) == expected
 
 
 @pytest.mark.parametrize('book,platforms,expected', [

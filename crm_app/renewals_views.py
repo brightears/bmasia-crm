@@ -10,6 +10,8 @@ Signed-in users only (the project default). It reads; it never writes. The
 Renewal Book endpoint and MCP tool are unchanged; each row here embeds the
 Renewal Book row for the term. See ``services/renewals_page_service.py``.
 """
+import re
+
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -25,7 +27,7 @@ class RenewalsView(APIView):
         view = params.get('view') or 'month'
         for name in ('year', 'month'):
             raw = params.get(name)
-            if raw and not raw.strip().isdigit():
+            if raw and not re.fullmatch(r'[0-9]{1,4}', raw.strip()):
                 return self._bad(f'{name} must be a whole number')
         try:
             data = build_renewals_view(
@@ -36,8 +38,12 @@ class RenewalsView(APIView):
                 basis=params.get('basis') or 'funnel',
                 today=today,
             )
-        except (TypeError, ValueError) as exc:
-            return self._bad(str(exc))
+        except ValueError as exc:
+            message = str(exc)
+            # Only the service's own messages reach the client, never Python's.
+            return self._bad(message if ' must ' in f' {message} ' else 'bad parameters')
+        except TypeError:
+            return self._bad('bad parameters')
         response = Response(data)
         response['Cache-Control'] = 'private, no-store'
         return response

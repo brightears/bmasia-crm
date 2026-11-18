@@ -18,6 +18,8 @@ from crm_app.models import AuditLog, Company, Contract, ContractServiceLocation,
 from crm_app.services.renewal_book_service import build_renewal_book
 from crm_app.services.renewals_page_service import BOOK_RENEWAL_FIELDS, build_renewals_view
 
+NOTE = 'Placeholder record (2025-11-21 – 2026-11-20), multi-year duplicate of HK-CT99999 (2025-08-01 – 2027-07-31). Kept closed; not a separate term.'
+
 TODAY = date(2026, 11, 18)
 TH = 'BMAsia (Thailand) Co., Ltd.'
 HK = 'BMAsia Limited'
@@ -199,7 +201,7 @@ def test_month_view_states_successor_value_change_and_order():
     assert rows[sent.contract_number]['renewal']['state'] == 'sent'
     paid_row = rows[paid.contract_number]['renewal']
     assert paid_row['state'] == 'paid' and paid_row['successor']['invoice_state'] == 'paid'
-    assert paid_row['value_change'] == 100.0 and paid_row['value_change_basis'] == 'term'
+    assert paid_row['value_change'] == 100.0
     assert rows[auto.contract_number]['renewal']['state'] == 'auto_renews'
     assert rows[gone.contract_number]['renewal']['state'] == 'lost'
     order = [r['contract_number'] for r in data['rows']]
@@ -263,7 +265,7 @@ def test_several_successors_mid_term_links_and_addons():
     term = contract(company('Several Hotel'), date(2026, 11, 20))
     dead = renewal_of(term, status='Cancelled', start=date(2026, 12, 1))
     live = renewal_of(term, status='Draft', contract_number='DRAFT-9101')
-    addon = renewal_of(term, start=date(2026, 3, 1))  # unmarked, starts mid-term
+    addon = renewal_of(term, start=date(2026, 3, 1), value='300.00')  # unmarked, starts mid-term
     row = one_row(year=2026, month=11)
     assert row['renewal']['state'] == 'drafted'
     assert row['renewal']['successor']['contract_number'] == live.contract_number
@@ -282,13 +284,15 @@ def test_unmarked_addon_alone_is_not_the_renewal_and_is_marked_as_addon_term():
     assert rows_by_number(view(year=2026, month=11))[marked.contract_number]['is_addon'] is True
 
 
-def test_multi_year_renewal_gets_no_value_change_figure():
+@pytest.mark.parametrize('new_value,change', [('12000.00', 0.0), ('13200.00', 1200.0)])
+def test_36_month_term_renewed_for_12_months_compares_annual_values(new_value, change):
+    # value is the annual price for any term length (decision of 19 Nov 2026)
     term = contract(company('Three Year Hotel'), date(2026, 11, 29), start=date(2023, 11, 30), value='12000.00')
-    renewal_of(term, value='12000.00')
+    renewal_of(term, value=new_value)
     row = one_row(year=2026, month=11)
     assert row['term_months'] == 36
-    assert row['renewal']['value_change'] is None
-    assert row['renewal']['value_change_basis'] == 'different_length'
+    assert row['renewal']['successor']['term_months'] == 12
+    assert row['renewal']['value_change'] == change
 
 
 def test_value_change_is_never_across_currencies():
@@ -306,10 +310,38 @@ def test_late_link_counts_as_the_renewal_and_mid_term_link_is_named():
     assert row['renewal']['state'] == 'signed'
     assert row['renewal']['successor']['contract_number'] == real.contract_number
     assert row['renewal']['successor']['link'] == 'late'
+    assert row['renewal']['successor']['gap_days'] == 212
+    # A 2025 placeholder term's dates are artificial: its "gap" needs no attention.
+    assert row['renewal']['attention'] is None
     term = contract(company('Mid Link Hotel'), date(2026, 11, 20), status='Renewed')
-    renewal_of(term, start=date(2026, 4, 1))
+    renewal_of(term, start=date(2026, 4, 1), value='400.00', months=12)
     rows = rows_by_number(view(year=2026, month=11))
     assert rows[term.contract_number]['renewal']['attention'] == 'renewed_link_mid_term'
+
+
+def test_overlapping_full_term_link_says_check_the_dates():
+    term = contract(company('Overlap Hotel'), date(2026, 11, 20), status='Renewed', value='1200.00')
+    renewal_of(term, start=date(2026, 4, 1), value='1200.00')
+    row = one_row(year=2026, month=11)
+    assert row['renewal']['state'] == 'renewed_unlinked'
+    assert row['renewal']['attention'] == 'renewed_link_overlap'
+    assert row['renewal']['other_linked'][0]['link_label'] == 'Overlapping term, check the dates'
+
+
+def test_late_renewal_shows_its_gap_and_needs_attention_within_the_year():
+    term = contract(company('Gap Hotel'), date(2026, 6, 15))
+    renewal_of(term, start=date(2026, 10, 16))   # 122 days without a term
+    row = one_row(year=2026, month=6)
+    assert row['renewal']['state'] == 'signed'
+    assert row['renewal']['successor']['link'] == 'late'
+    assert row['renewal']['successor']['gap_days'] == 122
+    assert row['renewal']['attention'] == 'renewed_after_gap'
+    assert row['renewal']['summary_bucket'] == 'renewed'
+    old = contract(company('Old Gap Hotel'), date(2024, 3, 14))
+    renewal_of(old, start=date(2024, 9, 1))
+    old_row = one_row(year=2024, month=3)
+    assert old_row['renewal']['successor']['gap_days'] == 170
+    assert old_row['renewal']['attention'] is None   # the gap is more than a year ago
 
 
 def test_successor_on_another_company_record_is_flagged():
@@ -334,7 +366,7 @@ def test_sent_never_activated_term_is_flagged_and_not_counted_as_lost():
 
 def test_rule2_and_rule3_placeholders_are_recognised():
     year_one = contract(company('Year One Hotel'), date(2026, 11, 20), status='Expired',
-                        notes='Placeholder record (2025-11-21 – 2026-11-20), multi-year duplicate of HK-CT99999.')
+                        notes='Older remark.\n' + NOTE)
     twin = contract(company('Twin Placeholder Hotel'), date(2026, 11, 21), status='Expired')
     AuditLog.objects.create(action='UPDATE', model_name='Contract', record_id=str(twin.pk),
                             additional_data={'class': 'R3', 'op': 'mark_expired', 'evidence': 'rule 3'})
@@ -350,6 +382,81 @@ def test_rule2_and_rule3_placeholders_are_recognised():
     assert rows[other.contract_number]['renewal']['state'] == 'lapsed'
     nov = data['months'][10]
     assert (nov['count'], nov['placeholders'], nov['lost']) == (1, 2, 1)
+    # All open lists them too (the page hides them by default), so nothing disappears silently.
+    open_states = {r['contract_number']: r['renewal']['state'] for r in view(year=2026, view='open')['rows']}
+    assert open_states.get(year_one.contract_number) == 'placeholder'
+
+
+def test_placeholder_markers_never_hide_a_live_or_hand_written_term():
+    live = contract(company('Live With Note Hotel'), date(2026, 11, 20), status='Active', notes=NOTE)
+    typed = contract(company('Typed Note Hotel'), date(2026, 11, 21), status='Expired',
+                     notes='Is this a multi-year duplicate of HK-CT99999? No.')
+    reopened = contract(company('Reopened Twin Hotel'), date(2026, 11, 22), status='Active')
+    AuditLog.objects.create(action='UPDATE', model_name='Contract', record_id=str(reopened.pk),
+                            additional_data={'class': 'R3', 'op': 'mark_expired'})
+    other_op = contract(company('Other Op Hotel'), date(2026, 11, 23), status='Expired')
+    AuditLog.objects.create(action='UPDATE', model_name='Contract', record_id=str(other_op.pk),
+                            additional_data={'class': 'R3', 'op': 'add_note'})
+    states = {r['contract_number']: r['renewal']['state'] for r in view(year=2026, month=11)['rows']}
+    assert states[live.contract_number] != 'placeholder'
+    assert states[typed.contract_number] == 'lapsed'
+    assert states[reopened.contract_number] != 'placeholder'
+    assert states[other_op.contract_number] == 'lapsed'
+
+
+def test_expired_term_with_an_unlinked_live_term_is_not_lost():
+    co = company('Live Unlinked Hotel')
+    term = contract(co, date(2026, 6, 29), status='Expired')
+    live = contract(co, date(2027, 6, 29), start=date(2026, 6, 30))   # Active, no link back
+    data = view(year=2026, month=6)
+    row = rows_by_number(data)[term.contract_number]
+    assert row['renewal']['state'] == 'live_unlinked'
+    assert row['renewal']['attention'] == 'link_the_renewal'
+    assert row['renewal']['summary_bucket'] == 'unlinked'
+    assert row['renewal']['in_rate'] is False
+    assert row['renewal']['live_unlinked'][0]['contract_number'] == live.contract_number
+    jun = data['months'][5]
+    assert (jun['unlinked'], jun['lost']) == (1, 0)
+
+
+@pytest.mark.parametrize('extra,expected', [
+    ({}, 'live_unlinked'),
+    ({'property_name': 'Other Outlet'}, 'lapsed'),                    # names another property
+    ({'start': date(2026, 1, 15)}, 'lapsed'),                         # starts mid-term
+    ({'start': date(2026, 9, 15)}, 'lapsed'),                         # starts long after the end
+    ({'status': 'Expired'}, 'lapsed'),                                # not live
+    ({'service_type': 'beat_breeze_yearly'}, 'lapsed'),               # another product
+])
+def test_live_unlinked_match_cautions(extra, expected):
+    co = company('Caution Hotel')
+    term = contract(co, date(2026, 6, 29), status='Expired', property_name='Main Outlet',
+                    service_type='soundtrack_unlimited_yearly')
+    kw = {'start': date(2026, 6, 30), 'property_name': 'Main Outlet', 'service_type': 'soundtrack_unlimited_yearly'}
+    kw.update(extra)
+    contract(co, date(2027, 6, 29), **kw)
+    assert rows_by_number(view(year=2026, month=6))[term.contract_number]['renewal']['state'] == expected
+
+
+def test_live_unlinked_needs_the_candidate_to_be_nobody_elses_renewal():
+    co = company('Taken Candidate Hotel')
+    term = contract(co, date(2026, 6, 29), status='Expired')
+    other_term = contract(co, date(2026, 6, 28), status='Renewed', property_name='Annex')
+    contract(co, date(2027, 6, 29), start=date(2026, 6, 30), renewed_from=other_term)
+    assert rows_by_number(view(year=2026, month=6))[term.contract_number]['renewal']['state'] == 'lapsed'
+
+
+def test_2025_placeholder_terms_are_history_not_churn():
+    stamp = contract(company('Stamp Hotel'), date(2025, 12, 31), start=date(2025, 1, 1), status='Expired')
+    real_lost = contract(company('Real Lost Hotel'), date(2026, 1, 15), status='Expired')
+    data = view(year=2026, month=1)
+    rows = rows_by_number(data)
+    assert rows[stamp.contract_number]['term_2025_placeholder'] is True
+    assert rows[stamp.contract_number]['renewal']['state'] == 'lapsed'          # listed, as the record says
+    assert rows[stamp.contract_number]['renewal']['summary_bucket'] == 'history'
+    assert rows[stamp.contract_number]['renewal']['in_rate'] is False
+    assert rows[real_lost.contract_number]['renewal']['summary_bucket'] == 'lost'
+    jan = data['months'][0]
+    assert (jan['count'], jan['lost'], jan['history']) == (2, 1, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -421,12 +528,13 @@ def test_open_view_lists_open_and_attention_rows_across_months():
 @pytest.mark.parametrize('query', [
     'year=2026&month=13', 'year=2026&month=x', 'year=abc&month=1', 'year=2026&month=1&entity=sg',
     'year=2026&view=everything', 'year=1999&month=1', 'year=2026&month=1&basis=weekly',
-    'year=2026&view=open&month=x',
+    'year=2026&view=open&month=x', 'year=%C2%B2026&month=1', 'year=20260&month=1', 'year=2026&month=%D9%A1',
 ])
 def test_bad_parameters_are_refused(client, query):
     response = client.get(f'/api/v1/renewals/?{query}')
     assert response.status_code == 400
     assert 'error' in response.json()
+    assert 'invalid literal' not in response.json()['error']
 
 
 def test_response_is_private_and_not_stored(client):
@@ -465,4 +573,4 @@ def test_query_count_does_not_grow_with_rows():
     few = _queries_for(2, 'a')
     many = _queries_for(10, 'b')
     assert few == many
-    assert many[0] <= 13 and many[1] <= 13
+    assert many[0] <= 16 and many[1] <= 16

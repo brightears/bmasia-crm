@@ -8,11 +8,15 @@ latest-starting linked contract, and its ``invoices_paid`` /
 ``outstanding_amount``, the term's own invoices) is moved under ``book`` so a
 row gives one answer to "has this renewed?": ``renewal``.
 
+``value`` is the annual price for terms of any length (decision of 19 Nov
+2026: every writer stores the yearly figure, and the contract PDF guard holds
+it to the per-zone yearly prices), so values are compared directly.
+
 On top of the book this module adds what a renewals person needs:
 
 - one renewal state per term (``derive_renewal_state``), from the term, the
-  contracts linked to it (``renewed_from``) that start around its end, and
-  their invoices;
+  contracts linked to it (``renewed_from``), their invoices, and unlinked live
+  contracts of the same company around its end;
 - a "needs attention" reason (``attention_of``);
 - the renewal's own value and the change from the current value;
 - the funnel's month convention (``funnel_window``) or calendar months;
@@ -22,6 +26,7 @@ The rule lives here once. The frontend shows ``renewal.state`` / ``label`` /
 ``summary_bucket`` / ``in_rate`` and never re-derives them.
 """
 import calendar
+import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -46,12 +51,14 @@ PAID = 'paid'
 RENEWED_UNLINKED = 'renewed_unlinked'
 AUTO_RENEWS = 'auto_renews'
 AUTO_UNCONFIRMED = 'auto_unconfirmed'
+LIVE_UNLINKED = 'live_unlinked'
 LAPSED = 'lapsed'
 LOST = 'lost'
 PLACEHOLDER = 'placeholder'
 
 # Groups: 'open' (not yet renewed or lost), 'renewed', 'auto' (renews by itself,
-# term not ended yet), 'lost', 'excluded' (not a real term).
+# term not ended yet), 'unlinked' (the company has a live term that is not
+# linked: probably renewed, not proven), 'lost', 'excluded' (not a real term).
 STATES = (
     # key, label, group
     (NOT_STARTED, 'Not started', 'open'),
@@ -64,6 +71,7 @@ STATES = (
     (PAID, 'Paid', 'renewed'),
     (RENEWED_UNLINKED, 'Renewed, not linked', 'renewed'),
     (AUTO_RENEWS, 'Auto-renews', 'auto'),
+    (LIVE_UNLINKED, 'Live term not linked', 'unlinked'),
     (LAPSED, 'Expired, not renewed', 'lost'),
     (LOST, 'Cancelled / lost', 'lost'),
     (PLACEHOLDER, 'Placeholder (closed)', 'excluded'),
@@ -76,11 +84,18 @@ STATE_GROUP = {key: group for key, _, group in STATES}
 SIGNED_STATUSES = ('Active', 'Renewed', 'Expired')
 # Invoice statuses that mean an invoice was issued to the customer.
 ISSUED_INVOICE_STATUSES = ('Sent', 'Overdue', 'Paid')
+# Statuses of a contract that is live or on its way: a renewal not yet linked.
+LIVE_STATUSES = ('Active', 'Sent', 'Draft')
+# A term must be closed before a placeholder marker can hide it.
+CLOSED_STATUSES = ('Expired', 'Renewed', 'Cancelled')
 
 ATTENTION_REASONS = (
     ('renewed_unlinked', 'Marked Renewed, no renewal linked'),
     ('renewed_link_mid_term', 'Marked Renewed; the linked contract starts mid-term (possible add-on)'),
+    ('renewed_link_overlap', 'Marked Renewed; the linked contract overlaps the term, check the dates'),
+    ('link_the_renewal', 'The company has a live term that is not linked: link the renewal'),
     ('invoice_refunded', 'Invoice refunded'),
+    ('renewed_after_gap', 'Renewed after a gap in service'),
     ('auto_renew_ended', 'Auto-renew set, term ended, no new term recorded'),
     ('ended_nothing_sent', 'Ended, no renewal sent'),
     ('ended_not_signed', 'Ended, renewal not signed'),
@@ -88,13 +103,16 @@ ATTENTION_REASONS = (
 )
 ATTENTION_LABEL = dict(ATTENTION_REASONS)
 ATTENTION_WINDOW_DAYS = 30
+GAP_ATTENTION_DAYS = 365
 
 # A linked contract that starts more than 90 days before the term's end (or not
 # after the term's start) is not the renewal: it starts mid-term, a possible
-# add-on. One that starts more than 60 days after the end still counts as the
-# renewal and is flagged 'late': in the 16 Nov data 145 of the 159 such links
-# hang off the 2025 placeholder terms that the 15 Nov rule 1 linked to the
-# client's real term on purpose. The window is the data-quality check's.
+# add-on; or, when it is itself a full term at the same value, an overlapping
+# term whose dates need checking. One that starts more than 60 days after the
+# end still counts as the renewal and is flagged 'late' with its gap: in the
+# 16 Nov data 145 of the 159 such links hang off the 2025 placeholder terms
+# that the 15 Nov rule 1 linked to the client's real term on purpose. The
+# window is the data-quality check's; it also finds unlinked live terms.
 RENEWAL_START_BEFORE_END_DAYS = 90
 RENEWAL_START_AFTER_END_DAYS = 60
 RENEWAL_LINKS = ('renewal', 'late')
@@ -103,14 +121,26 @@ LINK_LABEL = {
     'late': 'Renewal, starts more than 60 days after the term ended',
     'addon': 'Add-on (lifecycle type)',
     'mid_term': 'Linked contract starts mid-term (possible add-on)',
+    'overlap': 'Overlapping term, check the dates',
 }
 
-# Placeholders closed by the November corrections (parity rules of 15 Nov):
-# rule 2 adds a note naming the multi-year contract a year-one record repeats
-# (parity_check.NOTE_MARK); rule 3 expires a twin company's placeholder and
-# leaves only an AuditLog row with class 'R3' (op mark_expired).
-PLACEHOLDER_NOTE_MARK = 'multi-year duplicate of'
+# Placeholders closed by the November corrections (parity rules of 15 Nov), on
+# a closed term only: rule 2 adds this exact note line, naming the multi-year
+# contract a year-one record repeats (r7_build.py); rule 3 expires a twin
+# company's placeholder and leaves only an AuditLog row with class 'R3' and
+# op 'mark_expired'.
+PLACEHOLDER_NOTE_RE = re.compile(
+    r'^Placeholder record \(\d{4}-\d{2}-\d{2} – \d{4}-\d{2}-\d{2}\), multi-year duplicate of \S+ '
+    r'\(\d{4}-\d{2}-\d{2} – \d{4}-\d{2}-\d{2}\)\. Kept closed; not a separate term\.$',
+    re.MULTILINE,
+)
 PLACEHOLDER_AUDIT_CLASS = 'R3'
+PLACEHOLDER_AUDIT_OP = 'mark_expired'
+
+# The 2025 "Kent stamp" placeholder terms (1 Jan - 31 Dec 2025, project
+# decisions of 14 Nov): real records of last year's term, kept as the closed
+# previous term. Listed, but never counted as lost or in the rate.
+TERM_2025_START, TERM_2025_END = date(2025, 1, 1), date(2025, 12, 31)
 
 ENTITIES = {
     'th': 'BMAsia (Thailand) Co., Ltd.',
@@ -124,6 +154,15 @@ BASES = ('funnel', 'calendar')
 OPEN_MONTHS_BACK = 12
 OPEN_MONTHS_AHEAD = 6
 
+# Billing frequencies as the contract form and the quote conversion write them
+# (and the older spellings in the data), lower case. Anything else counts as
+# annual, which asks the most before "Paid".
+BILLING_INSTALMENTS = {
+    'annually': 1, 'annual': 1, 'yearly': 1,
+    'semi-annually': 2, 'semi-annual': 2, 'biannually': 2, 'bi-annually': 2, 'biannual': 2, 'half-yearly': 2,
+    'quarterly': 4,
+    'monthly': 12,
+}
 ONE_TIME_BILLING = {'one-time', 'one time', 'onetime', 'upfront', 'full term', 'full-term'}
 
 
@@ -141,6 +180,7 @@ class TermFacts:
     auto_renew: bool = False
     ended: bool = False          # today is after the end date
     placeholder: bool = False    # closed by the November corrections, not a real term
+    live_unlinked: bool = False  # the company has a live contract around the end, not linked
 
 
 @dataclass(frozen=True)
@@ -152,7 +192,7 @@ class SuccessorFacts:
     signed_date: Optional[date] = None
     invoice_state: str = 'none'  # 'none' | 'invoiced' | 'part_paid' | 'paid'
     refunded: bool = False
-    link: str = 'renewal'        # 'renewal' | 'addon' | 'mid_term' | 'late'
+    link: str = 'renewal'        # 'renewal' | 'late' | 'addon' | 'mid_term' | 'overlap'
     key: str = field(default='', compare=False)
 
 
@@ -176,29 +216,20 @@ class RenewalState:
 # ---------------------------------------------------------------------------
 
 def instalments_per_year(billing_frequency):
-    """1, 2, 4 or 12 from the free-text billing frequency; None for one-time billing."""
+    """1, 2, 4 or 12 from the billing frequency; None for one-time billing; 1 if unknown."""
     text = (billing_frequency or '').strip().lower()
     if text in ONE_TIME_BILLING:
         return None
-    if 'quarter' in text:
-        return 4
-    if 'month' in text:
-        return 12
-    if 'semi' in text or 'half' in text or text.replace('-', '') == 'biannually' or 'bi-annual' in text:
-        return 2
-    return 1
+    return BILLING_INSTALMENTS.get(text, 1)
 
 
 def due_so_far(value, billing_frequency, start, end, today):
-    """What the customer owes for the renewal by today, before tax.
+    """What the customer owes for the renewal by today, before tax ("paid to date" basis).
 
-    Invoices are raised in advance, so the first instalment is due from the
-    start (or before it). One-time billing: the whole value. A term up to 12
-    months: its value split over its instalments. A term over 12 months: an
-    instalment is value / instalments a year, the contract PDF's reading
-    ("invoiced annually at {value} per year"); under the other reading
-    (value for the whole term) this asks for more, never less, so "Paid" is
-    never claimed too early.
+    ``value`` is the annual price. Invoices are raised in advance, so the first
+    instalment is due from the start (or before it). One-time billing: the
+    whole value. A term up to 12 months: its value split over its instalments.
+    A term over 12 months: an instalment is value / instalments a year.
     """
     value = Decimal(str(value or 0))
     per_year = instalments_per_year(billing_frequency)
@@ -241,13 +272,30 @@ def invoice_state_of(invoices: Sequence[InvoiceFacts], due: Decimal, currency: s
 # The rule
 # ---------------------------------------------------------------------------
 
-def classify_link(term_start, term_end, start, lifecycle_type):
-    """Whether a linked contract is the renewal, by lifecycle type and by when it starts."""
+def in_renewal_window(term_start, term_end, start):
+    """Whether a contract starting on ``start`` can be this term's renewal by date alone."""
+    if not start or not term_end:
+        return True
+    if (term_start and start <= term_start) or start < term_end - timedelta(days=RENEWAL_START_BEFORE_END_DAYS):
+        return False
+    return start <= term_end + timedelta(days=RENEWAL_START_AFTER_END_DAYS)
+
+
+def classify_link(term_start, term_end, start, lifecycle_type, *, link_months=None, link_value=None,
+                  term_value=None):
+    """Whether a linked contract is the renewal, by lifecycle type and by when it starts.
+
+    'mid_term' becomes 'overlap' when the linked contract is itself a full term
+    (11 months or more) at the term's value: a second record of a term, not an add-on.
+    """
     if lifecycle_type == 'addon':
         return 'addon'
     if not start or not term_end:
         return 'renewal'
     if (term_start and start <= term_start) or start < term_end - timedelta(days=RENEWAL_START_BEFORE_END_DAYS):
+        if (link_months and link_months >= 11 and term_value is not None and link_value is not None
+                and abs(float(link_value) - float(term_value)) <= max(1.0, 0.01 * abs(float(term_value)))):
+            return 'overlap'
         return 'mid_term'
     if start > term_end + timedelta(days=RENEWAL_START_AFTER_END_DAYS):
         return 'late'
@@ -289,10 +337,13 @@ def derive_renewal_state(term: TermFacts, successors: Sequence[SuccessorFacts]) 
        signed (Active/Renewed/Expired, or a recorded signed date), sent, drafted.
     3. With no live renewal: a term marked Renewed is "renewed, not linked";
        a term whose renewals were all cancelled is lost (renewal declined);
+       otherwise, when the company has a live contract starting around the
+       term's end that is not linked, "live term not linked";
        an Expired term lapsed (Expired means lapsed with no successor);
        an auto-renewing term auto-renews until its end date, and after it
        has "auto-renew, no new term"; anything else has not started.
-    Linked contracts that are add-ons or start mid-term are never the renewal.
+    Linked contracts that are add-ons, start mid-term or overlap the term are
+    never the renewal.
     """
     if term.placeholder:
         return RenewalState(PLACEHOLDER, None, 'placeholder')
@@ -318,6 +369,8 @@ def derive_renewal_state(term: TermFacts, successors: Sequence[SuccessorFacts]) 
         return RenewalState(RENEWED_UNLINKED, None, 'term_marked_renewed')
     if renewals:  # every renewal was cancelled
         return RenewalState(LOST, None, 'renewal_cancelled')
+    if term.live_unlinked:
+        return RenewalState(LIVE_UNLINKED, None, 'company_live_term_unlinked')
     if term.status == 'Expired':
         return RenewalState(LAPSED, None, 'term_expired')
     if term.auto_renew:
@@ -328,14 +381,20 @@ def derive_renewal_state(term: TermFacts, successors: Sequence[SuccessorFacts]) 
 
 
 def attention_of(state: str, days_from_end: Optional[int], refunded: bool = False,
-                 mid_term_link: bool = False) -> Optional[str]:
+                 mid_term_link: bool = False, overlap_link: bool = False, recent_gap: bool = False) -> Optional[str]:
     """Why a row needs action now, or None. ``days_from_end`` is today minus the end date."""
     if state == PLACEHOLDER:
         return None
     if state == RENEWED_UNLINKED:
+        if overlap_link:
+            return 'renewed_link_overlap'
         return 'renewed_link_mid_term' if mid_term_link else 'renewed_unlinked'
+    if state == LIVE_UNLINKED:
+        return 'link_the_renewal'
     if refunded:
         return 'invoice_refunded'
+    if recent_gap:
+        return 'renewed_after_gap'
     if state == AUTO_UNCONFIRMED:
         return 'auto_renew_ended'
     if days_from_end is None:
@@ -349,26 +408,30 @@ def attention_of(state: str, days_from_end: Optional[int], refunded: bool = Fals
     return None
 
 
-def summary_bucket(state: str, never_activated: bool) -> str:
-    """Which total a row counts in: 'open', 'renewed', 'auto', 'lost' or 'excluded'.
+def summary_bucket(state: str, never_activated: bool, term_2025: bool = False) -> str:
+    """Which total a row counts in: 'open', 'renewed', 'auto', 'unlinked', 'lost', 'history' or 'excluded'.
 
-    A never-activated (Sent) term is not counted as lost.
+    A never-activated (Sent) term is not counted as lost; a 2025 placeholder
+    term that lapsed is history, not churn.
     """
     group = STATE_GROUP[state]
-    if never_activated and group == 'lost':
+    if group == 'lost' and never_activated:
         return 'excluded'
+    if group == 'lost' and term_2025:
+        return 'history'
     return group
 
 
-def in_rate(state: str, days_from_end: Optional[int], never_activated: bool) -> bool:
+def in_rate(state: str, days_from_end: Optional[int], never_activated: bool, term_2025: bool = False) -> bool:
     """Whether the row counts in the renewal rate's denominator.
 
     Decided terms (renewed or lost) and ended terms that are still open count.
-    Open terms still ahead, auto-renewals before their end, placeholders and
+    Open terms still ahead, auto-renewals before their end, terms whose company
+    has an unlinked live term, placeholders, 2025 placeholder terms and
     never-activated terms do not.
     """
     group = STATE_GROUP[state]
-    if never_activated or group in ('excluded', 'auto'):
+    if never_activated or term_2025 or group in ('excluded', 'auto', 'unlinked'):
         return False
     if group in ('renewed', 'lost'):
         return True
@@ -382,20 +445,21 @@ def term_months(start: Optional[date], end: Optional[date]) -> Optional[int]:
     return max(1, round(((end - start).days + 1) / 30.4375))
 
 
-def value_change(old_value, old_months, new_value, new_months, same_currency):
-    """(change, basis): the renewal's value minus the term's.
+def value_change(old_value, new_value, same_currency):
+    """The renewal's annual value minus the term's, or None across currencies.
 
-    Only for the same currency, and only when both terms have the same length
-    (a month either way). The code base reads ``value`` of a term over 12
-    months two ways (the contract PDF: per year; ``Contract.monthly_value``:
-    for the whole term), so terms of different length get no figure
-    ('different_length') rather than a wrong one.
+    ``value`` is the annual price for any term length, so the two compare directly.
     """
     if new_value is None or not same_currency:
-        return None, None
-    if old_months and new_months and abs(old_months - new_months) > 1:
-        return None, 'different_length'
-    return round(float(new_value or 0) - float(old_value or 0), 2), 'term'
+        return None
+    return round(float(new_value or 0) - float(old_value or 0), 2)
+
+
+def gap_days(term_end, renewal_start):
+    """Days without a term between the end and the renewal's start (0 when it follows on)."""
+    if not term_end or not renewal_start:
+        return None
+    return max(0, (renewal_start - term_end).days - 1)
 
 
 # ---------------------------------------------------------------------------
@@ -439,6 +503,49 @@ def month_of(end_date, basis):
 # Facts from the database (one path for the strip and the table)
 # ---------------------------------------------------------------------------
 
+def is_term_2025(contract):
+    return contract.start_date == TERM_2025_START and contract.end_date == TERM_2025_END
+
+
+def is_placeholder(contract, r3_ids):
+    """A placeholder closed by the corrections: closed status AND the exact rule-2 note or a rule-3 audit row."""
+    if contract.status not in CLOSED_STATUSES:
+        return False
+    return bool(PLACEHOLDER_NOTE_RE.search(contract.notes or '')) or str(contract.pk) in r3_ids
+
+
+def _platforms(contract):
+    """Products evidenced on the contract itself: service-location platforms and the service type."""
+    found = {loc.platform for loc in contract.service_locations.all() if loc.platform in ('beatbreeze', 'soundtrack')}
+    st = (contract.service_type or '').lower()
+    if 'beat' in st:
+        found.add('beatbreeze')
+    elif 'soundtrack' in st:
+        found.add('soundtrack')
+    return found
+
+
+def live_unlinked_match(term, candidate):
+    """Whether ``candidate`` (same company, live, not linked here) looks like this term's renewal.
+
+    It must start in the renewal window, not be another contract's renewal, and
+    not name a different property or product than the term.
+    """
+    if candidate.pk == term.pk or candidate.status not in LIVE_STATUSES:
+        return False
+    if candidate.renewed_from_id is not None:
+        return False
+    if not in_renewal_window(term.start_date, term.end_date, candidate.start_date):
+        return False
+    a, b = (term.property_name or '').strip().lower(), (candidate.property_name or '').strip().lower()
+    if a and b and a != b:
+        return False
+    pa, pb = _platforms(term), _platforms(candidate)
+    if pa and pb and not (pa & pb):
+        return False
+    return True
+
+
 @dataclass
 class Evaluated:
     result: RenewalState
@@ -448,16 +555,19 @@ class Evaluated:
     in_rate: bool
     never_activated: bool
     is_addon: bool
+    term_2025: bool
     successors: list
     facts: list
     refunded: bool
+    live_candidates: list
+    gap: Optional[int]
 
 
 def _invoice_facts(contract):
     return [InvoiceFacts(i.status, i.amount, i.currency) for i in contract.invoices.all()]
 
 
-def _evaluate(contract, today, r3_ids):
+def _evaluate(contract, today, r3_ids, company_live):
     days = (today - contract.end_date).days if contract.end_date else None
     successors = list(contract.renewals.all())
     facts = []
@@ -471,26 +581,42 @@ def _evaluate(contract, today, r3_ids):
             invoice_state=invoice_state_of(
                 invoices, due_so_far(s.value, s.billing_frequency, s.start_date, s.end_date, today), s.currency),
             refunded=any(i.status == 'Refunded' for i in invoices),
-            link=classify_link(contract.start_date, contract.end_date, s.start_date, s.lifecycle_type or ''),
+            link=classify_link(contract.start_date, contract.end_date, s.start_date, s.lifecycle_type or '',
+                               link_months=term_months(s.start_date, s.end_date), link_value=s.value,
+                               term_value=contract.value),
             key=str(s.pk),
         ))
-    placeholder = (PLACEHOLDER_NOTE_MARK in (contract.notes or '')) or str(contract.pk) in r3_ids
+    has_live_link = any(f.link in RENEWAL_LINKS and f.status != 'Cancelled' for f in facts)
+    candidates = [] if has_live_link else [
+        c for c in company_live.get(contract.company_id, ()) if live_unlinked_match(contract, c)]
+    placeholder = is_placeholder(contract, r3_ids)
     term = TermFacts(contract.status, bool(contract.auto_renew), ended=days is not None and days > 0,
-                     placeholder=placeholder)
+                     placeholder=placeholder, live_unlinked=bool(candidates))
     result = derive_renewal_state(term, facts)
+    term_2025 = is_term_2025(contract)
     refunded = result.state != PLACEHOLDER and any(f.refunded for f in facts if f.link in RENEWAL_LINKS)
-    attention = attention_of(result.state, days, refunded, any(f.link == 'mid_term' for f in facts))
+    gap = None
+    recent_gap = False
+    if result.successor is not None and result.successor.link == 'late':
+        gap = gap_days(contract.end_date, result.successor.start_date)
+        # The 2025 placeholder terms carry artificial dates: their "gap" is not a gap in service.
+        recent_gap = (not term_2025 and result.successor.start_date is not None
+                      and result.successor.start_date > today - timedelta(days=GAP_ATTENTION_DAYS))
+    attention = attention_of(result.state, days, refunded,
+                             mid_term_link=any(f.link == 'mid_term' for f in facts),
+                             overlap_link=any(f.link == 'overlap' for f in facts),
+                             recent_gap=recent_gap)
     never_activated = contract.status == 'Sent'
     prev = contract.renewed_from
     is_addon = (contract.lifecycle_type or '') == 'addon' or (
         prev is not None and classify_link(prev.start_date, prev.end_date, contract.start_date, '') == 'mid_term')
-    return Evaluated(result, days, attention, summary_bucket(result.state, never_activated),
-                     in_rate(result.state, days, never_activated), never_activated, is_addon,
-                     successors, facts, refunded)
+    return Evaluated(result, days, attention, summary_bucket(result.state, never_activated, term_2025),
+                     in_rate(result.state, days, never_activated, term_2025), never_activated, is_addon,
+                     term_2025, successors, facts, refunded, candidates, gap)
 
 
 def _r3_placeholder_ids(contract_ids):
-    """Contracts expired as a twin company's placeholder by the corrections (rule 3): AuditLog class R3."""
+    """Contracts expired as a twin company's placeholder by the corrections (rule 3): AuditLog class R3, op mark_expired."""
     from crm_app.models import AuditLog
 
     ids = [str(i) for i in contract_ids]
@@ -498,8 +624,24 @@ def _r3_placeholder_ids(contract_ids):
         return set()
     return set(AuditLog.objects.filter(
         model_name='Contract', action='UPDATE', record_id__in=ids,
-        additional_data__class=PLACEHOLDER_AUDIT_CLASS, additional_data__op='mark_expired',
+        additional_data__class=PLACEHOLDER_AUDIT_CLASS, additional_data__op=PLACEHOLDER_AUDIT_OP,
     ).values_list('record_id', flat=True))
+
+
+def _company_live_contracts(company_ids):
+    """Live (Active, Sent, Draft) contracts of these companies, by company id: one query plus locations."""
+    from crm_app.models import Contract
+
+    ids = list(set(company_ids))
+    if not ids:
+        return {}
+    by_company = {}
+    for c in (Contract.objects.filter(company_id__in=ids, status__in=LIVE_STATUSES)
+              .only('id', 'company_id', 'contract_number', 'status', 'start_date', 'end_date', 'renewed_from_id',
+                    'property_name', 'service_type')
+              .prefetch_related('service_locations')):
+        by_company.setdefault(c.company_id, []).append(c)
+    return by_company
 
 
 _SUCCESSOR_FIELDS = ('id', 'renewed_from_id', 'company_id', 'contract_number', 'status', 'start_date', 'end_date',
@@ -535,10 +677,11 @@ def _strip_queryset():
 
     return (
         Contract.objects
-        .only('id', 'status', 'auto_renew', 'start_date', 'end_date', 'notes', 'lifecycle_type',
+        .only('id', 'company_id', 'status', 'auto_renew', 'start_date', 'end_date', 'value', 'notes',
+              'lifecycle_type', 'property_name', 'service_type',
               'renewed_from__start_date', 'renewed_from__end_date')
         .select_related('renewed_from')
-        .prefetch_related(*_prefetches())
+        .prefetch_related('service_locations', *_prefetches())
         .exclude(status='Draft')
     )
 
@@ -595,11 +738,11 @@ def _owner_of(contract):
     return None, None
 
 
-def renewals_row(contract, today, r3_ids=frozenset()):
+def renewals_row(contract, today, r3_ids=frozenset(), company_live=None):
     """The Renewal Book row for ``contract`` (its renewal fields under ``book``) plus ``renewal``."""
     row = _row_of(contract)
     book = {key: row.pop(key) for key in BOOK_RENEWAL_FIELDS}
-    ev = _evaluate(contract, today, r3_ids)
+    ev = _evaluate(contract, today, r3_ids, company_live or {})
     result = ev.result
     chosen = None
     if result.successor is not None:
@@ -608,24 +751,23 @@ def renewals_row(contract, today, r3_ids=frozenset()):
     owner, owner_source = _owner_of(contract)
 
     successor_block = None
-    change, basis = None, None
+    change = None
     if chosen is not None:
-        chosen_months = term_months(chosen.start_date, chosen.end_date)
-        change, basis = value_change(
-            contract.value, months, chosen.value, chosen_months, chosen.currency == contract.currency)
+        change = value_change(contract.value, chosen.value, chosen.currency == contract.currency)
         successor_block = {
             'contract_id': str(chosen.pk),
             'contract_number': chosen.contract_number,
             'status': chosen.status,
             'start_date': chosen.start_date.isoformat() if chosen.start_date else None,
             'end_date': chosen.end_date.isoformat() if chosen.end_date else None,
-            'term_months': chosen_months,
+            'term_months': term_months(chosen.start_date, chosen.end_date),
             'value': float(chosen.value or 0),
             'currency': chosen.currency,
             'signed_date': chosen.signed_date.isoformat() if chosen.signed_date else None,
             'sent_date': chosen.sent_date.isoformat() if chosen.sent_date else None,
             'invoice_state': result.successor.invoice_state,
             'link': result.successor.link,
+            'gap_days': ev.gap,
             'other_company': chosen.company_id != contract.company_id,
         }
 
@@ -646,6 +788,7 @@ def renewals_row(contract, today, r3_ids=frozenset()):
         'days_from_end': ev.days,
         'is_addon': ev.is_addon,
         'never_activated': ev.never_activated,
+        'term_2025_placeholder': ev.term_2025,
         'renewal': {
             'state': result.state,
             'label': result.label,
@@ -667,8 +810,16 @@ def renewals_row(contract, today, r3_ids=frozenset()):
                 }
                 for s in ev.successors if chosen is None or s.pk != chosen.pk
             ],
+            'live_unlinked': [
+                {
+                    'contract_id': str(c.pk),
+                    'contract_number': c.contract_number,
+                    'status': c.status,
+                    'start_date': c.start_date.isoformat() if c.start_date else None,
+                }
+                for c in ev.live_candidates
+            ] if result.state == LIVE_UNLINKED else [],
             'value_change': change,
-            'value_change_basis': basis,
         },
     })
     return row
@@ -679,27 +830,31 @@ def _sort_key(row):
     return (0 if attention else 1, row['end_date'] or '9999', row['company'].lower(), row['contract_number'])
 
 
+STRIP_BUCKETS = ('open', 'renewed', 'auto', 'unlinked', 'lost', 'history')
+
+
 def _strip(year, basis, entity, today):
     """Counts per month of ``year`` from a light pass (no book rows built)."""
     start, _ = month_window(year, 1, basis)
     _, end = month_window(year, 12, basis)
     contracts = list(_in_window(_entity_filter(_strip_queryset(), entity), start, end))
     r3_ids = _r3_placeholder_ids(c.pk for c in contracts)
+    company_live = _company_live_contracts(c.company_id for c in contracts)
     months = {m: {'year': year, 'month': m, 'label': date(year, m, 1).strftime('%b %Y'), 'count': 0,
-                  'attention': 0, 'open': 0, 'renewed': 0, 'auto': 0, 'lost': 0, 'placeholders': 0}
+                  'attention': 0, 'placeholders': 0, **{b: 0 for b in STRIP_BUCKETS}}
               for m in range(1, 13)}
     for c in contracts:
         y, m = month_of(c.end_date, basis)
         if y != year:
             continue
-        ev = _evaluate(c, today, r3_ids)
+        ev = _evaluate(c, today, r3_ids, company_live)
         cell = months[m]
         if ev.result.state == PLACEHOLDER:
             cell['placeholders'] += 1
             continue
         cell['count'] += 1
         cell['attention'] += 1 if ev.attention else 0
-        if ev.bucket in ('open', 'renewed', 'auto', 'lost'):
+        if ev.bucket in STRIP_BUCKETS:
             cell[ev.bucket] += 1
     return [months[m] for m in range(1, 13)]
 
@@ -710,11 +865,11 @@ def build_renewals_view(*, year, month=None, view='month', entity='', basis='fun
     ``view='month'`` returns every non-Draft term of the month's tab: by the
     funnel convention (default) the terms ending from the last day of the
     previous month to the day before the month's last day; by ``calendar``
-    the terms ending in the calendar month. Placeholders are included (the
-    page hides them unless asked).
+    the terms ending in the calendar month.
     ``view='open'`` returns, across today's month - 12 to + 6, every term whose
     renewal is still open or that needs attention.
-    Both return the 12-month strip for ``year``.
+    Both include closed placeholders, marked (the page hides them unless
+    asked), and return the 12-month strip for ``year``.
     """
     today = today or timezone.localdate()
     year = int(year)
@@ -741,10 +896,11 @@ def build_renewals_view(*, year, month=None, view='month', entity='', basis='fun
         start, end = month_window(sy, sm, basis)[0], month_window(ey, em, basis)[1]
     contracts = list(_in_window(_entity_filter(_rows_queryset(), entity), start, end))
     r3_ids = _r3_placeholder_ids(c.pk for c in contracts)
-    rows = [renewals_row(c, today, r3_ids) for c in contracts]
+    company_live = _company_live_contracts(c.company_id for c in contracts)
+    rows = [renewals_row(c, today, r3_ids, company_live) for c in contracts]
     if view == 'open':
-        rows = [r for r in rows if r['renewal']['state'] != PLACEHOLDER
-                and (r['renewal']['group'] == 'open' or r['renewal']['attention'])]
+        rows = [r for r in rows if r['renewal']['state'] == PLACEHOLDER
+                or r['renewal']['group'] == 'open' or r['renewal']['attention']]
     rows.sort(key=_sort_key)
 
     return {
