@@ -766,7 +766,7 @@ class CompanyViewSet(BaseModelViewSet):
                 'opportunities_value': opportunities.aggregate(Sum('expected_value'))['expected_value__sum'] or 0,
                 'contracts_count': contracts.count(),
                 'contracts_value': contracts.aggregate(Sum('value'))['value__sum'] or 0,
-                'open_tasks': tasks.filter(status__in=['Pending', 'In Progress']).count(),
+                'open_tasks': tasks.filter(status__in=['To Do', 'In Progress']).count(),
                 'overdue_tasks': sum(1 for task in tasks if task.is_overdue),
             },
             'recent_activities': self.get_recent_activities(company),
@@ -807,7 +807,7 @@ class CompanyViewSet(BaseModelViewSet):
     def get_upcoming_tasks(self, company):
         """Get upcoming tasks for a company"""
         upcoming = company.tasks.filter(
-            status__in=['Pending', 'In Progress'],
+            status__in=['To Do', 'In Progress'],
             due_date__gte=timezone.now().date()
         ).order_by('due_date')[:5]
 

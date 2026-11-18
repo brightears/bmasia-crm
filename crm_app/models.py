@@ -546,8 +546,8 @@ class Task(TimestampedModel):
 
     @property
     def is_overdue(self):
-        """Check if task is overdue"""
-        return self.due_date and self.due_date < timezone.now() and self.status != 'Done'
+        """Past its due date and still open: Done and Cancelled tasks are never overdue."""
+        return self.due_date and self.due_date < timezone.now() and self.status not in ('Done', 'Cancelled')
 
     def save(self, *args, **kwargs):
         if self.status == 'Done' and not self.completed_at:
