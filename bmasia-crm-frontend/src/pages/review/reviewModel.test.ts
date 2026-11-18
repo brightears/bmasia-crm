@@ -1,4 +1,11 @@
 import {
+  CardState,
+  cardActions,
+  describeLink,
+  hasUnusualSpaces,
+  mixesDirections,
+  needsSourceCheck,
+  textWarnings,
   editableFields,
   groupProposals,
   hasInvisible,
@@ -20,9 +27,9 @@ describe('text safety', () => {
   it('shows invisible and direction-changing characters as markers', () => {
     expect(segmentText('a\u202Eb\u200Bc')).toEqual([
       { text: 'a' },
-      { text: '', hidden: 'U+202E' },
+      { text: '', marker: 'U+202E', kind: 'invisible' },
       { text: 'b' },
-      { text: '', hidden: 'U+200B' },
+      { text: '', marker: 'U+200B', kind: 'invisible' },
       { text: 'c' },
     ]);
     expect(segmentText('plain text')).toEqual([{ text: 'plain text' }]);
@@ -157,22 +164,170 @@ describe('queue rules', () => {
     expect(readOnlyReason(makeProposal(), 'reviewer.one', null)).toBeNull();
   });
 
-  it('round-trips the URL state', () => {
+  it('round-trips the URL state, and never puts a user name into it', () => {
     const q = readQuery(
-      new URLSearchParams('tab=decided&company=c1&kind=note&proposer=theo&evidence=unverified&decided=rejected'),
+      new URLSearchParams(
+        'tab=decided&company=c1&kind=note&proposer=sample-bot&evidence=unverified&decided=rejected&sort=expiring',
+      ),
     );
     expect(q).toEqual({
       tab: 'decided',
       company: 'c1',
       kind: 'note',
-      proposer: 'theo',
       evidence: 'unverified',
       decided: 'rejected',
+      sort: 'expiring',
     });
     expect(writeQuery(q).toString()).toBe(
-      'tab=decided&company=c1&kind=note&proposer=theo&evidence=unverified&decided=rejected',
+      'tab=decided&company=c1&kind=note&evidence=unverified&decided=rejected&sort=expiring',
     );
+    expect(writeQuery(q).toString()).not.toContain('sample-bot');
     expect(readQuery(new URLSearchParams('tab=bogus')).tab).toBe('open');
     expect(writeQuery(readQuery(new URLSearchParams(''))).toString()).toBe('');
+  });
+});
+
+describe('what can be done to a card (the one rule for buttons and keys)', () => {
+  const free: CardState = {
+    readOnly: null,
+    expired: false,
+    busy: false,
+    decided: false,
+    editing: false,
+    acknowledged: false,
+    conflictChoice: null,
+    partnersShown: true,
+    sourceChecked: false,
+  };
+  const conflict = {
+    id: 'o',
+    proposer_username: 'other',
+    patch: { phone: '1' },
+    evidence_occurred_at: null,
+    created_at: '',
+  };
+
+  it('allows everything on a plain open suggestion', () => {
+    const a = cardActions(makeProposal(), free);
+    expect([a.accept.ok, a.edit.ok, a.acceptEdits.ok, a.reject.ok, a.select.ok]).toEqual([
+      true,
+      true,
+      false,
+      true,
+      true,
+    ]);
+  });
+
+  it('while editing, only "accept with edits" and reject remain', () => {
+    const a = cardActions(makeProposal(), { ...free, editing: true });
+    expect(a.accept).toEqual({ ok: false, reason: 'Finish or cancel the edit first.' });
+    expect(a.acceptEdits.ok).toBe(true);
+    expect(a.select.ok).toBe(false);
+  });
+
+  it('the changed-record tick gates accept, edit and accept with edits', () => {
+    const p = makeProposal({ target_changed_at: '2026-11-18T00:00:00Z' });
+    [cardActions(p, free), cardActions(p, { ...free, editing: true })].forEach((a) => {
+      expect(a.accept.ok || a.edit.ok || a.acceptEdits.ok).toBe(false);
+    });
+    expect(cardActions(p, free).accept.reason).toMatch(/I have compared the current values/);
+    expect(cardActions(p, { ...free, acknowledged: true }).accept.ok).toBe(true);
+    expect(cardActions(p, free).reject.ok).toBe(true);
+  });
+
+  it('a conflict needs the other evidence shown and a choice, on every accepting route', () => {
+    const p = makeProposal({ conflicts_with: [conflict] });
+    expect(cardActions(p, { ...free, partnersShown: false, conflictChoice: 'this' }).accept.reason).toMatch(
+      /evidence is shown/,
+    );
+    expect(cardActions(p, free).edit.reason).toMatch(/Choose which/);
+    expect(cardActions(p, { ...free, editing: true }).acceptEdits.ok).toBe(false);
+    expect(cardActions(p, { ...free, conflictChoice: 'this' }).accept.ok).toBe(true);
+  });
+
+  it('an email or phone change without captured evidence needs the source tick', () => {
+    const weak = makeProposal({ evidence: 'verified_agent_recorded', patch: { email: 'a@example.com' } });
+    expect(needsSourceCheck(weak)).toBe(true);
+    expect(cardActions(weak, free).accept.reason).toMatch(/checked this against the source/);
+    expect(cardActions(weak, { ...free, sourceChecked: true }).accept.ok).toBe(true);
+    expect(needsSourceCheck(makeProposal({ evidence: 'verified_captured', patch: { phone: '1' } }))).toBe(false);
+    expect(needsSourceCheck(makeProposal({ evidence: 'unverified', patch: { city: 'X' } }))).toBe(false);
+  });
+
+  it('read-only, expired, busy and decided cards allow nothing', () => {
+    const p = makeProposal();
+    (
+      [
+        [{ readOnly: 'Not yours.' }, 'Not yours.'],
+        [{ expired: true }, 'This suggestion has expired.'],
+        [{ busy: true }, 'Waiting for the answer to the last decision.'],
+        [{ decided: true }, 'Already decided on this page.'],
+      ] as [Partial<CardState>, string][]
+    ).forEach(([patch, reason]) => {
+      const a = cardActions(p, { ...free, ...patch });
+      expect([a.accept.ok, a.edit.ok, a.reject.ok, a.select.ok]).toEqual([false, false, false, false]);
+      expect(a.accept.reason).toBe(reason);
+    });
+  });
+});
+
+describe('text checks', () => {
+  it('marks tag, filler and variation characters, and unusual spaces', () => {
+    const tag = String.fromCodePoint(0xe0041);
+    expect(segmentText(`a${tag}b`)).toEqual([
+      { text: 'a' },
+      { text: '', marker: 'U+E0041', kind: 'invisible' },
+      { text: 'b' },
+    ]);
+    expect(
+      segmentText('x\u034Fy')
+        .map((s) => s.marker)
+        .filter(Boolean),
+    ).toEqual(['U+034F']);
+    expect(
+      segmentText('a\u00A0b')
+        .map((s) => s.marker)
+        .filter(Boolean),
+    ).toEqual(['U+00A0']);
+    expect(segmentText(' a  b ', true).map((s) => s.marker || s.text)).toEqual(['\u2423', 'a  b', '\u2423']);
+    expect(hasUnusualSpaces('Bangkok  Noi')).toBe(true);
+    expect(hasUnusualSpaces('Bangkok Noi')).toBe(false);
+  });
+
+  it('tells mixed writing directions apart from look-alike letters', () => {
+    expect(textWarnings('\u05DE\u05E0\u05D4\u05DC 123 Manager')).toEqual(['direction']);
+    expect(textWarnings('Jo T\u0430n')).toEqual(['lookalike']);
+    expect(textWarnings('Plain value')).toEqual([]);
+    expect(textWarnings('Plain value', true)).toEqual(['server_mixed']);
+    expect(mixesDirections('\u05DE\u05E0\u05D4\u05DC')).toBe(false);
+  });
+
+  it('shows where a link goes and refuses unusual addresses', () => {
+    expect(describeLink('https://mail.google.com/mail/u/0/#inbox/1')).toMatchObject({
+      host: 'mail.google.com',
+      registrable: 'google.com',
+      prefix: 'mail.',
+      label: 'Open in Gmail',
+    });
+    expect(describeLink('https://mail.google.com.example.net/x')).toMatchObject({
+      registrable: 'example.net',
+      label: 'Open link',
+    });
+    expect(describeLink('https://intranet.example.co.th/a')).toMatchObject({
+      registrable: 'example.co.th',
+      prefix: 'intranet.',
+    });
+    [
+      ['https://mail.google.com@phish.example/login', /user name or an @/],
+      ['https://user:pass@example.com/', /user name or an @/],
+      ['https://xn--ggle-0nda.example/', /punycode/],
+      ['https://g\u043Eogle.example/', /non-ASCII/],
+      [`${JS}alert(1)`, /not an http/],
+      ['HTTPS://example.com', /not an http/],
+    ].forEach(([url, reason]) => {
+      const info = describeLink(url as string)!;
+      expect(info.href).toBeNull();
+      expect(info.refused).toMatch(reason as RegExp);
+    });
   });
 });

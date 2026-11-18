@@ -29,7 +29,7 @@ jest.mock('../../services/reviewApi', () => {
     ...actual,
     default: {
       getSettings: jest.fn(),
-      listAllOpen: jest.fn(),
+      listOpen: jest.fn(),
       list: jest.fn(),
       openCount: jest.fn(),
       get: jest.fn(),
@@ -63,7 +63,7 @@ const renderPage = (entry = '/review') =>
 
 const withOpen = (rows: ChangeProposal[], settings = settingsOn) => {
   api.getSettings.mockResolvedValue(settings);
-  api.listAllOpen.mockResolvedValue({ rows, count: rows.length, truncated: false });
+  api.listOpen.mockResolvedValue({ count: rows.length, next: null, previous: null, results: rows });
 };
 
 const cardOf = (p: ChangeProposal) => {
@@ -94,7 +94,7 @@ describe('states', () => {
     api.getSettings.mockResolvedValue({ ...settingsOn, proposals_enabled: false });
     renderPage();
     expect(await screen.findByText('Suggestions are not switched on yet')).toBeInTheDocument();
-    expect(api.listAllOpen).not.toHaveBeenCalled();
+    expect(api.listOpen).not.toHaveBeenCalled();
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
   });
 
@@ -109,10 +109,10 @@ describe('states', () => {
 
   it('shows an error when the list cannot be loaded, and an empty state per tab', async () => {
     api.getSettings.mockResolvedValue(settingsOn);
-    api.listAllOpen.mockRejectedValueOnce(new ReviewApiError(500, undefined, 'boom'));
+    api.listOpen.mockRejectedValueOnce(new ReviewApiError(500, undefined, 'boom'));
     renderPage();
     expect(await screen.findByText(/could not be loaded/)).toBeInTheDocument();
-    api.listAllOpen.mockResolvedValue({ rows: [], count: 0, truncated: false });
+    api.listOpen.mockResolvedValue({ count: 0, next: null, previous: null, results: [] });
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByText('Nothing waiting for review')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: /Needs another look/ }));
@@ -193,7 +193,7 @@ describe('cards', () => {
     expect(screen.getByTestId('note-text')).toHaveTextContent('Lobby closes in January.');
     expect(screen.getByText('New contact with')).toBeInTheDocument();
     expect(screen.getByText('dana@example.com')).toBeInTheDocument();
-    expect(screen.getByTestId('email-caution')).toBeInTheDocument();
+    expect(screen.getByTestId('source-check')).toBeInTheDocument();
     expect(screen.getByText('New task with')).toBeInTheDocument();
     expect(screen.getByText('Call back')).toBeInTheDocument();
     expect(document.querySelector('[data-evidence="verified_captured"]')).toHaveTextContent('From captured mail');
@@ -227,7 +227,7 @@ describe('cards', () => {
     withOpen([p]);
     renderPage('/review?tab=look');
     expect(await screen.findByTestId('apply-error')).toHaveTextContent('The record refused the values');
-    expect(screen.getByText('Mixed alphabets')).toBeInTheDocument();
+    expect(screen.getByText('Mixed scripts (flagged by the server)')).toBeInTheDocument();
   });
 });
 
@@ -388,7 +388,7 @@ describe('decisions', () => {
     api.get.mockResolvedValue({ ...p, status: 'accepted', reviewer_username: 'reviewer.one', applied_patch: p.patch });
     renderPage();
     fireEvent.click(await (await findCard(p)).findByRole('button', { name: 'Accept' }));
-    expect(await screen.findByTestId('proposal-result')).toHaveTextContent('Already accepted');
+    expect(await screen.findByTestId('proposal-result')).toHaveTextContent('Your decision was saved: accepted.');
     expect(api.accept).toHaveBeenCalledTimes(1);
     expect(api.get).toHaveBeenCalledWith(p.id);
   });
@@ -589,11 +589,9 @@ describe('URL state', () => {
   it('reads tab and filters from the URL and writes changes back', async () => {
     withOpen([]);
     renderPage('/review?tab=decided&kind=note&proposer=example-agent');
-    await waitFor(() =>
-      expect(api.list).toHaveBeenCalledWith(
-        expect.objectContaining({ kind: ['note'], proposer: 'example-agent', page: 1 }),
-      ),
-    );
+    await waitFor(() => expect(api.list).toHaveBeenCalledWith(expect.objectContaining({ kind: ['note'], page: 1 })));
+    // A user name in the URL is ignored: the proposer filter lives in the page only.
+    expect(api.list.mock.calls[0][0].proposer).toBeUndefined();
     expect(api.list.mock.calls[0][0].status).toEqual([
       'accepted',
       'edited',
@@ -603,7 +601,7 @@ describe('URL state', () => {
       'failed',
     ]);
     fireEvent.click(screen.getByRole('tab', { name: /Open/ }));
-    await waitFor(() => expect(location?.search).toBe('?kind=note&proposer=example-agent'));
+    await waitFor(() => expect(location?.search).toBe('?kind=note'));
   });
 
   it('filters the open list by evidence state from the URL', async () => {
@@ -642,7 +640,7 @@ describe('plain text only', () => {
     expect(container.querySelector('b')).toBeNull();
     expect(screen.getByTestId('after-address_line1')).toHaveTextContent('<img src=x onerror=alert(1)>');
     expect(screen.getAllByText('<b>Bold Co</b>').length).toBeGreaterThan(0);
-    expect(screen.queryByRole('link', { name: /Open source/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Open link/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /here/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /phish/ })).not.toBeInTheDocument();
     const quote = screen.getByTestId('evidence-quote');
@@ -665,7 +663,7 @@ describe('plain text only', () => {
     const p = makeProposal({ evidence_source_url: 'https://mail.example.com/m/1' });
     withOpen([p]);
     renderPage();
-    const link = await screen.findByRole('link', { name: /Open source/ });
+    const link = await screen.findByRole('link', { name: /Open link/ });
     expect(link).toHaveAttribute('href', 'https://mail.example.com/m/1');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     expect(link).toHaveAttribute('target', '_blank');

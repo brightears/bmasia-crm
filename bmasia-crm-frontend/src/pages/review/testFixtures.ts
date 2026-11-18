@@ -58,15 +58,44 @@ export const makeProposal = (overrides: Partial<ChangeProposal> = {}): ChangePro
 export const settingsOn: ReviewSettings = {
   kinds: {
     field_update: {
-      company: ['address_line1', 'address_line2', 'city', 'country', 'email', 'phone', 'postal_code', 'state', 'website'],
+      company: [
+        'address_line1',
+        'address_line2',
+        'city',
+        'country',
+        'email',
+        'phone',
+        'postal_code',
+        'state',
+        'website',
+      ],
       contact: ['department', 'email', 'linkedin_url', 'mobile', 'name', 'phone', 'preferred_contact_method', 'title'],
     },
     note: { company: ['notes'], contact: ['notes'] },
     new_contact: {
-      contact: ['department', 'email', 'linkedin_url', 'mobile', 'name', 'notes', 'phone', 'preferred_contact_method', 'title'],
+      contact: [
+        'department',
+        'email',
+        'linkedin_url',
+        'mobile',
+        'name',
+        'notes',
+        'phone',
+        'preferred_contact_method',
+        'title',
+      ],
     },
     task: {
-      task: ['description', 'due_date', 'priority', 'related_contact', 'related_contract', 'related_opportunity', 'task_type', 'title'],
+      task: [
+        'description',
+        'due_date',
+        'priority',
+        'related_contact',
+        'related_contract',
+        'related_opportunity',
+        'task_type',
+        'title',
+      ],
     },
   },
   proposals_enabled: true,
