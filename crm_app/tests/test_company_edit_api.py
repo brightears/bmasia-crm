@@ -21,7 +21,7 @@ def test_human_company_patch_saves_address_and_audits_it():
         'tax_id': 'TIN:EXAMPLE123', 'address_line1': '4th Floor, Example Tower',
         'address_line2': 'Example Road', 'city': 'Male', 'state': '',
         'postal_code': '20066', 'parent_company': None,
-        'phone': '+960 7308525', 'billing_entity': 'BMAsia Limited',
+        'phone': '+960 7000125', 'billing_entity': 'BMAsia Limited',
     }
     request = APIRequestFactory().patch('/api/v1/companies/' + str(company.pk) + '/', patch, format='json')
     force_authenticate(request, user=user)

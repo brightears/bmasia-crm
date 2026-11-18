@@ -54,14 +54,14 @@ def _call(collection, record, changes, observed, context):
 @pytest.mark.django_db
 def test_company_legal_identity_and_address_correction_is_source_bound_and_audited():
     company = Company.objects.create(
-        name='Sample Beeing', legal_entity_name='Old legal name',
+        name='Sample Haevn', legal_entity_name='Old legal name',
         country='Thailand', billing_entity='BMAsia Limited',
         seasonal_emails_enabled=True,
     )
     observed = CompanySerializer(company).data
     changes = {
-        'name': 'Sample Being',
-        'legal_entity_name': 'SAMPLE BEING PVT LTD',
+        'name': 'Sample Haven',
+        'legal_entity_name': 'SAMPLE HAVEN PVT LTD',
         'address_line1': 'Fourth Floor',
         'city': 'Male',
         'postal_code': '20066',
@@ -83,7 +83,7 @@ def test_company_legal_identity_and_address_correction_is_source_bound_and_audit
     audit = AuditLog.objects.get(pk=result['audit_log_id'])
     assert audit.model_name == 'Company'
     assert audit.changes['legal_entity_name'] == {
-        'before': 'Old legal name', 'after': 'SAMPLE BEING PVT LTD',
+        'before': 'Old legal name', 'after': 'SAMPLE HAVEN PVT LTD',
     }
     assert audit.additional_data['source_reference'] == 'spaces/test/messages/verified-instruction'
     assert audit.additional_data['post_version'] == result['post_version']

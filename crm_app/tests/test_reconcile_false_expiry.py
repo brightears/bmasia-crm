@@ -39,8 +39,8 @@ def _run(**kwargs):
 
 @pytest.mark.django_db
 def test_dry_run_makes_no_change(tmp_path):
-    c = _false_expired("HK-CT26419")
-    vf = _write(tmp_path, {"HK-CT26419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
+    c = _false_expired("HK-CT269419")
+    vf = _write(tmp_path, {"HK-CT269419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
     out = _run(verified_file=vf)  # no --execute
     assert "WOULD-FIX" in out and "DRY-RUN" in out
     c.refresh_from_db()
@@ -51,8 +51,8 @@ def test_dry_run_makes_no_change(tmp_path):
 
 @pytest.mark.django_db
 def test_execute_fixes_status_dates_notes_and_audits(tmp_path):
-    c = _false_expired("HK-CT26419")
-    vf = _write(tmp_path, {"HK-CT26419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
+    c = _false_expired("HK-CT269419")
+    vf = _write(tmp_path, {"HK-CT269419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
     _run(verified_file=vf, execute=True)
     c.refresh_from_db()
     assert c.status == "Active"
@@ -67,8 +67,8 @@ def test_execute_fixes_status_dates_notes_and_audits(tmp_path):
 
 @pytest.mark.django_db
 def test_idempotent_second_run_is_noop(tmp_path):
-    c = _false_expired("HK-CT26419")
-    vf = _write(tmp_path, {"HK-CT26419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
+    c = _false_expired("HK-CT269419")
+    vf = _write(tmp_path, {"HK-CT269419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
     _run(verified_file=vf, execute=True)
     out = _run(verified_file=vf, execute=True)
     assert "already Active" in out or "already-ok=1" in out
@@ -77,10 +77,10 @@ def test_idempotent_second_run_is_noop(tmp_path):
 
 @pytest.mark.django_db
 def test_status_only_correction_keeps_dates(tmp_path):
-    # Republique case: dates already fixed earlier, only status needs flipping.
-    c = ContractFactory(contract_number="HK-CT26282", status="Expired",
+    # Dates already fixed earlier, only status needs flipping.
+    c = ContractFactory(contract_number="HK-CT269282", status="Expired",
                         start_date=REAL_START, end_date=REAL_END, notes="")
-    vf = _write(tmp_path, {"HK-CT26282": {}})  # no dates supplied
+    vf = _write(tmp_path, {"HK-CT269282": {}})  # no dates supplied
     _run(verified_file=vf, execute=True)
     c.refresh_from_db()
     assert c.status == "Active"
@@ -89,9 +89,9 @@ def test_status_only_correction_keeps_dates(tmp_path):
 
 @pytest.mark.django_db
 def test_contract_not_in_allowlist_is_untouched(tmp_path):
-    keep = _false_expired("HK-CT26419")
+    keep = _false_expired("HK-CT269419")
     other = _false_expired("HK-CT26999")
-    vf = _write(tmp_path, {"HK-CT26419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
+    vf = _write(tmp_path, {"HK-CT269419": {"start_date": "2026-07-29", "end_date": "2027-07-28"}})
     _run(verified_file=vf, execute=True)
     other.refresh_from_db()
     assert other.status == "Expired"  # not in the list -> never touched

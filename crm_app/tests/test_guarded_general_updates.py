@@ -49,13 +49,13 @@ def _contract(status='Draft'):
 @pytest.mark.django_db
 def test_company_legal_name_tax_id_and_address_need_no_special_context():
     company = Company.objects.create(
-        name='Somerset Diamond Bay Garden', billing_entity='BMAsia Limited', country='Cambodia',
+        name='Example Bay Garden Residences', billing_entity='BMAsia Limited', country='Cambodia',
     )
     observed = CompanySerializer(company).data
     patch = {
-        'legal_entity_name': 'THE DIAMOND BAY GARDEN CO., LTD.',
-        'tax_id': 'L001-902104216',
-        'address_line1': 'Sales Centre, Koh Pich Road',
+        'legal_entity_name': 'THE EXAMPLE BAY GARDEN CO., LTD.',
+        'tax_id': 'L001-900000001',
+        'address_line1': 'Sales Centre, Example Island Road',
     }
 
     result = _guarded('company', company, observed, patch)
@@ -64,7 +64,7 @@ def test_company_legal_name_tax_id_and_address_need_no_special_context():
     company.refresh_from_db()
     assert company.legal_entity_name == patch['legal_entity_name']
     assert company.tax_id == patch['tax_id']
-    assert company.name == 'Somerset Diamond Bay Garden'
+    assert company.name == 'Example Bay Garden Residences'
     audit = AuditLog.objects.get(record_id=str(company.pk))
     assert audit.additional_data['kind'] == 'guarded_update'
     assert audit.changes['legal_entity_name'] == {
@@ -446,7 +446,7 @@ def test_zone_lock_still_catches_real_differences(tamper):
 @pytest.mark.django_db
 @pytest.mark.parametrize('switch_before', ['true', 'omitted'])
 def test_replace_switch_is_not_part_of_the_lock(switch_before):
-    # Hilton Colombo 1 Oct: Cira sent replace_service_locations=true, or left it out.
+    # The caller sent replace_service_locations=true, or left it out.
     contract = _bavi_contract()
     observed = ContractSerializer(contract).data
     patch = {'value': '1820.00', 'total_value': '1820.00',

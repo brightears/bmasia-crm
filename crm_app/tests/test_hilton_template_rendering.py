@@ -60,8 +60,8 @@ def _service_location(platform='custom', custom_service_name='Beat Breeze', loca
 
 def _contract(template_content='{{service_product_managed_name}} {{music_zone_label}} {{zones_table}}'):
     company = SimpleNamespace(
-        name='Lihe Hilton Garden Inn',
-        legal_entity_name='Lihe Garden Inn Co., Ltd.',
+        name='Example Garden Inn',
+        legal_entity_name='Example Garden Inn Co., Ltd.',
         billing_entity='BMAsia Limited',
         address_line1='1 Garden Road',
         address_line2='',
@@ -92,9 +92,9 @@ def _contract(template_content='{{service_product_managed_name}} {{music_zone_la
         billing_frequency='Annual',
         payment_terms='',
         tax_rate=Decimal('0'),
-        property_name='Lihe Hilton Garden Inn',
-        customer_contact_name='Joan Deng',
-        customer_contact_email='Joan.Deng@hilton.com',
+        property_name='Example Garden Inn',
+        customer_contact_name='Casey Lin',
+        customer_contact_email='Casey.Lin@example.com',
         customer_contact_title='Purchasing Manager',
         customer_signatory_name='',
         customer_signatory_title='',
@@ -130,8 +130,8 @@ def test_template_contact_prefers_complete_contract_fields_and_exposes_aliases()
     )
 
     assert rendered == (
-        'Joan Deng|Joan.Deng@hilton.com|Purchasing Manager|'
-        'Joan Deng|Joan.Deng@hilton.com|Purchasing Manager'
+        'Casey Lin|Casey.Lin@example.com|Purchasing Manager|'
+        'Casey Lin|Casey.Lin@example.com|Purchasing Manager'
     )
 
 
@@ -188,8 +188,8 @@ def test_hilton_dynamic_values_are_escaped_without_changing_template_markup():
     contract = _contract(
         '<b>{{hotel_legal_name}}</b> (trading as {{hotel_trading_name}})'
     )
-    contract.company.legal_entity_name = 'HOAN KIEM T&T CO., LTD'
-    contract.property_name = 'Hilton Garden Inn A&B'
+    contract.company.legal_entity_name = 'EXAMPLE T&T CO., LTD'
+    contract.property_name = 'Example Garden Inn A&B'
 
     rendered = ContractViewSet()._substitute_template_variables(
         contract.preamble_template.content,
@@ -198,8 +198,8 @@ def test_hilton_dynamic_values_are_escaped_without_changing_template_markup():
     )
 
     assert rendered == (
-        '<b>HOAN KIEM T&amp;T CO., LTD</b> '
-        '(trading as Hilton Garden Inn A&amp;B)'
+        '<b>EXAMPLE T&amp;T CO., LTD</b> '
+        '(trading as Example Garden Inn A&amp;B)'
     )
     # Escaping is the default; plain substitution must be requested.
     assert ContractViewSet()._substitute_template_variables(
@@ -211,8 +211,8 @@ def test_hilton_dynamic_values_are_escaped_without_changing_template_markup():
         contract,
         escape_for_paragraph=False,
     ) == (
-        '<b>HOAN KIEM T&T CO., LTD</b> '
-        '(trading as Hilton Garden Inn A&B)'
+        '<b>EXAMPLE T&T CO., LTD</b> '
+        '(trading as Example Garden Inn A&B)'
     )
 
 
@@ -221,8 +221,8 @@ def test_hilton_pdf_renders_ampersands_literally_in_parties_and_zone_table():
         '{{hotel_legal_name}} (trading as {{hotel_trading_name}})<br/>'
         '{{service_product_managed_name}}<br/>{{zones_table}}'
     )
-    contract.company.legal_entity_name = 'HOAN KIEM T&T CO., LTD'
-    contract.property_name = 'Hilton Garden Inn A&B'
+    contract.company.legal_entity_name = 'EXAMPLE T&T CO., LTD'
+    contract.property_name = 'Example Garden Inn A&B'
     contract.service_locations = FakeRelatedManager([
         _service_location(
             custom_service_name='Rhythm&Breeze',
@@ -236,8 +236,8 @@ def test_hilton_pdf_renders_ampersands_literally_in_parties_and_zone_table():
     text = '\n'.join(page.extract_text() or '' for page in PdfReader(BytesIO(response.content)).pages)
 
     assert response.status_code == 200
-    assert 'HOAN KIEM T&T CO., LTD' in text
-    assert 'Hilton Garden Inn A&B' in text
+    assert 'EXAMPLE T&T CO., LTD' in text
+    assert 'Example Garden Inn A&B' in text
     assert 'Rhythm&Breeze - Managed' in text
     assert 'Lobby&Atrium' in text
     assert 'T&T;' not in text
@@ -296,8 +296,8 @@ def test_reversed_legal_trading_guard_handles_ampersands():
         '{{hotel_trading_name}} (trading as {{hotel_legal_name}})<br/>'
         '{{service_product_managed_name}}'
     )
-    contract.company.legal_entity_name = 'HOAN KIEM T&T CO., LTD'
-    contract.property_name = 'Hilton Garden Inn Hanoi'
+    contract.company.legal_entity_name = 'EXAMPLE T&T CO., LTD'
+    contract.property_name = 'Example Garden Inn Hanoi'
 
     blockers = ContractViewSet()._hilton_template_pdf_blockers(contract)
 
@@ -598,8 +598,8 @@ def test_hilton_pdf_conflict_stops_contract_email_before_log_or_smtp(monkeypatch
     contract = SimpleNamespace(
         id='contract-1',
         company=SimpleNamespace(
-            name='Lihe Hilton Garden Inn',
-            legal_entity_name='Lihe Garden Inn Co., Ltd.',
+            name='Example Garden Inn',
+            legal_entity_name='Example Garden Inn Co., Ltd.',
             contacts=FakeRelatedManager([]),
         ),
         preamble_template=SimpleNamespace(name='Hilton International'),
@@ -648,7 +648,7 @@ def test_hilton_pdf_conflict_stops_contract_email_before_log_or_smtp(monkeypatch
 
     success, message = email_service_module.EmailService().send_contract_email(
         contract_id=contract.id,
-        recipients=['joan.deng@hilton.com'],
+        recipients=['casey.lin@example.com'],
         subject='Hilton Participation Agreement',
         body='Please review the attached agreement.',
     )
@@ -698,7 +698,7 @@ def test_contract_send_endpoint_preserves_structured_pdf_blockers(monkeypatch):
     response = view.send(
         SimpleNamespace(
             data={
-                'recipients': ['joan.deng@hilton.com'],
+                'recipients': ['casey.lin@example.com'],
                 'subject': 'Hilton Participation Agreement',
                 'body': 'Please review the attached agreement.',
             },

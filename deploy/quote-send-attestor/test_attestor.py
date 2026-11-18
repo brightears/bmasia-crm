@@ -27,7 +27,7 @@ def fake_pdftotext(monkeypatch):
     monkeypatch.setattr(attestor, "pdf_text", lambda data: data.decode("latin-1"))
 
 
-def _message(*, sender="norbert@bmasiamusic.com", to="gm@hotel.example", pdf=b"%PDF quote HK-QT26154 total",
+def _message(*, sender="norbert@bmasiamusic.com", to="gm@hotel.example", pdf=b"%PDF quote HK-QT269154 total",
              labels=("SENT",), sent=NOW - timedelta(hours=2)):
     msg = EmailMessage()
     msg["From"] = f"Norbert <{sender}>"
@@ -41,7 +41,7 @@ def _message(*, sender="norbert@bmasiamusic.com", to="gm@hotel.example", pdf=b"%
 
 
 def test_verified_send_evidence_and_bangkok_date():
-    verified = attestor.verify_sent_message(_message(), "norbert@bmasiamusic.com", "HK-QT26154", NOW)
+    verified = attestor.verify_sent_message(_message(), "norbert@bmasiamusic.com", "HK-QT269154", NOW)
     assert verified["sent_date"] == "2026-09-25"
     assert set(verified["evidence"]) == {"gmail_raw_mime_sha256", "recipient_set_sha256", "quote_pdf_sha256"}
 
@@ -51,21 +51,21 @@ def test_verified_send_evidence_and_bangkok_date():
     ({"sender": "nikki.h@bmasiamusic.com"}, "sender_mismatch"),
     ({"to": "pom@bmasiamusic.com"}, "no_external_recipient"),
     ({"pdf": None}, "quote_pdf_not_attached"),
-    ({"pdf": b"%PDF quote HK-QT26155"}, "quote_pdf_not_attached"),
+    ({"pdf": b"%PDF quote HK-QT269155"}, "quote_pdf_not_attached"),
     ({"sent": NOW - timedelta(days=120)}, "send_time_window"),
 ])
 def test_refusals(kwargs, reason):
     with pytest.raises(attestor.Hold, match=reason):
-        attestor.verify_sent_message(_message(**kwargs), "norbert@bmasiamusic.com", "HK-QT26154", NOW)
+        attestor.verify_sent_message(_message(**kwargs), "norbert@bmasiamusic.com", "HK-QT269154", NOW)
 
 
 @pytest.mark.parametrize("request_, reason", [
     ({"quote_id": QUOTE_ID}, "request_shape"),
-    ({"quote_id": "not-a-uuid", "quote_number": "HK-QT26154", "expected_version": "2026-09-25T08:00:00Z",
+    ({"quote_id": "not-a-uuid", "quote_number": "HK-QT269154", "expected_version": "2026-09-25T08:00:00Z",
       "gmail_message_id": "abc"}, "quote_id"),
-    ({"quote_id": QUOTE_ID, "quote_number": "HK-CT26154", "expected_version": "2026-09-25T08:00:00Z",
+    ({"quote_id": QUOTE_ID, "quote_number": "HK-CT269154", "expected_version": "2026-09-25T08:00:00Z",
       "gmail_message_id": "abc"}, "quote_number"),
-    ({"quote_id": QUOTE_ID, "quote_number": "HK-QT26154", "expected_version": "yesterday",
+    ({"quote_id": QUOTE_ID, "quote_number": "HK-QT269154", "expected_version": "yesterday",
       "gmail_message_id": "abc"}, "expected_version"),
 ])
 def test_request_validation(request_, reason):
@@ -86,10 +86,10 @@ def test_signed_receipt_is_accepted_by_the_crm_verifier(monkeypatch):
     monkeypatch.setattr(crm_verifier, "PRODUCTION_PUBLIC_DER_B64", base64.b64encode(der).decode("ascii"))
     monkeypatch.setattr(crm_verifier, "PRODUCTION_KEY_ID", key_id)
     now = datetime.now(timezone.utc)
-    request = {"quote_id": QUOTE_ID, "quote_number": "HK-QT26154",
+    request = {"quote_id": QUOTE_ID, "quote_number": "HK-QT269154",
                "expected_version": "2026-09-25T08:14:37.123456Z", "gmail_message_id": "msg-1"}
     verified = attestor.verify_sent_message(_message(sent=now - timedelta(minutes=5)),
-                                            "norbert@bmasiamusic.com", "HK-QT26154", now)
+                                            "norbert@bmasiamusic.com", "HK-QT269154", now)
     payload = attestor.build_payload(request, "lyra", "norbert@bmasiamusic.com", verified,
                                      "msg-1", key_id, now)
     receipt = attestor.sign_receipt(key, payload)
@@ -99,12 +99,12 @@ def test_signed_receipt_is_accepted_by_the_crm_verifier(monkeypatch):
         before={"status": "Draft", "sent_date": None},
         expected_version=request["expected_version"],
     )
-    assert result["payload"]["quote_number"] == "HK-QT26154"
+    assert result["payload"]["quote_number"] == "HK-QT269154"
     assert result["payload"]["request_key"] == f"lyra:quote-sent:{QUOTE_ID}"
 
 
 @pytest.mark.parametrize("version", ["2026-09-25T10:06:49.661070+07:00", "2026-09-25T03:06:49Z"])
 def test_crm_version_formats_are_accepted(version):
-    request = {"quote_id": QUOTE_ID, "quote_number": "HK-QT26154",
+    request = {"quote_id": QUOTE_ID, "quote_number": "HK-QT269154",
                "expected_version": version, "gmail_message_id": "abc"}
     assert attestor.validate_request(request) is request

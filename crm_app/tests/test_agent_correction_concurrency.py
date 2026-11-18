@@ -240,7 +240,7 @@ def test_guarded_contract_array_update_uses_deep_equality_and_returns_json():
     contract = _contract()
     record = ContractSerializer(contract).data
     changes = [{
-        'name': 'Mr. Nopparat Piyarattanayotin',
+        'name': 'Mr. Samuel Rivermontgomery',
         'title': 'Authorized Director',
         'legal_entity_name': 'Nested Guard Fixture Limited',
         'authority': {
