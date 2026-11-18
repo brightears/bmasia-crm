@@ -1,8 +1,10 @@
 """Quote PDF "Services and pricing" block pagination.
 
 When the whole block (heading, billing line, column header, rows, totals) fits
-on one page it is kept together; a taller block still splits by row. Synthetic
-fixtures only; assertions run on the rendered PDF's per-page text.
+on one page it is kept together unless a split leaves enough rows on both
+pages (see test_quote_pricing_block_split_rule.py); a taller block still
+splits by row. Synthetic fixtures only; assertions run on the rendered PDF's
+per-page text.
 """
 
 from decimal import Decimal
