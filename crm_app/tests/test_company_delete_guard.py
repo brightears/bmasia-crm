@@ -314,3 +314,61 @@ def test_a_delete_refused_by_a_protecting_key_leaves_no_audit_row(api):
     assert single.status_code == 409 and single.data['code'] == 'protected'
     assert bulk.data['results'][0]['code'] == 'protected'
     assert not AuditLog.objects.filter(action='DELETE').exists()
+
+
+# --- what a record creates for itself when it is saved does not make it undeletable ------
+
+def test_a_draft_invoice_with_a_service_period_can_be_deleted_with_its_schedules(api):
+    from crm_app.models import RevenueRecognitionSchedule
+    company = _company()
+    created = api.post('/api/v1/invoices/', {
+        'company': str(company.pk), 'invoice_number': 'INV-DEL-SP', 'status': 'Draft',
+        'issue_date': '2026-11-01', 'due_date': '2026-12-01', 'amount': '1200.00', 'total_amount': '1200.00',
+        'currency': 'THB', 'service_period_start': '2026-11-01', 'service_period_end': '2027-10-31',
+        'line_items': [{'description': 'Music service', 'quantity': '1', 'unit_price': '1200.00',
+                        'tax_rate': '0', 'service_period_start': '2026-11-01',
+                        'service_period_end': '2027-10-31'}],
+    }, format='json')
+    assert created.status_code == 201, created.data
+    invoice_id = created.data['id']
+    assert RevenueRecognitionSchedule.objects.filter(invoice_id=invoice_id).exists()  # written on save
+
+    response = api.delete(f'/api/v1/invoices/{invoice_id}/')
+
+    assert response.status_code == 204, response.data
+    assert not Invoice.objects.filter(pk=invoice_id).exists()
+    assert not RevenueRecognitionSchedule.objects.filter(invoice__isnull=True).exists()  # none orphaned
+
+
+def test_a_refused_invoice_delete_keeps_its_schedules(api):
+    from crm_app.models import RevenueRecognitionSchedule
+    invoice = _invoice(_company(), status='Sent')
+    RevenueRecognitionSchedule.objects.create(
+        invoice=invoice, invoice_number=invoice.invoice_number, invoice_date=invoice.issue_date,
+        client_name='Keep Me Resort', billing_entity='bmasia_hk', currency='USD', amount=Decimal('100'),
+        service_period_start=date(2026, 1, 1), service_period_end=date(2026, 12, 31), duration_months=12)
+    assert api.delete(f'/api/v1/invoices/{invoice.pk}/').status_code == 409
+    assert RevenueRecognitionSchedule.objects.filter(invoice=invoice).count() == 1
+
+
+def test_a_draft_quote_created_through_the_api_can_be_deleted(api):
+    company = _company()
+    created = api.post('/api/v1/quotes/', {
+        'company': str(company.pk), 'quote_number': 'HK-QT-DEL-API', 'status': 'Draft',
+        'valid_from': '2026-11-01', 'valid_until': '2026-12-01', 'currency': 'USD',
+        'line_items': [{'product_service': 'Music service', 'description': 'Music service', 'quantity': '1',
+                        'unit_price': '100.00'}],
+    }, format='json')
+    assert created.status_code == 201, created.data
+    assert api.delete(f'/api/v1/quotes/{created.data["id"]}/').status_code == 204
+
+
+def test_a_draft_contract_created_through_the_api_can_be_deleted(api):
+    company = _company()
+    created = api.post('/api/v1/contracts/', {
+        'company': str(company.pk), 'contract_number': 'HK-CT-DEL-API', 'status': 'Draft',
+        'start_date': '2026-11-01', 'end_date': '2027-10-31', 'value': '100.00', 'currency': 'USD',
+    }, format='json')
+    assert created.status_code == 201, created.data
+    response = api.delete(f'/api/v1/contracts/{created.data["id"]}/')
+    assert response.status_code == 204, response.data

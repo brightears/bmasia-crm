@@ -26,7 +26,9 @@ OWN_PARTS = {
     Contract: {'crm_app.ContractLineItem.contract', 'crm_app.ContractServiceLocation.contract',
                'crm_app.ContractZone.contract'},
     Quote: {'crm_app.QuoteLineItem.quote', 'crm_app.QuoteActivity.quote', 'crm_app.QuoteAttachment.quote'},
-    Invoice: {'crm_app.InvoiceLineItem.invoice'},
+    # Revenue-recognition schedules are written for the invoice when it is saved with service
+    # dates (InvoiceViewSet._generate_revenue_recognition); they go with a deleted Draft.
+    Invoice: {'crm_app.InvoiceLineItem.invoice', 'crm_app.RevenueRecognitionSchedule.invoice'},
     Company: set(),
     Contact: set(),
 }
@@ -162,13 +164,23 @@ def mcp_delete_refusal(collection):
             f"Instead, {_ALTERNATIVE_WORDS[model]}: update_record('{collection}', id, '{data}').")
 
 
+def _delete_parts_that_would_be_orphaned(instance):
+    """Own parts whose link is SET_NULL would be left behind without their record: delete them too."""
+    from django.db.models import CASCADE
+    parts = OWN_PARTS.get(type(instance), set())
+    for rel in referencing_relations(type(instance)):
+        if relation_key(rel) in parts and not rel.many_to_many and rel.on_delete is not CASCADE:
+            rel.related_model._base_manager.filter(**{rel.field.name: instance}).delete()
+
+
 def destroy_one(viewset, instance):
     """Delete one record by the rules above. Returns (deleted, refusal_body)."""
     refusal = delete_refusal(instance)
     if refusal:
         return False, refusal
     try:
-        with transaction.atomic():  # the audit row and the delete stand or fall together
+        with transaction.atomic():  # the audit row, the parts and the delete stand or fall together
+            _delete_parts_that_would_be_orphaned(instance)
             viewset.perform_destroy(instance)
     except ProtectedError as exc:
         kinds = sorted({str(o._meta.verbose_name_plural).lower() for o in exc.protected_objects})
