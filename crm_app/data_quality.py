@@ -69,10 +69,11 @@ _email_validator = EmailValidator()
 # EmailValidator (dot-atom local part; domain labels of letters, digits and inner hyphens; a
 # letter-only top-level domain of 2+ letters; within 64 characters no label can exceed 63). The
 # database sets those aside and Python validates only the rest. The pattern has no bounded
-# repeats such as {0,61}: those make PostgreSQL's regex engine about 15 times slower.
+# repeats such as {0,61}: those make PostgreSQL's regex engine about 15 times slower. It ends
+# in \Z, which both engines read as the very end (Python's $ also accepts a final newline).
 _ATOM = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
 CERTAINLY_VALID_EMAIL = (rf'^{_ATOM}(\.{_ATOM})*@([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+'
-                         r'[A-Za-z][A-Za-z]+$')
+                         r'[A-Za-z][A-Za-z]+\Z')
 CERTAINLY_VALID_MAX_LENGTH = 64
 
 
@@ -397,6 +398,20 @@ def _norm_place(value):
     return ' '.join((value or '').casefold().split())
 
 
+def _property_key(value):
+    """A property name compared the way company names are (case, punctuation, accents,
+    legal forms and word order ignored); blank when there is none."""
+    text = (value or '').strip()
+    if not text:
+        return ''
+    return normalise_company_name(text) or _norm_place(text)
+
+
+# A linked renewal in these statuses is the next term. Cancelled and Expired ones are not: in
+# this business Expired means lapsed with no successor.
+SUCCESSOR_LINK_STATUSES = ('Draft', 'Sent', 'Active', 'Renewed')
+
+
 class EndingWithoutSuccessor(ListCheck):
     """Active contracts ending within 60 days with no successor.
 
@@ -404,30 +419,30 @@ class EndingWithoutSuccessor(ListCheck):
     no successor. Auto-renewing contracts are included: the next term still has to be recorded
     and invoiced. Soonest end first.
 
-    A successor is either
-    (a) a contract linked through renewed_from in status Draft, Sent, Active, Renewed or
-        Expired. A linked renewal that was Cancelled does not clear the row: the contract is
-        still Active and ending, so someone must decide; the fact says "renewal X was
-        cancelled"; or
-    (b) an unlinked contract of the same company (not linked to any other contract either) that
-        - is Draft, Sent or Active;
-        - starts between 90 days before and 60 days after this contract's end, and after its
-          start. A renewal normally starts the day after the old term; it is sometimes dated
-          up to a quarter early (an early renewal, or a term moved to the calendar year) or a
-          few weeks late (a short lapse while the customer decides). A contract that starts
-          earlier runs alongside this one (another venue, a multi-year term); one that starts
-          more than two months after the end is a new sale, not this renewal;
-        - ends after this contract's end, or has no end date;
-        - is not a one-off or add-on: service type one-time setup, consulting or maintenance,
-          contract type One-time, billing One-time, lifecycle type addon or churn, or a term
-          that ends on or before its start;
-        - has a matching product (as the renewal book labels it; "Other" matches any), and
-        - covers the same place: where both contracts record places (service-location names,
-          zone links or zone names, property name), they share at least one.
-    When an otherwise qualifying contract cannot be compared because one of the two records
-    no places, the row is still listed, with "possible renewal: X (not linked)": a false alarm
-    costs a glance; a hidden gap costs a customer. Generic location names ("Lobby") shared by
-    two venues of one company record count as the same place.
+    The row is cleared by
+    (a) a contract linked through renewed_from in status Draft, Sent, Active or Renewed. A
+        linked renewal that was Cancelled or has Expired does not clear the row (the contract
+        is still Active and ending, so someone must decide): the fact says "renewal X was
+        cancelled" or "renewal X expired"; or
+    (b) an unambiguous unlinked renewal: a contract of the same company, not linked to any
+        other contract, that
+        - is Draft, Sent or Active, is not a one-off or add-on (service type one-time setup,
+          consulting or maintenance; contract type or billing One-time; lifecycle type addon
+          or churn; a term ending on or before its start), has the same product as the
+          renewal book labels it ("Other" matches any) and ends after this contract's end (or
+          has no end date);
+        - starts on or after this contract's end date and at most 60 days after it;
+        - is at the same place: the same property name, or, when neither contract has a
+          property name, at least one shared zone link (zones belong to one venue);
+        - has not already cleared another ending contract (a renewal renews one term).
+    An unlinked contract that fails only the last three tests, but starts from 90 days before
+    the end and is not at a different property, leaves the row listed with "possible renewal:
+    X (not linked)": a contract that starts while this one still runs may be an early renewal
+    or a mid-term add-on with no lifecycle type; a shared location or zone name ("Lobby") or a
+    property name on one side only does not prove the same venue. When both contracts have
+    property names and they differ, the candidate is another venue's contract and ignored.
+    Every one of these rules can only keep a row listed; a false alarm costs a glance, a
+    hidden gap costs a customer.
     """
     key = 'contract_ending_no_successor'
     title = 'Contracts ending within 60 days with no renewal'
@@ -442,9 +457,10 @@ class EndingWithoutSuccessor(ListCheck):
         ending = list(
             Contract.objects.filter(**window)
             .select_related('company', *CONTRACT_OWNER_RELATED)
-            .annotate(open_renewal=Exists(Contract.objects.filter(renewed_from=OuterRef('pk'))
-                                          .exclude(status='Cancelled')),
-                      cancelled_renewal=latest_renewal('contract_number', status='Cancelled'))
+            .annotate(live_renewal=Exists(Contract.objects.filter(renewed_from=OuterRef('pk'),
+                                                                  status__in=SUCCESSOR_LINK_STATUSES)),
+                      cancelled_renewal=latest_renewal('contract_number', status='Cancelled'),
+                      expired_renewal=latest_renewal('contract_number', status='Expired'))
             .order_by('end_date', 'contract_number', 'pk'))
         candidates = list(
             Contract.objects.filter(company_id__in=companies, status__in=OPEN_CONTRACT_STATUSES,
@@ -455,44 +471,41 @@ class EndingWithoutSuccessor(ListCheck):
             .values('id', 'company_id', 'contract_number', 'start_date', 'end_date', 'service_type',
                     'billing_frequency', 'property_name', 'company__contracted_product')
             .order_by('start_date', 'contract_number', 'id'))
-        places = {}
-        for contract_id, name in (ContractServiceLocation.objects.filter(contract__company_id__in=companies)
-                                  .values_list('contract_id', 'location_name')):
-            places.setdefault(contract_id, set()).add(('name', _norm_place(name)))
-        for contract_id, zone_id, zone_name in (ContractZone.objects.filter(contract__company_id__in=companies)
-                                                .values_list('contract_id', 'zone_id', 'zone__name')):
-            places.setdefault(contract_id, set()).update({('zone', zone_id), ('name', _norm_place(zone_name))})
-        for c in candidates:
-            if c['property_name'].strip():
-                places.setdefault(c['id'], set()).add(('property', _norm_place(c['property_name'])))
+        # Zone links are the only place evidence that names one venue; service-location and zone
+        # names ("Lobby") repeat across venues and never clear a row.
+        zones = {}
+        for contract_id, zone_id in (ContractZone.objects.filter(contract__company_id__in=companies)
+                                     .values_list('contract_id', 'zone_id')):
+            zones.setdefault(contract_id, set()).add(zone_id)
         by_company = {}
         for c in candidates:
+            c['property'] = _property_key(c['property_name'])
             by_company.setdefault(c['company_id'], []).append(c)
 
-        rows = []
+        used, rows = set(), []
         for e in ending:
-            if e.open_renewal:
+            if e.live_renewal:
                 continue
-            mine = set(places.get(e.pk, ()))
-            if e.property_name.strip():
-                mine.add(('property', _norm_place(e.property_name)))
             product = product_of(e.service_type, e.company.contracted_product)
-            possible, confirmed = [], False
+            my_property = _property_key(e.property_name)
+            possible, cleared = [], False
             for c in by_company.get(e.company_id, ()):
                 if c['id'] == e.pk or not self._could_follow(e, c, product):
                     continue
-                theirs = places.get(c['id'], set())
-                if mine and theirs:
-                    if mine & theirs:
-                        confirmed = True
-                        break
-                    continue  # both record places and none is shared: another venue's term
+                if my_property and c['property'] and my_property != c['property']:
+                    continue  # another venue's contract
+                if c['id'] not in used and self._unambiguous(e, c, my_property, zones):
+                    used.add(c['id'])
+                    cleared = True
+                    break
                 possible.append(c['contract_number'])
-            if confirmed:
+            if cleared:
                 continue
             notes = []
             if e.cancelled_renewal:
                 notes.append(f'renewal {e.cancelled_renewal} was cancelled')
+            if e.expired_renewal:
+                notes.append(f'renewal {e.expired_renewal} expired')
             if possible:
                 notes.append(f'possible renewal: {", ".join(possible)} (not linked)')
             if not notes:
@@ -505,6 +518,7 @@ class EndingWithoutSuccessor(ListCheck):
 
     @staticmethod
     def _could_follow(e, c, product):
+        """Could c be e's next term at all? (Window from 90 days before the end.)"""
         start, end = c['start_date'], c['end_date']
         if not (e.end_date - timedelta(days=SUCCESSOR_START_BEFORE_END_DAYS) <= start
                 <= e.end_date + timedelta(days=SUCCESSOR_START_AFTER_END_DAYS)):
@@ -517,6 +531,16 @@ class EndingWithoutSuccessor(ListCheck):
             return False
         theirs = product_of(c['service_type'], c['company__contracted_product'])
         return theirs == product or 'Other' in (theirs, product)
+
+    @staticmethod
+    def _unambiguous(e, c, my_property, zones):
+        """Is c certainly e's renewal? Starts on or after e's end, at the same property, or
+        with no property on either side and a shared zone link."""
+        if c['start_date'] < e.end_date:
+            return False
+        if my_property or c['property']:
+            return my_property == c['property']
+        return bool(zones.get(e.pk, set()) & zones.get(c['id'], set()))
 
 
 class SentNotSigned(QuerysetCheck):
@@ -784,9 +808,11 @@ def _nfkc(word):
     return unicodedata.normalize('NFKC', word).casefold()
 
 
-# Legal-form words. A run of them at the start or end of a name is dropped when it holds at
-# least one "strong" word; "sa", "public" and "private" are dropped only inside such a run, so
-# "Sa Sa Cosmetics" and "Private Room" keep their words.
+# Legal-form words. A run of them at the end of a name is dropped when it holds at least one
+# "strong" word; "sa", "public" and "private" are dropped only inside such a run, so "Sa Ninh
+# Cosmetics" and "Private Room" keep their words. At the start of a name only the forms that are
+# written before the name (PT, บริษัท) or a run of two or more legal words are dropped: "KK" or
+# "AG" alone at the start are usually initials ("KK Garden").
 STRONG_LEGAL_WORDS = {_nfkc(w) for w in (
     'co', 'company', 'ltd', 'limited', 'inc', 'incorporated', 'corp', 'corporation', 'plc', 'llc', 'llp',
     'pte', 'pvt', 'sdn', 'bhd', 'pt', 'tbk', 'jsc', 'gmbh', 'ag', 'bv', 'nv', 'kk', 'juristic',
@@ -798,6 +824,10 @@ WEAK_LEGAL_WORDS = {'sa', 'public', 'private', 'person', 'condominium'}
 # Thai legal words are often written without spaces; they are split off before reading words.
 THAI_LEGAL_WORDS = [_nfkc(w) for w in ('บริษัท', 'จำกัด', 'มหาชน')]
 LEGAL_WORDS = STRONG_LEGAL_WORDS | WEAK_LEGAL_WORDS
+LEADING_LEGAL_FORMS = {_nfkc(w) for w in ('pt', 'บริษัท')}
+# A name left with only these words says nothing about which business it is.
+GENERIC_WORDS = {'hotel', 'hotels', 'resort', 'resorts', 'spa', 'group', 'holdings', 'restaurant', 'cafe',
+                 'bar', 'mall', 'office', 'offices', 'store', 'shop', 'club', 'thailand', 'bangkok'}
 _ASCII_WORD_CHARS = frozenset('abcdefghijklmnopqrstuvwxyz0123456789')
 
 
@@ -811,13 +841,19 @@ def _strip_legal_run(words, from_end):
     run = 0
     while run < len(seq) and seq[run] in LEGAL_WORDS:
         run += 1
-    if any(w in STRONG_LEGAL_WORDS for w in seq[:run]):
+    run_words = seq[:run]
+    strong = [w for w in run_words if w in STRONG_LEGAL_WORDS]
+    if from_end:
+        drop = bool(strong)
+    else:
+        drop = bool(strong) and (run >= 2 or run_words[0] in LEADING_LEGAL_FORMS)
+    if drop:
         seq = seq[run:]
     return list(reversed(seq)) if from_end else seq
 
 
 def _drop_latin_accents(text):
-    """'Meliá' and 'Mövenpick' read as 'melia' and 'movenpick'. Only marks on Latin letters go;
+    """'Orvélia' and 'Lönnhaven' read as 'orvelia' and 'lonnhaven'. Only marks on Latin letters go;
     Thai vowel and tone marks are part of the word and stay."""
     if text.isascii():
         return text
@@ -846,19 +882,19 @@ def _name_words(name):
     # "& Spa" after a resort or hotel adds nothing: "X Resort & Spa" = "X Resort Spa" = "X Resort".
     words = [w for i, w in enumerate(words)
              if not (w == 'spa' and i > 0 and words[i - 1] in ('resort', 'hotel', 'and'))]
-    # "and", "the" and the singular "hotel" are dropped anywhere ("Hotel X" = "X Hotel" = "X",
-    # "Mall of the X" = "Mall of X"); the plural is kept, so a group "X Hotels" does not match
-    # its property "Hotel X".
-    return [w for w in words if w not in ('and', 'the', 'hotel')]
+    # "and" and "the" are dropped anywhere ("Mall of the X" = "Mall of X"). "Hotel" is kept: word
+    # order is ignored, so "Hotel X" = "X Hotel", but "X Hotel" (a property) does not match the
+    # bare brand "X", and a group "X Hotels" does not match its property "Hotel X".
+    return [w for w in words if w not in ('and', 'the')]
 
 
 def company_name_keys(name):
     """The two exact keys a company name is compared on: its words sorted (word order ignored)
     and its words joined without spaces (spacing ignored, e.g. Thai names). Empty when the
-    name has fewer than 3 letters or digits left."""
+    name has fewer than 3 letters or digits left, or only generic words ("The Hotel")."""
     words = _name_words(name)
     joined = ''.join(words)
-    if len(joined) < 3:
+    if len(joined) < 3 or all(w in GENERIC_WORDS for w in words):
         return ()
     return (' '.join(sorted(words)), joined)
 
@@ -878,11 +914,14 @@ class LookalikeCompanyNames(ListCheck):
 
     Definition: two or more companies that share a name key (company_name_keys). Names are
     compared after Unicode normalisation and case folding, with accents on Latin letters
-    removed ("Meliá" = "Melia"), "&" read as "and", punctuation dropped, a run of legal-form
-    words at the start or end (Co, Ltd, Pte, Sdn Bhd, PT ... Tbk, Public Company Limited,
-    Condominium Juristic Person, the Thai บริษัท / จำกัด / มหาชน, also written without
-    spaces) and "& Spa" after a resort or hotel removed, and "and", "the" and "hotel"
-    dropped anywhere. Two keys are used: the words in sorted order ("Bay
+    removed ("Orvélia" = "Orvelia"), "&" read as "and", punctuation dropped, a run of
+    legal-form words at the end (Co, Ltd, Pte, Sdn Bhd, Tbk, Public Company Limited,
+    Condominium Juristic Person, the Thai จำกัด / มหาชน, also written without spaces), the
+    forms written before a name (PT, บริษัท) or a run of two legal words at the start, and
+    "& Spa" after a resort or hotel removed, and "and" and "the" dropped anywhere. "Hotel" is
+    kept, so "X Hotel" and "X" are not grouped (but "Hotel X" and "X Hotel" are). "X Resort &
+    Spa" and "X Resort" are grouped on purpose: a hotel and its "hotel & spa" are usually one
+    customer. Names left with only generic words ("The Hotel") get no key. Two keys are used: the words in sorted order ("Bay
     Lumen Phuket" = "Lumen Bay Phuket") and the words joined without spaces ("Lumen Bay" =
     "LumenBay"). Exact keys only: no fuzzy comparison of every pair, so spelling variants are
     not found. One row per group, opening the oldest record and linking the others.

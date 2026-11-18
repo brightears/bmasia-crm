@@ -94,3 +94,23 @@ def test_today_and_needs_fixing_count_the_same_overdue_tasks(company, client):
     assert dq.CHECKS_BY_KEY['task_overdue'].count(dq.Context()) == len(overdue)
     stats = client.get('/api/v1/dashboard/stats/').json()
     assert stats['overdue_tasks'] == len(overdue)
+
+
+def test_just_after_midnight_in_bangkok(company, client):
+    """At 01:30 in Bangkok the UTC date is still yesterday, and a task due at 00:30 today is
+    already past the clock: neither may make it overdue anywhere."""
+    with freeze_time('2026-11-19T18:30:00+00:00'):  # 01:30 on 20 Nov in Bangkok
+        today = timezone.localdate()
+        assert str(today) == '2026-11-20'
+        start = timezone.make_aware(datetime.combine(today, time(0)))
+        task(company, 'To Do', start + timedelta(minutes=30), 'Due at half past midnight')
+        task(company, 'To Do', start - timedelta(hours=1), 'Due last night at eleven')
+        items = client.get('/api/v1/action-center/').json()['items']
+        urgency = {i['title']: (i['urgency'], i['time_context']) for i in items if i['type'] == 'task'}
+        assert urgency == {'Due at half past midnight': ('today', 'Due today'),
+                           'Due last night at eleven': ('overdue', '1 day overdue')}
+        stats = client.get(f'/api/v1/companies/{company.pk}/dashboard/').json()['stats']
+        assert (stats['open_tasks'], stats['overdue_tasks']) == (2, 1)
+        assert client.get('/api/v1/dashboard/stats/').json()['overdue_tasks'] == 1
+        assert dq.CHECKS_BY_KEY['task_overdue'].count(dq.Context()) == 1
+        assert [t.title for t in Task.objects.all() if t.is_overdue] == ['Due last night at eleven']
