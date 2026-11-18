@@ -784,8 +784,9 @@ NEW_CONTACT_INACTIVE_NOTE = (
 def _new_contact_data(company_id, applied):
     """A contact created from a proposal is inactive, receives no email and is not primary.
 
-    Every default-recipient choice in the CRM picks active contacts only, so nothing
-    is sent to it until a person has checked it and activated it.
+    The CRM's default-recipient choices pick active contacts only (the suspended
+    prospect sequences' last fallback is the one exception), so nothing is sent to
+    it until a person has checked it and activated it.
     """
     from crm_app.serializers import ContactSerializer
 
