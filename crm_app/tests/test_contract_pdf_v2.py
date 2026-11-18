@@ -73,7 +73,7 @@ def contract():
         customer_contact_title="General Manager",
         customer_signatory_name="Alex Example", customer_signatory_title="General Manager",
         bmasia_signatory_name="Chris Andrews", bmasia_signatory_title="Director",
-        bmasia_contact_name="Taylor Reed", bmasia_contact_email="norbert@example.com",
+        bmasia_contact_name="Taylor Reed", bmasia_contact_email="taylor.reed@example.com",
     )
     agreement.service_locations.create(
         location_name="Lobby", platform="beatbreeze", price=Decimal("260.00"),
