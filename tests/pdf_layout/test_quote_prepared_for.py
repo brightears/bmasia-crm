@@ -121,3 +121,12 @@ def test_prepared_for_falls_back_to_company_name_without_a_legal_name():
     assert "Example Hotel" in joined
     assert "Example Hotel Co., Ltd." not in joined
     assert "()" not in joined
+
+
+def test_prepared_for_uses_company_name_when_legal_name_is_only_spaces():
+    joined = _joined(example_company(legal_entity_name="   "))
+
+    assert joined.count("Example Hotel (Branch 00001)") == 1
+    # The branch is never printed on its own in place of the customer's name.
+    assert joined.count("(Branch 00001)") == 1
+    assert joined.count("Tax ID: 0100000000001") == 1
