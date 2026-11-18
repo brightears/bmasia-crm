@@ -186,3 +186,35 @@ it('shows a load error with a retry', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
   expect(await screen.findByRole('link', { name: 'TH-CT26001' })).toBeInTheDocument();
 });
+
+it("never shows the previous check's title while the next one loads", async () => {
+  checkPage.mockResolvedValueOnce(page('contract_active_past_end', contractRows));
+  renderAt('/needs-fixing/contract_active_past_end');
+  await screen.findByRole('link', { name: 'TH-CT26001' });
+  checkPage.mockReturnValueOnce(new Promise(() => {}));
+  fireEvent.click(screen.getByRole('link', { name: /Companies that may be duplicates/ }));
+  expect(await screen.findByRole('heading', { name: 'Companies that may be duplicates' })).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Active contracts past their end date' })).toBeNull();
+  expect(screen.queryByText('2 contracts')).toBeNull();
+});
+
+it('moves a page past the end to the last page', async () => {
+  checkPage.mockImplementation((key: string, opts: any) =>
+    Promise.resolve({ ...page('contract_active_past_end', opts.page === 1 ? contractRows : [], 2), page: opts.page })
+  );
+  renderAt('/needs-fixing/contract_active_past_end?page=4');
+  await waitFor(() => expect(location.search).toBe(''));
+  expect(await screen.findByRole('link', { name: 'TH-CT26001' })).toBeInTheDocument();
+});
+
+it('ignores a company or owner in the address that is not an id', async () => {
+  checkPage.mockResolvedValue(page('contract_active_past_end', contractRows));
+  renderAt('/needs-fixing/contract_active_past_end?company=123&owner=someone');
+  await screen.findByRole('link', { name: 'TH-CT26001' });
+  expect(checkPage).toHaveBeenLastCalledWith('contract_active_past_end', {
+    page: 1,
+    pageSize: 25,
+    company: undefined,
+    owner: undefined,
+  });
+});

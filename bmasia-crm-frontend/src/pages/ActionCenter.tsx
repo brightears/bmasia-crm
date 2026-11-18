@@ -144,7 +144,7 @@ const ActionCenter: React.FC = () => {
     if (!data) return null;
 
     const tiles = [
-      { label: 'Overdue', value: data.summary.overdue_count, tone: 'error' as const, icon: <ErrorOutline /> },
+      { label: 'Overdue tasks, invoices and follow-ups', value: data.summary.overdue_count, tone: 'error' as const, icon: <ErrorOutline /> },
       { label: 'Due soon', value: data.summary.today_count, tone: 'warning' as const, icon: <Today /> },
       { label: 'Coming up', value: data.summary.upcoming_count, tone: 'info' as const, icon: <CalendarMonth /> },
       { label: 'Contracts ending within 60 days', value: data.summary.expiring_count, tone: 'warning' as const, icon: <Description /> },
@@ -429,7 +429,13 @@ const ActionCenter: React.FC = () => {
           </Paper>
         ) : (
           <>
-            {renderSection('Overdue', <ErrorOutline />, 'error', overdueItems)}
+            {renderSection(
+              'Overdue',
+              <ErrorOutline />,
+              'error',
+              overdueItems,
+              'Tasks due before today, invoices past due, opportunities waiting for a follow-up'
+            )}
             {/* Groups as the server defines them (see ActionCenterViewSet in views.py). */}
             {renderSection('Due soon', <Today />, 'warning', todayItems, 'Tasks due today or tomorrow, invoices due within 7 days')}
             {renderSection(

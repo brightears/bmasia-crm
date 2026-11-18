@@ -48,7 +48,7 @@ import {
   SEVERITY_TONE,
 } from '../services/dataQuality';
 import { formatMoney } from '../theme/format';
-import useListState, { isRecordId } from '../hooks/useListState';
+import useListState from '../hooks/useListState';
 
 const PAGE_SIZES = [25, 50, 100];
 
@@ -69,6 +69,10 @@ const RECORD_NOUN: Record<DataQualityRecordType, [string, string]> = {
   invoice: ['invoice', 'invoices'],
   task: ['task', 'tasks'],
 };
+
+// Company and user ids are UUIDs; anything else in the address falls back to "any".
+const isUuid = (v: string | number) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(v));
 
 const IDENTIFIER_TYPES: DataQualityRecordType[] = ['contract', 'quote', 'invoice'];
 
@@ -102,8 +106,8 @@ const NeedsFixing: React.FC = () => {
     { page: 0, size: 25, company: '', owner: '' },
     {
       size: PAGE_SIZES,
-      company: (v) => isRecordId(v),
-      owner: (v) => v === 'none' || isRecordId(v),
+      company: (v) => isUuid(v),
+      owner: (v) => v === 'none' || isUuid(v),
     }
   );
   const { page, size, company, owner } = list.values;
@@ -166,6 +170,13 @@ const NeedsFixing: React.FC = () => {
   useEffect(() => {
     loadPage();
   }, [loadPage]);
+
+  // A page past the end (records were fixed since the link was made) moves to the last page.
+  useEffect(() => {
+    if (data && data.key === key && data.count > 0 && data.rows.length === 0 && page > 0) {
+      list.set('page', Math.max(0, Math.ceil(data.count / size) - 1));
+    }
+  }, [data, key, page, size, list]);
 
   const checkHref = (k: string) => {
     const params = new URLSearchParams();
@@ -265,7 +276,9 @@ const NeedsFixing: React.FC = () => {
     </Paper>
   );
 
-  const header = data || current;
+  // While another check loads, show its own title from the summary, never the previous check's.
+  const pageData = data && data.key === key ? data : null;
+  const header = pageData || current;
   const severity = header?.severity;
 
   return (
@@ -326,9 +339,9 @@ const NeedsFixing: React.FC = () => {
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                     {header ? header.why : <Skeleton width={360} />}
                   </Typography>
-                  {data && (
+                  {pageData && (
                     <Typography variant="body2" sx={{ mt: 0.75, fontWeight: 600 }}>
-                      {countLabel(data.count, data.record_type)}
+                      {countLabel(pageData.count, pageData.record_type)}
                       {(company || owner) && ' matching the filters'}
                     </Typography>
                   )}
