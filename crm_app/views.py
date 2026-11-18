@@ -29,7 +29,7 @@ from decimal import Decimal
 from crm_app.services.document_context import customer_legal_entity_name, effective_billing_entity
 from crm_app.services.document_entity_filters import filter_document_entity
 from crm_app.contract_pdf_v2 import (
-    clause_addition_markup, literal_hyphens, optional_clause_paragraph, paragraph_text,
+    clause_addition_markup, fill_template_values, literal_hyphens, optional_clause_paragraph, paragraph_text,
     split_clause_placements, stored_markup,
 )
 
@@ -2273,7 +2273,10 @@ class ContractViewSet(BaseModelViewSet):
             rendered[var] = replacement
         # One pass: a value that itself contains "{{variable}}" text prints as
         # written instead of being filled in again.
-        content = re.sub('|'.join(map(re.escape, rendered)), lambda match: rendered[match.group(0)], content)
+        if escape_for_paragraph:
+            content = fill_template_values(content, rendered)
+        else:
+            content = re.sub('|'.join(map(re.escape, rendered)), lambda match: rendered[match.group(0)], content)
 
         # Existing Hilton template text places the numeric variable before a
         # literal plural noun. Correct the one-zone grammar without changing
