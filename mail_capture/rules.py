@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from django.conf import settings
 
 from .parse import domain_in
+from .public_suffixes import SECOND_LEVELS as _PSL_SECOND_LEVELS, WILDCARD_COUNTRY_CODES
 
 
 # The built-in Gmail label any user can apply to keep a thread out of the CRM.
@@ -55,10 +56,18 @@ FREEMAIL_DOMAINS = frozenset({
 # Public suffixes, embedded (not the full Public Suffix List; no dependency).
 # A domain is refused for rules, company domains and internal domains unless
 # it has more labels than its public suffix, i.e. it is at least a registrable
-# domain ("hotel.co.th", never "co.th" or "th").
+# domain ("hotel.co.th", never "co.th" or "th"), and unless every label is
+# non-empty ("co..th" is refused).
 #
-# Second-level registration zones of the countries the company sells in,
-# plus a few generic ones:
+# Covered: the generic second levels of every country code in the Public
+# Suffix List (``public_suffixes.py``: source, version and filter stated
+# there; e.g. co.za, com.br, co.uk, com.au), the wildcard country codes
+# (every second level of .ck, .er, .fk, .jm, .mm, .np, .pg), and the
+# hand-written zones below for the countries the company sells in (which add
+# non-generic ones such as in.th, mi.th, my.id). Not covered: deeper or
+# city-level rules (for example the Japanese prefecture zones or *.kawasaki.jp)
+# and the PSL's private section beyond SHARED_PLATFORM_SUFFIXES. Confirmation
+# is still required before any rule purges.
 _COUNTRY_SECOND_LEVELS = {
     'th': 'co ac go in or net mi',
     'hk': 'com org net edu gov idv',
@@ -84,7 +93,9 @@ _COUNTRY_SECOND_LEVELS = {
     'nz': 'co org net ac govt school',
 }
 MULTI_PART_SUFFIXES = frozenset(
-    f'{second}.{tld}' for tld, seconds in _COUNTRY_SECOND_LEVELS.items() for second in seconds.split()
+    f'{second}.{tld}'
+    for table in (_COUNTRY_SECOND_LEVELS, _PSL_SECOND_LEVELS)
+    for tld, seconds in table.items() for second in seconds.split()
 )
 # Shared hosting and tenant domains: every customer of the platform sits under them.
 SHARED_PLATFORM_SUFFIXES = frozenset({
@@ -102,6 +113,8 @@ def public_suffix_of(domain):
     for size in (3, 2):
         if len(labels) >= size and '.'.join(labels[-size:]) in PUBLIC_SUFFIXES:
             return '.'.join(labels[-size:])
+    if len(labels) >= 2 and labels[-1] in WILDCARD_COUNTRY_CODES:
+        return '.'.join(labels[-2:])
     return labels[-1] if labels else ''
 
 
@@ -144,6 +157,8 @@ def is_public_suffix(domain):
     domain = (domain or '').lower().strip('.')
     if not domain or '.' not in domain:
         return True
+    if any(not label for label in domain.split('.')):
+        return True    # an empty label ("co..th") is never a registrable domain
     suffix = public_suffix_of(domain)
     return len(domain.split('.')) <= len(suffix.split('.'))
 

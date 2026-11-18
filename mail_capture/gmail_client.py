@@ -1,7 +1,7 @@
 """The Gmail client protocol and a fake that reads fixtures.
 
-There is no real Google client in this module (that comes with the credential
-factory in a later PR). ``FakeGmailClient`` answers in Gmail API shape from a
+The real client is ``google_client.GoogleGmailClient``. ``QuotaPacer`` keeps
+calls under Gmail's per-minute quota. ``FakeGmailClient`` answers in Gmail API shape from a
 fixture directory or from dicts built in a test, keeps a history sequence, and
 can be told to fail with 404, 429 or 500.
 
@@ -31,6 +31,8 @@ import email
 import email.policy
 import email.utils
 import json
+import threading
+import time
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -47,6 +49,108 @@ QUOTA_UNITS = {
     'get_attachment': 20,
 }
 
+# Gmail API usage limits (developers.google.com/workspace/gmail/api/reference/quota,
+# read 19 Nov 2026): 1,200,000 quota units per minute per project and 6,000 per
+# minute per user (mailbox). The settings CAPTURE_GMAIL_USER_UNITS_PER_MINUTE and
+# CAPTURE_GMAIL_PROJECT_UNITS_PER_MINUTE override them (lower only makes sense).
+USER_UNITS_PER_MINUTE = 6000
+PROJECT_UNITS_PER_MINUTE = 1200000
+
+
+class QuotaPacer:
+    """A token bucket that keeps any 60-second window under ``per_minute``
+    quota units.
+
+    The bucket holds at most ``burst`` units (a fifth of the minute's limit by
+    default) and refills at the rest of the limit spread over the minute, so
+    burst + refill over 60 s equals the limit. It starts empty: a run that
+    begins right after another (even in a new process) cannot add a burst on
+    top of the previous run's last minute. A call costing more than the bucket
+    holds waits for a full bucket and leaves it in debt.
+
+    ``acquire`` sleeps with the caller's ``sleep``; it never loops, so a test
+    sleep that returns at once cannot hang it. ``drain`` empties the bucket
+    after Gmail answered 429 anyway.
+    """
+
+    def __init__(self, per_minute, burst_fraction=0.2, clock=time.monotonic):
+        per_minute = max(1, int(per_minute))
+        self.per_minute = per_minute
+        self.burst = max(1.0, per_minute * burst_fraction)
+        self.rate = (per_minute - self.burst) / 60.0 or per_minute / 60.0
+        self._clock = clock
+        self._tokens = 0.0
+        self._at = clock()
+        self._lock = threading.Lock()
+        self.waited = 0.0
+
+    def _refill(self):
+        now = self._clock()
+        self._tokens = min(self.burst, self._tokens + max(0.0, now - self._at) * self.rate)
+        self._at = now
+
+    def wait_for(self, units):
+        """Seconds until ``units`` may be spent (0 if now)."""
+        with self._lock:
+            self._refill()
+            need = min(float(units), self.burst)
+            return max(0.0, (need - self._tokens) / self.rate)
+
+    def acquire(self, units, sleep=time.sleep):
+        with self._lock:
+            self._refill()
+            need = min(float(units), self.burst)
+            wait = max(0.0, (need - self._tokens) / self.rate)
+            if wait:
+                # Credit the refill the sleep will bring, then spend.
+                self._tokens += wait * self.rate
+                self._at = self._clock()
+        if wait:
+            self.waited += wait
+            sleep(wait)
+        with self._lock:
+            self._tokens -= float(units)
+            self._at = max(self._at, self._clock())
+        return wait
+
+    def drain(self):
+        with self._lock:
+            self._tokens = min(self._tokens, 0.0)
+            self._at = self._clock()
+
+
+_PACERS = {}
+_PACERS_LOCK = threading.Lock()
+
+
+def _limit(name, default):
+    try:
+        from django.conf import settings
+        value = int(getattr(settings, name, default) or default)
+    except Exception:
+        value = default
+    return max(1, min(value, default))
+
+
+def pacers_for(mailbox_email):
+    """The per-mailbox pacer and the project pacer, shared by every client in
+    this process (consecutive runs of one mailbox share its bucket)."""
+    user_limit = _limit('CAPTURE_GMAIL_USER_UNITS_PER_MINUTE', USER_UNITS_PER_MINUTE)
+    project_limit = _limit('CAPTURE_GMAIL_PROJECT_UNITS_PER_MINUTE', PROJECT_UNITS_PER_MINUTE)
+    with _PACERS_LOCK:
+        key = ('user', mailbox_email.lower(), user_limit)
+        if key not in _PACERS:
+            _PACERS[key] = QuotaPacer(user_limit)
+        project_key = ('project', '', project_limit)
+        if project_key not in _PACERS:
+            _PACERS[project_key] = QuotaPacer(project_limit)
+        return _PACERS[key], _PACERS[project_key]
+
+
+def reset_pacers():
+    with _PACERS_LOCK:
+        _PACERS.clear()
+
 
 class GmailError(Exception):
     """An error answer from Gmail. ``status`` is the HTTP status."""
@@ -58,23 +162,77 @@ class GmailError(Exception):
 
 
 class GmailNotFound(GmailError):
-    """404: unknown message, or a history id too old to list from."""
+    """404 or 410: unknown or deleted message, or a history id too old to list from."""
 
 
 class GmailRateLimited(GmailError):
-    """429, or 403 with reason rateLimitExceeded / userRateLimitExceeded."""
+    """429, or 403 with reason rateLimitExceeded / userRateLimitExceeded.
+    ``retry_after`` is Gmail's Retry-After in seconds when it sent one."""
+
+    def __init__(self, status, reason='', retry_after=None):
+        super().__init__(status, reason)
+        self.retry_after = retry_after
 
 
 class GmailServerError(GmailError):
-    """5xx."""
+    """5xx, or a transport failure (retryable)."""
 
 
-def error_for_status(status, reason=''):
+# Operator hints for authentication and permission failures. Each names the
+# setup step that is the likely cause; none carries a token, an assertion or a
+# key path (only these fixed texts and the OAuth error code are ever shown).
+AUTH_HINTS = {
+    'unauthorized_client': 'domain-wide delegation is missing for this service account or does not list '
+                           'this scope: check the delegation entry (Unique ID and scope) in the Admin console',
+    'access_denied': 'the scope is not authorised: GOOGLE_CAPTURE_SCOPE must match the delegation entry',
+    'invalid_scope': 'the scope is not authorised: GOOGLE_CAPTURE_SCOPE must match the delegation entry',
+    'invalid_grant': 'the grant was refused: check GOOGLE_CAPTURE_SERVICE_ACCOUNT or the key file, that the '
+                     'mailbox address exists in the domain, and the server clock',
+    'invalid_client': 'the service account or its key is not valid: check GOOGLE_CAPTURE_SERVICE_ACCOUNT '
+                      'or replace the key file',
+    'token_endpoint_unreachable': 'the Google token endpoint could not be reached: check outbound network '
+                                  'access from this service',
+    'signblob_refused': 'signBlob refused: grant Token Creator on the service account to the federated '
+                        'principal, enable the IAM Credentials API, check GOOGLE_CAPTURE_SERVICE_ACCOUNT',
+    'token_refused': 'the token request was refused: check the delegation entry, the scope and '
+                     'GOOGLE_CAPTURE_SERVICE_ACCOUNT',
+    'gmail_unauthorized': 'Gmail refused the token: check the delegation entry and its scope',
+    'api_not_enabled': 'the Gmail API is not enabled in the Google Cloud project',
+    'permission_denied': 'permission denied: check the delegation entry and scope, and that the mailbox '
+                         'exists and has Gmail enabled',
+    'credentials': 'the capture credential could not be made: check the GOOGLE_CAPTURE_* settings',
+}
+
+
+class GmailAuthError(GmailError):
+    """Authentication or permission refused. Never retried: the run ends at
+    once with outcome ``auth_error``. ``code`` is a short safe code;
+    ``hint`` names the setup step that is the likely cause."""
+
+    def __init__(self, code, status=401):
+        code = code if code in AUTH_HINTS else 'permission_denied'
+        super().__init__(status, code)
+        self.code = code
+        self.hint = AUTH_HINTS[code]
+
+
+_RATE_REASONS = ('ratelimitexceeded', 'userratelimitexceeded', 'quotaexceeded', 'dailylimitexceeded')
+_API_DISABLED_REASONS = ('accessnotconfigured', 'service_disabled', 'servicedisabled')
+
+
+def error_for_status(status, reason='', retry_after=None):
     status = int(status)
-    if status == 404:
+    reason = reason or ''
+    low = reason.lower()
+    if status in (404, 410):
         return GmailNotFound(status, reason)
-    if status == 429 or (status == 403 and 'ratelimit' in reason.lower()):
-        return GmailRateLimited(status, reason or 'rateLimitExceeded')
+    if status == 429 or (status == 403 and low in _RATE_REASONS):
+        return GmailRateLimited(status, reason or 'rateLimitExceeded', retry_after)
+    if status == 401:
+        return GmailAuthError('gmail_unauthorized', 401)
+    if status == 403:
+        # A 403 that is not a rate limit is a permission error: never retried.
+        return GmailAuthError('api_not_enabled' if low in _API_DISABLED_REASONS else 'permission_denied', 403)
     if status >= 500:
         return GmailServerError(status, reason)
     return GmailError(status, reason)
@@ -111,8 +269,13 @@ class GmailClient(Protocol):
         """users.messages.attachments.get."""
 
     # Optional: a client with ``supports_batch = True`` also offers
-    # ``get_messages(ids, format, metadata_headers) -> {id: message or None}``,
-    # many messages.get in one HTTP batch (None for a message gone since listed).
+    # ``get_messages(ids, format, metadata_headers) -> {id: message | None | GmailError}``,
+    # many messages.get in one HTTP batch: None for a message gone since it was
+    # listed (404/410), a GmailError instance for that one item's own failure.
+    # A failure of the whole batch request is raised.
+    #
+    # Optional: ``pace(units, sleep)`` waits until ``units`` quota units may be
+    # spent (the real client's token buckets); ``drain_pace()`` after a 429.
 
 
 # --- .eml conversion --------------------------------------------------------
@@ -201,6 +364,8 @@ class FakeGmailClient:
         self._history_id = int(history_id)
         self._oldest_valid_history = int(history_id)
         self._errors = []            # [{'method', 'status', 'reason', 'times', 'after'}]
+        self._item_errors = {}       # gmail id -> [{'status', 'reason', 'times', 'retry_after'}]
+        self.pacer = None            # a QuotaPacer, when a test wants pacing
         for message in messages:
             self._put(message)
         for item in errors:
@@ -251,6 +416,28 @@ class FakeGmailClient:
             'method': method, 'status': int(status), 'times': int(times),
             'reason': reason, 'after': int(after),
         })
+
+    def fail_item(self, message_id, status, times=1, reason='', retry_after=None):
+        """Make the next ``times`` fetches of one message fail with ``status``
+        (in a batch: that item only)."""
+        self._item_errors.setdefault(message_id, []).append({
+            'status': int(status), 'reason': reason, 'times': int(times), 'retry_after': retry_after,
+        })
+
+    def _item_error(self, message_id):
+        for item in self._item_errors.get(message_id, ()):
+            if item['times'] > 0:
+                item['times'] -= 1
+                return error_for_status(item['status'], item['reason'], item['retry_after'])
+        return None
+
+    def pace(self, units, sleep):
+        if self.pacer is not None:
+            self.pacer.acquire(units, sleep)
+
+    def drain_pace(self):
+        if self.pacer is not None:
+            self.pacer.drain()
 
     def _put(self, message):
         message = copy.deepcopy(message)
@@ -354,6 +541,9 @@ class FakeGmailClient:
 
     def get_message(self, message_id, format='metadata', metadata_headers=None):
         self._enter('get_message', message_id=message_id, format=format)
+        error = self._item_error(message_id)
+        if error is not None:
+            raise error
         if message_id not in self._messages:
             raise GmailNotFound(404, 'message not found')
         message = self._messages[message_id]
@@ -371,7 +561,10 @@ class FakeGmailClient:
         out = {}
         for message_id in ids:
             message = self._messages.get(message_id)
-            if message is None:
+            error = self._item_error(message_id)
+            if error is not None:
+                out[message_id] = None if isinstance(error, GmailNotFound) else error
+            elif message is None:
                 out[message_id] = None
             elif format == 'full':
                 out[message_id] = copy.deepcopy(message)

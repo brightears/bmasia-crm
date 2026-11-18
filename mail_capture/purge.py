@@ -356,17 +356,39 @@ def _preview_label_rule(rule):
                     'mailbox on its next run after confirmation.'}
 
 
-def confirm_rule(rule, user=None):
-    """Confirm a rule as it stands now; the fingerprint pins what was confirmed."""
+RULE_CHANGED = 'the rule changed since the preview: preview again'
+
+
+class RuleChanged(Exception):
+    """The rule is no longer the one that was previewed (or is already
+    confirmed as it stands): nothing was confirmed."""
+
+
+def confirm_rule(rule, user=None, *, expected_fingerprint):
+    """Confirm exactly the rule that was previewed. ``expected_fingerprint``
+    is ``rule.fingerprint()`` as shown on the preview; it is compared with
+    the rule as it stands now, under a row lock, and a mismatch (an edit since
+    the preview, by any route) raises ``RuleChanged`` and confirms nothing.
+    Every confirm route (the admin page, a shell, a future command) must pass
+    it; there is no default. A rule whose earlier confirmation went stale
+    (changed by ``QuerySet.update``) can be confirmed again the same way."""
+    with transaction.atomic():
+        current = CaptureRule.objects.select_for_update().filter(pk=rule.pk).first()
+        if current is None or not expected_fingerprint or current.fingerprint() != expected_fingerprint:
+            raise RuleChanged(RULE_CHANGED)
+        if current.is_confirmed:
+            raise RuleChanged('this rule is already confirmed as it stands')
+        current.purge_state = 'confirmed'
+        current.confirmed_by = user if (user is not None and getattr(user, 'is_authenticated', False)) else None
+        current.confirmed_at = timezone.now()
+        current.confirmed_fingerprint = expected_fingerprint
+        CaptureRule.objects.filter(pk=current.pk).update(
+            purge_state=current.purge_state, confirmed_by=current.confirmed_by,
+            confirmed_at=current.confirmed_at, confirmed_fingerprint=current.confirmed_fingerprint,
+            purge_done_at=None,
+        )
     rule.refresh_from_db()
-    rule.purge_state = 'confirmed'
-    rule.confirmed_by = user if (user is not None and getattr(user, 'is_authenticated', False)) else None
-    rule.confirmed_at = timezone.now()
-    rule.confirmed_fingerprint = rule.fingerprint()
-    CaptureRule.objects.filter(pk=rule.pk).update(
-        purge_state=rule.purge_state, confirmed_by=rule.confirmed_by, confirmed_at=rule.confirmed_at,
-        confirmed_fingerprint=rule.confirmed_fingerprint, purge_done_at=None,
-    )
+    return rule
 
 
 def demote_changed_rules():

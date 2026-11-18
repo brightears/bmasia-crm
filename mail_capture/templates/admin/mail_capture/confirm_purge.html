@@ -20,6 +20,8 @@ already blocks new capture. Confirming also removes mail stored before the rule 
 {% if rule.purge_state == 'awaiting_confirmation' %}
 <form method="post">{% csrf_token %}
   <input type="hidden" name="confirm" value="yes">
+  <input type="hidden" name="fingerprint" value="{{ fingerprint }}">
+  <input type="hidden" name="previewed" value="{{ preview.messages|default_if_none:'' }}">
   <input type="submit" value="Confirm purge">
   <a href="{% url 'admin:mail_capture_capturerule_changelist' %}">Not now</a>
 </form>

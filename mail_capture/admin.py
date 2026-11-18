@@ -17,7 +17,12 @@ Configuration (mailboxes, rules, company domains) is editable by superusers.
   removing mail already stored needs a second step: the confirmation page
   shows how many messages, conversations and queue rows would go, and only
   "Confirm purge" starts it (``purge.confirm_rule`` then ``enforce_rules``,
-  capped per call; later runs continue).
+  capped per call; later runs continue). The page carries the previewed
+  rule's fingerprint and count; if the rule changed since the preview the
+  confirmation is refused ("the rule changed since the preview: preview
+  again") and nothing is purged.
+* A mailbox marked "needs attention" (repeated failed runs) shows it in the
+  list; the "Clear needs attention" action lets runs start again.
 """
 from django.contrib import admin, messages
 from django.http import HttpResponseRedirect
@@ -27,11 +32,11 @@ from django.urls import path, reverse
 from django.utils import timezone
 
 from .models import (
-    CaptureFailure, CaptureMailbox, CapturePurge, CaptureRule, CaptureRun, CompanyDomain,
+    CaptureFailure, CaptureMailbox, CapturePurge, CaptureRule, CaptureRun, CaptureSkip, CompanyDomain,
     MailboxAccessLog, MailboxCopy, MailConversation, MailMatch, MailMessage, MailParticipant,
     UnmatchedSender,
 )
-from .purge import confirm_rule, enforce_rules, preview_rule
+from .purge import RuleChanged, confirm_rule, enforce_rules, preview_rule
 
 
 def _superuser(request):
@@ -73,14 +78,28 @@ AUDITED_MAILBOX_FIELDS = ('enabled', 'body_mode', 'visibility')
 @admin.register(CaptureMailbox)
 class CaptureMailboxAdmin(SuperuserAdmin):
     list_display = ('email', 'kind', 'enabled', 'body_mode', 'visibility', 'last_poll_at',
-                    'needs_resync', 'consecutive_errors')
-    list_filter = ('enabled', 'kind', 'body_mode', 'needs_resync')
+                    'needs_resync', 'consecutive_errors', 'needs_attention', 'attention_reason')
+    list_filter = ('enabled', 'kind', 'body_mode', 'needs_resync', 'needs_attention')
     search_fields = ('email',)
     readonly_fields = (
         'history_id', 'newest_internal_date', 'last_poll_at', 'last_full_sync_at',
-        'needs_resync', 'last_error', 'consecutive_errors', 'enforced_label_ids',
+        'needs_resync', 'last_error', 'consecutive_errors', 'needs_attention', 'attention_reason',
+        'attention_code_version', 'enforced_label_ids',
         'lease_token', 'lease_expires_at', 'created_at', 'updated_at',
     )
+    actions = ('clear_needs_attention',)
+
+    @admin.action(description='Clear needs attention: let runs start again')
+    def clear_needs_attention(self, request, queryset):
+        if not _superuser(request):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        from .sync import clear_attention
+        count = 0
+        for mailbox in queryset.filter(needs_attention=True):
+            clear_attention(mailbox, f'user:{request.user.pk}', 'cleared in the admin')
+            count += 1
+        messages.info(request, f'{count} mailboxes cleared; the next run starts again where it stopped.')
 
     def get_readonly_fields(self, request, obj=None):
         fields = tuple(super().get_readonly_fields(request, obj))
@@ -140,20 +159,27 @@ class CaptureRuleAdmin(SuperuserAdmin):
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied
         rule = get_object_or_404(CaptureRule.objects.select_related('mailbox'), pk=rule_id)
-        if request.method == 'POST' and request.POST.get('confirm') == 'yes' \
-                and rule.purge_state == 'awaiting_confirmation':
-            confirm_rule(rule, request.user)
+        if request.method == 'POST' and request.POST.get('confirm') == 'yes':
+            try:
+                confirm_rule(rule, request.user,
+                             expected_fingerprint=str(request.POST.get('fingerprint', ''))[:64])
+            except RuleChanged as exc:
+                messages.error(request, str(exc))
+                return HttpResponseRedirect(reverse('admin:mail_capture_capturerule_confirm', args=[rule.pk]))
             counts = enforce_rules(rules=[rule], actor=f'user:{request.user.pk}')
+            previewed = str(request.POST.get('previewed', ''))[:12]
             messages.info(
                 request,
-                'Purge confirmed: {messages} messages, {copies} copies, {queue_rows} queue rows '
-                'removed so far. Any remainder continues on the next runs.'.format(**counts),
+                'Purge confirmed (preview showed {previewed} messages): {messages} messages, {copies} '
+                'copies, {queue_rows} queue rows removed so far. Any remainder continues on the next '
+                'runs.'.format(previewed=previewed if previewed.isdigit() else 'no count', **counts),
             )
             return HttpResponseRedirect(reverse('admin:mail_capture_capturerule_changelist'))
         context = dict(
             self.admin_site.each_context(request),
             title='Confirm purge of stored mail',
             rule=rule,
+            fingerprint=rule.fingerprint(),
             preview=preview_rule(rule),
             opts=self.model._meta,
         )
@@ -245,7 +271,7 @@ class UnmatchedSenderAdmin(ReadOnlyAdmin):
 @admin.register(CaptureRun)
 class CaptureRunAdmin(ReadOnlyAdmin):
     list_display = ('started_at', 'mailbox', 'kind', 'dry_run', 'outcome', 'fetched', 'stored',
-                    'matched', 'unmatched', 'failed', 'errors')
+                    'matched', 'unmatched', 'failed', 'gone', 'errors', 'error_class', 'error_gmail_id')
     list_filter = ('kind', 'outcome', 'dry_run')
 
 
@@ -261,6 +287,12 @@ class CapturePurgeAdmin(ReadOnlyAdmin):
     list_display = ('at', 'reason', 'rule', 'mailbox', 'messages', 'copies', 'conversations',
                     'queue_rows', 'remaining')
     list_filter = ('reason', 'remaining')
+
+
+@admin.register(CaptureSkip)
+class CaptureSkipAdmin(ReadOnlyAdmin):
+    list_display = ('created_at', 'mailbox', 'gmail_id', 'actor', 'reason', 'used_at')
+    list_filter = ('mailbox',)
 
 
 @admin.register(CaptureFailure)

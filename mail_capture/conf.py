@@ -63,6 +63,14 @@ def access_log_retention_days():
     return _days('CAPTURE_ACCESS_LOG_RETENTION_DAYS', DEFAULT_ACCESS_LOG_RETENTION_DAYS)
 
 
+DEFAULT_ATTENTION_AFTER_ERRORS = 3
+
+
+def attention_after_errors():
+    """Failed runs in a row after which a mailbox needs a person."""
+    return _days('CAPTURE_ATTENTION_AFTER_ERRORS', DEFAULT_ATTENTION_AFTER_ERRORS)
+
+
 def domains_state():
     """Our own domains must be known, and none may be a public suffix or a
     freemail domain (that would make every customer there look internal)."""
