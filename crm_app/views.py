@@ -3183,7 +3183,7 @@ class ContractViewSet(BaseModelViewSet):
             # FULL TEMPLATE MODE: Template contains complete contract text
             # Skip all hardcoded clauses and render only template content
             from crm_app.contract_pdf_v2 import (
-                ContractTailoringClarification, markup_as_text, tailored_template_content,
+                ContractTailoringClarification, tailored_template_content,
             )
             try:
                 source_content, full_body_override = full_template_source(contract)
@@ -3201,7 +3201,6 @@ class ContractViewSet(BaseModelViewSet):
                 field='Contract.preamble_custom' if full_body_override else 'ContractTemplate.content',
                 record=getattr(contract if full_body_override else contract.preamble_template, 'pk', None),
                 pieces=self._template_layout_pieces,
-                fallback=markup_as_text,
             )
             template_content = re.sub(
                 r'\{\{\s*zones_table\s*\}\}',

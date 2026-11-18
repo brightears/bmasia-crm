@@ -11,7 +11,10 @@ import logging
 
 import pytest
 
-from crm_app.contract_pdf_v2 import paragraph_markup, paragraph_text, stored_markup
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.platypus import Paragraph
+
+from crm_app.contract_pdf_v2 import paragraph_markup, stored_markup
 from crm_app.models import Company, Contact, ContractTemplate, CorporatePdfTemplate
 from crm_app.tests.test_contract_pdf_stored_text_escaping import (  # noqa: F401
     CONTACT_EMAIL, CONTACT_NAME, CONTACT_TITLE, _category, _render, agreement,
@@ -32,7 +35,8 @@ def test_well_formed_value_is_guarded_markup(caplog):
 @pytest.mark.parametrize('value', [MALFORMED, '<b>unclosed', 'stray </i> close', '<sub>a<super>b</sub></super>'])
 def test_malformed_value_prints_as_plain_text_and_warns_without_content(value, caplog):
     with caplog.at_level(logging.WARNING, logger='crm_app.contract_pdf_v2'):
-        assert stored_markup(value, field='Contract.payment_custom', record=7) == paragraph_text(value)
+        fallback = stored_markup(value, field='Contract.payment_custom', record=7)
+    assert Paragraph(fallback, ParagraphStyle('t')).getPlainText() == value
     messages = [record.getMessage() for record in caplog.records]
     assert len(messages) == 1
     assert 'Contract.payment_custom' in messages[0] and '7' in messages[0]
@@ -98,12 +102,22 @@ def test_formatting_that_spans_a_line_break_still_renders(agreement):  # noqa: F
 
 
 # Upper case, an attribute, an entity and a bare "&": the fallback prints the
-# stored wording itself, not the guarded form of it.
-MALFORMED_WITH_ENTITIES = 'Fee <B class="x">A &amp; B & C'
+# stored wording itself, not the guarded form of it, and decodes its entities
+# as the markup would have.
+MALFORMED_WITH_ENTITIES = 'Fee <B class="x">A &amp; B & C &lt;D&gt;'
 
 
 def test_malformed_field_falls_back_from_the_stored_wording(agreement):  # noqa: F811
     agreement.payment_custom = MALFORMED_WITH_ENTITIES
     agreement.save()
     text = _render(agreement)
-    assert 'Fee <B class="x">A &amp; B & C' in text
+    assert 'Fee <B class="x">A & B & C <D>' in text
+
+
+def test_fallback_decodes_entities_and_keeps_line_breaks():
+    value = 'One &amp; two <b>open<br/>next &#169; line'
+    fallback = stored_markup(value, field='Contract.payment_custom', record=7)
+    assert fallback.count('<br/>') == 1
+    assert Paragraph(fallback, ParagraphStyle('t')).getPlainText() == 'One & two <b>opennext \u00a9 line'
+    # Applying it again changes nothing.
+    assert stored_markup(fallback, field='Contract.payment_custom', record=7) == fallback
