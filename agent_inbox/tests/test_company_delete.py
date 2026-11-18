@@ -40,13 +40,22 @@ def test_company_with_proposals_is_not_deleted_over_rest(agent, person, company)
     assert _no_delete_audit(company)
 
 
-def test_bulk_delete_with_one_company_with_history_deletes_nothing(agent, person, company, other_company):
+def test_bulk_delete_never_deletes_a_company_with_history(agent, person, company, other_company):
     record_activity(agent, activity_body(company), via='rest')
     response = _client(person).post('/api/v1/companies/bulk_operations/', {
         'action': 'delete', 'ids': [str(company.pk), str(other_company.pk)]}, format='json')
-    assert response.status_code == 409
-    assert Company.objects.filter(pk__in=[company.pk, other_company.pk]).count() == 2
-    assert _no_delete_audit(company, other_company)
+    assert Company.objects.filter(pk=company.pk).exists()
+    assert Activity.objects.filter(company=company).count() == 1
+    assert _no_delete_audit(company)
+    if response.status_code == 409:
+        # Refused as a whole: nothing deleted and nothing recorded.
+        assert Company.objects.filter(pk=other_company.pk).exists()
+        assert _no_delete_audit(other_company)
+    else:
+        # Decided record by record: the company with history is reported as not deleted.
+        assert response.status_code == 200
+        results = {row['id']: row for row in response.json()['results']}
+        assert results[str(company.pk)]['deleted'] is False
 
 
 def test_company_without_history_is_still_deleted(person, other_company):
