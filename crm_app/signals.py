@@ -1,7 +1,7 @@
 """Signals for CRM app"""
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
-from django.utils import timezone
+from .dates import business_today
 from .models import Company, Contract, QuoteLineItem
 import logging
 
@@ -49,7 +49,7 @@ def handle_contract_termination(sender, instance, created, **kwargs):
     # A link ends on the earlier of today and the contract's end date: a term that
     # ended months ago and is cancelled now did not cover its zones until today.
     # Never before the link's own start.
-    end = timezone.now().date()
+    end = business_today()
     if instance.end_date and instance.end_date < end:
         end = instance.end_date
 

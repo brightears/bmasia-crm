@@ -15,10 +15,10 @@ Behaviour:
 from datetime import datetime
 from decimal import Decimal
 
-from django.utils import timezone
 from django.db import transaction
 from dateutil.relativedelta import relativedelta
 
+from crm_app.dates import business_today
 from crm_app.models import Contract
 
 
@@ -100,7 +100,7 @@ def convert_quote_to_contract(quote, overrides=None):
 
     months = int(overrides.get('contract_duration_months')
                  or getattr(quote, 'contract_duration_months', None) or 12)
-    start = _parse_date(overrides.get('start_date')) or quote.valid_from or timezone.now().date()
+    start = _parse_date(overrides.get('start_date')) or quote.valid_from or business_today()
     end = _parse_date(overrides.get('end_date')) or (start + relativedelta(months=months))
 
     line_items = list(quote.line_items.all())
