@@ -60,9 +60,39 @@ def preferred_then_eligible(contacts, kind, prefer, automated=None):
     return emails
 
 
+class NoRecipient(str):
+    """A sender's message when no contact is set to receive this kind of email.
+
+    A str, so a caller that shows or logs the message keeps working, that also
+    carries the reply the API gives for it: 422 with
+    {"code": "no_recipient", "kind", "company_id", "message"}. It is a business
+    refusal, not a server error; screens match on the code, never on the text.
+    """
+    code = 'no_recipient'
+
+    def __new__(cls, company, kind):
+        value = super().__new__(cls, f'No contact of {company.name} is set to receive '
+                                     f'{LABELS.get(kind, kind)} emails.')
+        value.kind = kind
+        value.company_id = str(company.pk)
+        return value
+
+    def body(self):
+        return {'code': self.code, 'kind': self.kind, 'company_id': self.company_id, 'message': str(self)}
+
+
 def no_recipient_message(company, kind):
-    return (f'No contact of {company.name} is set to receive {LABELS.get(kind, kind)} emails. '
-            'Choose the recipients, or switch the email setting on for a contact.')
+    return NoRecipient(company, kind)
+
+
+def no_recipient_response(message):
+    """The API reply for a send that found nobody to send to, or None for any other outcome."""
+    if not isinstance(message, NoRecipient):
+        return None
+    from rest_framework import status
+    from rest_framework.response import Response
+
+    return Response(message.body(), status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
 
 # ------------------------------------------------------------------ per sender
