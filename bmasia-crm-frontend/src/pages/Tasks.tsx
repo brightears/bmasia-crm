@@ -183,9 +183,15 @@ const Tasks: React.FC = () => {
     };
   }, [taskIdFromUrl]);
 
+  // Leaving the task (close, edit or delete) drops it from the address, so a reload or Back
+  // does not reopen it.
+  const leaveTaskAddress = () => {
+    if (taskIdFromUrl) navigate('/tasks', { replace: true });
+  };
+
   const closeTaskDetail = () => {
     setTaskDetailOpen(false);
-    if (taskIdFromUrl) navigate('/tasks', { replace: true });
+    leaveTaskAddress();
   };
 
   useEffect(() => {
@@ -592,10 +598,12 @@ const Tasks: React.FC = () => {
           task={selectedTask}
           onEdit={() => {
             setTaskDetailOpen(false);
+            leaveTaskAddress();
             handleEditTask(selectedTask);
           }}
           onDelete={(taskId) => {
             setTaskDetailOpen(false);
+            leaveTaskAddress();
             handleTaskDelete(taskId);
           }}
           onStatusChange={handleTaskStatusChange}
