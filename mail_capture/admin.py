@@ -1,21 +1,57 @@
-"""Django admin for mail capture: read-mostly.
+"""Django admin for mail capture: superusers only, read-mostly.
 
-Captured data (messages, copies, participants, conversations, matches, the
-queue, runs and the access log) is view-only: no add, change or delete here.
-Configuration (mailboxes, rules, company domains) is editable by staff with
-the model permissions. Saving a rule applies the rules to stored
-mail at once (``purge.enforce_rules``).
+Until per-mailbox visibility is enforced in a real screen, every page of this
+app (captured data and configuration alike) is visible to active superusers
+only. Captured data is view-only: no add, change or delete here.
+Configuration (mailboxes, rules, company domains) is editable by superusers.
+
+* Changing a mailbox's ``enabled``, ``body_mode`` or ``visibility`` (or
+  creating one) is written to the mailbox access log with the actor. A
+  mailbox's address cannot change after it is created.
+* Saving a rule never purges by itself. A rule blocks new capture at once;
+  removing mail already stored needs a second step: the confirmation page
+  shows how many messages, conversations and queue rows would go, and only
+  "Confirm purge" starts it (``purge.confirm_rule`` then ``enforce_rules``,
+  capped per call; later runs continue).
 """
 from django.contrib import admin, messages
+from django.http import HttpResponseRedirect
+from django.shortcuts import get_object_or_404
+from django.template.response import TemplateResponse
+from django.urls import path, reverse
+from django.utils import timezone
 
 from .models import (
-    CaptureMailbox, CaptureRule, CaptureRun, CompanyDomain, MailboxAccessLog, MailboxCopy,
-    MailConversation, MailMatch, MailMessage, MailParticipant, UnmatchedSender,
+    CaptureFailure, CaptureMailbox, CapturePurge, CaptureRule, CaptureRun, CompanyDomain,
+    MailboxAccessLog, MailboxCopy, MailConversation, MailMatch, MailMessage, MailParticipant,
+    UnmatchedSender,
 )
-from .purge import enforce_rules
+from .purge import confirm_rule, enforce_rules, preview_rule
 
 
-class ReadOnlyAdmin(admin.ModelAdmin):
+def _superuser(request):
+    user = request.user
+    return bool(user.is_active and user.is_superuser)
+
+
+class SuperuserAdmin(admin.ModelAdmin):
+    def has_module_permission(self, request):
+        return _superuser(request)
+
+    def has_view_permission(self, request, obj=None):
+        return _superuser(request)
+
+    def has_add_permission(self, request, obj=None):
+        return _superuser(request)
+
+    def has_change_permission(self, request, obj=None):
+        return _superuser(request)
+
+    def has_delete_permission(self, request, obj=None):
+        return _superuser(request)
+
+
+class ReadOnlyAdmin(SuperuserAdmin):
     def has_add_permission(self, request, obj=None):
         return False
 
@@ -26,8 +62,11 @@ class ReadOnlyAdmin(admin.ModelAdmin):
         return False
 
 
+AUDITED_MAILBOX_FIELDS = ('enabled', 'body_mode', 'visibility')
+
+
 @admin.register(CaptureMailbox)
-class CaptureMailboxAdmin(admin.ModelAdmin):
+class CaptureMailboxAdmin(SuperuserAdmin):
     list_display = ('email', 'kind', 'enabled', 'body_mode', 'visibility', 'last_poll_at',
                     'needs_resync', 'consecutive_errors')
     list_filter = ('enabled', 'kind', 'body_mode', 'needs_resync')
@@ -38,31 +77,87 @@ class CaptureMailboxAdmin(admin.ModelAdmin):
         'lease_token', 'lease_expires_at', 'created_at', 'updated_at',
     )
 
+    def get_readonly_fields(self, request, obj=None):
+        fields = tuple(super().get_readonly_fields(request, obj))
+        return fields + ('email',) if obj is not None else fields
+
     def has_delete_permission(self, request, obj=None):
         return False  # switch a mailbox off with "enabled"; its access log must stay
 
+    def save_model(self, request, obj, form, change):
+        old = {}
+        if change and obj.pk:
+            old = CaptureMailbox.objects.filter(pk=obj.pk).values(*AUDITED_MAILBOX_FIELDS).first() or {}
+        super().save_model(request, obj, form, change)
+        actor = f'user:{request.user.pk}'
+        changes = [
+            {'field': name, 'old': old.get(name) if change else None, 'new': getattr(obj, name)}
+            for name in AUDITED_MAILBOX_FIELDS
+            if not change or old.get(name) != getattr(obj, name)
+        ]
+        for item in changes:
+            MailboxAccessLog.objects.create(
+                mailbox=obj, at=timezone.now(), purpose='config', actor=actor, detail=item,
+            )
+
 
 @admin.register(CaptureRule)
-class CaptureRuleAdmin(admin.ModelAdmin):
-    list_display = ('kind', 'value', 'action', 'scope', 'mailbox', 'created_at')
-    list_filter = ('kind', 'action', 'scope')
+class CaptureRuleAdmin(SuperuserAdmin):
+    list_display = ('kind', 'value', 'action', 'scope', 'mailbox', 'purge_state', 'created_at')
+    list_filter = ('kind', 'action', 'scope', 'purge_state')
     search_fields = ('value', 'note')
-    readonly_fields = ('created_by', 'created_at')
+    readonly_fields = ('purge_state', 'confirmed_by', 'confirmed_at', 'purge_done_at',
+                       'created_by', 'created_at', 'updated_at')
+
+    def get_urls(self):
+        return [
+            path('<uuid:rule_id>/confirm-purge/', self.admin_site.admin_view(self.confirm_view),
+                 name='mail_capture_capturerule_confirm'),
+        ] + super().get_urls()
 
     def save_model(self, request, obj, form, change):
         if not obj.created_by_id and request.user.is_authenticated:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
-        counts = enforce_rules()
-        messages.info(
-            request,
-            'Rules applied to stored mail: {purged} messages purged, {copies_dropped} copies '
-            'dropped, {bodies_cleared} bodies cleared, {queue_removed} queue rows removed.'.format(**counts),
+
+    def _confirm_redirect(self, obj):
+        return HttpResponseRedirect(reverse('admin:mail_capture_capturerule_confirm', args=[obj.pk]))
+
+    def response_add(self, request, obj, post_url_continue=None):
+        return self._confirm_redirect(obj)
+
+    def response_change(self, request, obj):
+        if obj.purge_state == 'awaiting_confirmation':
+            return self._confirm_redirect(obj)
+        return super().response_change(request, obj)
+
+    def confirm_view(self, request, rule_id):
+        if not _superuser(request):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        rule = get_object_or_404(CaptureRule.objects.select_related('mailbox'), pk=rule_id)
+        if request.method == 'POST' and request.POST.get('confirm') == 'yes' \
+                and rule.purge_state == 'awaiting_confirmation':
+            confirm_rule(rule, request.user)
+            counts = enforce_rules(rules=[rule], actor=f'user:{request.user.pk}')
+            messages.info(
+                request,
+                'Purge confirmed: {messages} messages, {copies} copies, {queue_rows} queue rows '
+                'removed so far. Any remainder continues on the next runs.'.format(**counts),
+            )
+            return HttpResponseRedirect(reverse('admin:mail_capture_capturerule_changelist'))
+        context = dict(
+            self.admin_site.each_context(request),
+            title='Confirm purge of stored mail',
+            rule=rule,
+            preview=preview_rule(rule),
+            opts=self.model._meta,
         )
+        return TemplateResponse(request, 'admin/mail_capture/confirm_purge.html', context)
 
 
 @admin.register(CompanyDomain)
-class CompanyDomainAdmin(admin.ModelAdmin):
+class CompanyDomainAdmin(SuperuserAdmin):
     list_display = ('domain', 'company', 'is_primary', 'shared_group_domain', 'created_at')
     list_filter = ('shared_group_domain', 'is_primary')
     search_fields = ('domain', 'company__name')
@@ -85,6 +180,9 @@ class MailboxCopyInline(admin.TabularInline):
     def has_add_permission(self, request, obj=None):
         return False
 
+    def has_view_permission(self, request, obj=None):
+        return _superuser(request)
+
 
 class MailParticipantInline(admin.TabularInline):
     model = MailParticipant
@@ -95,6 +193,9 @@ class MailParticipantInline(admin.TabularInline):
 
     def has_add_permission(self, request, obj=None):
         return False
+
+    def has_view_permission(self, request, obj=None):
+        return _superuser(request)
 
 
 @admin.register(MailMessage)
@@ -109,9 +210,9 @@ class MailMessageAdmin(ReadOnlyAdmin):
 
 @admin.register(MailConversation)
 class MailConversationAdmin(ReadOnlyAdmin):
-    list_display = ('subject_normalised', 'company', 'link_state', 'message_count',
+    list_display = ('subject_normalised', 'company', 'link_state', 'is_mixed', 'message_count',
                     'last_message_at', 'last_inbound_at', 'last_outbound_at')
-    list_filter = ('link_state',)
+    list_filter = ('link_state', 'is_mixed')
     search_fields = ('subject_normalised', 'conversation_key')
 
 
@@ -144,12 +245,25 @@ class UnmatchedSenderAdmin(ReadOnlyAdmin):
 @admin.register(CaptureRun)
 class CaptureRunAdmin(ReadOnlyAdmin):
     list_display = ('started_at', 'mailbox', 'kind', 'dry_run', 'outcome', 'fetched', 'stored',
-                    'matched', 'unmatched', 'errors')
+                    'matched', 'unmatched', 'failed', 'errors')
     list_filter = ('kind', 'outcome', 'dry_run')
 
 
 @admin.register(MailboxAccessLog)
 class MailboxAccessLogAdmin(ReadOnlyAdmin):
     list_display = ('at', 'mailbox', 'purpose', 'actor', 'dry_run', 'api_calls', 'messages_read',
-                    'bodies_read')
+                    'bodies_read', 'finished_at')
     list_filter = ('purpose', 'dry_run')
+
+
+@admin.register(CapturePurge)
+class CapturePurgeAdmin(ReadOnlyAdmin):
+    list_display = ('at', 'reason', 'rule', 'mailbox', 'messages', 'copies', 'conversations',
+                    'queue_rows', 'remaining')
+    list_filter = ('reason', 'remaining')
+
+
+@admin.register(CaptureFailure)
+class CaptureFailureAdmin(ReadOnlyAdmin):
+    list_display = ('mailbox', 'gmail_id', 'attempts', 'error', 'parked', 'last_failed_at')
+    list_filter = ('parked', 'error')

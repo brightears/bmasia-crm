@@ -20,7 +20,7 @@ from django.db import transaction
 from django.test.utils import override_settings
 
 from mail_capture import conf
-from mail_capture.gmail_client import FakeGmailClient
+from mail_capture.gmail_client import FakeGmailClient, fake_factory
 from mail_capture.models import (
     CaptureMailbox, CaptureRule, CaptureRun, CompanyDomain, MailboxAccessLog, MailboxCopy,
     MailConversation, MailMatch, MailMessage, MailParticipant, UnmatchedSender,
@@ -118,13 +118,13 @@ class Command(BaseCommand):
             mailboxes[email] = CaptureMailbox.objects.create(email=email, enabled=True, history_id=cursor)
             clients[email] = FakeGmailClient.from_fixture_dir(FIXTURES, email)
 
-        def factory(mailbox):
-            return clients[mailbox.email]
+        factory = fake_factory(clients)
 
         def sync(email, **kwargs):
+            # Fixture rules only (none): real rules and real rows never reach this run.
             return sync_mailbox(
                 mailboxes[email].pk, factory, actor='selfcheck', sleep=lambda s: None,
-                fake_only=True, maintenance=False, **kwargs,
+                fake_only=True, maintenance=False, rules=(), **kwargs,
             )
 
         since = date(2000, 1, 1)

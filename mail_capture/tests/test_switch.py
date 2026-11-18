@@ -85,6 +85,44 @@ class TestDisabled:
         # counts only: no fixture subject or address in the output
         assert 'casey' not in text and 'renewal question' not in text
 
+    def test_selfcheck_python_error_mid_pipeline_leaves_nothing(self, settings, monkeypatch):
+        from mail_capture import sync as sync_module
+        settings.GOOGLE_CAPTURE_ENABLED = False
+        before = _table_counts()
+        companies = Company.objects.count()
+        calls = {'n': 0}
+        real = sync_module._Runner._write_plans
+
+        def boom(self, *args, **kwargs):
+            calls['n'] += 1
+            real(self, *args, **kwargs)
+            if calls['n'] == 2:
+                raise RuntimeError('crash after two pages')
+
+        monkeypatch.setattr(sync_module._Runner, '_write_plans', boom)
+        with pytest.raises(RuntimeError):
+            call_command('mail_capture_selfcheck', stdout=StringIO(), stderr=StringIO())
+        assert calls['n'] == 2
+        assert _table_counts() == before and Company.objects.count() == companies
+
+    def test_selfcheck_database_error_mid_pipeline_leaves_nothing(self, settings, monkeypatch):
+        from django.db import IntegrityError
+        from mail_capture import sync as sync_module
+        from mail_capture.models import CaptureMailbox
+        settings.GOOGLE_CAPTURE_ENABLED = False
+        before = _table_counts()
+        real = sync_module._Runner._lock_for_write
+
+        def bad(self):
+            row = real(self)
+            CaptureMailbox.objects.create(email=self.mailbox.email)   # unique: a real DB error
+            return row
+
+        monkeypatch.setattr(sync_module._Runner, '_lock_for_write', bad)
+        with pytest.raises(IntegrityError):
+            call_command('mail_capture_selfcheck', stdout=StringIO(), stderr=StringIO())
+        assert _table_counts() == before
+
     def test_selfcheck_no_pipeline(self, settings):
         settings.GOOGLE_CAPTURE_ENABLED = False
         out = StringIO()
