@@ -115,6 +115,8 @@ def _count(user_name, url, n_companies, first=0):
 QUERY_CASES = {
     'action_center_admin': ('admin', '/api/v1/action-center/', 10),
     'action_center_sales': ('sales', '/api/v1/action-center/', 12),
+    'dashboard_admin': ('admin', '/api/v1/dashboard/stats/', 46),
+    'dashboard_sales': ('sales', '/api/v1/dashboard/stats/', 46),
 }
 
 
