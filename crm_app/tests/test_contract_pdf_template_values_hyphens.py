@@ -123,6 +123,13 @@ def test_template_hyphens_around_an_empty_value_start_no_page(agreement, mode): 
     assert 'N1:A---B' in _render(agreement)
 
 
+def test_substitution_for_analysis_fills_template_hyphens_as_written(agreement):  # noqa: F811
+    view = ContractViewSet()
+    content = 'A--{{billing_note}}-B'
+    assert view._substitute_template_variables(content, agreement, escape_for_paragraph=False) == 'A---B'
+    assert view._substitute_template_variables(content, agreement) == 'A&#45;&#45;&#45;B'
+
+
 VALUES = {'{{x}}': '', '{{y}}': '', '{{v}}': 'Value'}
 
 
