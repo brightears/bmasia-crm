@@ -44,6 +44,7 @@ import { Quote, QuoteLineItem, Company, Contact, Opportunity } from '../types';
 import ApiService from '../services/api';
 import DocumentIssuerField from './DocumentIssuerField';
 import { documentValidationMessage } from '../utils/documentTailoring';
+import { formatMoney } from '../theme';
 
 // Product options for dropdown
 const PRODUCT_OPTIONS = [
@@ -480,31 +481,11 @@ const QuoteForm: React.FC<QuoteFormProps> = ({
     onClose();
   };
 
-  const getCurrencySymbol = (currency: string): string => {
-    const symbols: { [key: string]: string } = {
-      'USD': '$',
-      'THB': '฿',
-      'EUR': '€',
-      'GBP': '£'
-    };
-    return symbols[currency] || currency;
-  };
+  // Input adornments show the currency code ("THB"), as in the house money format.
+  const getCurrencySymbol = (currency: string): string => currency || 'USD';
 
-  const formatCurrency = (value: number): string => {
-    // Currency locale mapping for proper symbol display
-    const currencyLocaleMap: { [key: string]: string } = {
-      'USD': 'en-US',
-      'THB': 'th-TH',
-      'EUR': 'de-DE',
-      'GBP': 'en-GB'
-    };
-
-    return new Intl.NumberFormat(currencyLocaleMap[formData.currency] || 'en-US', {
-      style: 'currency',
-      currency: formData.currency,
-      minimumFractionDigits: 2,
-    }).format(value);
-  };
+  // House money format, e.g. "THB 108,000".
+  const formatCurrency = (value: number): string => formatMoney(value, formData.currency);
 
   const totals = calculateTotals();
 
