@@ -124,9 +124,26 @@ def expire_due():
     )
 
 
+def _is_due(proposal, now=None):
+    return bool(proposal.expires_at) and proposal.expires_at <= (now or timezone.now())
+
+
+def _store_expired_if_due(proposal):
+    """Store an open proposal that is past its expiry as expired. True when it was."""
+    if proposal.status == OPEN_STATUS and _is_due(proposal):
+        proposal.status = 'expired'
+        proposal.save()
+        return True
+    return False
+
+
+def _expired_error():
+    return ServiceError(409, 'expired', 'Proposal has expired', status='expired')
+
+
 def effective_status(proposal):
     """The status a reader sees: an open proposal past its expiry reads as expired."""
-    if proposal.status == OPEN_STATUS and proposal.expires_at and proposal.expires_at <= timezone.now():
+    if proposal.status == OPEN_STATUS and _is_due(proposal):
         return 'expired'
     return proposal.status
 
@@ -882,10 +899,8 @@ def accept(request, proposal_id, body, *, with_edits=False):
         _require_person(request, proposal)
         _check_seen(proposal, body)
         try:
-            if proposal.expires_at <= timezone.now():
-                proposal.status = 'expired'
-                proposal.save()
-                raise _Refusal(ServiceError(409, 'expired', 'Proposal has expired', status='expired'))
+            if _store_expired_if_due(proposal):
+                raise _Refusal(_expired_error())
             applied = _final_patch(proposal, body, with_edits)
             # The allowlist is checked again: it may have narrowed since the proposal was made.
             _check_fields(proposal.kind, proposal.target_collection, applied)
@@ -918,10 +933,15 @@ def reject(request, proposal_id, body):
             raise ServiceError(409, 'not_open', f'Proposal is {proposal.status}', status=proposal.status)
         _require_person(request, proposal)
         _check_seen(proposal, body)
-        proposal.status = 'rejected'
-        _mark_decided(proposal, request, reason)
-        _history(proposal, 'rejected', request, reason)
-        proposal.save()
+        # Like accept: a proposal past its expiry is stored as expired, not rejected.
+        expired = _store_expired_if_due(proposal)
+        if not expired:
+            proposal.status = 'rejected'
+            _mark_decided(proposal, request, reason)
+            _history(proposal, 'rejected', request, reason)
+            proposal.save()
+    if expired:
+        raise _expired_error()
     return proposal
 
 
@@ -930,23 +950,34 @@ def reopen(request, proposal_id, body):
     _require_person(request)
     strict_object(body, {'note', 'seen_version'}, required=('note', 'seen_version'))
     note = text_field(body, 'note', DECISION_NOTE_MAX, required=True, multiline=True)
+    expired = False
     with transaction.atomic():
         proposal = _locked(proposal_id)
-        if proposal.status != 'rejected':
-            raise ServiceError(409, 'not_rejected', f'Only a rejected proposal can be reopened; this one is '
-                                                    f'{proposal.status}', status=proposal.status)
-        _require_person(request, proposal)
-        _check_seen(proposal, body)
-        if ChangeProposal.objects.filter(fingerprint=proposal.fingerprint, status=OPEN_STATUS).exists():
-            raise ServiceError(409, 'duplicate_open', 'The same change is already waiting for review')
-        _history(proposal, 'reopened', request, note)
-        proposal.status = OPEN_STATUS
-        proposal.reviewer = None
-        proposal.reviewer_username = ''
-        proposal.reviewed_at = None
-        proposal.decision_note = ''
-        proposal.expires_at = timezone.now() + timedelta(days=policy.proposal_expiry_days())
-        proposal.save()
+        if proposal.status == OPEN_STATUS and _is_due(proposal):
+            # Reads show it as expired: store that and refuse, as accept and reject do.
+            _require_person(request, proposal)
+            expired = _store_expired_if_due(proposal)
+        else:
+            if proposal.status != 'rejected':
+                raise ServiceError(409, 'not_rejected', f'Only a rejected proposal can be reopened; this one is '
+                                                        f'{proposal.status}', status=proposal.status)
+            _require_person(request, proposal)
+            _check_seen(proposal, body)
+            # An open twin past its expiry no longer counts as waiting for review.
+            twins = ChangeProposal.objects.select_for_update().filter(
+                fingerprint=proposal.fingerprint, status=OPEN_STATUS)
+            if [twin for twin in twins if not _store_expired_if_due(twin)]:
+                raise ServiceError(409, 'duplicate_open', 'The same change is already waiting for review')
+            _history(proposal, 'reopened', request, note)
+            proposal.status = OPEN_STATUS
+            proposal.reviewer = None
+            proposal.reviewer_username = ''
+            proposal.reviewed_at = None
+            proposal.decision_note = ''
+            proposal.expires_at = timezone.now() + timedelta(days=policy.proposal_expiry_days())
+            proposal.save()
+    if expired:
+        raise _expired_error()
     return proposal
 
 
@@ -979,6 +1010,9 @@ def bulk_reject(request, body):
             if seen != seen_version(proposal):
                 skipped.append({'id': proposal_id, 'status': proposal.status, 'code': 'stale_view',
                                 'seen_version': seen_version(proposal)})
+                continue
+            if _store_expired_if_due(proposal):
+                skipped.append({'id': proposal_id, 'status': 'expired', 'code': 'expired'})
                 continue
             proposal.status = 'rejected'
             _mark_decided(proposal, request, reason)
