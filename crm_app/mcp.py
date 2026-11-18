@@ -2378,4 +2378,254 @@ def _get_system_user():
         return SimpleNamespace(is_authenticated=False, pk=None)
 
 
+# ============================================================
+# Activity log and review queue (agent_inbox app)
+# ============================================================
+# The tool bodies live in agent_inbox/mcp_tools.py; validation, switches and
+# the proposal allowlist in agent_inbox/policy.py. These tools, their query
+# collections and their instructions are registered only while their switch
+# (AGENT_ACTIVITY_WRITES_ENABLED, CHANGE_PROPOSALS_ENABLED) is on, so with both
+# off the server offers exactly what it offered before this app existed.
+
+from agent_inbox import mcp_tools as _inbox_tools
+from agent_inbox import policy as _inbox_policy
+
+_INBOX_ACTIVITY_INSTRUCTIONS = """
+- `log_activity(...)` records one interaction with a customer (email, call, meeting,
+  chat, note, document) on the company's timeline. Idempotent per idempotency_key.
+- Query collection `activity` (published fields only; bodies are not published)."""
+
+_INBOX_PROPOSAL_INSTRUCTIONS = """
+- `propose_change(...)` suggests a change to a company, contact or new contact/task.
+  A proposal is never applied automatically: a person accepts or rejects it on the
+  CRM website. The evidence_quote must be copied verbatim from the source.
+- `list_proposals(...)` shows your own proposals and how they were decided.
+- Query collection `changeproposal` (published fields only; proposed values are not published)."""
+
+
+def _inbox_instructions():
+    parts = []
+    if _inbox_policy.activity_writes_enabled():
+        parts.append(_INBOX_ACTIVITY_INSTRUCTIONS)
+    if _inbox_policy.proposals_enabled():
+        parts.append(_INBOX_PROPOSAL_INSTRUCTIONS)
+    return '### Activity log and change proposals' + ''.join(parts) if parts else ''
+
+
+def _activity_query_toolset():
+    from agent_inbox.models import Activity
+
+    class ActivityQuery(_CaseInsensitiveFilters, ModelQueryToolset):
+        model = Activity
+        # Not published: body and participants (free text and third-party addresses),
+        # source_url, recorded_by (user model), idempotency_key and payload hash.
+        fields = [
+            'id', 'company', 'contact', 'contract', 'quote', 'opportunity',
+            'kind', 'direction', 'occurred_at', 'summary', 'source_system', 'source_ref',
+            'recorded_by_username', 'recorded_via', 'is_void', 'created_at', 'updated_at',
+        ]
+        search_fields = ['summary']
+        extra_instructions = (
+            "Customer interactions logged by agents and people (log_activity). kind: email, call, meeting, "
+            "chat, note, document, other. direction: inbound, outbound, internal. Leave out is_void=true rows. "
+            "summary is one line; the full body is not published here."
+        )
+
+    return ActivityQuery
+
+
+def _changeproposal_query_toolset():
+    from agent_inbox.models import ChangeProposal
+
+    class ChangeProposalQuery(_CaseInsensitiveFilters, ModelQueryToolset):
+        model = ChangeProposal
+        # Not published: patch, applied_patch and current_values (unreviewed values),
+        # evidence_quote, rationale and decision_note (free text), user relations.
+        fields = [
+            'id', 'company', 'target_collection', 'target_id', 'kind', 'status', 'proposer_username',
+            'proposer_kind', 'evidence_verified', 'confidence', 'batch_key',
+            'reviewed_at', 'expires_at', 'created_at', 'updated_at',
+            # The link to the evidence activity is published with the activity collection.
+            *(['activity'] if _inbox_policy.activity_writes_enabled() else []),
+        ]
+        search_fields = []
+        extra_instructions = (
+            "Proposed record changes waiting for or decided by a person. status: proposed, accepted, edited, "
+            "rejected, expired, superseded, failed. Use list_proposals for the values and outcome of your own."
+        )
+
+    return ChangeProposalQuery
+
+
+def log_activity(
+    company_id: str,
+    kind: str,
+    direction: str,
+    occurred_at: str,
+    summary: str,
+    idempotency_key: str,
+    source_system: str = 'agent',
+    body: str = '',
+    contact_id: str = '',
+    contract_id: str = '',
+    quote_id: str = '',
+    opportunity_id: str = '',
+    participants_json: str = '',
+    source_ref: str = '',
+    source_url: str = '',
+) -> str:
+    """Record one interaction with a customer on the company's timeline.
+
+    Use it whenever you sent, received or took part in an email, call, meeting,
+    chat or document exchange with a customer, or need to leave a dated note on
+    the customer record. It records what happened; it changes no other record.
+    To suggest a change to a company, contact or task, use propose_change.
+
+    Args:
+        company_id: UUID of the customer's company (required; query company first).
+        kind: email, call, meeting, chat, note, document or other.
+        direction: inbound (from the customer), outbound (to the customer) or internal.
+        occurred_at: ISO 8601 time with timezone, e.g. 2026-11-18T09:30:00+07:00.
+        summary: One plain-text line, at most 500 characters.
+        idempotency_key: 8-200 characters of [A-Za-z0-9:._-], unique for this activity.
+            Retrying with the same key and the same arguments returns the stored row;
+            the same key with different arguments is refused.
+        source_system: gmail, google_chat, calendar, phone, sheet, drive, agent or other
+            (manual and crm are for text a person entered on the website).
+        body: Optional plain text (at most 20,000 characters). Not shown to other agents.
+        contact_id, contract_id, quote_id, opportunity_id: Optional UUIDs of the same company.
+        participants_json: Optional JSON list of {"name", "address", "role"}; role is from,
+            to, cc, bcc, attendee, organizer, caller, callee or other.
+        source_ref: Optional id in the source system. For gmail it must be the message's
+            RFC 822 Message-ID header (e.g. <CAB12345@mail.example.com>), not a Gmail API
+            id. One live activity per company and source_ref.
+        source_url: Optional http(s) link to the source.
+
+    Returns: JSON {"ok": true, "id", "replayed", ...} or {"ok": false, "status", "code", "detail"}.
+    Sends nothing.
+    """
+    return _inbox_tools.log_activity(
+        company_id=company_id, kind=kind, direction=direction, occurred_at=occurred_at,
+        summary=summary, idempotency_key=idempotency_key, source_system=source_system, body=body,
+        contact_id=contact_id, contract_id=contract_id, quote_id=quote_id,
+        opportunity_id=opportunity_id, participants_json=participants_json,
+        source_ref=source_ref, source_url=source_url,
+    )
+
+
+def propose_change(
+    kind: str,
+    patch_json: str,
+    evidence_quote: str = '',
+    target_collection: str = '',
+    target_id: str = '',
+    company_id: str = '',
+    activity_id: str = '',
+    rationale: str = '',
+    evidence_source_system: str = '',
+    evidence_source_ref: str = '',
+    evidence_source_url: str = '',
+    evidence_occurred_at: str = '',
+    proposer_kind: str = '',
+    model: str = '',
+    prompt_version: str = '',
+    confidence: float = -1.0,
+    batch_key: str = '',
+) -> str:
+    """Propose a change to a CRM record for a person to review. Never applied automatically.
+
+    Use it when a source (an email, chat, call, sheet row or conversation) suggests
+    that a company's or contact's details are out of date, that a new contact should
+    be added, that notes should be added, or that a follow-up task is needed, and no
+    person has checked it yet. The proposal waits in the review queue; a person
+    accepts, edits or rejects it on the CRM website, and only then is the record
+    changed. Keep using update_record for changes you are already allowed to make
+    directly, for example a correction a person has asked you to make. Proposing
+    nothing is fine when the source is unclear: never guess a value.
+
+    Allowed (anything else is refused):
+        kind=field_update, target_collection=contact: name, email, phone, mobile, title,
+            department, preferred_contact_method, linkedin_url. The email of a contact
+            that receives invoices or payment emails, or is the billing or primary
+            contact, is changed by a person only.
+        kind=field_update, target_collection=company: phone, email, website, address_line1,
+            address_line2, city, state, postal_code, country.
+        kind=note, target_collection=company or contact: {"notes": "<text to append>"}.
+        kind=new_contact (company_id required): name and email required; phone, mobile,
+            title, department, preferred_contact_method, linkedin_url, notes. The new
+            contact receives no automated or document emails until a person sets that.
+        kind=task (company_id required): title required; description, priority (Low,
+            Medium, High, Urgent), task_type, due_date, related_contact, related_contract,
+            related_opportunity.
+        Never: contract, quote or invoice fields, status, money, dates of a term,
+        company identity or billing fields, deletes or merges.
+
+    Args:
+        kind: field_update, note, new_contact or task.
+        patch_json: JSON object of field -> proposed value (strings or null).
+        evidence_quote: Required for agents and AI. Copy the exact words from the source
+            that support the change, verbatim: no paraphrase, no translation. When
+            activity_id points to your logged activity with a body, the quote must occur
+            in it word for word (whitespace may differ) or the proposal is refused.
+        target_collection, target_id: The record to change (company or contact UUID)
+            for field_update and note. Leave target_id empty for new_contact and task.
+        company_id: The company for new_contact and task (optional check otherwise).
+        activity_id: An activity you logged yourself that the evidence comes from.
+            Its source becomes the evidence source.
+        rationale: One or two sentences on why.
+        evidence_source_system / evidence_source_ref / evidence_source_url /
+            evidence_occurred_at: Where and when the source said it, when it is not a
+            logged activity (for gmail the ref is the RFC 822 Message-ID).
+        proposer_kind: agent (default for agent accounts) or ai (an automated model step).
+        model, prompt_version: For AI steps, the model and prompt version used.
+        confidence: 0 to 1; leave at -1 when you have none.
+        batch_key: Groups proposals from one source so a reviewer sees them together.
+
+    Returns: JSON {"ok": true, "id", "status": "proposed", "replayed"} or a refusal with a
+    code such as field_not_allowed, quote_not_verbatim, activity_not_usable,
+    duplicate_open, previously_rejected, person_only_change, no_change or daily_cap.
+    Refused attempts count towards your daily cap. Do not raise a rejected change again.
+    """
+    return _inbox_tools.propose_change(
+        kind=kind, patch_json=patch_json, evidence_quote=evidence_quote,
+        target_collection=target_collection, target_id=target_id, company_id=company_id,
+        activity_id=activity_id, rationale=rationale, evidence_source_system=evidence_source_system,
+        evidence_source_ref=evidence_source_ref, evidence_source_url=evidence_source_url,
+        evidence_occurred_at=evidence_occurred_at, proposer_kind=proposer_kind, model=model,
+        prompt_version=prompt_version, confidence=confidence, batch_key=batch_key,
+    )
+
+
+def list_proposals(status: str = '', batch_key: str = '', since: str = '', limit: int = 50) -> str:
+    """List your own change proposals and how a person decided them. Read-only.
+
+    Use it to see whether your proposals were accepted, edited or rejected (with the
+    reviewer's note), so you do not raise a rejected change again and can learn
+    which evidence reviewers accept.
+
+    Args:
+        status: Optional comma list: proposed, accepted, edited, rejected, expired,
+            superseded, failed.
+        batch_key: Optional batch to show.
+        since: Optional ISO 8601 time; default the last 90 days (by last change).
+        limit: 1-100, newest first (default 50).
+    """
+    return _inbox_tools.list_proposals(status=status, batch_key=batch_key, since=since, limit=limit)
+
+
+_inbox_tools.configure(
+    mcp_server,
+    tools={
+        'log_activity': (log_activity, _inbox_policy.activity_writes_enabled),
+        'propose_change': (propose_change, _inbox_policy.proposals_enabled),
+        'list_proposals': (list_proposals, _inbox_policy.proposals_enabled),
+    },
+    toolsets={
+        'ActivityQuery': (_activity_query_toolset, _inbox_policy.activity_writes_enabled),
+        'ChangeProposalQuery': (_changeproposal_query_toolset, _inbox_policy.proposals_enabled),
+    },
+    instructions=_inbox_instructions,
+)
+
+
 logger.info("BMAsia CRM MCP tools registered successfully.")

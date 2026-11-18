@@ -44,6 +44,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
+import { formatMoney } from '../theme';
 
 // Backend Cash Flow response interface
 interface CashFlowResponse {
@@ -92,15 +93,8 @@ interface TrendData {
 }
 
 // Format currency
-const formatCurrency = (amount: number, currency: string = 'THB') => {
-  const locale = currency === 'THB' ? 'th-TH' : currency === 'USD' ? 'en-US' : 'en-US';
-  return new Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency: currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
-};
+// House money format, e.g. "THB 108,000" (was Intl with a currency symbol).
+const formatCurrency = (amount: number, currency: string = 'THB') => formatMoney(Math.round(amount), currency); // whole units, as before
 
 // KPI Card Component
 interface KPICardProps {
@@ -377,7 +371,7 @@ interface TrendChartProps {
 }
 
 const TrendChart: React.FC<TrendChartProps> = ({ data, currency }) => {
-  const currencySymbol = currency === 'THB' ? '฿' : '$';
+  const currencySymbol = `${currency} `;
 
   return (
     <Card>

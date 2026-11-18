@@ -426,8 +426,9 @@ class ApiService {
     return response.data;
   }
 
-  async markInvoicePaid(id: string, data?: { payment_method?: string; transaction_id?: string; notes?: string }): Promise<any> {
-    const response = await authApi.post(`/invoices/${id}/mark_paid/`, data);
+  /** Records a payment once. The server answers 409 if the invoice is already Paid. */
+  async markInvoicePaid(id: string, data: MarkInvoicePaidData): Promise<MarkInvoicePaidResult> {
+    const response = await authApi.post<MarkInvoicePaidResult>(`/invoices/${id}/mark_paid/`, data);
     return response.data;
   }
 
@@ -464,11 +465,6 @@ class ApiService {
 
   async sendReceiptEmail(invoiceId: string, data: EmailSendData): Promise<void> {
     await authApi.post(`/invoices/${invoiceId}/send-receipt/`, data);
-  }
-
-  async addInvoicePayment(invoiceId: string, data: Partial<any>): Promise<any> {
-    const response = await authApi.post(`/invoices/${invoiceId}/payments/`, data);
-    return response.data;
   }
 
   async getInvoiceStats(): Promise<any> {
@@ -567,21 +563,6 @@ class ApiService {
   async getQuoteStats(): Promise<any> {
     const response = await authApi.get('/quotes/stats/');
     return response.data;
-  }
-
-  async addQuoteAttachment(quoteId: string, file: File): Promise<any> {
-    const formData = new FormData();
-    formData.append('file', file);
-    const response = await authApi.post(`/quotes/${quoteId}/attachments/`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-    return response.data;
-  }
-
-  async deleteQuoteAttachment(quoteId: string, attachmentId: string): Promise<void> {
-    await authApi.delete(`/quotes/${quoteId}/attachments/${attachmentId}/`);
   }
 
   // User Management
@@ -1880,6 +1861,27 @@ class ApiService {
     });
     return response.data;
   }
+}
+
+export interface MarkInvoicePaidData {
+  /** Date the money arrived, YYYY-MM-DD; the server uses today when it is left out. */
+  paid_date?: string;
+  /** true emails the receipt to the customer; false or left out sends nothing. */
+  send_receipt: boolean;
+  payment_method?: string;
+  transaction_id?: string;
+  /** Kept in the audit log, not on the invoice. */
+  notes?: string;
+}
+
+export interface MarkInvoicePaidResult {
+  message: string;
+  receipt_number: string;
+  paid_date: string;
+  /** true when the invoice was already Paid and only got its receipt number now */
+  receipt_only?: boolean;
+  /** 'not_requested', 'sent' or 'failed: …' */
+  receipt_email_status: string;
 }
 
 export interface EmailSendData {
