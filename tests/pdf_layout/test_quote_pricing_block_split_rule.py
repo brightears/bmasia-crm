@@ -437,3 +437,34 @@ def test_row_counter_treats_an_exact_fit_as_fitting():
         [Spacer(1, 100 + 2 * _FUZZ), table], width, 100,
     )
     assert (before, after, crossing, placed, offered) == (0, 5, None, 0, 100)
+
+
+@pytest.mark.parametrize("row_count, one_time, currency", [(1, 0, None), (6, 2, None), (12, 0, "USD")])
+def test_pricing_block_flowables_carry_no_space_before_or_after(row_count, one_time, currency):
+    # The row counter lays the block out without space before or after each
+    # flowable, while the block measurement counts it; both agree only while
+    # the block's flowables carry none.
+    seen = {}
+    real = quote_pdf.section_block
+
+    def spy(number, title, body, styles, minimum_following_height=72):
+        flowables = real(number, title, body, styles, minimum_following_height)
+        seen["block"] = flowables[1:]
+        return flowables
+
+    with mock.patch.object(quote_pdf, "section_block", spy):
+        quote_pdf.build_quote_pdf_v2(
+            _quote(row_count, 4, one_time, currency=currency),
+            ENTITY,
+            str(LOGO),
+            format_address_multiline,
+            format_duration,
+            preview=True,
+        )
+    width = commercial_pdf.CONTENT_WIDTH
+    spaced = []
+    for flowable in seen["block"]:
+        flowable.wrap(width, commercial_pdf.PAGE_HEIGHT)
+        if flowable.getSpaceBefore() or flowable.getSpaceAfter():
+            spaced.append((type(flowable).__name__, flowable.getSpaceBefore(), flowable.getSpaceAfter()))
+    assert seen["block"] and spaced == []
