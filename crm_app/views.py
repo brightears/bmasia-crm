@@ -4280,8 +4280,11 @@ and<br/><br/>
             # A render error is reported, never replaced by another document.
             try:
                 return self._generate_hilton_combined_pdf(contract)
-            except Exception:
-                logger.exception('Corporate participation PDF failed for contract %s', contract.pk)
+            except Exception as exc:
+                # Type and stage only: the error text and a traceback can
+                # carry the document's wording.
+                logger.error('Corporate participation PDF failed for contract %s in the combined format render (%s)',
+                             contract.pk, type(exc).__name__)
                 return Response({
                     'error': 'The corporate participation agreement could not be generated.',
                     'code': 'CONTRACT_PDF_RENDER_FAILED',

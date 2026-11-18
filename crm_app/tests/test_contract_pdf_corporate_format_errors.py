@@ -7,6 +7,7 @@ template falls back to the standard format.
 
 All fixtures are synthetic.
 """
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -28,7 +29,7 @@ def _response(agreement):
     return view.pdf(view.request, pk=agreement.pk)
 
 
-def test_render_error_in_the_corporate_format_is_reported(agreement, monkeypatch):  # noqa: F811
+def test_render_error_in_the_corporate_format_is_reported(agreement, monkeypatch, caplog):  # noqa: F811
     _corporate(agreement, warranty_text='Example warranty.')
     agreement.save()
 
@@ -39,11 +40,19 @@ def test_render_error_in_the_corporate_format_is_reported(agreement, monkeypatch
     standard = []
     monkeypatch.setattr(ContractViewSet, '_contract_v2_response',
                         lambda self, *args, **kwargs: standard.append(args) or None)
-    response = _response(agreement)
+    with caplog.at_level(logging.ERROR, logger='crm_app.views'):
+        response = _response(agreement)
     assert response.status_code == 500
     assert response.data['code'] == 'CONTRACT_PDF_RENDER_FAILED'
     assert 'example layout failure' not in str(response.data)
     assert not standard
+    # The log names the contract, the stage and the error type; never the
+    # error message or a traceback, which can carry document wording.
+    records = [r for r in caplog.records if r.name == 'crm_app.views']
+    assert len(records) == 1 and not records[0].exc_info
+    message = records[0].getMessage()
+    assert str(agreement.pk) in message and 'RuntimeError' in message and 'combined format' in message
+    assert 'example layout failure' not in caplog.text
 
 
 def test_corporate_parent_without_a_template_uses_the_standard_format(agreement):  # noqa: F811
