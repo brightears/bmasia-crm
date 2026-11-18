@@ -174,3 +174,83 @@ def test_section_block_reserves_the_measured_height_only_when_it_fits_one_page()
         minimum_following_height=125,
     )
     assert nested[0].height == 125
+
+
+# The limit is one continuation frame (the shorter first-page frame would
+# reject blocks that do fit a later page), and both comparisons are inclusive.
+def _boundary_texts(story):
+    from crm_app.commercial_pdf import build_document_pdf
+
+    pdf = build_document_pdf(
+        story, document_title="Example", document_id="EX-0001", entity=ENTITY,
+    )
+    return [" ".join((page.extract_text() or "").split()) for page in PdfReader(BytesIO(pdf)).pages]
+
+
+def _continuation_height():
+    from crm_app.commercial_pdf import CONTINUATION_PAGE_TOP, PAGE_BOTTOM
+
+    return PAGE_HEIGHT - CONTINUATION_PAGE_TOP - PAGE_BOTTOM
+
+
+def _first_page_height():
+    from crm_app.commercial_pdf import FIRST_PAGE_TOP, PAGE_BOTTOM
+
+    return PAGE_HEIGHT - FIRST_PAGE_TOP - PAGE_BOTTOM
+
+
+def _block_of_height(height, styles):
+    from crm_app.commercial_pdf import CONTENT_WIDTH, section_block, section_heading
+
+    heading = section_heading("01", "Block", styles).wrap(CONTENT_WIDTH, PAGE_HEIGHT)[1]
+    return section_block(
+        "01", "Block", [Spacer(1, height - heading)], styles, minimum_following_height=125,
+    )
+
+
+def test_continuation_frame_is_taller_than_the_first_page_frame():
+    # Otherwise the next two tests could not tell the two limits apart.
+    assert _first_page_height() < _continuation_height()
+
+
+@pytest.mark.parametrize("shortfall", [0, 0.01])
+def test_block_exactly_one_continuation_page_tall_moves_whole_without_a_blank_page(shortfall):
+    styles = document_styles()
+    height = _continuation_height() - shortfall
+    block = _block_of_height(height, styles)
+
+    # Measured reservation, not the 125 pt fallback: <= at the page limit.
+    assert block[0].height == pytest.approx(height)
+    texts = _boundary_texts([
+        Paragraph("STARTMARK", styles["body"]),
+        *block,
+        Paragraph("AFTERMARK", styles["body"]),
+    ])
+    assert len(texts) == 3
+    assert "STARTMARK" in texts[0] and "Block" not in texts[0]
+    assert "Block" in texts[1] and "AFTERMARK" not in texts[1]
+    assert "AFTERMARK" in texts[2]
+
+
+def test_block_just_taller_than_a_continuation_page_falls_back_to_the_reservation():
+    styles = document_styles()
+    block = _block_of_height(_continuation_height() + 0.01, styles)
+
+    assert type(block[0]) is CondPageBreak
+    assert block[0].height == 125
+
+
+@pytest.mark.parametrize("slack, stays", [(0, True), (0.001, True), (-0.001, False), (-1, False)])
+def test_block_exactly_filling_the_remaining_space_stays(slack, stays):
+    styles = document_styles()
+    block = _block_of_height(200, styles)
+    need = block[0].height
+    assert need == pytest.approx(200)
+
+    texts = _boundary_texts([
+        Spacer(1, _first_page_height() - need - slack),
+        *block,
+        Paragraph("AFTERMARK", styles["body"]),
+    ])
+    assert ("Block" in texts[0]) is stays
+    assert ("Block" in texts[1]) is not stays
