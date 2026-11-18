@@ -866,7 +866,7 @@ class ContactViewSet(BaseModelViewSet):
 
 class NoteViewSet(BaseModelViewSet):
     """ViewSet for Note management"""
-    queryset = Note.objects.all()
+    queryset = Note.objects.select_related('author', 'company', 'contact')
     serializer_class = NoteSerializer
     search_fields = ['title', 'text', 'tags']
     ordering_fields = ['created_at', 'priority', 'note_type']
