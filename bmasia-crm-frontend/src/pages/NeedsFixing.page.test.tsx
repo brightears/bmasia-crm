@@ -74,8 +74,11 @@ const page = (key: string, rows: any[], count = rows.length) => {
 };
 
 let location: any;
+// Every address the page has been at (a replace gives a new key), to catch update loops.
+let addresses = new Set<string>();
 const Where: React.FC = () => {
   location = useLocation();
+  addresses.add(location.key);
   return null;
 };
 
@@ -205,6 +208,20 @@ it('moves a page past the end to the last page', async () => {
   renderAt('/needs-fixing/contract_active_past_end?page=4');
   await waitFor(() => expect(location.search).toBe(''));
   expect(await screen.findByRole('link', { name: 'TH-CT26001' })).toBeInTheDocument();
+});
+
+it('does not loop when the last page comes back empty', async () => {
+  // 30 records at 25 per page: page 2 is the last page, but it comes back empty.
+  checkPage.mockImplementation((key: string, opts: any) =>
+    Promise.resolve({ ...page('contract_active_past_end', [], 30), page: opts.page })
+  );
+  addresses = new Set<string>();
+  renderAt('/needs-fixing/contract_active_past_end?page=2');
+  await waitFor(() => expect(checkPage).toHaveBeenCalled());
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(location.search).toBe('?page=2');
+  expect(addresses.size).toBe(1);
+  expect(checkPage).toHaveBeenCalledTimes(1);
 });
 
 it('ignores a company or owner in the address that is not an id', async () => {

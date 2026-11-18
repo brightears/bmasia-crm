@@ -174,7 +174,10 @@ const NeedsFixing: React.FC = () => {
   // A page past the end (records were fixed since the link was made) moves to the last page.
   useEffect(() => {
     if (data && data.key === key && data.count > 0 && data.rows.length === 0 && page > 0) {
-      list.set('page', Math.max(0, Math.ceil(data.count / size) - 1));
+      const last = Math.max(0, Math.ceil(data.count / size) - 1);
+      // Only ever move once: if the count and the rows disagree (a record fixed between the
+      // two queries), the last page itself can come back empty, and must not be set again.
+      if (page !== last) list.set('page', last);
     }
   }, [data, key, page, size, list]);
 
