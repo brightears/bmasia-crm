@@ -29,13 +29,18 @@ it would hide a change to an existing field; regenerate instead.
 Regenerating the golden bodies
 ------------------------------
 Only legitimate when a change to existing values is intended and reviewed, or after a
-fixture change. Generate from the code BEFORE your behaviour change (check out main),
-never from the code under test, or the test only pins what the new code does:
+fixture change. Generate from the code BEFORE your behaviour change, never from the code
+under test, or the test only pins what the new code does. Do not use git stash for it:
+several worktrees share one stash. Either commit the fixture change on its own, regenerate
+on that commit and only then make the behaviour change, or use a second worktree:
 
-    git stash / git checkout main        # the code whose answers you want to keep
+    git worktree add ../goldens-old <commit before the change>
+    cp crm_app/tests/list_endpoint_fixture.py ../goldens-old/crm_app/tests/   # if the fixture changed
+    cd ../goldens-old
     REGENERATE_LIST_GOLDENS=1 DATABASE_URL=postgres://... pytest crm_app/tests/test_list_endpoint_responses.py -k bodies
     REGENERATE_LIST_GOLDENS=1 pytest crm_app/tests/test_list_endpoint_responses.py -k bodies   # SQLite, second
-    git checkout -                        # back to your change; the test must now pass
+    cd - && cp -R ../goldens-old/crm_app/tests/golden/list_endpoints crm_app/tests/golden/
+    git worktree remove ../goldens-old    # the test must now pass on your change
 
 PostgreSQL writes the common files; SQLite then writes a copy under sqlite/ only where its
 body differs (the old code sums money in the database, and SQLite returns those sums as

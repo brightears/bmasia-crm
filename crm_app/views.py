@@ -7815,18 +7815,22 @@ class ActionCenterViewSet(viewsets.ViewSet):
         """Look up the contact of many companies at once (two queries, not two per item).
 
         Same rule as before: the company's first active primary contact by name, else its
-        first active contact by name. Kept for the rest of this request.
+        first active contact by name; among equal names, the lowest id. Kept for the rest of
+        this request.
         """
         cache = self.__dict__.setdefault('_primary_contacts', {})
         ids = {company.pk for company in companies if company is not None} - set(cache)
         if not ids:
             return
         found = {}
-        for contact in Contact.objects.filter(company_id__in=ids, is_primary=True, is_active=True):
+        # By name, then id, so that two contacts with the same name never swap between requests.
+        for contact in Contact.objects.filter(company_id__in=ids, is_primary=True,
+                                              is_active=True).order_by('name', 'pk'):
             found.setdefault(contact.company_id, contact)
         missing = ids - set(found)
         if missing:
-            for contact in Contact.objects.filter(company_id__in=missing, is_active=True):
+            for contact in Contact.objects.filter(company_id__in=missing,
+                                                  is_active=True).order_by('name', 'pk'):
                 found.setdefault(contact.company_id, contact)
         for pk in ids:
             cache[pk] = found.get(pk)

@@ -46,7 +46,35 @@ def build_today_dataset(n_companies, first=0):
         tick()
         for i in range(first, first + n_companies):
             _company(i, admin, sales, tick)
+        if first == 0:
+            _company_with_inactive_contacts_only(admin, tick)
     return admin, sales
+
+
+def _company_with_inactive_contacts_only(admin, tick):
+    """Contacts exist but none is active, so the first-active-contact fallback finds none."""
+    company = Company.objects.create(id=uid('company', 900), name='Todayco inactive contacts',
+                                     billing_entity='BMAsia Limited')
+    tick()
+    for k, primary in enumerate([True, False]):
+        Contact.objects.create(
+            id=uid('contact', 9000 + k), company=company, name=f'Former contact {k}',
+            email=f'former{k}@example.com', is_primary=False, is_active=False,
+            unsubscribe_token=f'today-former-{k}')
+        if primary:
+            Contact.objects.filter(pk=uid('contact', 9000 + k)).update(is_primary=True)
+        tick()
+    Task.objects.create(
+        id=uid('task', 9000), company=company, title='Task inactive contacts overdue',
+        assigned_to=admin, created_by=admin, priority='Urgent', status='To Do', task_type='Call',
+        due_date=_at(date(2026, 11, 18) - timedelta(days=30), 7, 7))
+    tick()
+    Invoice.objects.create(
+        id=uid('invoice', 9000), company=company, invoice_number='HK-INV899990', status='Sent',
+        issue_date=date(2026, 7, 1), due_date=date(2026, 10, 2), amount=Decimal('99.00'),
+        tax_amount=Decimal('0.00'), discount_amount=Decimal('0.00'), total_amount=Decimal('0'),
+        currency='USD')
+    tick()
 
 
 def _company(i, admin, sales, tick):

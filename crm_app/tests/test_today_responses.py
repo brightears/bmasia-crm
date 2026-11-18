@@ -6,8 +6,11 @@ Today task rules of PR 57), from today_fixture.py, read at a fixed moment, and a
 compared byte for byte.
 
 Regenerating them is legitimate only when a change to the answers is intended and
-reviewed, and must be done from the code BEFORE that change (see the procedure in
-test_list_endpoint_responses.py; the switch here is REGENERATE_TODAY_GOLDENS=1).
+reviewed, and must be done from the code BEFORE that change, in a second worktree or on a
+commit that holds only the fixture change, never with git stash (see the procedure in
+test_list_endpoint_responses.py; the switch here is REGENERATE_TODAY_GOLDENS=1). They were
+last regenerated when the company with only inactive contacts joined the fixture, from the
+code before the name-then-id tie-break (a506ace); that company's contacts do not tie.
 PostgreSQL writes the common files, SQLite a copy under sqlite/ where its body differs
 (opportunities with no expected value sort first on PostgreSQL and last on SQLite, and the
 old code sums some money in the database).
@@ -128,3 +131,32 @@ def test_query_count_does_not_grow_with_items(name):
     large = _count(user_name, url, 8, first=4)  # now 12 companies, three times the items
     assert large == small, (name, small, large)
     assert large == exact, (name, large)
+
+
+def test_two_primaries_with_the_same_name_resolve_to_the_lowest_id():
+    """Today, the company list and the company page pick the same contact when two active
+    primaries share a name: the one with the lowest id (before, the database chose)."""
+    import uuid
+    from datetime import datetime, timezone as dt_timezone
+
+    from crm_app.models import Company, Contact, Task, User
+
+    admin = User.objects.create(username='tie-admin', role='Admin')
+    company = Company.objects.create(name='Tied primaries', billing_entity='BMAsia Limited')
+    low, high = uuid.UUID(int=(70 << 96) | 1), uuid.UUID(int=(70 << 96) | 2)
+    for pk in (high, low):  # the higher id first, so creation order and id order differ
+        Contact.objects.create(id=pk, company=company, name='Same Name', email=f'{pk.int}@example.com',
+                               unsubscribe_token=f'tie-{pk.int}')
+    Contact.objects.filter(company=company).update(is_primary=True, is_active=True)
+    Task.objects.create(company=company, title='Tie task', status='To Do', assigned_to=admin,
+                        due_date=datetime(2026, 11, 1, 2, 0, tzinfo=dt_timezone.utc))
+    client = APIClient()
+    client.force_authenticate(admin)
+    with freeze_time(READ_AT):
+        today = client.get('/api/v1/action-center/').json()
+        listed = client.get('/api/v1/companies/?search=Tied%20primaries').json()['results'][0]
+        detail = client.get(f'/api/v1/companies/{company.pk}/').json()
+    item = next(i for i in today['items'] if i['title'] == 'Tie task')
+    assert item['contact_email'] == f'{low.int}@example.com'
+    assert listed['primary_contact']['id'] == str(low)
+    assert detail['primary_contact']['id'] == str(low)

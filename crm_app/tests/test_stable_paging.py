@@ -208,3 +208,64 @@ def test_renewal_book_orders_ties_by_key_and_picks_the_same_successor():
     lowest = min((c for c in Contract.objects.filter(renewed_from=terms[0])), key=lambda c: c.pk)
     first = next(row for row in book['rows'] if row['contract_id'] == str(terms[0].id))
     assert first['successor_contract'] == lowest.contract_number
+
+
+# Lists with no view ordering: the model's Meta.ordering is the ordering the key extends.
+META_KEYS = [0, 0, 0, 1, 2, 2, 3, 4, 4]  # nine rows, some tied, some different
+
+
+def _build_meta_ordered():
+    """Nine rows per model whose Meta.ordering key ties for some and differs for others."""
+    from crm_app.models import (
+        AIEmailDraft, ProspectEnrollment, ProspectSequence, ProspectSequenceStep,
+        ProspectStepExecution, TicketAttachment, TicketComment,
+    )
+    admin = User.objects.create(id=_id(53, 0), username='meta-admin', role='Admin')
+    company = Company.objects.create(id=_id(53, 1), name='Meta co', billing_entity='BMAsia Limited')
+    contact = Contact.objects.create(id=_id(53, 2), company=company, name='Meta contact',
+                                     email='meta@example.com', unsubscribe_token='meta')
+    deal = Opportunity.objects.create(id=_id(53, 3), company=company, name='Meta deal')
+    ticket = Ticket.objects.create(id=_id(53, 4), ticket_number='TK-5999', subject='Meta',
+                                   description='meta', company=company)
+    holder = ProspectSequence.objects.create(id=_id(53, 5), name='Z holder sequence')
+    step = ProspectSequenceStep.objects.create(id=_id(53, 6), sequence=holder, step_number=1)
+    for n, key in enumerate(META_KEYS):
+        moment = STAMP + timedelta(minutes=key)
+        comment = TicketComment.objects.create(id=_id(54, n), ticket=ticket, author=admin, text=f'c{n}')
+        attachment = TicketAttachment.objects.create(
+            id=_id(55, n), ticket=ticket, name=f'a{n}.txt', file=f'ticket_attachments/a{n}.txt',
+            size=1, uploaded_by=admin)
+        ProspectSequence.objects.create(id=_id(56, n), name=f'Meta sequence {key}')
+        enrollment = ProspectEnrollment.objects.create(id=_id(57, n), sequence=holder,
+                                                       opportunity=deal, contact=contact)
+        execution = ProspectStepExecution.objects.create(id=_id(58, n), enrollment=enrollment,
+                                                         step=step, scheduled_for=STAMP)
+        draft = AIEmailDraft.objects.create(id=_id(59, n), execution=execution, subject='s',
+                                            body_html='b', expires_at=STAMP + timedelta(days=1))
+        TicketComment.objects.filter(pk=comment.pk).update(created_at=moment)
+        TicketAttachment.objects.filter(pk=attachment.pk).update(created_at=moment)
+        ProspectEnrollment.objects.filter(pk=enrollment.pk).update(enrolled_at=moment)
+        AIEmailDraft.objects.filter(pk=draft.pk).update(created_at=moment)
+    return admin, {
+        '/api/v1/ticket-comments/': (TicketComment, 'created_at', False),
+        '/api/v1/ticket-attachments/': (TicketAttachment, 'created_at', True),
+        '/api/v1/prospect-sequences/': (ProspectSequence, 'name', False),
+        '/api/v1/prospect-enrollments/': (ProspectEnrollment, 'enrolled_at', True),
+        '/api/v1/ai-email-drafts/': (AIEmailDraft, 'created_at', True),
+    }
+
+
+def test_lists_ordered_by_the_model_keep_its_order_and_page_without_gaps():
+    """When the view sets no ordering, the key extends the model's Meta.ordering: rows that
+    differ keep the model's order, tied rows come in key order, on every page size."""
+    admin, cases = _build_meta_ordered()
+    client = APIClient()
+    client.force_authenticate(admin)
+    for url, (model, field, descending) in cases.items():
+        assert model._meta.ordering == [('-' if descending else '') + field], url
+        rows = sorted(model.objects.all(), key=lambda row: row.pk)
+        rows.sort(key=lambda row: getattr(row, field), reverse=descending)  # stable: key among ties
+        expected = [str(row.pk) for row in rows]
+        for size in (1, 2, 25):
+            ids, _ = _walk(client, url, size)
+            assert ids == expected, (url, size)

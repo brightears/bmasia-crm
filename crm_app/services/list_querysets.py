@@ -115,7 +115,9 @@ def company_list_queryset(queryset):
         .select_related('parent_company')
         .prefetch_related(
             'contacts',
-            Prefetch('contacts', queryset=Contact.objects.filter(is_primary=True, is_active=True),
+            Prefetch('contacts',
+                     queryset=Contact.objects.filter(is_primary=True, is_active=True)
+                     .order_by('name', 'pk'),
                      to_attr='_prefetched_primary_contacts'),
             Prefetch('zones', queryset=zones),
             Prefetch('contracts', queryset=active_contracts, to_attr='_prefetched_active_contracts'),
