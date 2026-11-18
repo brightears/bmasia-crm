@@ -64,12 +64,15 @@ DATE_MISMATCH = timedelta(days=2)
 METADATA_HEADERS = (
     'From', 'To', 'Cc', 'Reply-To', 'Subject', 'Date', 'Message-ID', 'In-Reply-To',
     'References', 'List-Id', 'Auto-Submitted', 'Precedence', 'X-BMAsia-Email-ID',
+    'Authentication-Results',
 )
 
 FLAG_TRUNCATED = 'truncated'      # a value was cut to its column limit
 FLAG_BOUNDED = 'bounded'          # an input bound was hit; only part was read
 FLAG_DATE_MISMATCH = 'date_mismatch'
 FLAG_SYNTHETIC_ID = 'synthetic_id'
+FLAG_PLACEHOLDER_ID = 'placeholder_message_id'   # <>, <none> and the like: treated as missing
+FLAG_NO_INTERNAL_DATE = 'no_internal_date'       # Gmail gave no usable date: capture time used
 
 _FOLD_RE = re.compile(r'\r?\n[ \t]*')
 _ANGLE_ID_RE = re.compile(r'<([^<>\s]+)>')
@@ -238,8 +241,9 @@ def _make_address(addr, name, flags=None):
                  MAX_NAME, flags)
     domain = address_domain(address)
     local = address.rsplit('@', 1)[0] if '@' in address else ''
-    valid = (bool(local) and '@' not in local and bool(domain) and '.' in domain
-             and ' ' not in address and '"' not in address)
+    quoted_local = len(local) >= 2 and local.startswith('"') and local.endswith('"')
+    valid = (bool(local) and bool(domain) and '.' in domain and ' ' not in domain
+             and (quoted_local or ('@' not in local and ' ' not in local and '"' not in local)))
     return Address(address=address, display_name=name, domain=domain, valid=valid)
 
 
@@ -293,6 +297,7 @@ def _split_address_list(raw, flags=None):
 
 _ANGLE_RE = re.compile(r'<([^<>]*)>')
 _COMMENT_RE = re.compile(r'\([^()]*\)')
+_QUOTED_LOCAL_RE = re.compile(r'"(?:[^"\\\r\n]|\\.){1,64}"@[^\s<>,;()"]{1,253}')
 
 
 def _piece_to_address(piece, flags=None):
@@ -307,13 +312,38 @@ def _piece_to_address(piece, flags=None):
         addr = (with_at or angles)[-1]
         name = piece[:piece.find('<')]
     else:
-        text = _COMMENT_RE.sub(' ', piece)
-        tokens = [t for t in text.split() if '@' in t]
-        addr = tokens[-1] if tokens else text.strip()
-        name = ''
+        quoted = _QUOTED_LOCAL_RE.search(piece)
+        if quoted:
+            # "john doe"@x.test: a quoted local part may hold spaces.
+            addr, name = quoted.group(0), ''
+        else:
+            text = _COMMENT_RE.sub(' ', piece)
+            tokens = [t for t in text.split() if '@' in t]
+            addr = tokens[-1] if tokens else text.strip()
+            name = ''
     if not addr.strip() and not name.strip():
         return None
     return _make_address(addr, name, flags)
+
+
+_LOOSE_ADDRESS_RE = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Za-z0-9.-]{1,253}")
+MAX_OVERFLOW = 2000
+
+
+def scan_addresses(value, limit=MAX_OVERFLOW):
+    """Every address-looking token in a header, linear and bounded by the
+    header cap: used when the address list was cut, so a customer listed after
+    the first ``MAX_ADDRESSES`` recipients can still be recognised."""
+    raw = unfold(value, MAX_HEADER)
+    out, seen = [], set()
+    for match in _LOOSE_ADDRESS_RE.finditer(raw):
+        item = _make_address(match.group(0), '')
+        if item.address and item.address not in seen:
+            seen.add(item.address)
+            out.append(item)
+            if len(out) >= limit:
+                break
+    return out
 
 
 def parse_address_list(value, flags=None):
@@ -374,6 +404,24 @@ def normalise_message_id(value):
     if len(token) > MAX_MESSAGE_ID:
         return _hash_id('long', token)
     return token
+
+
+# Values some software writes when it has no real Message-ID. Two different
+# messages with one of these must not share a key, so they count as missing.
+PLACEHOLDER_MESSAGE_IDS = frozenset({
+    '', '@', 'none', 'null', 'nil', 'na', 'n/a', 'unknown', 'undefined', 'missing', '0', '-',
+    'localhost', '@localhost', 'message-id', 'messageid', 'msgid', 'no-id', 'noid', 'id', 'x',
+})
+
+
+def is_placeholder_message_id(value):
+    """True for an empty or well-known junk Message-ID such as ``<>`` or
+    ``<none>`` (case-insensitive, angle brackets and spaces ignored)."""
+    raw = clean(unfold(value, 512)).strip()
+    if not raw:
+        return False
+    core = raw.strip('<> \t').strip().lower()
+    return core in PLACEHOLDER_MESSAGE_IDS or not any(c.isalnum() for c in core)
 
 
 def parse_id_list(value, flags=None):
@@ -592,35 +640,88 @@ _SKIP_TAGS = {'script', 'style', 'head', 'title'}
 _BREAK_TAGS = {'br', 'p', 'div', 'tr', 'li', 'h1', 'h2', 'h3', 'h4', 'table'}
 # '<' then anything but '<' or '>', then '>': it cannot overlap itself, so the
 # scan is linear even on a run of unclosed '<' (the old '<[^>]+>' was not).
-_TAG_SCAN_RE = re.compile(r'<(/?)\s*+([A-Za-z][A-Za-z0-9]*+)?[^<>]*+>')  # possessive: no backtracking
 MAX_HTML_CHARS = 128 * 1024
 
 
+def _tag_end(value, start):
+    """Index of the '>' that closes the tag opened at ``start``, skipping '>'
+    inside quoted attribute values; -1 when the tag never closes. Linear."""
+    quote = None
+    i, n = start + 1, len(value)
+    while i < n:
+        ch = value[i]
+        if quote:
+            j = value.find(quote, i)
+            if j == -1:
+                return -1
+            i, quote = j + 1, None
+            continue
+        if ch in '"\'':
+            quote = ch
+        elif ch == '>':
+            return i
+        elif ch == '<':
+            return -2          # a new '<' before any '>': not a tag after all
+        i += 1
+    return -1
+
+
 def html_to_text(value):
-    """Visible text of HTML in one linear scan. Script and style content is
-    dropped; block tags become line breaks. At most ``MAX_HTML_CHARS`` read
-    (the stored text is capped at 64 KB anyway)."""
+    """Visible text of HTML in one linear pass. Comments (``<!-- ... -->``),
+    script and style content are dropped; '>' inside quoted attributes does
+    not end a tag; block tags become line breaks. At most ``MAX_HTML_CHARS``
+    read (the stored text is capped at 64 KB anyway)."""
     value = (value or '')[:MAX_HTML_CHARS]
     out = []
-    pos = 0
+    pos, n = 0, len(value)
     skipping = None
-    for match in _TAG_SCAN_RE.finditer(value):
-        start = match.start()
-        if skipping is None and start > pos:
-            out.append(value[pos:start])
-        pos = match.end()
-        closing, name = match.group(1), (match.group(2) or '').lower()
+    while pos < n:
+        lt = value.find('<', pos)
+        if lt == -1:
+            if skipping is None:
+                out.append(value[pos:])
+            break
+        if skipping is None and lt > pos:
+            out.append(value[pos:lt])
+        nxt = value[lt + 1:lt + 2]
+        if not (nxt.isalpha() or nxt in ('/', '!')):
+            # '<' not followed by a tag name is text ("x < y"), as in browsers.
+            if skipping is None:
+                out.append('<')
+            pos = lt + 1
+            continue
+        if value.startswith('<!--', lt):
+            close = value.find('-->', lt + 4)
+            if close == -1:
+                break
+            pos = close + 3
+            continue
+        end = _tag_end(value, lt)
+        if end == -1:
+            break               # unclosed tag: the rest is not readable markup
+        if end == -2:
+            if skipping is None:
+                out.append('<')
+            pos = lt + 1
+            continue
+        tag = value[lt + 1:end].strip()
+        closing = tag.startswith('/')
+        body = tag.lstrip('/').lstrip()
+        name = ''
+        for ch in body:
+            if ch.isalnum():
+                name += ch
+            else:
+                break
+        name = name.lower()
         if skipping is not None:
             if closing and name == skipping:
                 skipping = None
-        elif name in _SKIP_TAGS and not closing and value[pos - 2] != '/':
+        elif name in _SKIP_TAGS and not closing and not tag.endswith('/'):
             skipping = name
-        else:
+        elif name:
             out.append('\n' if name in _BREAK_TAGS else ' ')
-    if skipping is None and pos < len(value):
-        tail = value[pos:]
-        cut = tail.find('<')
-        out.append(tail if cut == -1 else tail[:cut])
+        pos = end + 1
     text = html.unescape(''.join(out))
     lines = [_WS_RE.sub(' ', line).strip() for line in text.splitlines()]
     return '\n'.join(line for line in lines if line)
@@ -722,7 +823,7 @@ class ParsedMessage:
     subject: str
     subject_normalised: str
     is_reply: bool
-    sent_at: object                   # internal date (or the claimed date if Gmail gave none)
+    sent_at: object                   # Gmail's internal date; None when Gmail gave none
     claimed_date: object              # the Date header, as claimed by the sender
     from_address: object              # Address or None
     to: list = field(default_factory=list)
@@ -735,6 +836,8 @@ class ParsedMessage:
     attachments: list = field(default_factory=list)
     defects: list = field(default_factory=list)
     flags: set = field(default_factory=set)
+    overflow: list = field(default_factory=list)   # addresses past the cap, from a cheap scan
+    dkim_pass_domains: list = field(default_factory=list)   # from Gmail's own Authentication-Results
 
     @property
     def has_attachments(self):
@@ -775,6 +878,27 @@ class ParsedMessage:
 
     def sorted_flags(self):
         return sorted(self.flags)
+
+
+def gmail_dkim_pass_domains(values):
+    """Domains with dkim=pass in the first Authentication-Results header,
+    only when Gmail itself wrote it (authserv-id mx.google.com). Gmail adds its
+    own header on top; one a sender wrote further down is never read."""
+    if not values:
+        return []
+    first = clean(unfold(values[0], 4096))
+    head = first.split(';', 1)[0].strip().lower()
+    if head != 'mx.google.com':
+        return []
+    out = []
+    for part in first.split(';')[1:]:
+        part = part.strip().lower()
+        if not part.startswith('dkim=pass'):
+            continue
+        found = re.search(r'header\.(?:d|i)=@?([a-z0-9.-]{1,253})', part)
+        if found and found.group(1) not in out:
+            out.append(found.group(1).rstrip('.'))
+    return out[:5]
 
 
 def _first(headers, name):
@@ -818,8 +942,15 @@ def _parse(message):
     elif not from_address.valid:
         defects.append('malformed From address')
 
-    to = parse_address_list(', '.join(str(v) for v in headers.get('to', [])[:5]), flags)
-    cc = parse_address_list(', '.join(str(v) for v in headers.get('cc', [])[:5]), flags)
+    to_raw = ', '.join(str(v) for v in headers.get('to', [])[:5])
+    cc_raw = ', '.join(str(v) for v in headers.get('cc', [])[:5])
+    to = parse_address_list(to_raw, flags)
+    cc = parse_address_list(cc_raw, flags)
+    overflow = []
+    if len(to) >= MAX_ADDRESSES or len(cc) >= MAX_ADDRESSES:
+        listed = {a.address for a in to + cc}
+        overflow = [a for a in scan_addresses(to_raw) + scan_addresses(cc_raw)
+                    if a.address not in listed and a.valid]
     reply_to = parse_address_list(_first(headers, 'Reply-To'), flags)
     for group in (to, cc, reply_to):
         if any(not a.valid for a in group):
@@ -835,13 +966,21 @@ def _parse(message):
         defects.append('unparseable Date')
     if claimed is not None and gmail_internal is not None and abs(claimed - gmail_internal) > DATE_MISMATCH:
         flags.add(FLAG_DATE_MISMATCH)
-    sent_at = gmail_internal or claimed
+    # Gmail's clock only. Without it the engine uses the time of capture; the
+    # sender's Date never drives retention or the conversation clocks.
+    sent_at = gmail_internal
+    if gmail_internal is None:
+        flags.add(FLAG_NO_INTERNAL_DATE)
 
     references = parse_id_list(' '.join(str(v) for v in headers.get('references', [])[:5]), flags)
     in_reply_to_ids = parse_id_list(_first(headers, 'In-Reply-To'), flags)
     in_reply_to = in_reply_to_ids[0] if in_reply_to_ids else ''
 
-    message_id = normalise_message_id(_first(headers, 'Message-ID'))
+    raw_message_id = _first(headers, 'Message-ID')
+    message_id = normalise_message_id(raw_message_id)
+    if message_id and is_placeholder_message_id(raw_message_id):
+        message_id = ''
+        flags.add(FLAG_PLACEHOLDER_ID)
     synthetic = False
     if not message_id:
         recipients = [a.address for a in to + cc]
@@ -891,4 +1030,6 @@ def _parse(message):
         attachments=attachment_metadata(payload, gmail_id, flags),
         defects=defects,
         flags=set(flags),
+        overflow=overflow,
+        dkim_pass_domains=gmail_dkim_pass_domains(headers.get('authentication-results', [])),
     )
