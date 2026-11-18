@@ -2,21 +2,25 @@ import type { RenewalRow, RenewalStateKey } from '../services/renewals';
 
 /**
  * Filtering, sorting, totals and CSV for the Renewals page. Display only: the renewal
- * state of every row comes from the server and is never worked out here.
+ * state of every row, the total it counts in (`summary_bucket`) and whether it counts in
+ * the renewal rate (`in_rate`) come from the server and are never worked out here.
  */
 
 /** The order states are listed in (filters, sort): from "needs work" to "done". */
 export const STATE_ORDER: RenewalStateKey[] = [
   'not_started',
+  'auto_unconfirmed',
   'drafted',
   'sent',
   'renewed_unlinked',
   'signed',
   'invoiced',
+  'part_paid',
   'paid',
   'auto_renews',
   'lapsed',
   'lost',
+  'placeholder',
 ];
 
 export type ProductFilter = '' | 'Soundtrack' | 'Beat Breeze' | 'Other';
@@ -27,6 +31,10 @@ export interface RowFilters {
   attentionOnly: boolean;
   product: ProductFilter;
   search: string;
+  /** Placeholders closed by the data corrections are hidden unless this is on. */
+  showPlaceholders?: boolean;
+  /** Only terms that were never activated (still Sent). */
+  neverActivatedOnly?: boolean;
 }
 
 /** "a,b" from the address -> known state keys only (unknown ones are dropped). */
@@ -42,9 +50,13 @@ const norm = (text: string | null | undefined) =>
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase();
 
+export const isPlaceholder = (r: RenewalRow) => r.renewal.state === 'placeholder';
+
 export function filterRows(rows: RenewalRow[], f: RowFilters): RenewalRow[] {
   const q = norm(f.search.trim());
   return rows.filter((r) => {
+    if (isPlaceholder(r) && !f.showPlaceholders) return false;
+    if (f.neverActivatedOnly && !r.never_activated) return false;
     if (f.states.length && !f.states.includes(r.renewal.state)) return false;
     if (f.attentionOnly && !r.renewal.attention) return false;
     if (f.product) {
@@ -53,13 +65,7 @@ export function filterRows(rows: RenewalRow[], f: RowFilters): RenewalRow[] {
       if (f.product === 'Other' ? shown !== 'Other' : !shown.split(' + ').includes(f.product)) return false;
     }
     if (q) {
-      const hay = [
-        r.company,
-        r.corporate_group,
-        r.property_name,
-        r.contract_number,
-        r.renewal.successor?.contract_number,
-      ]
+      const hay = [r.company, r.corporate_group, r.property_name, r.contract_number, r.renewal.successor?.contract_number]
         .map(norm)
         .join(' ');
       if (!hay.includes(q)) return false;
@@ -68,24 +74,15 @@ export function filterRows(rows: RenewalRow[], f: RowFilters): RenewalRow[] {
   });
 }
 
-export const SORT_KEYS = [
-  'company',
-  'contract',
-  'product',
-  'zones',
-  'end',
-  'value',
-  'state',
-  'renewal',
-  'change',
-  'owner',
-] as const;
+export const SORT_KEYS = ['company', 'contract', 'product', 'zones', 'end', 'value', 'state', 'renewal', 'change', 'owner'] as const;
 export type SortKey = typeof SORT_KEYS[number];
 
 /** Allowed values of ?sort=: '' (needs action first, then end date), 'end', '-end', ... */
 export const SORT_VALUES: string[] = ['', ...SORT_KEYS.flatMap((k) => [k, `-${k}`])];
 
-const sortValue = (r: RenewalRow, key: SortKey): string | number | null => {
+type SortValue = string | number | null | [string, number | null];
+
+const sortValue = (r: RenewalRow, key: SortKey): SortValue => {
   switch (key) {
     case 'company':
       return norm(r.company);
@@ -98,13 +95,14 @@ const sortValue = (r: RenewalRow, key: SortKey): string | number | null => {
     case 'end':
       return r.end_date;
     case 'value':
-      return r.value;
+      // Money sorts by currency first, then amount: THB and USD are never compared as numbers.
+      return [r.currency, r.value];
     case 'state':
       return STATE_ORDER.indexOf(r.renewal.state);
     case 'renewal':
       return r.renewal.successor?.contract_number ?? null;
     case 'change':
-      return r.renewal.value_change;
+      return r.renewal.value_change === null ? null : [r.currency, r.renewal.value_change];
     case 'owner':
       return r.owner ? norm(r.owner) : null;
     default:
@@ -112,9 +110,22 @@ const sortValue = (r: RenewalRow, key: SortKey): string | number | null => {
   }
 };
 
+const compareScalar = (a: string | number, b: string | number) =>
+  typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b));
+
+const compareValues = (a: Exclude<SortValue, null>, b: Exclude<SortValue, null>): number => {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const byCurrency = a[0].localeCompare(b[0]);
+    if (byCurrency !== 0) return byCurrency;
+    return compareScalar(a[1] ?? 0, b[1] ?? 0);
+  }
+  return compareScalar(a as string | number, b as string | number);
+};
+
 /**
  * Sorts a copy. '' keeps the server's order (rows that need action first, then by end date).
- * Empty values always go last; ties keep the server's order.
+ * Empty values always go last; ties keep the server's order. Money sorts by currency, then
+ * amount; in descending order the currencies keep their order and the amounts reverse.
  */
 export function sortRows(rows: RenewalRow[], sort: string): RenewalRow[] {
   if (!sort) return rows.slice();
@@ -127,7 +138,8 @@ export function sortRows(rows: RenewalRow[], sort: string): RenewalRow[] {
       if (a.v === null && b.v === null) return a.index - b.index;
       if (a.v === null) return 1;
       if (b.v === null) return -1;
-      const cmp = typeof a.v === 'number' && typeof b.v === 'number' ? a.v - b.v : String(a.v).localeCompare(String(b.v));
+      if (Array.isArray(a.v) && Array.isArray(b.v) && a.v[0] !== b.v[0]) return a.v[0].localeCompare(b.v[0]);
+      const cmp = compareValues(a.v, b.v);
       if (cmp !== 0) return desc ? -cmp : cmp;
       return a.index - b.index;
     })
@@ -139,6 +151,7 @@ export interface CurrencySummary {
   terms: number;
   value: number;
   renewed: number;
+  /** What the renewals are worth: the renewal contracts' values, in their own currency. */
   renewedValue: number;
   open: number;
   atRiskValue: number;
@@ -146,37 +159,50 @@ export interface CurrencySummary {
   lostValue: number;
   auto: number;
   autoValue: number;
-  /** Renewed terms divided by terms ending, leaving out auto-renewing terms. Null when nothing to divide by. */
+  /** Terms counted in the rate (decided, or ended without a renewal). */
+  rateBase: number;
+  rateRenewed: number;
+  /** rateRenewed / rateBase; null when nothing has been decided or has ended yet. */
   rate: number | null;
 }
 
-/** Totals per currency of the rows given (current term values). Never adds currencies together. */
+const emptySummary = (currency: string): CurrencySummary => ({
+  currency,
+  terms: 0,
+  value: 0,
+  renewed: 0,
+  renewedValue: 0,
+  open: 0,
+  atRiskValue: 0,
+  lost: 0,
+  lostValue: 0,
+  auto: 0,
+  autoValue: 0,
+  rateBase: 0,
+  rateRenewed: 0,
+  rate: null,
+});
+
+/**
+ * Totals per currency of the rows given. Never adds currencies together. Placeholders count
+ * nowhere; a renewal's value is added in the renewal's own currency.
+ */
 export function summarize(rows: RenewalRow[]): CurrencySummary[] {
   const by: Record<string, CurrencySummary> = {};
+  const bucketOf = (cur: string) => (by[cur] = by[cur] || emptySummary(cur));
   rows.forEach((r) => {
-    const cur = r.currency || 'USD';
-    const s = (by[cur] = by[cur] || {
-      currency: cur,
-      terms: 0,
-      value: 0,
-      renewed: 0,
-      renewedValue: 0,
-      open: 0,
-      atRiskValue: 0,
-      lost: 0,
-      lostValue: 0,
-      auto: 0,
-      autoValue: 0,
-      rate: null,
-    });
+    if (r.renewal.summary_bucket === 'excluded' && isPlaceholder(r)) return;
+    const s = bucketOf(r.currency || 'USD');
     const v = Number(r.value) || 0;
     s.terms += 1;
     s.value += v;
-    switch (r.renewal.group) {
-      case 'renewed':
+    switch (r.renewal.summary_bucket) {
+      case 'renewed': {
         s.renewed += 1;
-        s.renewedValue += v;
+        const succ = r.renewal.successor;
+        if (succ) bucketOf(succ.currency || s.currency).renewedValue += Number(succ.value) || 0;
         break;
+      }
       case 'open':
         s.open += 1;
         s.atRiskValue += v;
@@ -190,12 +216,13 @@ export function summarize(rows: RenewalRow[]): CurrencySummary[] {
         s.autoValue += v;
         break;
     }
+    if (r.renewal.in_rate) {
+      s.rateBase += 1;
+      if (r.renewal.summary_bucket === 'renewed') s.rateRenewed += 1;
+    }
   });
   return Object.values(by)
-    .map((s) => {
-      const base = s.terms - s.auto;
-      return { ...s, rate: base > 0 ? s.renewed / base : null };
-    })
+    .map((s) => ({ ...s, rate: s.rateBase > 0 ? s.rateRenewed / s.rateBase : null }))
     .sort((a, b) => a.currency.localeCompare(b.currency));
 }
 
@@ -242,7 +269,8 @@ export const CSV_HEADER = [
   'Zones source',
   'Term start',
   'Term end',
-  'Days from end',
+  'Term months',
+  'Days from end (positive = ended, negative = days to go)',
   'Currency',
   'Current value',
   'Renewal state',
@@ -251,8 +279,9 @@ export const CSV_HEADER = [
   'Renewal status',
   'Renewal currency',
   'New value',
-  'Change',
-  'Change basis',
+  'Change (same term length only)',
+  'Add-on',
+  'Never activated',
   'Owner',
   'Billing entity',
   'Contract status',
@@ -276,6 +305,7 @@ export function rowsToCsv(rows: RenewalRow[]): string {
         r.zones_source === 'contracted_zone_count' ? 'company funnel count' : 'service locations',
         r.start_date,
         r.end_date,
+        r.term_months,
         r.days_from_end,
         r.currency,
         r.value,
@@ -286,7 +316,8 @@ export function rowsToCsv(rows: RenewalRow[]): string {
         s?.currency,
         s ? s.value : null,
         r.renewal.value_change,
-        r.renewal.value_change_basis === 'per_year' ? 'per year' : r.renewal.value_change_basis === 'term' ? 'per term' : '',
+        r.is_addon,
+        r.never_activated,
         r.owner,
         r.entity ? ENTITY_NAMES[r.entity] : '',
         r.status,

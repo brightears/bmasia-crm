@@ -47,6 +47,7 @@ import { useListSearchBox } from '../hooks/useListSearchBox';
 import { formatDate, formatMoney, visuallyHidden } from '../theme';
 import {
   EntityKey,
+  MonthBasis,
   getRenewals,
   RenewalRow,
   RenewalsResponse,
@@ -55,6 +56,7 @@ import {
 import {
   CurrencySummary,
   filterRows,
+  isPlaceholder,
   parseStates,
   PRODUCT_FILTERS,
   ProductFilter,
@@ -71,15 +73,18 @@ type ChipColor = 'default' | 'primary' | 'info' | 'success' | 'warning' | 'error
 /** Colour of each renewal state, in the app's status language (display only). */
 export const STATE_TONE: Record<RenewalStateKey, ChipColor> = {
   not_started: 'default',
+  auto_unconfirmed: 'warning',
   drafted: 'info',
   sent: 'info',
   signed: 'success',
   invoiced: 'success',
+  part_paid: 'success',
   paid: 'success',
   renewed_unlinked: 'warning',
   auto_renews: 'primary',
   lapsed: 'error',
   lost: 'error',
+  placeholder: 'default',
 };
 
 const ENTITY_LABEL: Record<string, string> = {
@@ -126,11 +131,32 @@ const ProductCell: React.FC<{ row: RenewalRow }> = ({ row }) => {
 const toneText = (tone: 'success' | 'warning' | 'error') => (t: Theme) =>
   t.palette.mode === 'dark' ? t.palette[tone].light : tone === 'warning' ? t.palette.warning.dark : t.palette[tone].main;
 
-const isYear = (v: string | number) => /^\d{4}$/.test(String(v)) && Number(v) >= 2000 && Number(v) <= 2100;
+// The year arrows stay within this many years of today.
+const YEARS_BACK = 6;
+const YEARS_AHEAD = 2;
+const isYear = (v: string | number) => {
+  const now = new Date().getFullYear();
+  return /^\d{4}$/.test(String(v)) && Number(v) >= now - YEARS_BACK && Number(v) <= now + YEARS_AHEAD;
+};
+
+/** "Renewals due in November 2026: terms ending 31 Oct to 29 Nov 2026". */
+export const describeWindow = (data: RenewalsResponse, monthName: string, year: number): string => {
+  const [sy, sm, sd] = data.window.start.split('-').map(Number);
+  const [ey] = data.window.end.split('-').map(Number);
+  const start = sy === ey ? `${sd} ${MONTH_SHORT[sm - 1]}` : formatDate(data.window.start);
+  const span = `${start} to ${formatDate(data.window.end)}`;
+  if (data.view === 'open') return `Open renewals due from ${span}`;
+  return data.basis === 'funnel'
+    ? `Renewals due in ${monthName} ${year}: terms ending ${span}`
+    : `Terms ending in ${monthName} ${year}: ${span}`;
+};
 const isMonth = (v: string | number) => /^\d{1,2}$/.test(String(v)) && Number(v) >= 1 && Number(v) <= 12;
 
 const DEFAULTS = {
   view: '',
+  basis: '',
+  placeholders: '',
+  never: '',
   year: '',
   month: '',
   entity: '',
@@ -183,7 +209,6 @@ const ValueChange: React.FC<{ row: RenewalRow }> = ({ row }) => {
   const s = row.renewal.successor;
   if (!s) return <Typography variant="body2" color="text.secondary">—</Typography>;
   const change = row.renewal.value_change;
-  const perYear = row.renewal.value_change_basis === 'per_year';
   return (
     <Box sx={{ textAlign: 'right' }}>
       <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
@@ -192,6 +217,12 @@ const ValueChange: React.FC<{ row: RenewalRow }> = ({ row }) => {
       {change === null ? (
         s.currency !== row.currency ? (
           <Typography variant="caption" color="text.secondary">other currency</Typography>
+        ) : row.renewal.value_change_basis === 'different_length' ? (
+          <Tooltip title="The terms differ in length, so the values are not compared.">
+            <Typography variant="caption" color="text.secondary">
+              {s.term_months ? `${s.term_months}-month term` : 'other term length'}
+            </Typography>
+          </Tooltip>
         ) : null
       ) : (
         <Typography
@@ -204,7 +235,7 @@ const ValueChange: React.FC<{ row: RenewalRow }> = ({ row }) => {
         >
           {change === 0
             ? 'no change'
-            : `${change > 0 ? '+' : '−'}${formatMoney(Math.abs(change), row.currency)}${perYear ? ' / yr' : ''}`}
+            : `${change > 0 ? '+' : '−'}${formatMoney(Math.abs(change), row.currency)}`}
         </Typography>
       )}
     </Box>
@@ -214,11 +245,22 @@ const ValueChange: React.FC<{ row: RenewalRow }> = ({ row }) => {
 const SuccessorCell: React.FC<{ row: RenewalRow }> = ({ row }) => {
   const s = row.renewal.successor;
   const others = row.renewal.other_linked.length;
+  const notRenewal = row.renewal.other_linked.filter((o) => o.link !== 'renewal');
+  const linkNote = notRenewal.length ? (
+    <Tooltip title={notRenewal.map((o) => `${o.contract_number}: ${o.link_label}`).join('; ')}>
+      <Typography variant="caption" color="text.secondary" component="div" sx={{ lineHeight: 1.3 }}>
+        {notRenewal.length} linked, not the renewal
+      </Typography>
+    </Tooltip>
+  ) : null;
   if (!s) {
     return (
-      <Typography variant="body2" color="text.secondary">
-        {others ? `${others} linked, none live` : '—'}
-      </Typography>
+      <Box>
+        <Typography variant="body2" color="text.secondary">
+          {others && others > notRenewal.length ? `${others - notRenewal.length} cancelled` : '—'}
+        </Typography>
+        {linkNote}
+      </Box>
     );
   }
   return (
@@ -229,16 +271,21 @@ const SuccessorCell: React.FC<{ row: RenewalRow }> = ({ row }) => {
       <Typography variant="caption" color="text.secondary" component="div" sx={{ lineHeight: 1.3 }}>
         {s.status}
         {s.start_date ? ` from ${formatDate(s.start_date)}` : ''}
-        {others ? ` · +${others} more` : ''}
+        {others - notRenewal.length ? ` · +${others - notRenewal.length} more` : ''}
         {s.other_company ? ' · other company record' : ''}
       </Typography>
+      {linkNote}
     </Box>
   );
 };
 
 /** Property name, a status other than Active, and "add-on", as one caption. */
 const contractFacts = (row: RenewalRow) =>
-  [row.property_name, row.status !== 'Active' ? row.status : '', row.lifecycle_type === 'addon' ? 'add-on' : '']
+  [
+    row.property_name,
+    row.never_activated ? 'Sent, never activated' : row.status !== 'Active' ? row.status : '',
+    row.is_addon ? 'Add-on' : '',
+  ]
     .filter(Boolean)
     .join(' · ');
 
@@ -271,6 +318,8 @@ interface StripProps {
 }
 
 const MonthStrip: React.FC<StripProps> = ({ data, year, month, openView, today, onMonth, onOpen, onYear }) => {
+  const minYear = today.getFullYear() - YEARS_BACK;
+  const maxYear = today.getFullYear() + YEARS_AHEAD;
   const months = data && data.year === year ? data.months : null;
   const selectedRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
@@ -294,13 +343,23 @@ const MonthStrip: React.FC<StripProps> = ({ data, year, month, openView, today, 
   return (
     <Box component="nav" aria-label="Months" sx={{ display: 'flex', alignItems: 'stretch', gap: 1, mb: 2 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
-        <IconButton size="small" aria-label={`Previous year, ${year - 1}`} onClick={() => onYear(year - 1)}>
+        <IconButton
+          size="small"
+          aria-label={`Previous year, ${year - 1}`}
+          onClick={() => onYear(year - 1)}
+          disabled={year <= minYear}
+        >
           <ChevronLeft />
         </IconButton>
         <Typography sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }} aria-live="polite">
           {year}
         </Typography>
-        <IconButton size="small" aria-label={`Next year, ${year + 1}`} onClick={() => onYear(year + 1)}>
+        <IconButton
+          size="small"
+          aria-label={`Next year, ${year + 1}`}
+          onClick={() => onYear(year + 1)}
+          disabled={year >= maxYear}
+        >
           <ChevronRight />
         </IconButton>
       </Box>
@@ -429,7 +488,7 @@ const SummaryStrip: React.FC<{ summaries: CurrencySummary[]; filtered: boolean; 
             <Figure
               label="Renewed"
               value={s.renewed}
-              sub={formatMoney(s.renewedValue, s.currency)}
+              sub={s.renewedValue ? `renewals worth ${formatMoney(s.renewedValue, s.currency)}` : undefined}
               tone={s.renewed > 0 ? 'success' : undefined}
             />
             <Figure
@@ -445,12 +504,17 @@ const SummaryStrip: React.FC<{ summaries: CurrencySummary[]; filtered: boolean; 
               tone={s.lostValue > 0 ? 'error' : undefined}
             />
             {!openView && (
-              <Tooltip title="Renewed terms ÷ terms ending, leaving out terms that renew automatically.">
+              <Tooltip
+                title={
+                  'Renewed ÷ (renewed + lost + ended without a renewal yet). Terms still ahead with nothing decided, ' +
+                  'auto-renewals before their end date, never-activated offers and placeholders are left out.'
+                }
+              >
                 <Box>
                   <Figure
                     label="Renewal rate"
                     value={s.rate === null ? '—' : `${Math.round(s.rate * 100)}%`}
-                    sub={s.auto ? `${s.auto} auto-renew` : undefined}
+                    sub={s.rate === null ? 'nothing decided yet' : `${s.rateRenewed} of ${s.rateBase} decided or ended`}
                   />
                 </Box>
               </Tooltip>
@@ -498,12 +562,16 @@ const Renewals: React.FC = () => {
     entity: ['', 'th', 'hk'],
     state: (v) => parseStates(String(v)).length > 0,
     attention: ['', '1'],
+    basis: ['', 'calendar'],
+    placeholders: ['', '1'],
+    never: ['', '1'],
     product: PRODUCT_FILTERS,
     sort: SORT_VALUES,
   });
   const v = list.values;
   const openView = v.view === 'open';
   const year = v.year ? Number(v.year) : today.getFullYear();
+  const basis: MonthBasis = v.basis === 'calendar' ? 'calendar' : 'funnel';
   const month = v.month ? Number(v.month) : today.getMonth() + 1;
   const entity = v.entity as '' | EntityKey;
   const states = useMemo(() => parseStates(String(v.state)), [v.state]);
@@ -528,7 +596,7 @@ const Renewals: React.FC = () => {
     const id = ++requestId.current;
     setLoading(true);
     setError('');
-    getRenewals({ view: openView ? 'open' : 'month', year, month, entity })
+    getRenewals({ view: openView ? 'open' : 'month', year, month, entity, basis })
       .then((result) => {
         if (id === requestId.current) setData(result);
       })
@@ -538,7 +606,7 @@ const Renewals: React.FC = () => {
       .finally(() => {
         if (id === requestId.current) setLoading(false);
       });
-  }, [openView, year, month, entity, reload]);
+  }, [openView, year, month, entity, basis, reload]);
 
   // Rows of the response that matches the current choice (older responses are not shown as current).
   const current =
@@ -546,7 +614,8 @@ const Renewals: React.FC = () => {
     data.view === (openView ? 'open' : 'month') &&
     data.year === year &&
     (openView || data.month === month) &&
-    data.entity === entity
+    data.entity === entity &&
+    data.basis === basis
       ? data
       : null;
   const allRows = useMemo(() => current?.rows ?? [], [current]);
@@ -555,12 +624,16 @@ const Renewals: React.FC = () => {
     attentionOnly: v.attention === '1',
     product: v.product as ProductFilter,
     search: String(v.q),
+    showPlaceholders: v.placeholders === '1',
+    neverActivatedOnly: v.never === '1',
   };
-  const anyFilter = Boolean(filters.states.length || filters.attentionOnly || filters.product || filters.search);
+  const anyFilter = Boolean(
+    filters.states.length || filters.attentionOnly || filters.product || filters.search || filters.neverActivatedOnly
+  );
   const visible = useMemo(
     () => sortRows(filterRows(allRows, filters), String(v.sort)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allRows, v.state, v.attention, v.product, v.q, v.sort]
+    [allRows, v.state, v.attention, v.product, v.q, v.sort, v.placeholders, v.never]
   );
   const summaries = useMemo(() => summarize(visible), [visible]);
 
@@ -572,6 +645,8 @@ const Renewals: React.FC = () => {
     return counts;
   }, [allRows]);
   const attentionCount = allRows.filter((r) => r.renewal.attention).length;
+  const neverActivatedCount = allRows.filter((r) => r.never_activated && !isPlaceholder(r)).length;
+  const placeholderCount = stateCounts.placeholder || 0;
   const stateLabel = (key: RenewalStateKey) => current?.states.find((s) => s.key === key)?.label ?? key;
 
   const toggleState = (key: RenewalStateKey) => {
@@ -580,7 +655,7 @@ const Renewals: React.FC = () => {
   };
 
   const clearFilters = () => {
-    update({ state: '', attention: '', product: '', q: '' });
+    update({ state: '', attention: '', product: '', q: '', never: '' });
   };
 
   const onSort = (key: string) => {
@@ -591,6 +666,7 @@ const Renewals: React.FC = () => {
   const viewTitle = openView
     ? `All open renewals${current ? `, ${formatDate(current.window.start)} – ${formatDate(current.window.end)}` : ''}`
     : `${MONTH_LONG[month - 1]} ${year}`;
+  const windowText = current ? describeWindow(current, MONTH_LONG[month - 1], year) : '';
 
   const exportCsv = () => {
     const csv = rowsToCsv(visible);
@@ -609,12 +685,12 @@ const Renewals: React.FC = () => {
     ? { title: 'No open renewals', description: 'Every term in this window is renewed, lost or renews automatically.' }
     : {
         title: 'Nothing ends in this month',
-        description: `No contract term ends in ${MONTH_LONG[month - 1]} ${year}${entity ? ` for ${ENTITY_FULL[entity]}` : ''}.`,
+        description: `No contract term is due in ${MONTH_LONG[month - 1]} ${year}${entity ? ` for ${ENTITY_FULL[entity]}` : ''}.`,
       };
 
   // ----- table and cards -----
   const renderEmpty = () =>
-    anyFilter && allRows.length > 0 ? (
+    error ? null : anyFilter && allRows.length > 0 ? (
       <EmptyState
         icon={<Search />}
         title="No rows match these filters"
@@ -626,7 +702,15 @@ const Renewals: React.FC = () => {
         }
       />
     ) : (
-      <EmptyState icon={<AutorenewOutlined />} title={emptyText.title} description={emptyText.description} />
+      <EmptyState
+        icon={<AutorenewOutlined />}
+        title={emptyText.title}
+        description={
+          placeholderCount && !filters.showPlaceholders
+            ? `${emptyText.description} ${placeholderCount} closed placeholder${placeholderCount === 1 ? ' is' : 's are'} hidden.`
+            : emptyText.description
+        }
+      />
     );
 
   const rowAccent = (row: RenewalRow) =>
@@ -725,9 +809,9 @@ const Renewals: React.FC = () => {
                 </TableCell>
                 <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
                   <Typography variant="body2">{formatMoney(row.value, row.currency)}</Typography>
-                  {row.term_months && row.term_months !== 12 ? (
+                  {row.term_months && Math.abs(row.term_months - 12) > 1 ? (
                     <Typography variant="caption" color="text.secondary">
-                      {row.term_months} months
+                      {row.term_months}-month term
                     </Typography>
                   ) : null}
                 </TableCell>
@@ -841,10 +925,35 @@ const Renewals: React.FC = () => {
             </ToggleButton>
           ))}
         </ToggleButtonGroup>
-        <Typography variant="body2" color="text.secondary" sx={{ ml: { sm: 'auto' } }}>
-          {current ? `${viewTitle} · data as of ${formatDate(current.as_of)}` : viewTitle}
+        <ToggleButtonGroup
+          size="small"
+          exclusive
+          value={basis}
+          onChange={(_, value) => value !== null && update({ basis: value === 'calendar' ? 'calendar' : '' })}
+          aria-label="Which month a term belongs to"
+        >
+          <ToggleButton value="funnel" sx={{ px: 1.5, textTransform: 'none' }}>
+            <Tooltip title="As the renewal funnel sheets: a term ending on the last day of a month is due the next month.">
+              <span>By renewal month</span>
+            </Tooltip>
+          </ToggleButton>
+          <ToggleButton value="calendar" sx={{ px: 1.5, textTransform: 'none' }}>
+            <span>By end date (calendar month)</span>
+          </ToggleButton>
+        </ToggleButtonGroup>
+        <Typography variant="body2" color="text.secondary" sx={{ ml: { md: 'auto' } }}>
+          {current ? `Data as of ${formatDate(current.as_of)}` : ''}
         </Typography>
       </Box>
+
+      <Typography
+        component="h2"
+        variant="subtitle1"
+        sx={{ fontWeight: 600, mb: 1.5 }}
+        aria-live="polite"
+      >
+        {windowText || viewTitle}
+      </Typography>
 
       <MonthStrip
         data={data}
@@ -914,7 +1023,7 @@ const Renewals: React.FC = () => {
             </Button>
           )}
           <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }} aria-live="polite">
-            {current ? `${visible.length} of ${allRows.length} terms` : ''}
+            {current ? `${visible.length} of ${allRows.length - (filters.showPlaceholders ? 0 : placeholderCount)} terms` : ''}
           </Typography>
           <Box
             role="group"
@@ -930,7 +1039,17 @@ const Renewals: React.FC = () => {
               onClick={() => update({ attention: filters.attentionOnly ? '' : '1' })}
               aria-pressed={filters.attentionOnly}
             />
-            {STATE_ORDER.filter((key) => stateCounts[key] || states.includes(key)).map((key) => {
+            {neverActivatedCount > 0 && (
+              <Chip
+                size="small"
+                label={`Sent, never activated (${neverActivatedCount})`}
+                color={filters.neverActivatedOnly ? 'warning' : 'default'}
+                variant={filters.neverActivatedOnly ? 'filled' : 'outlined'}
+                onClick={() => update({ never: filters.neverActivatedOnly ? '' : '1' })}
+                aria-pressed={filters.neverActivatedOnly}
+              />
+            )}
+            {STATE_ORDER.filter((key) => key !== 'placeholder' && (stateCounts[key] || states.includes(key))).map((key) => {
               const on = states.includes(key);
               return (
                 <Chip
@@ -944,13 +1063,23 @@ const Renewals: React.FC = () => {
                 />
               );
             })}
+            {placeholderCount > 0 && (
+              <Chip
+                size="small"
+                label={`${filters.showPlaceholders ? 'Hide' : 'Show'} closed placeholders (${placeholderCount})`}
+                variant="outlined"
+                onClick={() => update({ placeholders: filters.showPlaceholders ? '' : '1' })}
+                aria-pressed={filters.showPlaceholders}
+              />
+            )}
           </Box>
         </Box>
         {narrow ? cards : table}
       </Paper>
       <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 1.5 }}>
-        A term is listed in the month its end date falls in. Draft contracts are not terms. The renewal state comes from
-        the contracts linked as its renewal and their invoices. * zone count from the company's funnel figure.
+        Draft contracts are not terms. The renewal state comes from the contracts linked to the term that start
+        between 90 days before and 60 days after its end, and their invoices. Placeholders closed by the November data
+        corrections are hidden unless shown. * zone count from the company's funnel figure.
       </Typography>
     </Box>
   );
