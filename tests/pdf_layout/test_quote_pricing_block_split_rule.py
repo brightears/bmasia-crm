@@ -94,10 +94,24 @@ def _item(index, words):
     )
 
 
-def _quote(row_count, words):
+def _one_time_item(index):
+    return SimpleNamespace(
+        product_service="Soundtrack Player",
+        description=f"R{index:02d}B Playback hardware R{index:02d}E",
+        quantity=Decimal("1"),
+        unit_price=Decimal("0"),
+        unit_value=Decimal("250"),
+        line_total=Decimal("0"),
+    )
+
+
+def _quote(row_count, words, one_time=False):
     quote = sample_quote()
     quote.company = _example_company()
     items = [_item(index, words) for index in range(1, row_count + 1)]
+    if one_time:
+        # The last data row becomes a one-time item under its own group heading.
+        items[-1] = _one_time_item(row_count)
     quote.line_items = RelatedList(items)
     quote.subtotal = sum((item.line_total for item in items), Decimal("0"))
     quote.total_value = quote.subtotal
@@ -126,11 +140,11 @@ def _captured_block(seen, layout_before_measuring=False):
         yield
 
 
-def _layout(row_count, words, *, layout_before_measuring=False):
+def _layout(row_count, words, *, layout_before_measuring=False, one_time=False):
     seen = {}
     with _captured_block(seen, layout_before_measuring):
         pdf = quote_pdf.build_quote_pdf_v2(
-            _quote(row_count, words),
+            _quote(row_count, words, one_time),
             ENTITY,
             str(LOGO),
             format_address_multiline,
@@ -218,6 +232,56 @@ def test_pricing_block_split_thresholds(row_count, words, old_rows, outcome):
         assert new.totals == 1
     else:
         assert new == Layout(1, (1,), (1,) * row_count, 1)
+
+
+def test_group_heading_is_not_counted_as_a_data_row():
+    # Four zone rows stay; only the one-time item carries over, under its
+    # group heading. That is one data row, so the block moves whole.
+    old, fits_a_page = _layout(5, 0, layout_before_measuring=True, one_time=True)
+    assert fits_a_page
+    assert old.rows == (0, 0, 0, 0, 1)
+
+    new, _ = _layout(5, 0, one_time=True)
+
+    assert new == Layout(1, (1,), (1,) * 5, 1)
+
+
+def test_block_never_splits_where_the_heading_reservation_would_already_break():
+    # Three small rows fit in less than the 125 pt heading reservation. The
+    # old layout broke the page there, so the block moves whole even though
+    # a 3 + 2 split would be possible.
+    from reportlab.platypus import Paragraph, Spacer
+
+    styles = commercial_pdf.document_styles()
+    rows = [[f"ZROW{index}", "Example", "1", "1", "1"] for index in range(1, 6)]
+    body = commercial_pdf.item_table(
+        ["Service", "Zone", "Qty", "Unit", "Amount"],
+        rows,
+        [78, commercial_pdf.CONTENT_WIDTH - 324, 42, 92, 112],
+        {2, 3, 4},
+        styles,
+        amount_columns={4},
+    )
+    table = body[0]
+    table.wrap(commercial_pdf.CONTENT_WIDTH, USABLE_HEIGHT)
+    heading = commercial_pdf.section_heading("01", "Block", styles).wrap(
+        commercial_pdf.CONTENT_WIDTH, USABLE_HEIGHT,
+    )[1]
+    three_rows = heading + sum(table._rowHeights[:4])
+    assert three_rows + 0.5 < 125
+    block = commercial_pdf.section_block("01", "Block", body, styles, minimum_following_height=125)
+    first_page = (
+        commercial_pdf.PAGE_HEIGHT - commercial_pdf.FIRST_PAGE_TOP - commercial_pdf.PAGE_BOTTOM
+    )
+    pdf = commercial_pdf.build_document_pdf(
+        [Spacer(1, first_page - three_rows - 0.5), *block, Paragraph("AFTERMARK", styles["body"])],
+        document_title="Example", document_id="EX-0001", entity=ENTITY,
+    )
+    texts = [" ".join((page.extract_text() or "").split()) for page in PdfReader(BytesIO(pdf)).pages]
+
+    assert "Block" not in texts[0] and "ZROW" not in texts[0]
+    assert "Block" in texts[1]
+    assert all(f"ZROW{index}" in texts[1] for index in range(1, 6))
 
 
 def test_split_thresholds_are_named_constants():
