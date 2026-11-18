@@ -88,6 +88,7 @@ INSTALLED_APPS = [
 
     # Local apps
     'crm_app',
+    'agent_inbox',  # activity log and change-proposal review queue
 ]
 
 MIDDLEWARE = [
@@ -330,6 +331,18 @@ CARA_QUARTERLY_OWNER = config('CARA_QUARTERLY_OWNER', default='legacy')
 # Cara care-touch and care-summary write endpoints (crm_app/cara_care_writes.py).
 # Off by default; reads are unaffected by this switch.
 CARA_CARE_WRITES_ENABLED = config('CARA_CARE_WRITES_ENABLED', default=False, cast=bool)
+
+# Activity log and change-proposal review queue (agent_inbox). Both write
+# surfaces are off by default; while off they answer "not enabled" and the
+# read endpoints still work. Accepting a proposal is always a person's click.
+AGENT_ACTIVITY_WRITES_ENABLED = config('AGENT_ACTIVITY_WRITES_ENABLED', default=False, cast=bool)
+CHANGE_PROPOSALS_ENABLED = config('CHANGE_PROPOSALS_ENABLED', default=False, cast=bool)
+CHANGE_PROPOSAL_EXPIRY_DAYS = config('CHANGE_PROPOSAL_EXPIRY_DAYS', default=30, cast=int)
+CHANGE_PROPOSALS_DAILY_CAP = config('CHANGE_PROPOSALS_DAILY_CAP', default=200, cast=int)
+AGENT_ACTIVITY_DAILY_CAP = config('AGENT_ACTIVITY_DAILY_CAP', default=2000, cast=int)
+# Extra CRM usernames treated as agent accounts (comma list), on top of the
+# principals in crm_app/agent_policy.py. Agent accounts cannot decide proposals.
+AGENT_INBOX_AGENT_USERNAMES = config('AGENT_INBOX_AGENT_USERNAMES', default='', cast=Csv())
 
 # Phase 1 agent gate (docs/agent-gate-phase1-design.md). 'observe' records what
 # crm_app/agent_policy.py would refuse without changing any write; 'off' disables
