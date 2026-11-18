@@ -6319,54 +6319,64 @@ class InvoiceViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=['post'])
     def mark_paid(self, request, pk=None):
-        """Mark invoice as paid and auto-generate receipt/tax invoice"""
+        """Mark the invoice paid once and number its receipt (crm_app/services/invoice_payments.py).
+
+        Body (all optional): paid_date (bank date, YYYY-MM-DD, default today), send_receipt
+        (true to email the receipt to the customer; default false), payment_method,
+        transaction_id, notes (audit log only). An invoice that is already Paid gets 409
+        with its existing receipt number; nothing is renumbered or sent again.
+        """
         from crm_app.services.email_service import EmailService
+        from crm_app.services.invoice_payments import (
+            InvoiceNotPayable, MarkPaidRequestSerializer, mark_invoice_paid,
+        )
 
         invoice = self.get_object()
-        old_status = invoice.status
-        invoice.status = 'Paid'
-        invoice.paid_date = timezone.now().date()
+        body = MarkPaidRequestSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        data = body.validated_data
+        paid_date = data.get('paid_date') or timezone.localdate()
 
-        # Auto-generate receipt number
-        entity = effective_billing_entity(invoice)
-        prefix = 'REC-TH' if 'Thailand' in entity else 'REC-HK'
-        year = timezone.now().year
-        pattern = f'{prefix}-{year}-'
-        last = Invoice.objects.filter(
-            receipt_number__startswith=pattern
-        ).order_by('-receipt_number').first()
-        if last:
-            try:
-                last_seq = int(last.receipt_number.split('-')[-1])
-                next_seq = last_seq + 1
-            except (ValueError, IndexError):
-                next_seq = 1
-        else:
-            next_seq = 1
-        invoice.receipt_number = f'{pattern}{str(next_seq).zfill(4)}'
-        invoice.save()
+        try:
+            invoice, old_status = mark_invoice_paid(
+                invoice.pk, paid_date=paid_date,
+                payment_method=data.get('payment_method', ''),
+                transaction_id=data.get('transaction_id', ''),
+            )
+        except InvoiceNotPayable as refusal:
+            return Response({
+                'error': refusal.message,
+                'code': refusal.code,
+                'status': refusal.invoice.status,
+                'receipt_number': refusal.invoice.receipt_number,
+                'paid_date': refusal.invoice.paid_date.isoformat() if refusal.invoice.paid_date else None,
+            }, status=status.HTTP_409_CONFLICT)
+        except ValueError as exc:  # no usable billing entity on the invoice or its company
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        self.log_action('UPDATE', invoice, {
+        changes = {
             'status': {'old': old_status, 'new': 'Paid'},
             'receipt_number': invoice.receipt_number,
-        })
+            'paid_date': invoice.paid_date.isoformat(),
+            'send_receipt': data['send_receipt'],
+        }
+        if data.get('notes'):
+            changes['payment_notes'] = data['notes']
+        self.log_action('UPDATE', invoice, changes)
 
-        # Auto-send receipt email (best-effort — don't fail mark_paid if email fails)
-        receipt_email_status = 'not_sent'
-        try:
-            email_service = EmailService()
-            success, message = email_service.send_receipt_email(
-                invoice_id=invoice.id,
-                request=request
-            )
-            receipt_email_status = 'sent' if success else f'failed: {message}'
-        except Exception as e:
-            logger.warning(f"Receipt email failed for {invoice.invoice_number}: {e}")
-            receipt_email_status = f'failed: {str(e)}'
+        receipt_email_status = 'not_requested'
+        if data['send_receipt']:
+            try:
+                success, message = EmailService().send_receipt_email(invoice_id=invoice.id, request=request)
+                receipt_email_status = 'sent' if success else f'failed: {message}'
+            except Exception:
+                logger.exception('Receipt email failed for invoice %s', invoice.pk)
+                receipt_email_status = 'failed: the receipt email could not be sent'
 
         return Response({
             'message': 'Invoice marked as paid',
             'receipt_number': invoice.receipt_number,
+            'paid_date': invoice.paid_date.isoformat(),
             'receipt_email_status': receipt_email_status,
         })
 
