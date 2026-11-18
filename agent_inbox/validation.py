@@ -1,0 +1,195 @@
+"""Shared input checks and the error type both write surfaces translate.
+
+The services raise ``ServiceError``; the REST views turn it into a response
+with the same status and body, and the MCP tools into a JSON string.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import unicodedata
+from datetime import datetime, timedelta, timezone as dt_timezone
+from uuid import UUID
+
+from django.utils import timezone
+
+KEY_RE = re.compile(r'[A-Za-z0-9:._-]{8,200}\Z')
+BATCH_RE = re.compile(r'[A-Za-z0-9:._-]{1,100}\Z')
+FUTURE_TOLERANCE = timedelta(minutes=10)
+EARLIEST = datetime(2000, 1, 1, tzinfo=dt_timezone.utc)
+
+
+class ServiceError(Exception):
+    """A refused request: HTTP status, a stable code and a one-line detail."""
+
+    def __init__(self, http_status, code, detail, **extra):
+        super().__init__(detail)
+        self.status = http_status
+        self.code = code
+        self.detail = detail
+        self.extra = extra
+
+    def body(self):
+        return {'detail': self.detail, 'code': self.code, **self.extra}
+
+
+def bad(detail, **extra):
+    return ServiceError(400, 'invalid', detail, **extra)
+
+
+def unprocessable(code, detail, **extra):
+    return ServiceError(422, code, detail, **extra)
+
+
+# ------------------------------------------------------------------ structure
+
+
+def strict_object(body, allowed, required=()):
+    if not isinstance(body, dict):
+        raise bad('Body must be a JSON object')
+    unknown = sorted(str(key) for key in set(body) - set(allowed))
+    if unknown:
+        raise bad('Unknown keys: ' + ', '.join(unknown))
+    missing = sorted(key for key in required if body.get(key) in (None, ''))
+    if missing:
+        raise bad('Missing keys: ' + ', '.join(missing))
+    return body
+
+
+def payload_sha256(body):
+    canonical = json.dumps(body, sort_keys=True, separators=(',', ':'), ensure_ascii=False, default=str)
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+
+# ------------------------------------------------------------------ text
+
+
+def has_control(text, allow_newlines=False):
+    for char in text:
+        if allow_newlines and char in '\n\r\t':
+            continue
+        if unicodedata.category(char) in ('Cc', 'Cs', 'Zl', 'Zp'):
+            return True
+    return False
+
+
+def optional_str(body, key):
+    value = body.get(key)
+    if value is None:
+        return ''
+    if not isinstance(value, str):
+        raise bad(f'{key} must be a string')
+    return value
+
+
+def text_field(body, key, max_length, *, required=False, multiline=False):
+    """A plain-text value: capped, without control characters (newlines only if multiline)."""
+    value = optional_str(body, key)
+    if multiline:
+        value = value.replace('\r\n', '\n').replace('\r', '\n')
+    value = value.strip()
+    if required and not value:
+        raise bad(f'{key} is required')
+    if len(value) > max_length:
+        raise bad(f'{key} must be at most {max_length} characters')
+    if has_control(value, allow_newlines=multiline):
+        if multiline:
+            raise bad(f'{key} must not contain control characters other than newlines and tabs')
+        raise bad(f'{key} must be a single line without control characters')
+    return value
+
+
+def token_field(body, key, max_length):
+    value = optional_str(body, key)
+    if len(value) > max_length:
+        raise bad(f'{key} must be at most {max_length} characters')
+    if any(char.isspace() for char in value) or has_control(value):
+        raise bad(f'{key} must not contain whitespace or control characters')
+    return value
+
+
+def url_field(body, key, max_length):
+    value = token_field(body, key, max_length)
+    if value and not re.match(r'https?://[^/\s]+', value):
+        raise bad(f'{key} must be an http or https URL')
+    return value
+
+
+def choice(body, key, choices, default=None):
+    value = body.get(key, default)
+    if value is None:
+        value = default
+    allowed = [c[0] for c in choices] if choices and isinstance(choices[0], tuple) else list(choices)
+    if value not in allowed:
+        raise bad(f'{key} must be one of: ' + ', '.join(allowed))
+    return value
+
+
+def uuid_value(value, key):
+    if not isinstance(value, str):
+        raise bad(f'{key} must be a UUID string')
+    try:
+        return UUID(value)
+    except ValueError:
+        raise bad(f'{key} must be a UUID string') from None
+
+
+def optional_uuid(body, key):
+    value = body.get(key)
+    if value in (None, ''):
+        return None
+    return uuid_value(value, key)
+
+
+def aware_datetime(value, key):
+    if not isinstance(value, str):
+        raise bad(f'{key} must be an ISO 8601 string with a timezone')
+    raw = value[:-1] + '+00:00' if value.endswith('Z') else value
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        raise bad(f'{key} must be an ISO 8601 string with a timezone') from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise bad(f'{key} must include a timezone')
+    return parsed
+
+
+def past_datetime(value, key):
+    parsed = aware_datetime(value, key)
+    if parsed > timezone.now() + FUTURE_TOLERANCE:
+        raise bad(f'{key} is in the future')
+    if parsed < EARLIEST:
+        raise bad(f'{key} is before 2000')
+    return parsed
+
+
+def key_field(body, key='idempotency_key'):
+    value = body.get(key)
+    if not isinstance(value, str) or not KEY_RE.fullmatch(value):
+        raise bad(f'{key} must be 8-200 characters of [A-Za-z0-9:._-]')
+    return value
+
+
+def batch_field(body, key='batch_key'):
+    value = optional_str(body, key)
+    if value and not BATCH_RE.fullmatch(value):
+        raise bad(f'{key} must be 1-100 characters of [A-Za-z0-9:._-]')
+    return value
+
+
+# ------------------------------------------------------------------ verbatim evidence
+
+
+def normalise_for_quote(text):
+    """NFC, and every run of whitespace (including line breaks) as one space.
+
+    Line wrapping and spacing differ between a stored body and a quote copied
+    from it; letters, digits, punctuation and case must match exactly.
+    """
+    return ' '.join(unicodedata.normalize('NFC', text or '').split())
+
+
+def quote_occurs_in(quote, text):
+    needle = normalise_for_quote(quote)
+    return bool(needle) and needle in normalise_for_quote(text)
