@@ -413,36 +413,15 @@ class BaseModelViewSet(viewsets.ModelViewSet):
             ip = request.META.get('REMOTE_ADDR')
         return ip
     
+    # Bulk operations this record type offers (crm_app/services/bulk_updates.py). None by default;
+    # each operation follows the same rules as the single edit or delete, record by record.
+    bulk_allowed = frozenset()
+
     @action(detail=False, methods=['post'])
     def bulk_operations(self, request):
-        """Handle bulk operations on multiple records"""
-        serializer = BulkOperationSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        action_type = serializer.validated_data['action']
-        ids = serializer.validated_data['ids']
-        data = serializer.validated_data.get('data', {})
-        
-        # Get queryset filtered by IDs
-        queryset = self.get_queryset().filter(id__in=ids)
-        
-        if action_type == 'delete':
-            from crm_app.services.delete_guards import bulk_delete
-            return bulk_delete(self, queryset, ids)
-        
-        elif action_type == 'update_status':
-            from crm_app.services.bulk_updates import bulk_update_status
-            return bulk_update_status(self, queryset, ids, data)
-        
-        elif action_type == 'assign':
-            if 'assigned_to' in data:
-                count = queryset.update(assigned_to_id=data['assigned_to'])
-                return Response({'message': f'{count} records assigned'})
-        
-        elif action_type == 'export':
-            return self.export_csv(queryset)
-        
-        return Response({'error': 'Invalid action'}, status=status.HTTP_400_BAD_REQUEST)
+        """Bulk operations enabled for this record type (bulk_allowed), one record at a time."""
+        from crm_app.services.bulk_updates import run_bulk_operation
+        return run_bulk_operation(self, request)
     
     def export_csv(self, queryset):
         """Export queryset to CSV"""
@@ -8688,50 +8667,8 @@ class EmailTemplateViewSet(BaseModelViewSet):
 
         return queryset
 
-    @action(detail=False, methods=['post'])
-    def bulk_operations(self, request):
-        """
-        Handle bulk operations on email templates with activate/deactivate support.
-
-        POST /api/v1/email-templates/bulk_operations/
-        Body: {
-            "action": "activate" | "deactivate" | "delete" | "export",
-            "ids": ["uuid1", "uuid2", ...]
-        }
-        """
-        serializer = BulkOperationSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        action_type = serializer.validated_data['action']
-        ids = serializer.validated_data['ids']
-
-        # Get queryset filtered by IDs
-        queryset = self.get_queryset().filter(id__in=ids)
-
-        if action_type == 'activate':
-            count = queryset.update(is_active=True)
-            return Response({
-                'message': f'{count} template{"s" if count != 1 else ""} activated',
-                'count': count
-            })
-
-        elif action_type == 'deactivate':
-            count = queryset.update(is_active=False)
-            return Response({
-                'message': f'{count} template{"s" if count != 1 else ""} deactivated',
-                'count': count
-            })
-
-        elif action_type == 'delete':
-            # Let parent class handle delete with audit logging
-            return super().bulk_operations(request)
-
-        elif action_type == 'export':
-            # Let parent class handle export
-            return super().bulk_operations(request)
-
-        # If action is not recognized, fall back to parent
-        return super().bulk_operations(request)
+    # The Email Templates page selects templates and activates, deactivates or deletes them.
+    bulk_allowed = frozenset({'activate', 'deactivate', 'delete'})
 
     @action(detail=True, methods=['get'])
     def preview(self, request, pk=None):

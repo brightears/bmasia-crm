@@ -18,6 +18,14 @@ from crm_app.serializers import InvoiceSerializer
 THAI = 'BMAsia (Thailand) Co., Ltd.'
 
 
+@pytest.fixture(autouse=True)
+def bulk_operations_enabled(monkeypatch):
+    """These tests check what bulk operations do once a record type enables them; which types enable
+    which operations is pinned in test_bulk_operations_rules.py."""
+    from crm_app.views import BaseModelViewSet
+    monkeypatch.setattr(BaseModelViewSet, 'bulk_allowed', frozenset({'delete', 'update_status'}))
+
+
 @pytest.fixture
 def user():
     return User.objects.create_user(
