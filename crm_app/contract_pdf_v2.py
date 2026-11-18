@@ -1051,11 +1051,10 @@ def _keep_execution_section(items, width):
             output.append(KeepTogether(lead + [item]))
             continue
         if table_height <= _PAGE_FRAME_HEIGHT:
-            # The table starts a page; the opening line flows before it. Its
-            # first line keeps the next one, so a clause heading never ends
-            # a page alone.
-            if len(lead) > 1 and isinstance(lead[1], Paragraph):
-                lead[0].keepWithNext = True
+            # The table starts a page and the opening line flows before it, as
+            # on the old flow. Keeping a clause heading with its next line
+            # here would push that line onto the table's page and the table
+            # onto a page of its own.
             output.extend(lead)
             output.append(KeepTogether([item]) if pairs and item.splitByRow else item)
             continue

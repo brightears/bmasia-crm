@@ -256,12 +256,13 @@ def test_signer_rows_win_when_the_table_fits_a_page_only_without_its_contacts_cl
         signer_pages = {_found(pages, name)[0] for name in names} | set(_found(pages, SUPPLIER))
         assert len(signer_pages) == 1, (step, signer_pages)
         heading = [n for n, text in enumerate(pages) if CONTACTS.search(text)]
-        # The clause heading never ends a page alone.
-        assert heading == _found(pages, 'BMA: Example Coordinator'), step
         contacts_apart += heading[0] not in signer_pages
         old = _old_flow_pages(build, monkeypatch)
         if len({_found(old, name)[0] for name in names}) == 1:
-            assert len(pages) <= len(old), step
+            # Where the old flow kept the signers together, nothing changes.
+            assert pages == old, step
+        else:
+            assert len(pages) <= len(old) + 1, step
     # The sweep must reach the band where only the table fits.
     assert contacts_apart > 0
 
@@ -354,9 +355,9 @@ def test_table_that_fits_a_page_only_alone_stays_whole_without_its_opening_line(
     lead = _contacts_lead()
     table = _rows_table(contract_pdf_v2._PAGE_FRAME_HEIGHT - 10)
     flow = contract_pdf_v2._keep_execution_section(lead + [table], CONTENT_WIDTH)
-    # The opening line flows before the page break, its heading kept with the
-    # next line; the signer rows stay whole.
-    assert flow[:2] == lead and lead[0].getKeepWithNext()
+    # The opening line flows before the page break as on the old flow; the
+    # signer rows stay whole.
+    assert flow[:2] == lead and not any(item.getKeepWithNext() for item in lead)
     assert len(flow) == 3 and isinstance(flow[2], KeepTogether) and flow[2]._content == [table]
 
 
