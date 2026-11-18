@@ -245,7 +245,7 @@ const ValueChange: React.FC<{ row: RenewalRow }> = ({ row }) => {
 const SuccessorCell: React.FC<{ row: RenewalRow }> = ({ row }) => {
   const s = row.renewal.successor;
   const others = row.renewal.other_linked.length;
-  const notRenewal = row.renewal.other_linked.filter((o) => o.link !== 'renewal');
+  const notRenewal = row.renewal.other_linked.filter((o) => o.link === 'addon' || o.link === 'mid_term');
   const linkNote = notRenewal.length ? (
     <Tooltip title={notRenewal.map((o) => `${o.contract_number}: ${o.link_label}`).join('; ')}>
       <Typography variant="caption" color="text.secondary" component="div" sx={{ lineHeight: 1.3 }}>
@@ -273,6 +273,7 @@ const SuccessorCell: React.FC<{ row: RenewalRow }> = ({ row }) => {
         {s.start_date ? ` from ${formatDate(s.start_date)}` : ''}
         {others - notRenewal.length ? ` · +${others - notRenewal.length} more` : ''}
         {s.other_company ? ' · other company record' : ''}
+        {s.link === 'late' ? ' · starts over 60 days after the end' : ''}
       </Typography>
       {linkNote}
     </Box>

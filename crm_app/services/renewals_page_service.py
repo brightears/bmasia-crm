@@ -79,6 +79,7 @@ ISSUED_INVOICE_STATUSES = ('Sent', 'Overdue', 'Paid')
 
 ATTENTION_REASONS = (
     ('renewed_unlinked', 'Marked Renewed, no renewal linked'),
+    ('renewed_link_mid_term', 'Marked Renewed; the linked contract starts mid-term (possible add-on)'),
     ('invoice_refunded', 'Invoice refunded'),
     ('auto_renew_ended', 'Auto-renew set, term ended, no new term recorded'),
     ('ended_nothing_sent', 'Ended, no renewal sent'),
@@ -88,16 +89,20 @@ ATTENTION_REASONS = (
 ATTENTION_LABEL = dict(ATTENTION_REASONS)
 ATTENTION_WINDOW_DAYS = 30
 
-# A linked contract counts as the renewal only if it starts in this window
-# around the term's end (and after the term's start); the same window as the
-# data-quality "no renewal" check.
+# A linked contract that starts more than 90 days before the term's end (or not
+# after the term's start) is not the renewal: it starts mid-term, a possible
+# add-on. One that starts more than 60 days after the end still counts as the
+# renewal and is flagged 'late': in the 16 Nov data 145 of the 159 such links
+# hang off the 2025 placeholder terms that the 15 Nov rule 1 linked to the
+# client's real term on purpose. The window is the data-quality check's.
 RENEWAL_START_BEFORE_END_DAYS = 90
 RENEWAL_START_AFTER_END_DAYS = 60
+RENEWAL_LINKS = ('renewal', 'late')
 LINK_LABEL = {
     'renewal': 'Renewal',
+    'late': 'Renewal, starts more than 60 days after the term ended',
     'addon': 'Add-on (lifecycle type)',
     'mid_term': 'Linked contract starts mid-term (possible add-on)',
-    'late': 'Linked contract starts more than 60 days after the term ended',
 }
 
 # Placeholders closed by the November corrections (parity rules of 15 Nov):
@@ -267,9 +272,9 @@ def _successor_rank(s: SuccessorFacts):
 def pick_successor(successors: Sequence[SuccessorFacts]) -> Optional[SuccessorFacts]:
     """The renewal that counts: most money evidence, then furthest along, then latest start.
 
-    Only links that are the renewal (``link == 'renewal'``) and not Cancelled.
+    Only links that are the renewal (``RENEWAL_LINKS``) and not Cancelled.
     """
-    live = [s for s in successors if s.link == 'renewal' and s.status != 'Cancelled']
+    live = [s for s in successors if s.link in RENEWAL_LINKS and s.status != 'Cancelled']
     if not live:
         return None
     return max(live, key=_successor_rank)
@@ -287,15 +292,14 @@ def derive_renewal_state(term: TermFacts, successors: Sequence[SuccessorFacts]) 
        an Expired term lapsed (Expired means lapsed with no successor);
        an auto-renewing term auto-renews until its end date, and after it
        has "auto-renew, no new term"; anything else has not started.
-    Linked contracts that are add-ons or start outside the renewal window are
-    never the renewal.
+    Linked contracts that are add-ons or start mid-term are never the renewal.
     """
     if term.placeholder:
         return RenewalState(PLACEHOLDER, None, 'placeholder')
     if term.status == 'Cancelled':
         return RenewalState(LOST, None, 'term_cancelled')
 
-    renewals = [s for s in successors if s.link == 'renewal']
+    renewals = [s for s in successors if s.link in RENEWAL_LINKS]
     best = pick_successor(renewals)
     if best is not None:
         if best.invoice_state == 'paid':
@@ -323,12 +327,13 @@ def derive_renewal_state(term: TermFacts, successors: Sequence[SuccessorFacts]) 
     return RenewalState(NOT_STARTED, None, 'no_renewal')
 
 
-def attention_of(state: str, days_from_end: Optional[int], refunded: bool = False) -> Optional[str]:
+def attention_of(state: str, days_from_end: Optional[int], refunded: bool = False,
+                 mid_term_link: bool = False) -> Optional[str]:
     """Why a row needs action now, or None. ``days_from_end`` is today minus the end date."""
     if state == PLACEHOLDER:
         return None
     if state == RENEWED_UNLINKED:
-        return 'renewed_unlinked'
+        return 'renewed_link_mid_term' if mid_term_link else 'renewed_unlinked'
     if refunded:
         return 'invoice_refunded'
     if state == AUTO_UNCONFIRMED:
@@ -473,8 +478,8 @@ def _evaluate(contract, today, r3_ids):
     term = TermFacts(contract.status, bool(contract.auto_renew), ended=days is not None and days > 0,
                      placeholder=placeholder)
     result = derive_renewal_state(term, facts)
-    refunded = result.state != PLACEHOLDER and any(f.refunded for f in facts if f.link == 'renewal')
-    attention = attention_of(result.state, days, refunded)
+    refunded = result.state != PLACEHOLDER and any(f.refunded for f in facts if f.link in RENEWAL_LINKS)
+    attention = attention_of(result.state, days, refunded, any(f.link == 'mid_term' for f in facts))
     never_activated = contract.status == 'Sent'
     prev = contract.renewed_from
     is_addon = (contract.lifecycle_type or '') == 'addon' or (
@@ -620,6 +625,7 @@ def renewals_row(contract, today, r3_ids=frozenset()):
             'signed_date': chosen.signed_date.isoformat() if chosen.signed_date else None,
             'sent_date': chosen.sent_date.isoformat() if chosen.sent_date else None,
             'invoice_state': result.successor.invoice_state,
+            'link': result.successor.link,
             'other_company': chosen.company_id != contract.company_id,
         }
 

@@ -25,6 +25,7 @@ export type RenewalGroup = 'open' | 'renewed' | 'auto' | 'lost' | 'excluded';
 
 export type AttentionKey =
   | 'renewed_unlinked'
+  | 'renewed_link_mid_term'
   | 'invoice_refunded'
   | 'auto_renew_ended'
   | 'ended_nothing_sent'
@@ -47,6 +48,8 @@ export interface RenewalSuccessor {
   signed_date: string | null;
   sent_date: string | null;
   invoice_state: 'none' | 'invoiced' | 'part_paid' | 'paid';
+  /** 'late': starts more than 60 days after the term ended (still the renewal). */
+  link: LinkKind;
   other_company: boolean;
 }
 

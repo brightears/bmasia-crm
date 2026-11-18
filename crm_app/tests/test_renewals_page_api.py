@@ -299,6 +299,19 @@ def test_value_change_is_never_across_currencies():
     assert row['renewal']['value_change'] is None
 
 
+def test_late_link_counts_as_the_renewal_and_mid_term_link_is_named():
+    placeholder = contract(company('Late Link Hotel'), date(2025, 12, 31), start=date(2025, 1, 1), status='Renewed')
+    real = renewal_of(placeholder, start=date(2026, 8, 1))
+    row = one_row(year=2026, month=1)
+    assert row['renewal']['state'] == 'signed'
+    assert row['renewal']['successor']['contract_number'] == real.contract_number
+    assert row['renewal']['successor']['link'] == 'late'
+    term = contract(company('Mid Link Hotel'), date(2026, 11, 20), status='Renewed')
+    renewal_of(term, start=date(2026, 4, 1))
+    rows = rows_by_number(view(year=2026, month=11))
+    assert rows[term.contract_number]['renewal']['attention'] == 'renewed_link_mid_term'
+
+
 def test_successor_on_another_company_record_is_flagged():
     term = contract(company('Twin A Hotel'), date(2026, 11, 20))
     contract(company('Twin B Hotel'), date(2027, 11, 20), start=date(2026, 11, 21), renewed_from=term)

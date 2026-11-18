@@ -88,8 +88,10 @@ CASES = [
      [S('Active', JAN, link='addon', key='a')], RENEWED_UNLINKED, None),
     ('unmarked add-on starting mid-term is not the renewal', T('Active'),
      [S('Active', JAN, link='mid_term', key='a')], NOT_STARTED, None),
-    ('linked contract starting long after the end is not the renewal', T('Active'),
-     [S('Active', JAN, link='late', key='a')], NOT_STARTED, None),
+    ('linked contract starting long after the end still is the renewal', T('Active'),
+     [S('Active', JAN, link='late', key='a')], SIGNED, 'a'),
+    ('renewal beats a late link', T('Active'),
+     [S('Active', JAN, link='late', key='a'), S('Sent', FEB, invoice_state='invoiced', key='b')], INVOICED, 'b'),
 ]
 
 
@@ -176,9 +178,15 @@ def test_classify_link(start, lifecycle, expected):
 
 def test_pick_successor_ignores_non_renewal_links_and_cancelled():
     assert pick_successor([S('Cancelled', JAN), S('Active', JAN, link='addon'), S('Active', JAN, link='mid_term')]) is None
+    assert pick_successor([S('Active', JAN, link='late', key='x')]).key == 'x'
 
 
 # --- attention, totals, rate --------------------------------------------------
+
+def test_attention_names_a_mid_term_link_on_a_term_marked_renewed():
+    assert attention_of(RENEWED_UNLINKED, 30, False, True) == 'renewed_link_mid_term'
+    assert attention_of(NOT_STARTED, 30, False, True) == 'ended_nothing_sent'
+
 
 @pytest.mark.parametrize('state,days,refunded,expected', [
     (NOT_STARTED, 5, False, 'ended_nothing_sent'),
