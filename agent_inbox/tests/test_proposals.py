@@ -343,9 +343,10 @@ def test_task_is_created_with_the_reviewer_as_creator(agent, person, company, co
 # ------------------------------------------------------------------ the record changed
 
 
-def test_version_mismatch_applies_nothing_and_refreshes(agent, person, company):
+def test_a_watched_field_edit_applies_nothing_and_refreshes(agent, person, company):
+    """Someone else changed the phone after the suggestion: the accept stops (an unrelated edit would not)."""
     proposal = propose(token_client(agent), **phone_body(company)).json()
-    company.city = 'Chiang Mai'
+    company.phone = '+66 2 999 9999'
     company.save()
     client = session_client(person)
     response = accept(client, proposal['id'], seen_version=proposal['seen_version'])
@@ -359,14 +360,14 @@ def test_version_mismatch_applies_nothing_and_refreshes(agent, person, company):
     assert fresh['expected_version'] == row.expected_version
     assert fresh['seen_version'] != proposal['seen_version']
     company.refresh_from_db()
-    assert company.phone == '+66 2 000 0000'
+    assert company.phone == '+66 2 999 9999'
     assert _audit_for('Company', company.pk) == []
     # Repeating the same click (double click, retry, stale tab) applies nothing.
     repeat = accept(client, proposal['id'], seen_version=proposal['seen_version'])
     assert repeat.status_code == 409 and repeat.json()['code'] == 'stale_view'
     assert repeat.json()['proposal']['seen_version'] == fresh['seen_version']
     company.refresh_from_db()
-    assert company.phone == '+66 2 000 0000'
+    assert company.phone == '+66 2 999 9999'
     # An accept bound to the refreshed values applies it.
     again = accept(client, proposal['id'], seen_version=fresh['seen_version'])
     assert again.status_code == 200, again.content
