@@ -431,46 +431,63 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
             {links.length > 0 && <Box sx={{ display: 'inline-flex', gap: 0.5, flexWrap: 'wrap' }}>{links}</Box>}
           </Box>
 
+          {event.changes.length === 0 && event.detail && (
+            <Typography
+              id={detailId}
+              variant="body2"
+              sx={{
+                mt: 0.75,
+                whiteSpace: 'pre-line',
+                overflowWrap: 'anywhere',
+                color: 'text.primary',
+                ...(canExpand && !open
+                  ? { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }
+                  : {}),
+              }}
+            >
+              {event.detail}
+            </Typography>
+          )}
           {canExpand && (
-            <>
-              <Button
-                size="small"
-                onClick={() => toggleExpanded(event.id)}
-                aria-expanded={open}
-                aria-controls={detailId}
-                endIcon={open ? <ExpandLess /> : <ExpandMore />}
-                sx={{ mt: 0.5, ml: -1, px: 1, minHeight: 28, color: 'text.secondary', fontWeight: 500 }}
+            <Button
+              size="small"
+              onClick={() => toggleExpanded(event.id)}
+              aria-expanded={open}
+              aria-controls={detailId}
+              endIcon={open ? <ExpandLess /> : <ExpandMore />}
+              sx={{ mt: 0.25, ml: -1, px: 1, minHeight: 28, color: 'text.secondary', fontWeight: 500 }}
+            >
+              {event.changes.length
+                ? open
+                  ? 'Hide changes'
+                  : `Show ${event.changes.length} change${event.changes.length > 1 ? 's' : ''}`
+                : open
+                ? 'Show less'
+                : 'Show more'}
+            </Button>
+          )}
+          {event.changes.length > 0 && (
+            <Collapse in={open} unmountOnExit>
+              <Box
+                id={detailId}
+                sx={{
+                  mt: 0.5,
+                  p: 1.5,
+                  borderRadius: 1,
+                  bgcolor: isDark ? 'rgba(255,255,255,0.04)' : ink[25],
+                  border: 1,
+                  borderColor: 'divider',
+                }}
               >
-                {open ? 'Hide details' : event.changes.length ? `Show ${event.changes.length} change${event.changes.length > 1 ? 's' : ''}` : 'Show details'}
-              </Button>
-              <Collapse in={open} unmountOnExit>
-                <Box
-                  id={detailId}
-                  sx={{
-                    mt: 0.5,
-                    p: 1.5,
-                    borderRadius: 1,
-                    bgcolor: isDark ? 'rgba(255,255,255,0.04)' : ink[25],
-                    border: 1,
-                    borderColor: 'divider',
-                  }}
-                >
-                  {event.changes.length > 0 ? (
-                    <Box component="ul" sx={{ m: 0, pl: 2.5, display: 'grid', gap: 0.5 }}>
-                      {event.changes.map((change) => (
-                        <Typography component="li" variant="body2" key={change.field} sx={{ overflowWrap: 'anywhere' }}>
-                          {changeSentence(change)}
-                        </Typography>
-                      ))}
-                    </Box>
-                  ) : (
-                    <Typography variant="body2" sx={{ whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}>
-                      {event.detail}
+                <Box component="ul" sx={{ m: 0, pl: 2.5, display: 'grid', gap: 0.5 }}>
+                  {event.changes.map((change) => (
+                    <Typography component="li" variant="body2" key={change.field} sx={{ overflowWrap: 'anywhere' }}>
+                      {changeSentence(change)}
                     </Typography>
-                  )}
+                  ))}
                 </Box>
-              </Collapse>
-            </>
+              </Box>
+            </Collapse>
           )}
         </Box>
       </Box>

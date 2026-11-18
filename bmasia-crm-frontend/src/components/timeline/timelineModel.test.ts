@@ -143,7 +143,9 @@ describe('links and summaries', () => {
 
   it('only offers details when there is something to show', () => {
     expect(hasMore(event())).toBe(false);
-    expect(hasMore(event({ detail: 'Spoke to the GM' }))).toBe(true);
+    expect(hasMore(event({ detail: 'Spoke to the GM' }))).toBe(false); // short detail is shown as it is
+    expect(hasMore(event({ detail: 'x'.repeat(200) }))).toBe(true);
+    expect(hasMore(event({ detail: 'one\ntwo\nthree' }))).toBe(true);
     expect(hasMore(event({ changes: [{ field: 'x', label: 'X', kind: 'text', old: 'a', new: 'b' }] }))).toBe(true);
   });
 });

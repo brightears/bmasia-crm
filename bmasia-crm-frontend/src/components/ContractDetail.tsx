@@ -619,7 +619,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
           <Grid item xs={12} md={6}>
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>
-                Contract Timeline
+                Key dates
               </Typography>
 
               <Timeline sx={{ p: 0 }}>

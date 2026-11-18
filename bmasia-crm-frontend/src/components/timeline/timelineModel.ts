@@ -218,5 +218,12 @@ export const eventSummary = (event: TimelineEvent): string | null => {
   return parts.length ? parts.join(' · ') : null;
 };
 
+/** Detail longer than the two lines shown under an event. */
+export const isLongDetail = (detail?: string | null): boolean => {
+  const text = (detail || '').trim();
+  return text.length > 160 || text.split('\n').length > 2;
+};
+
+/** Whether an event has more to show than its collapsed form: field changes or a long detail. */
 export const hasMore = (event: TimelineEvent): boolean =>
-  Boolean((event.detail && event.detail.trim()) || (event.changes && event.changes.length));
+  Boolean((event.changes && event.changes.length) || isLongDetail(event.detail));

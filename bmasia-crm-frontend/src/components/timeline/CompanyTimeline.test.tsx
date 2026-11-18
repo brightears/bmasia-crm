@@ -110,10 +110,22 @@ it('expands an event to show its detail and field changes as sentences', async (
   expect(toggle).toHaveAttribute('aria-expanded', 'false');
   fireEvent.click(toggle);
   expect(await screen.findByText('Changed End date from 31 Dec 2026 to 31 Dec 2027')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Hide details' })).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByRole('button', { name: 'Hide changes' })).toHaveAttribute('aria-expanded', 'true');
 
-  fireEvent.click(screen.getByRole('button', { name: 'Show details' }));
-  expect(await screen.findByText('GM wants two more zones.')).toBeInTheDocument();
+  // A short detail is shown straight away; a long one is clamped until "Show more".
+  expect(screen.getByText('GM wants two more zones.')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Show more' })).not.toBeInTheDocument();
+});
+
+it('clamps a long detail and expands it with Show more', async () => {
+  const long = 'Walked every zone with the IT manager. '.repeat(8).trim();
+  api.getCompanyTimeline.mockResolvedValue(page([ev({ id: 'note:7', title: 'Site visit', detail: long })]));
+  renderTimeline();
+  expect(await screen.findByText(long)).toBeInTheDocument();
+  const more = screen.getByRole('button', { name: 'Show more' });
+  expect(more).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.click(more);
+  expect(screen.getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true');
 });
 
 it('filters by type with chips that carry counts', async () => {
