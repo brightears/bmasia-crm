@@ -7,11 +7,13 @@ bypass it; full legal templates such as Hilton use this approved design.
 """
 from copy import copy
 from io import BytesIO
+import logging
 import re
 from html import unescape
 from xml.sax.saxutils import escape
 
 from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import CondPageBreak, HRFlowable, Image, KeepTogether, PageBreak, Paragraph, Spacer, Table, TableStyle
 
 from crm_app.commercial_pdf import (
@@ -131,12 +133,16 @@ def split_clause_placements(value):
     return parts[0].strip(), placed
 
 
-def clause_addition_markup(placed, clause):
-    """Markup appended inside a numbered clause, on its own line."""
+def clause_addition_markup(placed, clause, *, record=None):
+    """Markup appended inside a numbered clause, on its own line.
+
+    The placed wording comes from the contract's custom_terms (``record``).
+    """
     value = placed.get(clause, '')
     if not clean_text(value).strip():
         return ''
-    return '<br/>' + _markup(value).replace('\n', '<br/>')
+    text = stored_markup(clean_text(value), field='Contract.custom_terms', record=record)
+    return '<br/>' + text.replace('\n', '<br/>')
 
 
 def full_template_source(contract):
@@ -202,14 +208,15 @@ def tailored_template_content(contract, resolved_content=None):
             # no explicit payment wording is supplied.
             if not value and slot == '{{payment_terms}}':
                 continue
-            content = content.replace(slot, html_text(value) if getattr(contract, field, '') else _markup(value))
+            content = content.replace(slot, filled_text(value) if getattr(contract, field, '') else stored_markup(
+                clean_text(value), field='ContractTemplate.content', record=getattr(selected, 'pk', None)))
     additional_terms, placed = split_clause_placements(getattr(contract, 'custom_terms', ''))
     for clause in CLAUSE_PLACEMENTS:
         slot = f'{{{{under_{clause}}}}}'
         value = placed.get(clause, '')
         if value and slot not in content and not already_present(value):
             missing.append({'field': 'custom_terms', 'accepted_slots': [f'under_{clause}']})
-        content = content.replace(slot, html_text(value) if value else '')
+        content = content.replace(slot, filled_text(value) if value else '')
     if missing:
         raise ContractTailoringClarification(missing)
 
@@ -218,7 +225,7 @@ def tailored_template_content(contract, resolved_content=None):
         if '{{service_items}}' not in content:
             raise ContractTailoringClarification([{'field': 'custom_service_items', 'accepted_slots': ['service_items']}])
         content = content.replace('{{service_items}}', '<br/>'.join(
-            html_text(item.get('name', '')) + (': ' + html_text(item['description']) if item.get('description') else '')
+            filled_text(item.get('name', '')) + (': ' + filled_text(item['description']) if item.get('description') else '')
             for item in custom_services if isinstance(item, dict)
         ))
     else:
@@ -232,9 +239,9 @@ def tailored_template_content(contract, resolved_content=None):
         value = (additional_terms if field == 'custom_terms' else getattr(contract, field, '')) or ''
         found = [f'{{{{{slot}}}}}' for slot in slots if f'{{{{{slot}}}}}' in content]
         for slot in found:
-            content = content.replace(slot, html_text(value) if value.strip() else '')
+            content = content.replace(slot, filled_text(value) if value.strip() else '')
         if value.strip() and not found and not already_present(value):
-            inserts.append(optional_clause_markup(heading, value))
+            inserts.append(literal_hyphens(optional_clause_markup(heading, value)))
     if inserts:
         extra = '<br/><br/>'.join(inserts) + '<br/><br/>'
         # Place the additions before the complete signature segment, including
@@ -258,6 +265,26 @@ def tailored_template_content(contract, resolved_content=None):
     return content
 
 
+# A hyphen that could join others into the full-template page-break marker
+# "---": one beside another hyphen, or at either end of a filled value.
+_MARKER_HYPHEN = re.compile(r'^-|-$|-(?=-)|(?<=-)-')
+
+
+def literal_hyphens(markup):
+    """Write a filled value's marker-forming hyphens as "&#45;".
+
+    The full-template layout starts a page at "---" after the template's
+    values are filled in. A value such as "Alpha---Beta" is plain text and
+    prints its hyphens; the entity prints the same character.
+    """
+    return _MARKER_HYPHEN.sub('&#45;', markup)
+
+
+def filled_text(value):
+    """html_text() for a plain value filled into a full template."""
+    return literal_hyphens(html_text(value))
+
+
 def paragraph_text(value):
     """Escape one stored plain-text value for ReportLab Paragraph markup.
 
@@ -269,23 +296,97 @@ def paragraph_text(value):
     return '' if value is None else escape(str(value))
 
 
-# "&" that does not start a character or entity reference, and "<" that cannot
-# start a tag. Neither is valid markup; ReportLab misreads or rejects both.
+# "&" that does not start a character or entity reference. ReportLab misreads
+# it ("F&B" prints as "F&B;").
 _BARE_AMPERSAND = re.compile(r'&(?!#[0-9]+;|#[xX][0-9a-fA-F]+;|[A-Za-z][A-Za-z0-9]*;)')
-_STRAY_LESS_THAN = re.compile(r'<(?![A-Za-z/!?][^<>]*>)')
+_CHARACTER_REFERENCE = re.compile(r'&#(?:([0-9]+)|[xX]([0-9a-fA-F]+));')
+# The formatting tags contract text fields accept. An opening tag may carry
+# name="value" attributes (they are dropped); anything else, such as the prose
+# "A<B and C>D", is text. Tag names and spacing are ASCII only (re.A), so no
+# other letter or space case-folds into an allowed tag.
+_TAG_ATTRIBUTES = r'''(?:\s+[A-Za-z_:][-\w:.]*\s*=\s*(?:"[^"<>]*"|'[^'<>]*'))*'''
+_FORMATTING_TAG = re.compile(
+    r'<(?:/(b|i|u|strong|em|super|sub)\s*|(b|i|u|strong|em|super|sub)' + _TAG_ATTRIBUTES + r'\s*)>'
+    r'|<br' + _TAG_ATTRIBUTES + r'\s*/?\s*>', re.I | re.A)
+# Pasted Word formatting; the document, not the paste, owns typography.
+_PASTED_FONT_TAG = re.compile(r'</?(?:font|span)\b[^<>]*>', re.I | re.A)
+
+
+def _character_reference(match):
+    code = int(match.group(1) or match.group(2), 10 if match.group(1) else 16)
+    if 0 < code <= 0x10FFFF and not 0xD800 <= code <= 0xDFFF:
+        return match.group(0)
+    return '&amp;' + match.group(0)[1:]
 
 
 def paragraph_markup(value):
     """Guard stored wording that is Paragraph markup by design.
 
     Template bodies, corporate clause text, custom_terms and the standard
-    agreement's custom preamble/payment/activation wording may carry <b>, <br/>
-    or entities. Keep every tag and entity; escape only a bare "&" or a stray
-    "<", which cannot be intended markup. Idempotent: already escaped or
-    guarded text is returned unchanged, so it can never double-escape.
+    agreement's custom preamble/payment/activation wording accept basic
+    formatting tags only: b, i, u, br, strong, em, super and sub, written
+    without attributes. Pasted font/span tags are dropped and their text kept.
+    Every other "<" and every bare "&" is escaped, so it prints as written;
+    entities keep working. Idempotent: guarded or escaped text is returned
+    unchanged, so it can never double-escape.
     """
     text = '' if value is None else str(value)
-    return _STRAY_LESS_THAN.sub('&lt;', _BARE_AMPERSAND.sub('&amp;', text))
+    text = _PASTED_FONT_TAG.sub('', text)
+    text = _CHARACTER_REFERENCE.sub(_character_reference, _BARE_AMPERSAND.sub('&amp;', text))
+    parts, position = [], 0
+    for match in _FORMATTING_TAG.finditer(text):
+        closing, opening = match.group(1), match.group(2)
+        tag = f'</{closing.lower()}>' if closing else f'<{opening.lower()}>' if opening else '<br/>'
+        parts += [text[position:match.start()].replace('<', '&lt;'), tag]
+        position = match.end()
+    parts.append(text[position:].replace('<', '&lt;'))
+    return ''.join(parts)
+
+
+logger = logging.getLogger(__name__)
+_MARKUP_CHECK_STYLE = ParagraphStyle('stored-markup-check')
+
+
+def _markup_parses(text, pieces=None):
+    for piece in [text] + (list(pieces(text)) if pieces else []):
+        try:
+            Paragraph(piece or '', _MARKUP_CHECK_STYLE)
+        except Exception:
+            return False
+    return True
+
+
+_LINE_BREAK_TAG = re.compile(r'<br' + _TAG_ATTRIBUTES + r'\s*/?\s*>', re.I | re.A)
+
+
+def markup_as_text(value):
+    """Stored wording as plain text: every tag prints as written.
+
+    Line breaks stay line breaks and entities are decoded, as the markup would
+    have printed them, so a stored "&amp;" prints as "&". Values a full
+    template body already holds escaped are not escaped a second time.
+    """
+    text = '' if value is None else str(value)
+    text = _CHARACTER_REFERENCE.sub(_character_reference, _BARE_AMPERSAND.sub('&amp;', text))
+    return '<br/>'.join(part.replace('<', '&lt;') for part in _LINE_BREAK_TAG.split(text))
+
+
+def stored_markup(value, *, field, record=None, pieces=None):
+    """paragraph_markup() for one stored wording field, sure to render.
+
+    Guarded formatting tags can still fail to pair up (an unclosed <b>, tags
+    closed out of order). Such a value prints as plain text instead, so a
+    malformed value can no longer stop a PDF from rendering (markup_as_text).
+    ``pieces`` returns the parts the layout turns into separate paragraphs;
+    each must then render on its own as well. The warning names the field and the record, never the
+    wording.
+    """
+    text = paragraph_markup(value)
+    if _markup_parses(text, pieces):
+        return text
+    logger.warning('Contract PDF: %s on record %s has formatting tags that do not pair up; '
+                   'printed as plain text.', field, record)
+    return markup_as_text(value)
 
 
 def _markup(text):
@@ -296,22 +397,23 @@ def _markup(text):
     return text
 
 
-def optional_clause_markup(label, value, *, allow_markup=False):
+def optional_clause_markup(label, value, *, allow_markup=False, record=None):
     """Render supplied optional wording as part of the agreement body.
 
     These fields are not a source of new terms or approval authority. Their
     caller supplies the wording; blank fields produce no label. Keep the label
     inline so it cannot become an oversized or orphaned section heading.
+    Markup is allowed only for the contract's custom_terms (``record``).
     """
     if not clean_text(value).strip():
         return ''
-    text = (_markup(value).replace('\n', '<br/>')
+    text = (stored_markup(clean_text(value), field='Contract.custom_terms', record=record).replace('\n', '<br/>')
             if allow_markup else html_text(value))
     return f'<b>{html_text(label)}:</b> {text}'
 
 
-def optional_clause_paragraph(label, value, style, *, allow_markup=False):
-    text = optional_clause_markup(label, value, allow_markup=allow_markup)
+def optional_clause_paragraph(label, value, style, *, allow_markup=False, record=None):
+    text = optional_clause_markup(label, value, allow_markup=allow_markup, record=record)
     return Paragraph(text, style) if text else None
 
 
@@ -549,8 +651,8 @@ def _flowables(source, width, styles, *, cell=False):
                 parts.append((part, len(re.findall(r'<br\s*/?>', following, flags=re.I))))
             # Inline emphasis may span a paragraph boundary. Keep that one
             # balanced paragraph intact rather than feed malformed fragments.
-            if any(len(re.findall(r'<(?:b|i|u)>', part, re.I)) !=
-                   len(re.findall(r'</(?:b|i|u)>', part, re.I)) for part, _ in parts):
+            if any(len(re.findall(r'<(?:b|i|u|strong|em|super|sub)>', part, re.I | re.A)) !=
+                   len(re.findall(r'</(?:b|i|u|strong|em|super|sub)>', part, re.I | re.A)) for part, _ in parts):
                 parts = [(item.text, 0)]
             explicit_group = object()
             for part, break_count in parts:

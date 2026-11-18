@@ -29,8 +29,8 @@ from decimal import Decimal
 from crm_app.services.document_context import customer_legal_entity_name, effective_billing_entity
 from crm_app.services.document_entity_filters import filter_document_entity
 from crm_app.contract_pdf_v2 import (
-    clause_addition_markup, optional_clause_paragraph, paragraph_markup, paragraph_text,
-    split_clause_placements,
+    clause_addition_markup, literal_hyphens, optional_clause_paragraph, paragraph_text,
+    split_clause_placements, stored_markup,
 )
 
 logger = logging.getLogger(__name__)
@@ -284,6 +284,11 @@ def format_address_multiline(company):
 def paragraph_address_multiline(company):
     """format_address_multiline with every stored line escaped for Paragraph markup."""
     return '<br/>'.join(paragraph_text(line) for line in _address_lines(company))
+
+
+def paragraph_lines(value):
+    """Escape multi-line stored plain text for Paragraph markup, one line per <br/>."""
+    return '<br/>'.join(paragraph_text(line) for line in str(value or '').split('\n'))
 
 
 def _address_lines(company):
@@ -2049,6 +2054,23 @@ class ContractViewSet(BaseModelViewSet):
 
         return blockers
 
+    def _template_layout_pieces(self, content):
+        """The parts of a full template body laid out as separate Paragraphs.
+
+        Mirrors the splits in _generate_principal_terms_pdf: the zones table,
+        the signature layouts, page-break markers and the heading kept with
+        the zones table.
+        """
+        from crm_app.contract_signature_layouts import SIGNATURE_LAYOUT_TOKEN_PATTERN
+        zones = r'\{\{\s*zones_table\s*\}\}'
+        page_break = r'(?:<br/>)*\s*(?:<b>)?---(?:</b>)?\s*(?:<br/>)*'
+        pieces = re.split(zones + '|' + SIGNATURE_LAYOUT_TOKEN_PATTERN + '|' + page_break, content)
+        for before in re.split(zones, content)[:-1]:
+            before = re.split(SIGNATURE_LAYOUT_TOKEN_PATTERN, before)[-1]
+            bulk, heading, _ = self._split_template_zones_preamble(before)
+            pieces += re.split(page_break, bulk) + [heading]
+        return [piece for piece in pieces if piece]
+
     @staticmethod
     def _split_template_zones_preamble(content):
         """Separate the final zones heading and preserve an intentional page break."""
@@ -2237,6 +2259,7 @@ class ContractViewSet(BaseModelViewSet):
                 rate = float(contract.value) / zone_count
                 replacements['{{rate_per_zone}}'] = f"{contract.currency} {rate:,.2f}"
 
+        rendered = {}
         for var, value in replacements.items():
             replacement = str(value)
             if escape_for_paragraph:
@@ -2244,8 +2267,13 @@ class ContractViewSet(BaseModelViewSet):
                 # while CRM values are plain text. Escape only the dynamic value
                 # so legal names such as "T&T" render literally without allowing
                 # customer data to be parsed as paragraph markup.
-                replacement = paragraph_text(replacement)
-            content = content.replace(var, replacement)
+                # A value's own "---" prints as written; the full-template
+                # layout must not read it as a page-break marker.
+                replacement = literal_hyphens(paragraph_text(replacement))
+            rendered[var] = replacement
+        # One pass: a value that itself contains "{{variable}}" text prints as
+        # written instead of being filled in again.
+        content = re.sub('|'.join(map(re.escape, rendered)), lambda match: rendered[match.group(0)], content)
 
         # Existing Hilton template text places the numeric variable before a
         # literal plural noun. Correct the one-zone grammar without changing
@@ -3156,14 +3184,40 @@ class ContractViewSet(BaseModelViewSet):
         if contract.preamble_template:
             # FULL TEMPLATE MODE: Template contains complete contract text
             # Skip all hardcoded clauses and render only template content
-            from crm_app.contract_pdf_v2 import tailored_template_content, ContractTailoringClarification
+            from crm_app.contract_pdf_v2 import (
+                ContractTailoringClarification, markup_as_text, tailored_template_content,
+            )
             try:
-                source_content, _ = full_template_source(contract)
+                source_content, full_body_override = full_template_source(contract)
                 template_source = tailored_template_content(
                     contract, self._substitute_template_variables(
                         source_content, contract, escape_for_paragraph=False))
             except ContractTailoringClarification as exc:
                 return Response(exc.payload(), status=422)
+            # The body is markup by design. Guard it once before the layout
+            # splits it at the zones table, the signature blocks, page-break
+            # markers and the zones heading; the values filled in above are
+            # already escaped.
+            body_field = 'Contract.preamble_custom' if full_body_override else 'ContractTemplate.content'
+            body_record = getattr(contract if full_body_override else contract.preamble_template, 'pk', None)
+            template_source = stored_markup(
+                template_source, field=body_field, record=body_record, pieces=self._template_layout_pieces,
+            )
+
+            def layout_paragraph(content, style):
+                """One laid-out part of the guarded body.
+
+                A cut the guard cannot foresee (a filled value that turns a line
+                into the zones heading, a hand-built signature segment) can
+                still leave a part whose tags do not pair up; it prints as text
+                instead of stopping the PDF.
+                """
+                try:
+                    return Paragraph(content, style)
+                except Exception:
+                    logger.warning('Contract PDF: %s on record %s has formatting tags that do not pair up in '
+                                   'one laid-out part; printed as plain text.', body_field, body_record)
+                    return Paragraph(markup_as_text(content), style)
             template_content = re.sub(
                 r'\{\{\s*zones_table\s*\}\}',
                 '{{zones_table}}',
@@ -3204,10 +3258,10 @@ class ContractViewSet(BaseModelViewSet):
                         if i:
                             elements.append(PB())
                         if section.strip():
-                            elements.append(Paragraph(section.strip(), body_style))
+                            elements.append(layout_paragraph(section.strip(), body_style))
                             elements.append(Spacer(1, 0.2*inch))
                 else:
-                    elements.append(Paragraph(content, body_style))
+                    elements.append(layout_paragraph(content, body_style))
                     elements.append(Spacer(1, 0.2*inch))
 
             # Helper function to render template segments with special variable handling
@@ -3237,7 +3291,7 @@ class ContractViewSet(BaseModelViewSet):
                     )
                     keep_items = []
                     if before.strip():
-                        keep_items.append(Paragraph(before, body_style))
+                        keep_items.append(layout_paragraph(before, body_style))
                     keep_items.append(sig_table)
                     elements.append(KeepTogether(keep_items))
                     elements.append(Spacer(1, 0.2*inch))
@@ -3266,19 +3320,19 @@ class ContractViewSet(BaseModelViewSet):
                                 kt_list = []
                                 if heading_content.strip():
                                     heading_style = body_style.clone('section_heading', spaceAfter=6)
-                                    kt_list.append(Paragraph(heading_content, heading_style))
+                                    kt_list.append(layout_paragraph(heading_content, heading_style))
                                 kt_list.append(zone_table)
                                 kt_list.append(Spacer(1, 0.15*inch))
                                 elements.append(KeepTogether(kt_list))
                             else:
                                 if heading_content.strip():
-                                    elements.append(Paragraph(heading_content, body_style))
+                                    elements.append(layout_paragraph(heading_content, body_style))
                                 elements.append(zone_table)
                                 elements.append(Spacer(1, 0.15*inch))
                         elif heading_content.strip():
-                            elements.append(Paragraph(heading_content, body_style))
+                            elements.append(layout_paragraph(heading_content, body_style))
                     elif heading_content.strip():
-                        elements.append(Paragraph(heading_content, body_style))
+                        elements.append(layout_paragraph(heading_content, body_style))
 
                     # Process content after {{zones_table}} (may contain other special vars)
                     if len(parts) > 1 and parts[1].strip():
@@ -3303,7 +3357,7 @@ class ContractViewSet(BaseModelViewSet):
                     )
                     if before.strip():
                         keep_style = body_style.clone('keep_sig_heading', keepWithNext=True, spaceAfter=6)
-                        elements.append(Paragraph(before, keep_style))
+                        elements.append(layout_paragraph(before, keep_style))
                     elements.append(KeepTogether([sig_table]))
                     elements.append(Spacer(1, 0.2*inch))
                     # Process content after {{signature_blocks}}
@@ -3359,7 +3413,8 @@ class ContractViewSet(BaseModelViewSet):
             if contract.preamble_custom:
                 # Stored wording is markup by design here (it replaces the
                 # default preamble, including its <b> and <br/>).
-                preamble_text = paragraph_markup(contract.preamble_custom)
+                preamble_text = stored_markup(
+                    contract.preamble_custom, field='Contract.preamble_custom', record=contract.pk)
             else:
                 # FIX 2026-05-05 (Lyra): product-aware Whereas clause.
                 # SYB contracts → "BMA is a certified legal reseller of Soundtrack Your Brand (SYB)..."
@@ -3427,7 +3482,7 @@ and<br/><br/>
             # Clause 3: Commencement Date
             elements.append(Paragraph(
                 f"<b>{clause_num}.</b> Commencement Date: {contract.start_date.strftime('%d %B %Y') if contract.start_date else '[Date]'}"
-                f"{clause_addition_markup(placed_terms, 'commencement')}",
+                f"{clause_addition_markup(placed_terms, 'commencement', record=contract.pk)}",
                 clause_style
             ))
             clause_num += 1
@@ -3437,13 +3492,13 @@ and<br/><br/>
                 duration_text = _format_duration(contract.start_date, contract.end_date)
                 elements.append(Paragraph(
                     f"<b>{clause_num}.</b> Duration: {duration_text} from {contract.start_date.strftime('%d %B %Y')} to {contract.end_date.strftime('%d %B %Y')}"
-                    f"{clause_addition_markup(placed_terms, 'duration')}",
+                    f"{clause_addition_markup(placed_terms, 'duration', record=contract.pk)}",
                     clause_style
                 ))
             else:
                 elements.append(Paragraph(
                     f"<b>{clause_num}.</b> Duration: As specified in schedule"
-                    f"{clause_addition_markup(placed_terms, 'duration')}",
+                    f"{clause_addition_markup(placed_terms, 'duration', record=contract.pk)}",
                     clause_style
                 ))
             clause_num += 1
@@ -3589,16 +3644,19 @@ and<br/><br/>
             # Clause 7: Terms of Payment. Stored payment wording and template
             # content are markup by design; their variables are escaped below.
             if contract.payment_custom:
-                payment_text = paragraph_markup(contract.payment_custom)
+                payment_text = stored_markup(
+                    contract.payment_custom, field='Contract.payment_custom', record=contract.pk)
             elif contract.payment_template:
-                payment_text = paragraph_markup(contract.payment_template.content)
+                payment_text = stored_markup(
+                    contract.payment_template.content, field='ContractTemplate.content',
+                    record=contract.payment_template.pk)
             else:
                 payment_text = payment_terms_default
 
             payment_text = self._substitute_template_variables(payment_text, contract)
             elements.append(Paragraph(
                 f"<b>{clause_num}.</b> Terms of payment: {payment_text}"
-                f"{clause_addition_markup(placed_terms, 'payment')}",
+                f"{clause_addition_markup(placed_terms, 'payment', record=contract.pk)}",
                 clause_style
             ))
             payment_schedule = optional_clause_paragraph(
@@ -3684,16 +3742,19 @@ and<br/><br/>
 
             # Clause 8: Activation Date
             if contract.activation_custom:
-                activation_text = paragraph_markup(contract.activation_custom)
+                activation_text = stored_markup(
+                    contract.activation_custom, field='Contract.activation_custom', record=contract.pk)
             elif contract.activation_template:
-                activation_text = paragraph_markup(contract.activation_template.content)
+                activation_text = stored_markup(
+                    contract.activation_template.content, field='ContractTemplate.content',
+                    record=contract.activation_template.pk)
             else:
                 activation_text = "Music service will be activated within 3 business days of receipt of payment and completion of account setup."
 
             activation_text = self._substitute_template_variables(activation_text, contract)
             elements.append(Paragraph(
                 f"<b>{clause_num}.</b> Activation Date: {activation_text}"
-                f"{clause_addition_markup(placed_terms, 'activation')}",
+                f"{clause_addition_markup(placed_terms, 'activation', record=contract.pk)}",
                 clause_style
             ))
             clause_num += 1
@@ -3702,7 +3763,7 @@ and<br/><br/>
             # internal notes are never a source of contractual wording.
             additional_terms = optional_clause_paragraph(
                 'Additional terms and conditions', additional_terms_text,
-                body_style, allow_markup=True,
+                body_style, allow_markup=True, record=contract.pk,
             )
             if additional_terms is not None:
                 elements.append(additional_terms)
@@ -4118,13 +4179,13 @@ and<br/><br/>
         for clause, label in (('commencement', 'Commencement'), ('duration', 'Duration'),
                               ('payment', 'Terms of payment'), ('activation', 'Activation')):
             placed_clause = optional_clause_paragraph(
-                label, placed_terms.get(clause, ''), body_style, allow_markup=True,
+                label, placed_terms.get(clause, ''), body_style, allow_markup=True, record=contract.pk,
             )
             if placed_clause is not None:
                 elements.append(placed_clause)
         additional_terms = optional_clause_paragraph(
             'Additional terms and conditions', additional_terms_text,
-            body_style, allow_markup=True,
+            body_style, allow_markup=True, record=contract.pk,
         )
         if additional_terms is not None:
             elements.append(additional_terms)
@@ -4222,15 +4283,28 @@ and<br/><br/>
         company = contract.company
 
         # Check if this contract should use Hilton HPA format
+        from django.core.exceptions import ObjectDoesNotExist
+        pdf_template = None
         if company and company.parent_company:
             try:
                 pdf_template = company.parent_company.pdf_template
-                if pdf_template.template_format == 'hilton_hpa':
-                    # Hilton HPA always generates combined Attachment A + Exhibit D
-                    return self._generate_hilton_combined_pdf(contract)
-            except Exception:
-                # If there's any issue accessing the template, fall back to standard format
+            except ObjectDoesNotExist:
+                # No corporate template: use the standard participation format.
                 pass
+        if pdf_template is not None and pdf_template.template_format == 'hilton_hpa':
+            # Hilton HPA always generates combined Attachment A + Exhibit D.
+            # A render error is reported, never replaced by another document.
+            try:
+                return self._generate_hilton_combined_pdf(contract)
+            except Exception as exc:
+                # Type and stage only: the error text and a traceback can
+                # carry the document's wording.
+                logger.error('Corporate participation PDF failed for contract %s in the combined format render (%s)',
+                             contract.pk, type(exc).__name__)
+                return Response({
+                    'error': 'The corporate participation agreement could not be generated.',
+                    'code': 'CONTRACT_PDF_RENDER_FAILED',
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Standard participation agreement format
         if contract.preamble_template:
@@ -4532,13 +4606,13 @@ and<br/><br/>
         for clause, label in (('commencement', 'Commencement'), ('duration', 'Duration'),
                               ('payment', 'Terms of payment'), ('activation', 'Activation')):
             placed_clause = optional_clause_paragraph(
-                label, placed_terms.get(clause, ''), body_style, allow_markup=True,
+                label, placed_terms.get(clause, ''), body_style, allow_markup=True, record=contract.pk,
             )
             if placed_clause is not None:
                 elements.append(placed_clause)
         additional_terms = optional_clause_paragraph(
             'Additional terms and conditions', additional_terms_text,
-            body_style, allow_markup=True,
+            body_style, allow_markup=True, record=contract.pk,
         )
         if additional_terms is not None:
             elements.append(additional_terms)
@@ -4890,11 +4964,13 @@ and<br/><br/>
 
         # Get warranty text from CorporatePdfTemplate if available
         warranty_text = None
+        warranty_record = None
         if company.parent_company:
             try:
                 pdf_template = company.parent_company.pdf_template
                 if pdf_template.warranty_text:
                     warranty_text = pdf_template.warranty_text
+                    warranty_record = getattr(pdf_template, 'pk', None)
             except:
                 pass
 
@@ -4906,7 +4982,9 @@ and<br/><br/>
             laws and regulations in the provision of Services."""
 
         # Corporate clause text is markup by design.
-        elements.append(Paragraph(paragraph_markup(warranty_text), att_body_style))
+        elements.append(Paragraph(stored_markup(
+            warranty_text, field='CorporatePdfTemplate.warranty_text', record=warranty_record,
+        ), att_body_style))
         elements.append(Spacer(1, 0.3*inch))
 
         # 8. Products & Prices (Service Breakdown)
@@ -5011,17 +5089,21 @@ and<br/><br/>
 
         # Get legal terms from CorporatePdfTemplate if available
         custom_legal_terms = None
+        legal_terms_record = None
         if company.parent_company:
             try:
                 pdf_template = company.parent_company.pdf_template
                 if pdf_template.legal_terms:
                     custom_legal_terms = pdf_template.legal_terms
+                    legal_terms_record = getattr(pdf_template, 'pk', None)
             except:
                 pass
 
         # Legal sections - use custom if provided, otherwise use defaults
         if custom_legal_terms:
-            elements.append(Paragraph(paragraph_markup(custom_legal_terms), exd_body_style))
+            elements.append(Paragraph(stored_markup(
+                custom_legal_terms, field='CorporatePdfTemplate.legal_terms', record=legal_terms_record,
+            ), exd_body_style))
         else:
             # Default Hilton-style legal terms
             legal_sections = [
@@ -6738,15 +6820,16 @@ class InvoiceViewSet(BaseModelViewSet):
             ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#E8910C')),
         ]))
 
-        # Create card-style BILL TO section
-        bill_to_lines = [f'<b>{company.legal_entity_name or company.name}</b>']
+        # Create card-style BILL TO section. Stored values are plain text;
+        # escape each once for Paragraph markup.
+        bill_to_lines = [f'<b>{paragraph_text(company.legal_entity_name or company.name)}</b>']
         if getattr(company, 'branch', ''):
-            bill_to_lines.append(f'({company.branch})')
+            bill_to_lines.append(f'({paragraph_text(company.branch)})')
         if getattr(invoice, 'property_name', ''):
-            bill_to_lines.append(f'Property: {invoice.property_name}')
+            bill_to_lines.append(f'Property: {paragraph_text(invoice.property_name)}')
         if getattr(company, 'tax_id', ''):
-            bill_to_lines.append(f'Tax ID: {company.tax_id}')
-        bill_addr = format_address_multiline(company)
+            bill_to_lines.append(f'Tax ID: {paragraph_text(company.tax_id)}')
+        bill_addr = paragraph_address_multiline(company)
         if bill_addr:
             bill_to_lines.append(bill_addr)
         bill_to_content = Paragraph('<br/>'.join(bill_to_lines), from_content_style)
@@ -6778,7 +6861,7 @@ class InvoiceViewSet(BaseModelViewSet):
 
         # Contract reference (only if invoice has a contract)
         if invoice.contract:
-            contract_text = f"<b>Contract:</b> {invoice.contract.contract_number}"
+            contract_text = f"<b>Contract:</b> {paragraph_text(invoice.contract.contract_number)}"
             if invoice.contract.service_type:
                 contract_text += f"<br/><b>Service:</b> {invoice.contract.get_service_type_display()}"
             elements.append(Paragraph(contract_text, body_style))
@@ -6802,7 +6885,7 @@ class InvoiceViewSet(BaseModelViewSet):
             for item in line_items:
                 item_subtotal = item.quantity * item.unit_price
                 # Build description with optional per-line service period
-                desc_text = item.description.replace('\n', '<br/>') if item.description else ''
+                desc_text = paragraph_lines(item.description) if item.description else ''
                 period_start = getattr(item, 'service_period_start', None)
                 period_end = getattr(item, 'service_period_end', None)
                 if period_start and period_end:
@@ -6812,7 +6895,7 @@ class InvoiceViewSet(BaseModelViewSet):
 
                 row = []
                 if has_product:
-                    row.append(Paragraph(getattr(item, 'product_service', '') or '', body_style))
+                    row.append(Paragraph(paragraph_text(getattr(item, 'product_service', '') or ''), body_style))
                 row.extend([
                     Paragraph(desc_text, body_style),
                     f"{item.quantity:,.0f}" if item.quantity == int(item.quantity) else f"{item.quantity:,.2f}",
@@ -6832,7 +6915,7 @@ class InvoiceViewSet(BaseModelViewSet):
             if invoice.contract:
                 service_description = f"{invoice.contract.get_service_type_display() if invoice.contract.service_type else 'Professional Services'}"
                 if invoice.contract.service_type:
-                    service_description += f"<br/><font size=8>Contract: {invoice.contract.contract_number}</font>"
+                    service_description += f"<br/><font size=8>Contract: {paragraph_text(invoice.contract.contract_number)}</font>"
                     service_description += f"<br/><font size=8>Period: {invoice.contract.start_date.strftime('%b %d, %Y')} - {invoice.contract.end_date.strftime('%b %d, %Y')}</font>"
             else:
                 service_description = 'Professional Services'
@@ -6956,7 +7039,7 @@ class InvoiceViewSet(BaseModelViewSet):
             pt_text = invoice.payment_terms_text
         else:
             pt_text = payment_terms_default
-        pt_formatted = pt_text.replace('\n', '<br/>')
+        pt_formatted = paragraph_lines(pt_text)
         payment_section.append(Paragraph(pt_formatted, body_style))
 
         elements.append(KeepTogether(payment_section))
@@ -6966,7 +7049,7 @@ class InvoiceViewSet(BaseModelViewSet):
         if invoice.notes:
             notes_section = []
             notes_section.append(Paragraph("Notes:", heading_style))
-            notes_text = invoice.notes.replace('\n', '<br/>')
+            notes_text = paragraph_lines(invoice.notes)
             notes_section.append(Paragraph(notes_text, body_style))
             elements.append(KeepTogether(notes_section))
             elements.append(Spacer(1, 0.2*inch))

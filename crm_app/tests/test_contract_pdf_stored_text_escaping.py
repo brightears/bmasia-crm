@@ -49,7 +49,7 @@ CUSTOM_SERVICE = 'Mood&Tone <Pro>'
 CONTACT_NAME = 'Jo "Sam" O\'Neil & Co'
 CONTACT_TITLE = 'Senior F&B Executive &amp; <Ops>'
 CONTACT_EMAIL = 'ops&b@example.com'
-BMA_CONTACT_NAME = 'Example Account Lead'
+BMA_CONTACT_NAME = 'Example Lead & Q<A Desk'
 BMA_CONTACT_TITLE = 'Q&A Manager <Ops>'
 BMA_CONTACT_EMAIL = 'lead+q&a@example.com'
 SIGNER_NAME = 'Signer &lt;One&gt;'
@@ -65,7 +65,7 @@ PAYMENT_SCHEDULE = 'Two parts: 50&50 <split>'
 
 PLAIN_VALUES = [
     LEGAL_NAME, ADDRESS_LINE, ZONE_NAME, CUSTOM_ZONE_NAME, CUSTOM_SERVICE,
-    CONTACT_NAME, CONTACT_TITLE, CONTACT_EMAIL, BMA_CONTACT_TITLE,
+    CONTACT_NAME, CONTACT_TITLE, CONTACT_EMAIL, BMA_CONTACT_NAME, BMA_CONTACT_TITLE,
     BMA_CONTACT_EMAIL, SIGNER_NAME, SIGNER_TITLE, BMA_SIGNER_NAME,
     BMA_SIGNER_TITLE, WITNESS_NAME, WITNESS_TITLE, SERVICE_ITEM_NAME,
     SERVICE_ITEM_DESCRIPTION, LINE_ITEM, PAYMENT_SCHEDULE,
@@ -297,6 +297,7 @@ def test_corporate_participation_format_prints_stored_values(agreement):
     CorporatePdfTemplate.objects.create(
         name='Example corporate layout', template_format=corporate_format, company=parent,
         warranty_text='Warranty covers F&B <b>areas</b> &amp; lounges.',
+        legal_terms='Legal terms for F&B <b>lounges</b>; rate A<B applies.',
     )
     agreement.company.parent_company = parent
     agreement.company.save()
@@ -310,7 +311,8 @@ def test_corporate_participation_format_prints_stored_values(agreement):
     text = _render(agreement)
     _assert_printed(
         text, f'and {LEGAL_NAME} ("Hotel")', ZONE_NAME, CUSTOM_ZONE_NAME, 'Net 30 for F&B <Ops>.',
-        'Warranty covers F&B areas & lounges.', CONTACT_NAME, CONTACT_EMAIL,
+        'Warranty covers F&B areas & lounges.', 'Legal terms for F&B lounges; rate A<B applies.',
+        CONTACT_NAME, CONTACT_EMAIL,
         SIGNER_NAME, SIGNER_TITLE, BMA_SIGNER_NAME, BMA_SIGNER_TITLE,
     )
 
@@ -328,7 +330,7 @@ def test_plain_values_are_escaped_once_and_wording_markup_is_left_intact():
     markup = '<b>Bold</b> F&B &amp; &#160; &nbsp; <br/> x<y and 1 < 2 <font size="9">z</font>'
     guarded = paragraph_markup(markup)
     assert guarded == (
-        '<b>Bold</b> F&amp;B &amp; &#160; &nbsp; <br/> x&lt;y and 1 &lt; 2 <font size="9">z</font>'
+        '<b>Bold</b> F&amp;B &amp; &#160; &nbsp; <br/> x&lt;y and 1 &lt; 2 z'
     )
     # Guarding is idempotent, so already-guarded or escaped text never doubles.
     assert paragraph_markup(guarded) == guarded
