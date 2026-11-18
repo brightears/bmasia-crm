@@ -487,6 +487,17 @@ class UserViewSet(BaseModelViewSet):
         data = request.data.copy()
         data.pop('role', None)  # Users cannot change their own role
         data.pop('is_active', None)  # Users cannot deactivate themselves
+        # The username is read-only here; an administrator changes it.
+        if data.get('username') not in (None, request.user.username):
+            return Response({'username': ['The username cannot be changed here.']},
+                            status=status.HTTP_400_BAD_REQUEST)
+        data.pop('username', None)
+        # A new password needs the current one, as in change_password.
+        current_password = data.pop('current_password', None)
+        if data.get('password') and not (
+                current_password and request.user.check_password(current_password)):
+            return Response({'current_password': ['Enter your current password to set a new one.']},
+                            status=status.HTTP_400_BAD_REQUEST)
         serializer = self.get_serializer(request.user, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
