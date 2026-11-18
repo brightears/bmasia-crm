@@ -89,7 +89,7 @@ test('contract email send preserves actionable Hilton blockers from a JSON 409',
   });
 
   await expect(ApiService.sendContractEmail('contract-1', {
-    recipients: ['joan.deng@hilton.com'],
+    recipients: ['casey.lin@example.com'],
     cc: [],
     subject: 'Hilton Participation Agreement',
     body: 'Please review the agreement.',

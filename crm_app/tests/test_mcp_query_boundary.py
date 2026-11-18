@@ -99,6 +99,30 @@ def test_published_lists_are_published_in_full():
         assert set(boundary.fields[name]) == set(cls.fields), name
 
 
+UNPUBLISHED_FIELDS = {
+    'invoice': ('payment_method', 'transaction_id', 'receipt_number'),
+    'contract': ('bmasia_contact_name', 'bmasia_contact_email', 'bmasia_contact_title'),
+    'zone': ('soundtrack_admin_email', 'api_raw_data'),
+    'contact': ('unsubscribe_token',),
+    'clienttechdetail': ('comments',),
+    'company': ('care_summary', 'it_notes'),
+}
+
+
+def test_fields_outside_the_published_set_stay_refused():
+    collections = published_collections()
+    boundary = _boundary()
+    for collection, names in UNPUBLISHED_FIELDS.items():
+        cls = collections[collection]
+        for name in names:
+            cls.model._meta.get_field(name)  # the model has the field
+            assert name not in cls.fields, (collection, name)
+            assert name not in boundary.fields[collection], (collection, name)
+            assert name not in help_.collection_schema(cls)['$jsonSchema']['properties'], (collection, name)
+            assert refused(collection, [{'$project': {name: 1}}]) == unknown_field_message(
+                name, collection, boundary.fields[collection])
+
+
 def test_search_fields_are_published():
     boundary = _boundary()
     for name in published_collections():

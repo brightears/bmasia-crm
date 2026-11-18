@@ -102,7 +102,7 @@ class TestContractZoneSerializer:
 
     def test_company_name_read_only_field(self):
         """Test company_name read-only field from contract.company.name"""
-        company = CompanyFactory(name='Hilton Pattaya')
+        company = CompanyFactory(name='Example Beach Hotel')
         contract = ContractFactory(company=company)
         zone = ZoneFactory(company=company)
         contract_zone = ContractZoneFactory(contract=contract, zone=zone)
@@ -110,7 +110,7 @@ class TestContractZoneSerializer:
         serializer = ContractZoneSerializer(contract_zone)
         data = serializer.data
 
-        assert data['company_name'] == 'Hilton Pattaya'
+        assert data['company_name'] == 'Example Beach Hotel'
 
     def test_serializer_handles_null_end_date(self):
         """Test serializer handles null end_date (currently active)"""

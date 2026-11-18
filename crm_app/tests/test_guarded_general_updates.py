@@ -49,13 +49,13 @@ def _contract(status='Draft'):
 @pytest.mark.django_db
 def test_company_legal_name_tax_id_and_address_need_no_special_context():
     company = Company.objects.create(
-        name='Somerset Diamond Bay Garden', billing_entity='BMAsia Limited', country='Cambodia',
+        name='Example Bay Garden Residences', billing_entity='BMAsia Limited', country='Cambodia',
     )
     observed = CompanySerializer(company).data
     patch = {
-        'legal_entity_name': 'THE DIAMOND BAY GARDEN CO., LTD.',
-        'tax_id': 'L001-902104216',
-        'address_line1': 'Sales Centre, Koh Pich Road',
+        'legal_entity_name': 'THE EXAMPLE BAY GARDEN CO., LTD.',
+        'tax_id': 'L001-900000001',
+        'address_line1': 'Sales Centre, Example Island Road',
     }
 
     result = _guarded('company', company, observed, patch)
@@ -64,7 +64,7 @@ def test_company_legal_name_tax_id_and_address_need_no_special_context():
     company.refresh_from_db()
     assert company.legal_entity_name == patch['legal_entity_name']
     assert company.tax_id == patch['tax_id']
-    assert company.name == 'Somerset Diamond Bay Garden'
+    assert company.name == 'Example Bay Garden Residences'
     audit = AuditLog.objects.get(record_id=str(company.pk))
     assert audit.additional_data['kind'] == 'guarded_update'
     assert audit.changes['legal_entity_name'] == {
@@ -361,17 +361,17 @@ def test_nested_zone_price_accepts_query_tool_number():
     assert location.location_name == 'Main lobby'
 
 
-def _bavi_contract():
-    company = Company.objects.create(name='Ba Vi style resort', billing_entity='BMAsia Limited')
+def _resort_contract():
+    company = Company.objects.create(name='Example hillside resort', billing_entity='BMAsia Limited')
     contract = Contract.objects.create(
         company=company, contract_number='DRAFT-0087', contract_type='Annual', status='Draft',
         start_date=date(2026, 8, 1), end_date=date(2027, 7, 31),
-        value=Decimal('1560.00'), total_value=Decimal('1560.00'),
+        value=Decimal('1500.00'), total_value=Decimal('1500.00'),
     )
-    for order, name in enumerate(['Lobby', 'Senses', 'Tonkin', 'Spa', 'Pool', 'Bar'], 1):
+    for order, name in enumerate(['Lobby', 'Garden', 'Terrace', 'Spa', 'Pool', 'Bar'], 1):
         ContractServiceLocation.objects.create(
             contract=contract, location_name=name, platform='custom',
-            custom_service_name='Beat Breeze', sort_order=order, price=Decimal('260.00'),
+            custom_service_name='Beat Breeze', sort_order=order, price=Decimal('250.00'),
         )
     return contract
 
@@ -389,21 +389,21 @@ def _query_tool_rows(contract):
 def _seven_zones(contract):
     rows = [
         {'id': str(row.id), 'location_name': row.location_name, 'platform': 'custom',
-         'custom_service_name': 'Beat Breeze', 'sort_order': row.sort_order, 'price': '260.00'}
+         'custom_service_name': 'Beat Breeze', 'sort_order': row.sort_order, 'price': '250.00'}
         for row in contract.service_locations.order_by('sort_order')
     ]
-    rows.append({'location_name': '1902 Lounge', 'platform': 'custom',
-                 'custom_service_name': 'Beat Breeze', 'sort_order': 7, 'price': '260.00'})
+    rows.append({'location_name': 'Rooftop Lounge', 'platform': 'custom',
+                 'custom_service_name': 'Beat Breeze', 'sort_order': 7, 'price': '250.00'})
     return rows
 
 
 @pytest.mark.django_db
 def test_query_tool_zone_rows_lock_a_seven_zone_replacement():
-    contract = _bavi_contract()
+    contract = _resort_contract()
     observed = ContractSerializer(contract).data
-    patch = {'value': '1820.00', 'total_value': '1820.00',
+    patch = {'value': '1750.00', 'total_value': '1750.00',
              'replace_service_locations': True, 'service_locations': _seven_zones(contract)}
-    expected = {'value': 1560.0, 'total_value': 1560.0, 'replace_service_locations': None,
+    expected = {'value': 1500.0, 'total_value': 1500.0, 'replace_service_locations': None,
                 'service_locations': _query_tool_rows(contract)}
 
     result = json.loads(update_record(
@@ -414,24 +414,24 @@ def test_query_tool_zone_rows_lock_a_seven_zone_replacement():
     assert result['updated'] is True, result
     contract.refresh_from_db()
     assert contract.service_locations.count() == 7
-    assert contract.value == Decimal('1820.00')
+    assert contract.value == Decimal('1750.00')
 
 
 @pytest.mark.django_db
 @pytest.mark.parametrize('tamper', ['price', 'drop_row', 'drop_writable_key'])
 def test_zone_lock_still_catches_real_differences(tamper):
-    contract = _bavi_contract()
+    contract = _resort_contract()
     observed = ContractSerializer(contract).data
     rows = _query_tool_rows(contract)
     if tamper == 'price':
-        rows[0]['price'] = 250.0
+        rows[0]['price'] = 240.0
     elif tamper == 'drop_row':
         rows.pop()
     else:
         del rows[0]['location_name']
-    patch = {'value': '1820.00', 'total_value': '1820.00',
+    patch = {'value': '1750.00', 'total_value': '1750.00',
              'replace_service_locations': True, 'service_locations': _seven_zones(contract)}
-    expected = {'value': 1560.0, 'total_value': 1560.0, 'replace_service_locations': None,
+    expected = {'value': 1500.0, 'total_value': 1500.0, 'replace_service_locations': None,
                 'service_locations': rows}
 
     result = json.loads(update_record(
@@ -446,12 +446,12 @@ def test_zone_lock_still_catches_real_differences(tamper):
 @pytest.mark.django_db
 @pytest.mark.parametrize('switch_before', ['true', 'omitted'])
 def test_replace_switch_is_not_part_of_the_lock(switch_before):
-    # Hilton Colombo 1 Oct: Cira sent replace_service_locations=true, or left it out.
-    contract = _bavi_contract()
+    # The caller sent replace_service_locations=true, or left it out.
+    contract = _resort_contract()
     observed = ContractSerializer(contract).data
-    patch = {'value': '1820.00', 'total_value': '1820.00',
+    patch = {'value': '1750.00', 'total_value': '1750.00',
              'replace_service_locations': True, 'service_locations': _seven_zones(contract)}
-    expected = {'value': 1560.0, 'total_value': 1560.0, 'service_locations': _query_tool_rows(contract)}
+    expected = {'value': 1500.0, 'total_value': 1500.0, 'service_locations': _query_tool_rows(contract)}
     if switch_before == 'true':
         expected['replace_service_locations'] = True
 
@@ -466,11 +466,11 @@ def test_replace_switch_is_not_part_of_the_lock(switch_before):
 
 @pytest.mark.django_db
 def test_stored_field_still_required_in_expected_values():
-    contract = _bavi_contract()
+    contract = _resort_contract()
     observed = ContractSerializer(contract).data
-    patch = {'value': '1820.00', 'total_value': '1820.00',
+    patch = {'value': '1750.00', 'total_value': '1750.00',
              'replace_service_locations': True, 'service_locations': _seven_zones(contract)}
-    expected = {'value': 1560.0, 'service_locations': _query_tool_rows(contract)}
+    expected = {'value': 1500.0, 'service_locations': _query_tool_rows(contract)}
 
     result = json.loads(update_record(
         'contract', str(contract.pk), json.dumps(patch),

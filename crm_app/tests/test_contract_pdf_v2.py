@@ -73,7 +73,7 @@ def contract():
         customer_contact_title="General Manager",
         customer_signatory_name="Alex Example", customer_signatory_title="General Manager",
         bmasia_signatory_name="Chris Andrews", bmasia_signatory_title="Director",
-        bmasia_contact_name="Norbert Platzer", bmasia_contact_email="norbert@example.com",
+        bmasia_contact_name="Taylor Reed", bmasia_contact_email="taylor.reed@example.com",
     )
     agreement.service_locations.create(
         location_name="Lobby", platform="beatbreeze", price=Decimal("260.00"),
@@ -190,7 +190,7 @@ def test_standard_contract_prints_company_branch_and_witness_role(contract, clie
 
 
 def test_template_contract_does_not_duplicate_branch_already_in_legal_name(contract, client):
-    contract.company.legal_entity_name = "One Bangkok Co., Ltd (Branch 00008)"
+    contract.company.legal_entity_name = "Example Bangkok Co., Ltd (Branch 00008)"
     contract.company.branch = "Branch 00008"
     contract.company.save(update_fields=["legal_entity_name", "branch"])
     contract.additional_customer_signatories = [{
@@ -210,7 +210,7 @@ def test_template_contract_does_not_duplicate_branch_already_in_legal_name(contr
 
     _assert_a4(response)
     text = _text(response.content)
-    assert "One Bangkok Co., Ltd (Branch 00008)" in text
+    assert "Example Bangkok Co., Ltd (Branch 00008)" in text
     assert "(Branch 00008) (Branch 00008)" not in text
     assert "WITNESS" in text
     assert "Wendy Witness" in text

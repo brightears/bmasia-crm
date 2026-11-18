@@ -281,6 +281,39 @@ def literal_hyphens(markup):
     return _MARKER_HYPHEN.sub('&#45;', markup)
 
 
+_HYPHEN_RUN = re.compile(r'-+')
+
+
+def fill_template_values(content, values):
+    """Fill each "{{variable}}" in content with its value, in one pass.
+
+    A value that itself contains "{{variable}}" text prints as written. An
+    empty value can bring the template's own hyphens on either side of it
+    together ("A--{{x}}-B" with x empty). When no side holds three hyphens of
+    its own, the hyphens they form are written as "&#45;", which prints the
+    same character, so the layout does not read them as a "---" marker the
+    template never wrote. Every other run of hyphens is left as it is.
+    """
+    parts, joins, length, position = [], [], 0, 0
+    for match in re.finditer('|'.join(map(re.escape, values)), content):
+        literal, value = content[position:match.start()], values[match.group(0)]
+        if not value:
+            joins.append(length + len(literal))
+        parts += [literal, value]
+        length += len(literal) + len(value)
+        position = match.end()
+    parts.append(content[position:])
+    text = ''.join(parts)
+
+    def run(match):
+        cuts = [join - match.start() for join in joins if match.start() < join < match.end()]
+        bounds = [0, *cuts, len(match.group(0))]
+        if not cuts or len(match.group(0)) < 3 or max(b - a for a, b in zip(bounds, bounds[1:])) >= 3:
+            return match.group(0)
+        return '&#45;' * len(match.group(0))
+    return _HYPHEN_RUN.sub(run, text) if joins else text
+
+
 def filled_text(value):
     """html_text() for a plain value filled into a full template."""
     return literal_hyphens(html_text(value))

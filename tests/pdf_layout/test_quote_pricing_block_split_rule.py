@@ -437,3 +437,49 @@ def test_row_counter_treats_an_exact_fit_as_fitting():
         [Spacer(1, 100 + 2 * _FUZZ), table], width, 100,
     )
     assert (before, after, crossing, placed, offered) == (0, 5, None, 0, 100)
+
+
+@pytest.mark.parametrize("row_count, one_time, currency, shared_copy", [
+    (1, 0, None, False), (6, 2, None, False), (12, 0, "USD", False), (4, 0, None, True),
+])
+def test_pricing_block_flowables_carry_no_space_before_or_after(row_count, one_time, currency, shared_copy):
+    # The row counter lays the block out without space before or after each
+    # flowable, while the block measurement counts it; both agree only while
+    # the block's flowables carry none.
+    blocks = []
+    real = quote_pdf.section_block
+
+    def spy(number, title, body, styles, minimum_following_height=72):
+        flowables = real(number, title, body, styles, minimum_following_height)
+        blocks.append((title, flowables[1:]))
+        return flowables
+
+    quote = _quote(row_count, 4, one_time, currency=currency)
+    if shared_copy:
+        # Several zones with the standard service wording: it prints once,
+        # above the item table, instead of in every row.
+        for item in quote.line_items.all():
+            item.description = f"{item.description} {commercial_pdf.STANDARD_SERVICE_COPY}"
+    with mock.patch.object(quote_pdf, "section_block", spy):
+        quote_pdf.build_quote_pdf_v2(
+            quote,
+            ENTITY,
+            str(LOGO),
+            format_address_multiline,
+            format_duration,
+            preview=True,
+        )
+    assert "Services and pricing" in [title for title, _ in blocks]
+    width = commercial_pdf.CONTENT_WIDTH
+    spaced = []
+    for title, flowables in blocks:
+        for flowable in flowables:
+            flowable.wrap(width, commercial_pdf.PAGE_HEIGHT)
+            if flowable.getSpaceBefore() or flowable.getSpaceAfter():
+                spaced.append((title, type(flowable).__name__, flowable.getSpaceBefore(), flowable.getSpaceAfter()))
+    assert spaced == []
+    copy_printed = any(
+        commercial_pdf.STANDARD_SERVICE_COPY in getattr(flowable, "getPlainText", lambda: "")()
+        for _, flowables in blocks for flowable in flowables
+    )
+    assert copy_printed == shared_copy

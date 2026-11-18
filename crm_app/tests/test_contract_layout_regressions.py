@@ -415,8 +415,8 @@ def test_template_signature_pairs_allow_long_names_and_preserve_poa_on_same_page
 
 def test_two_customer_signers_move_as_one_execution_section(jakarta_contract):
     """A short two-pair signing section must not straddle pages."""
-    primary = "Mr. Yeo Choon Guan"
-    additional = "Mr. Nopparat Piyarattanayotin"
+    primary = "Mr. Alex Morgan"
+    additional = "Mr. Samuel Rivermontgomery"
     jakarta_contract.customer_signatory_name = primary
     jakarta_contract.customer_signatory_title = "Authorized Director"
     jakarta_contract.additional_customer_signatories = [{

@@ -837,6 +837,11 @@ def _item_rows_either_side(flowables, width, height):
     table that crosses the page edge (or ``None``), ``placed`` the number of
     its rows, header included, that fit on this page, and ``offered`` the
     height it is given there.
+
+    Space before and after each flowable is not counted, unlike in
+    ``_measured_block_height``. That assumes the block's flowables carry
+    none, which the quote pricing block's do (a test pins this); a block with
+    spacing would need it counted here too.
     """
     remaining = height
     before = after = 0

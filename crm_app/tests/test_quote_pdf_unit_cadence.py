@@ -8,7 +8,7 @@ def _quote(billing_frequency, duration_months):
 
 
 def test_prorated_one_time_addon_is_priced_per_period():
-    # TH-QT26121: two zones prorated to an existing contract, 3 months, one-time.
+    # Two zones prorated to an existing contract, 3 months, one-time.
     assert subscription_unit_suffix(_quote("one-time", 3)) == "per zone / period"
 
 

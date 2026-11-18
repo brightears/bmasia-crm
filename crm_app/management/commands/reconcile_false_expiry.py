@@ -30,9 +30,9 @@ SAFETY MODEL — read before use:
 
 Verified-file format (JSON):
     {
-      "HK-CT26419": {"start_date": "2026-07-29", "end_date": "2027-07-28"},
-      "HK-CT26282": {"start_date": "2026-07-29", "end_date": "2027-07-28",
-                     "status": "Active", "note": "invoice HK250169"}
+      "HK-CT00419": {"start_date": "2026-07-29", "end_date": "2027-07-28"},
+      "HK-CT00282": {"start_date": "2026-07-29", "end_date": "2027-07-28",
+                     "status": "Active", "note": "invoice HK000169"}
     }
   - status is optional (default "Active"; use "Renewed" if a live replacement
     contract already supersedes this one).

@@ -13,10 +13,10 @@ jest.mock('../services/api', () => ({
   },
 }));
 
-const joali: Company = {
-  id: 'company-joali',
-  name: 'Joali Being',
-  legal_entity_name: 'JOALI BEING BODUFUSHI',
+const islandCompany: Company = {
+  id: 'company-island',
+  name: 'Island Fixture',
+  legal_entity_name: 'ISLAND FIXTURE RETREAT',
   country: 'Maldives',
   industry: 'Hotels',
   billing_entity: 'BMAsia Limited',
@@ -41,21 +41,21 @@ beforeEach(() => {
 });
 
 test('keeps Maldives visible and preserves the accepted empty optional parent', async () => {
-  (ApiService.updateCompany as jest.Mock).mockResolvedValue(joali);
-  render(<CompanyForm open company={joali} onClose={jest.fn()} onSave={jest.fn()} />);
+  (ApiService.updateCompany as jest.Mock).mockResolvedValue(islandCompany);
+  render(<CompanyForm open company={islandCompany} onClose={jest.fn()} onSave={jest.fn()} />);
 
   await waitFor(() => expect(ApiService.getCompanies).toHaveBeenCalled());
   expect(screen.getByText('Maldives')).toBeTruthy();
 
   fireEvent.click(screen.getByRole('button', { name: /update company/i }));
   await waitFor(() => expect(ApiService.updateCompany).toHaveBeenCalledWith(
-    'company-joali',
+    'company-island',
     expect.objectContaining({ country: 'Maldives', parent_company: '' }),
   ));
 });
 
 test('keeps an existing country that is outside the curated menu visible', async () => {
-  const legacyCountryCompany = { ...joali, country: 'Réunion' };
+  const legacyCountryCompany = { ...islandCompany, country: 'Réunion' };
   render(<CompanyForm open company={legacyCountryCompany} onClose={jest.fn()} onSave={jest.fn()} />);
 
   await waitFor(() => expect(ApiService.getCompanies).toHaveBeenCalled());
@@ -63,7 +63,7 @@ test('keeps an existing country that is outside the curated menu visible', async
 });
 
 test('allows unrelated edits to preserve legacy blank country and industry', async () => {
-  const legacyCompany = { ...joali, country: '', industry: '' };
+  const legacyCompany = { ...islandCompany, country: '', industry: '' };
   (ApiService.updateCompany as jest.Mock).mockResolvedValue(legacyCompany);
   render(<CompanyForm open company={legacyCompany} onClose={jest.fn()} onSave={jest.fn()} />);
 
@@ -71,7 +71,7 @@ test('allows unrelated edits to preserve legacy blank country and industry', asy
   fireEvent.click(screen.getByRole('button', { name: /update company/i }));
 
   await waitFor(() => expect(ApiService.updateCompany).toHaveBeenCalledWith(
-    'company-joali',
+    'company-island',
     expect.objectContaining({ country: '', industry: '' }),
   ));
 });
@@ -96,7 +96,7 @@ test('shows server-wide and parent-company validation errors instead of a generi
       },
     },
   });
-  render(<CompanyForm open company={joali} onClose={jest.fn()} onSave={jest.fn()} />);
+  render(<CompanyForm open company={islandCompany} onClose={jest.fn()} onSave={jest.fn()} />);
 
   await waitFor(() => expect(ApiService.getCompanies).toHaveBeenCalled());
   fireEvent.click(screen.getByRole('button', { name: /update company/i }));
@@ -109,7 +109,7 @@ test('does not render an HTML error response as the save error', async () => {
   (ApiService.updateCompany as jest.Mock).mockRejectedValue({
     response: { data: '<!doctype html><html><body>upstream failure</body></html>' },
   });
-  render(<CompanyForm open company={joali} onClose={jest.fn()} onSave={jest.fn()} />);
+  render(<CompanyForm open company={islandCompany} onClose={jest.fn()} onSave={jest.fn()} />);
 
   await waitFor(() => expect(ApiService.getCompanies).toHaveBeenCalled());
   fireEvent.click(screen.getByRole('button', { name: /update company/i }));
