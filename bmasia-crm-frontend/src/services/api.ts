@@ -14,6 +14,7 @@ import {
   CareTouch
 } from '../types';
 import { authApi } from './authService';
+import { TimelinePage, TimelineQuery, timelineParams } from '../components/timeline/timelineModel';
 import { MockApiService } from './mockData';
 
 export interface ContractPdfBlocker {
@@ -123,6 +124,14 @@ class ApiService {
   /** Read-only: the 20 most recent client-care touches for one company. */
   async getCompanyCareTouches(companyId: string): Promise<CareTouch[]> {
     const response = await authApi.get<CareTouch[]>(`/companies/${companyId}/care-touches/`);
+    return response.data;
+  }
+
+  /** One page of the company timeline (read-only). */
+  async getCompanyTimeline(companyId: string, query: TimelineQuery = {}): Promise<TimelinePage> {
+    const response = await authApi.get<TimelinePage>(`/companies/${companyId}/timeline/`, {
+      params: timelineParams(query),
+    });
     return response.data;
   }
 
