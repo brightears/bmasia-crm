@@ -6845,7 +6845,7 @@ class InvoiceViewSet(BaseModelViewSet):
 
         # Contract reference (only if invoice has a contract)
         if invoice.contract:
-            contract_text = f"<b>Contract:</b> {invoice.contract.contract_number}"
+            contract_text = f"<b>Contract:</b> {paragraph_text(invoice.contract.contract_number)}"
             if invoice.contract.service_type:
                 contract_text += f"<br/><b>Service:</b> {invoice.contract.get_service_type_display()}"
             elements.append(Paragraph(contract_text, body_style))
@@ -6899,7 +6899,7 @@ class InvoiceViewSet(BaseModelViewSet):
             if invoice.contract:
                 service_description = f"{invoice.contract.get_service_type_display() if invoice.contract.service_type else 'Professional Services'}"
                 if invoice.contract.service_type:
-                    service_description += f"<br/><font size=8>Contract: {invoice.contract.contract_number}</font>"
+                    service_description += f"<br/><font size=8>Contract: {paragraph_text(invoice.contract.contract_number)}</font>"
                     service_description += f"<br/><font size=8>Period: {invoice.contract.start_date.strftime('%b %d, %Y')} - {invoice.contract.end_date.strftime('%b %d, %Y')}</font>"
             else:
                 service_description = 'Professional Services'
