@@ -190,12 +190,28 @@ const toIsoDay = (d: Date | null): string | undefined => {
 
 const ISO_DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
+/** A YYYY-MM-DD day from the address, or null when it is not a real day the server accepts (1900–9998). */
 const fromIsoDay = (value: string | null): Date | null => {
   const m = value ? ISO_DAY.exec(value) : null;
   if (!m) return null;
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  return Number.isNaN(d.getTime()) ? null : d;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (year < 1900 || year > 9998) return null;
+  const d = new Date(2000, 0, 1);
+  d.setFullYear(year, month - 1, day); // not new Date(y, …): years below 100 would become 19xx
+  return d.getFullYear() === year && d.getMonth() === month - 1 && d.getDate() === day ? d : null;
 };
+
+/** Search text as sent: tabs, line breaks and other control characters read as spaces. */
+const cleanSearch = (text: string): string =>
+  Array.from(text, (c) => {
+    const code = c.charCodeAt(0);
+    return code < 32 || code === 127 ? ' ' : c;
+  })
+    .join('')
+    .trim();
+
+const filterSnapshot = (types: string, q: string, from?: string, to?: string, actor?: string): string =>
+  [types, q, from || '', to || '', actor || ''].join('|');
 
 /** Address parameters that hold the timeline's filters (urlState). */
 export const URL_KEYS = { types: 'tl_types', q: 'tl_q', from: 'tl_from', to: 'tl_to', actor: 'tl_actor' } as const;
@@ -241,13 +257,14 @@ const toLoadError = (err: any, fallback: string): LoadError => {
   return { kind: 'server', message: fallback };
 };
 
-const useDebounced =<T,>(value: T, ms: number): T => {
+/** A value that follows ``value`` after ``ms`` of quiet, and can also be set at once. */
+const useDebounced = <T,>(value: T, ms: number): [T, (v: T) => void] => {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
     const id = setTimeout(() => setDebounced(value), ms);
     return () => clearTimeout(id);
   }, [value, ms]);
-  return debounced;
+  return [debounced, setDebounced];
 };
 
 /** The company's activity feed: every note, email, task, quote, contract, ticket and change, newest first. */
@@ -283,7 +300,8 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
 
   const [types, setTypes] = useState<TimelineCategory[]>(initial.types);
   const [searchText, setSearchText] = useState(initial.q);
-  const search = useDebounced(searchText, 300);
+  const [typedSearch, setSearchNow] = useDebounced(searchText, 300);
+  const search = cleanSearch(typedSearch);
   const [dateFrom, setDateFrom] = useState<Date | null>(initial.from);
   const [dateTo, setDateTo] = useState<Date | null>(initial.to);
   const [actor, setActor] = useState(initial.actor);
@@ -315,8 +333,13 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
   // the filters writes: moving to another page must not carry this feed's filters onto it.
   const setParams = useRef(setSearchParams);
   setParams.current = setSearchParams;
+  // The filters as last written to (or read from) the address.
+  const urlFilters = useRef(
+    filterSnapshot(initial.types.join(','), cleanSearch(initial.q), toIsoDay(initial.from), toIsoDay(initial.to), initial.actor)
+  );
   useEffect(() => {
     if (!urlState) return;
+    urlFilters.current = filterSnapshot(typesKey, search, from, to, actor);
     setParams.current(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -334,12 +357,35 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
     );
   }, [urlState, typesKey, search, from, to, actor]);
 
+  // A link that changes only the tl_* filters on this same page (e.g. /companies/x?tl_types=email
+  // from /companies/x) applies them.
+  useEffect(() => {
+    if (!urlState) return;
+    const f = readUrlFilters(searchParams);
+    const snapshot = filterSnapshot(f.types.join(','), cleanSearch(f.q), toIsoDay(f.from), toIsoDay(f.to), f.actor);
+    if (snapshot === urlFilters.current) return;
+    urlFilters.current = snapshot;
+    setTypes(f.types);
+    setSearchText(f.q);
+    setSearchNow(f.q);
+    setDateFrom(f.from);
+    setDateTo(f.to);
+    setActor(f.actor);
+  }, [urlState, searchParams, setSearchNow]);
+
+  // Counts are asked for on load and when the type, date or person filters change, not on every
+  // search keystroke (they can be costly on long histories); clearing a search refreshes them.
+  const countsKey = [typesKey, from, to, actor, refreshKey, retry].join('|');
+  const countsTaken = useRef<{ key: string; withSearch: boolean } | null>(null);
+
   useEffect(() => {
     const id = ++request.current;
+    const taken = countsTaken.current;
+    const wantCounts = showFilters && (!taken || taken.key !== countsKey || (taken.withSearch && !search));
     setLoading(true);
     setError(null);
     setMoreError(null);
-    ApiService.getCompanyTimeline(companyId, { ...baseQuery, facets: showFilters })
+    ApiService.getCompanyTimeline(companyId, { ...baseQuery, facets: wantCounts })
       .then((page) => {
         if (id !== request.current) return;
         setEvents(page.results);
@@ -349,6 +395,7 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
         if (page.facets) {
           setCounts(page.facets.types);
           setActors(page.facets.actors);
+          countsTaken.current = { key: countsKey, withSearch: Boolean(search) };
         }
       })
       .catch((err) => {
@@ -360,7 +407,7 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
       .finally(() => {
         if (id === request.current) setLoading(false);
       });
-  }, [companyId, baseQuery, showFilters, refreshKey, retry]);
+  }, [companyId, baseQuery, showFilters, refreshKey, retry, countsKey, search]);
 
   const loadMore = useCallback(() => {
     if (!cursor || loadingMore) return;
@@ -414,6 +461,7 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
   const clearFilters = () => {
     setTypes([]);
     setSearchText('');
+    setSearchNow('');
     setDateFrom(null);
     setDateTo(null);
     setActor('');

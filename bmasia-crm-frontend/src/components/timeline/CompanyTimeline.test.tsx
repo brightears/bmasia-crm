@@ -296,3 +296,68 @@ it('keeps filters and search in the address, so a link or a tab switch keeps the
   );
   expect(screen.getByRole('textbox', { name: 'Search activity' })).toHaveValue('zones');
 });
+
+it('applies a same-page link that changes only the tl_* filters', async () => {
+  const Page: React.FC = () => {
+    const navigate = useNavigate();
+    return (
+      <>
+        <button onClick={() => navigate('/companies/co-1?tl_types=email&tl_q=renewal')}>Show emails</button>
+        <CompanyTimeline companyId="co-1" urlState />
+      </>
+    );
+  };
+  render(
+    <MemoryRouter initialEntries={['/companies/co-1']}>
+      <Routes>
+        <Route path="/companies/:id" element={<Page />} />
+      </Routes>
+    </MemoryRouter>
+  );
+  await screen.findByText('Renewal call');
+  fireEvent.click(screen.getByRole('button', { name: 'Show emails' }));
+  await waitFor(() =>
+    expect(api.getCompanyTimeline).toHaveBeenLastCalledWith(
+      'co-1',
+      expect.objectContaining({ types: ['email'], q: 'renewal' })
+    )
+  );
+  expect(screen.getByRole('textbox', { name: 'Search activity' })).toHaveValue('renewal');
+});
+
+it('ignores an address date the server would refuse instead of turning it into another year', async () => {
+  render(
+    <MemoryRouter initialEntries={['/companies/co-1?tl_from=0001-01-01&tl_to=2026-02-30']}>
+      <CompanyTimeline companyId="co-1" urlState />
+    </MemoryRouter>
+  );
+  await screen.findByText('Renewal call');
+  const query = api.getCompanyTimeline.mock.calls[0][1];
+  expect(query.from).toBeUndefined();
+  expect(query.to).toBeUndefined();
+});
+
+it('reads a tab in the search box as a space and trims it', async () => {
+  renderTimeline();
+  await screen.findByText('Renewal call');
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search activity' }), { target: { value: '\tzones\t' } });
+  await waitFor(() =>
+    expect(api.getCompanyTimeline).toHaveBeenLastCalledWith('co-1', expect.objectContaining({ q: 'zones' }))
+  );
+});
+
+it('asks for counts on load and filter changes, not on search keystrokes', async () => {
+  renderTimeline();
+  await screen.findByText('Renewal call');
+  const lastQuery = () => api.getCompanyTimeline.mock.calls[api.getCompanyTimeline.mock.calls.length - 1][1];
+  expect(lastQuery().facets).toBe(true);
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search activity' }), { target: { value: 'zones' } });
+  await waitFor(() => expect(lastQuery().q).toBe('zones'));
+  expect(lastQuery().facets).toBe(false);
+  fireEvent.click(within(screen.getByRole('group', { name: 'Filter by type' })).getByText('Emails'));
+  await waitFor(() => expect(lastQuery().types).toEqual(['email']));
+  expect(lastQuery().facets).toBe(true);
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search activity' }), { target: { value: '' } });
+  await waitFor(() => expect(lastQuery().q).toBeUndefined());
+  expect(lastQuery().facets).toBe(true);
+});
