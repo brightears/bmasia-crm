@@ -28,6 +28,22 @@ def inbox_switches_on():
         yield
 
 
+@pytest.fixture
+def inbox_mcp():
+    """Register the inbox MCP tools and collections (switched on), and unregister them afterwards."""
+    import crm_app.mcp  # noqa: F401 - registers the tool definitions
+    from agent_inbox import mcp_tools
+    from bmasia_crm import settings as configured
+
+    mcp_tools.sync()
+    yield
+    with override_settings(
+        AGENT_ACTIVITY_WRITES_ENABLED=configured.AGENT_ACTIVITY_WRITES_ENABLED,
+        CHANGE_PROPOSALS_ENABLED=configured.CHANGE_PROPOSALS_ENABLED,
+    ):
+        mcp_tools.sync()
+
+
 @pytest.fixture(autouse=True)
 def clear_mcp_request_context():
     from mcp_server.djangomcp import django_request_ctx
@@ -120,6 +136,20 @@ def contract(company):
     )
 
 
+def seen_of(proposal_id):
+    """The seen_version a reviewer would have read for this proposal now."""
+    from agent_inbox.models import ChangeProposal
+    from agent_inbox.proposals import seen_version
+    row = ChangeProposal.objects.filter(pk=proposal_id).first()
+    return seen_version(row) if row else 'not-found'
+
+
+def decide(client, proposal_id, action, **body):
+    """POST a decision (accept, accept-with-edits, reject, reopen) with the current seen_version."""
+    body.setdefault('seen_version', seen_of(proposal_id))
+    return client.post(f'{PROPOSALS}{proposal_id}/{action}/', body, format='json')
+
+
 def iso_ago(**delta):
     return (timezone.now() - timedelta(**delta)).isoformat()
 
@@ -135,7 +165,7 @@ def activity_body(company, **overrides):
         'body': 'Hello,\nour new reception number is +66 2 111 2222 from Monday.\nRegards, Pat',
         'participants': [{'name': 'Pat Example', 'address': 'pat@riverside.example.com', 'role': 'from'}],
         'source_system': 'gmail',
-        'source_ref': 'msg-0001',
+        'source_ref': 'msg-0001@mail.example.com',
     }
     body.update(overrides)
     return body

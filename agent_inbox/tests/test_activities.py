@@ -85,7 +85,7 @@ def test_voided_source_ref_can_be_recorded_again(agent, company):
     ({'summary': 'two\nlines'}, 'single line'),
     ({'summary': ''}, 'Missing keys: summary'),
     ({'body': 'x' * (BODY_MAX + 1)}, 'body must be at most'),
-    ({'body': 'bell\x07'}, 'control characters'),
+    ({'body': 'bell\x07'}, 'control or invisible characters'),
     ({'kind': 'fax'}, 'kind must be one of'),
     ({'direction': 'sideways'}, 'direction must be one of'),
     ({'source_system': 'carrier-pigeon'}, 'source_system must be one of'),
@@ -94,8 +94,9 @@ def test_voided_source_ref_can_be_recorded_again(agent, company):
     ({'occurred_at': '1999-12-31T00:00:00+00:00'}, 'before 2000'),
     ({'idempotency_key': 'short'}, 'idempotency_key must be'),
     ({'idempotency_key': 'has space in it'}, 'idempotency_key must be'),
-    ({'source_ref': 'with space'}, 'whitespace'),
-    ({'source_ref': 'x' * 256}, 'source_ref must be at most'),
+    ({'source_ref': 'with space', 'source_system': 'phone'}, 'whitespace'),
+    ({'source_ref': '18c2a4f0b1d2e3f4'}, 'RFC 822 Message-ID'),
+    ({'source_ref': 'x' * 501, 'source_system': 'phone'}, 'source_ref must be at most'),
     ({'source_url': 'javascript:alert(1)'}, 'http or https'),
     ({'source_url': 'https://example.com/' + 'x' * 500}, 'source_url must be at most'),
     ({'participants': 'pat@example.com'}, 'participants must be a list'),
@@ -104,7 +105,7 @@ def test_voided_source_ref_can_be_recorded_again(agent, company):
     ({'participants': [{'role': 'to'}]}, 'needs a name or an address'),
     ({'participants': [{'name': 'x' * 201}]}, 'name must be at most'),
     ({'participants': [{'name': f'P{i}'} for i in range(PARTICIPANTS_MAX + 1)]}, 'at most'),
-    ({'recorded_via': 'mcp'}, 'recorded_via must be one of'),
+    ({'recorded_via': 'ui'}, 'Unknown keys: recorded_via'),
     ({'unexpected': 1}, 'Unknown keys: unexpected'),
     ({'company_id': 'not-a-uuid'}, 'company_id must be a UUID'),
 ])
@@ -138,8 +139,9 @@ def test_daily_cap_per_recorder(agent, company):
     with override_settings(AGENT_ACTIVITY_DAILY_CAP=2):
         for index in range(2):
             assert post(client, activity_body(company, idempotency_key=f'test:cap-{index:04}',
-                                              source_ref=f'cap-{index}')).status_code == 201
-        refused = post(client, activity_body(company, idempotency_key='test:cap-0009', source_ref='cap-9'))
+                                              source_ref=f'cap-{index}@mail.example.com')).status_code == 201
+        refused = post(client, activity_body(company, idempotency_key='test:cap-0009',
+                                             source_ref='cap-9@mail.example.com'))
     assert refused.status_code == 429
     assert refused.json()['code'] == 'daily_cap'
 

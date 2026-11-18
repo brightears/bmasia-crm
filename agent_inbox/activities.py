@@ -1,4 +1,16 @@
-"""Recording and voiding activities (REST and MCP share this module)."""
+"""Recording and voiding activities (REST and MCP share this module).
+
+Provenance is set by the server: ``recorded_via`` comes from the route the
+write arrived on (``ui`` for a person on the website, ``rest`` for an API
+token, ``mcp`` for the MCP tool, ``job`` for a background job), never from the
+request body. Agent accounts may not claim that a person or the CRM wrote the
+text (``source_system`` manual or crm).
+
+One live activity per company and source: a second recorder of the same
+``source_ref`` is refused, except that a recorder who is not an agent account
+(a capture job or a person) may always record it. The earlier agent row is then
+voided and linked to the new one through ``duplicate_of``.
+"""
 from __future__ import annotations
 
 from datetime import timedelta
@@ -14,17 +26,17 @@ from agent_inbox.models import (
 )
 from agent_inbox.validation import (
     ServiceError, bad, choice, key_field, optional_uuid, past_datetime,
-    payload_sha256, strict_object, text_field, token_field, url_field,
+    payload_sha256, source_ref_field, strict_object, text_field, url_field,
 )
 
 ACTIVITY_KEYS = frozenset({
     'idempotency_key', 'company_id', 'contact_id', 'contract_id', 'quote_id', 'opportunity_id',
     'kind', 'direction', 'occurred_at', 'summary', 'body', 'participants',
-    'source_system', 'source_ref', 'source_url', 'recorded_via',
+    'source_system', 'source_ref', 'source_url',
 })
 ACTIVITY_REQUIRED = ('idempotency_key', 'company_id', 'kind', 'direction', 'occurred_at', 'summary', 'source_system')
-# A REST caller may say it is the website or a job; MCP is always 'mcp'.
-REST_RECORDED_VIA = ('rest', 'ui', 'job')
+ROUTES = ('rest', 'ui', 'mcp', 'job')
+DUPLICATE_REASON = 'Replaced by a captured record of the same source.'
 
 
 def _not_enabled():
@@ -64,15 +76,19 @@ def _related(model, pk, key, company):
     return obj
 
 
-def _validated(body):
+def _validated(user, body):
     from crm_app.models import Company, Contact, Contract, Opportunity, Quote
 
     company_id = optional_uuid(body, 'company_id')
     company = Company.objects.filter(pk=company_id).only('pk').first()
     if company is None:
         raise ServiceError(422, 'unknown_record', 'company_id does not exist')
-    summary = text_field(body, 'summary', SUMMARY_MAX, required=True)
-    text = text_field(body, 'body', BODY_MAX, multiline=True)
+    source_system = choice(body, 'source_system', SOURCE_SYSTEM_CHOICES)
+    if source_system in policy.PERSON_SOURCE_SYSTEMS and policy.is_agent_account(user):
+        raise ServiceError(
+            422, 'source_not_allowed',
+            f'source_system {source_system} is for text a person entered; use agent or the real source',
+        )
     return {
         'company': company,
         'contact': _related(Contact, optional_uuid(body, 'contact_id'), 'contact_id', company),
@@ -82,11 +98,12 @@ def _validated(body):
         'kind': choice(body, 'kind', ACTIVITY_KIND_CHOICES),
         'direction': choice(body, 'direction', ACTIVITY_DIRECTION_CHOICES),
         'occurred_at': past_datetime(body.get('occurred_at'), 'occurred_at'),
-        'summary': summary,
-        'body': text,
+        'summary': text_field(body, 'summary', SUMMARY_MAX, required=True),
+        # Bodies are copies of the source and may carry its formatting characters.
+        'body': text_field(body, 'body', BODY_MAX, multiline=True, allow_format=True),
         'participants': _participants(body.get('participants')),
-        'source_system': choice(body, 'source_system', SOURCE_SYSTEM_CHOICES),
-        'source_ref': token_field(body, 'source_ref', SOURCE_REF_MAX),
+        'source_system': source_system,
+        'source_ref': source_ref_field(body, 'source_ref', source_system, SOURCE_REF_MAX),
         'source_url': url_field(body, 'source_url', SOURCE_URL_MAX),
     }
 
@@ -104,20 +121,27 @@ def _replay(user, key, digest):
     )
 
 
-def _source_conflict(user, key, digest, values):
-    """Refuse a second live activity for the same source, unless it is this caller's retry."""
+def _same_source(values):
     if not values['source_ref']:
         return None
-    other = Activity.objects.filter(
+    return Activity.objects.filter(
         company=values['company'], source_system=values['source_system'],
         source_ref=values['source_ref'], is_void=False,
-    ).only('pk').first()
+    ).first()
+
+
+def _source_check(user, key, digest, values):
+    """(replayed, displaced): the caller's own stored retry, or an agent row a trusted recorder replaces."""
+    other = _same_source(values)
     if other is None:
-        return None
+        return None, None
     # A concurrent retry of the same request may have stored the row in between.
     replayed = _replay(user, key, digest)
     if replayed is not None:
-        return replayed
+        return replayed, None
+    if not policy.is_agent_account(user) and other.recorded_by is not None \
+            and policy.is_agent_account(other.recorded_by):
+        return None, other
     raise ServiceError(
         409, 'source_already_recorded',
         'This source_ref is already recorded as an activity for this company',
@@ -126,23 +150,23 @@ def _source_conflict(user, key, digest, values):
 
 
 def record_activity(user, body, *, via):
-    """Store one activity. Returns (activity, replayed). Raises ServiceError."""
+    """Store one activity. ``via`` is the route it arrived on. Returns (activity, replayed)."""
+    if via not in ROUTES:
+        raise ValueError(f'unknown route {via!r}')
     if not policy.activity_writes_enabled():
         raise _not_enabled()
     if user is None or not getattr(user, 'is_authenticated', False):
         raise ServiceError(401, 'not_authenticated', 'Authentication required')
-    allowed = ACTIVITY_KEYS if via != 'mcp' else ACTIVITY_KEYS - {'recorded_via'}
-    strict_object(body, allowed, required=ACTIVITY_REQUIRED)
+    strict_object(body, ACTIVITY_KEYS, required=ACTIVITY_REQUIRED)
     key = key_field(body)
-    recorded_via = 'mcp' if via == 'mcp' else choice(body, 'recorded_via', REST_RECORDED_VIA, default='rest')
     digest = payload_sha256(body)
 
     replayed = _replay(user, key, digest)
     if replayed is not None:
         return replayed, True
 
-    values = _validated(body)
-    replayed = _source_conflict(user, key, digest, values)
+    values = _validated(user, body)
+    replayed, displaced = _source_check(user, key, digest, values)
     if replayed is not None:
         return replayed, True
     since = timezone.now() - timedelta(hours=24)
@@ -151,17 +175,29 @@ def record_activity(user, body, *, via):
 
     try:
         with transaction.atomic():
+            if displaced is not None:
+                displaced = Activity.objects.select_for_update().get(pk=displaced.pk)
+                displaced.is_void = True
+                displaced.void_reason = DUPLICATE_REASON
+                displaced.voided_by = user
+                displaced.voided_at = timezone.now()
+                displaced.save(update_fields=['is_void', 'void_reason', 'voided_by', 'voided_at', 'updated_at'])
             activity = Activity.objects.create(
                 **values,
                 recorded_by=user,
                 recorded_by_username=str(user.username)[:150],
-                recorded_via=recorded_via,
+                recorded_via=via,
                 idempotency_key=key,
                 payload_sha256=digest,
             )
+            if displaced is not None:
+                displaced.duplicate_of = activity
+                displaced.save(update_fields=['duplicate_of', 'updated_at'])
     except IntegrityError:
         # A concurrent request stored the same key (or source) first.
-        replayed = _replay(user, key, digest) or _source_conflict(user, key, digest, values)
+        replayed = _replay(user, key, digest)
+        if replayed is None:
+            replayed, _ = _source_check(user, key, digest, values)
         if replayed is not None:
             return replayed, True
         raise
@@ -188,4 +224,3 @@ def void_activity(user, activity_id, body):
         activity.voided_at = timezone.now()
         activity.save(update_fields=['is_void', 'void_reason', 'voided_by', 'voided_at', 'updated_at'])
     return activity
-
