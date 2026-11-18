@@ -40,15 +40,9 @@ test('a network error without a response and a plain error are described too', (
     .toBe('500 POST /api/v1/companies/c-1/');
 });
 
-// Files a named open change still edits or deletes, with the number of raw logs they hold now.
-// Not a permanent list: the test fails when a file gains a raw log, and when it loses one
-// (then lower the count, or drop the entry once it reaches zero).
-const NOT_YET: Record<string, { change: string; rawLogs: number }> = {
-  'components/OpportunityForm.tsx': { change: 'PR 60 (company timeline) rewrites it', rawLogs: 3 },
-  'components/ContractDetail.tsx': { change: 'PR 60 (company timeline) rewrites it', rawLogs: 7 },
-  'components/ActivityTimeline.tsx': { change: 'PR 60 (company timeline) deletes it', rawLogs: 2 },
-  'pages/ActivityDemo.tsx': { change: 'PR 60 (company timeline) deletes it', rawLogs: 1 },
-};
+// Files that may still log a caught error object, with how many: none now. A file added here
+// needs a named reason and fails the test when its count changes.
+const NOT_YET: Record<string, { change: string; rawLogs: number }> = {};
 
 const sourceFiles = (dir: string): string[] =>
   fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
