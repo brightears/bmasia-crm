@@ -237,17 +237,24 @@ def test_new_events_arriving_between_pages_do_not_shift_later_pages(admin, compa
     assert rest == [f'old {i}' for i in range(4, 10)]
 
 
-def test_date_only_events_sit_at_the_start_of_their_day_and_page_correctly(admin, company):
-    contract = _contract(company, 'TH-CT26902', when=BASE - timedelta(days=30), status='Active')
+def test_date_only_events_sit_at_the_end_of_their_day_in_stage_order_and_page_correctly(admin, company):
+    contract = _contract(company, 'TH-CT26902', status='Active',
+                         when=timezone.make_aware(datetime(2026, 11, 10, 15, 30), TZ))  # created that afternoon
     Contract.objects.filter(pk=contract.pk).update(signed_date=date(2026, 11, 10), sent_date=date(2026, 11, 10))
-    morning = Note.objects.create(company=company, author=admin, text='morning')
-    _at(morning, timezone.make_aware(datetime(2026, 11, 10, 0, 0, 1), TZ))
+    late = Note.objects.create(company=company, author=admin, text='late')
+    _at(late, timezone.make_aware(datetime(2026, 11, 10, 23, 59, 59), TZ))
+    next_morning = Note.objects.create(company=company, author=admin, text='next morning')
+    _at(next_morning, timezone.make_aware(datetime(2026, 11, 11, 0, 0, 0), TZ))
     events = _get(admin, company)['results']
-    assert _types(events)[:3] == ['note', 'contract_signed', 'contract_sent']
+    # Newest first: next day, then the 10th's date-only facts (signed after sent), then its timed events.
+    assert [e['detail'] or e['type'] for e in events] == [
+        'next morning', 'contract_signed', 'contract_sent', 'late', 'contract_created']
     signed = events[1]
     assert signed['precision'] == 'date' and signed['date'] == '2026-11-10'
-    assert datetime.fromisoformat(signed['occurred_at']) == timezone.make_aware(datetime(2026, 11, 10), TZ)
-    assert [e['id'] for e in _all(admin, company, page_size=1)] == [e['id'] for e in events]
+    end_of_day = timezone.make_aware(datetime(2026, 11, 11), TZ)
+    assert end_of_day - timedelta(microseconds=10) < datetime.fromisoformat(signed['occurred_at']) < end_of_day
+    for size in (1, 2, 3):
+        assert [e['id'] for e in _all(admin, company, page_size=size)] == [e['id'] for e in events]
 
 
 # ---------------------------------------------------------------- filters
@@ -276,7 +283,7 @@ def test_date_range_filter_is_inclusive_for_times_and_dates(admin, company):
     Contract.objects.filter(pk=c.pk).update(sent_date=date(2026, 11, 11))
     events = _all(admin, company, **{'from': '2026-11-09', 'to': '2026-11-10'})
     assert [e['detail'] or e['type'] for e in events] == [
-        'late on the 10th', 'note 10', 'contract_signed', 'note 9']
+        'contract_signed', 'late on the 10th', 'note 10', 'note 9']
 
 
 def test_record_filter_keeps_one_contracts_events(admin, company):
@@ -557,7 +564,7 @@ def test_one_event_per_save_with_before_and_after_and_hidden_system_fields(admin
         {'field': 'end_date', 'label': 'End date', 'kind': 'date', 'old': '2026-12-31', 'new': '2027-12-31'},
         {'field': 'line_items', 'label': 'Line items', 'kind': 'collection', 'old': None, 'new': None},
         {'field': 'value', 'label': 'Value', 'kind': 'money', 'old': '100000.00', 'new': '108000.00',
-         'currency': 'THB'},
+         'currency': 'THB', 'old_currency': 'THB'},
     ]
     assert 'Changed End date from 2026-12-31 to 2027-12-31' in event['detail']
     assert event['links'] == [{'type': 'contract', 'id': str(contract.pk), 'label': 'TH-CT26911'}]
