@@ -317,6 +317,19 @@ export const groupProposals = (
   return Array.from(companies.values());
 };
 
+/** The backend's refusal in plain words, without the names of server settings. */
+export const friendlyRefusal = (detail?: string | null, code?: string, configured?: boolean): string => {
+  if (code === 'review_not_configured' || configured === false)
+    return 'Reviewing is not set up yet. Ask an administrator.';
+  if (code === 'not_a_reviewer') return 'Your account is not on the list of reviewers. Ask an administrator.';
+  const text = (detail || '')
+    .replace(/\s*\(?\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b\)?/g, '')
+    .replace(/\s*:\s*(?=[.]|$)/g, '')
+    .replace(/\s+([.,])/g, '$1')
+    .trim();
+  return text || 'Your account may not decide on suggestions.';
+};
+
 /** Who may decide this proposal from this page, or why not (one line). */
 export const readOnlyReason = (
   p: ChangeProposal,
@@ -402,6 +415,12 @@ export interface CardState {
   partnersShown: boolean;
   /** The "I checked this against the source myself" tick, for the version shown. */
   sourceChecked: boolean;
+  /** For a contact target: whether its primary/billing flags were read ('ok'), are being read, or could not be read. */
+  contactCheck?: 'ok' | 'pending' | 'failed';
+  /** The "I have checked this contact myself" tick, for the version shown, when the look-up failed. */
+  contactChecked?: boolean;
+  /** The other side of a conflict could not be read. */
+  partnersFailed?: boolean;
 }
 
 export interface Allowed {
@@ -437,6 +456,11 @@ export const cardActions = (p: ChangeProposal, s: CardState): CardActions => {
 
   let gate: Allowed = yes;
   if (p.target_changed_at && !s.acknowledged) gate = no('Tick “I have compared the current values” first.');
+  else if (s.contactCheck === 'pending') gate = no('Checking whether this is the primary or billing contact…');
+  else if (s.contactCheck === 'failed' && !s.contactChecked)
+    gate = no('Tick “I have checked this contact myself” first.');
+  else if (conflicts && s.partnersFailed && !s.partnersShown)
+    gate = no('Could not load the other suggestion’s evidence. Retry first.');
   else if (conflicts && !s.partnersShown) gate = no('Wait until the other suggestion’s evidence is shown.');
   else if (conflicts && s.conflictChoice !== 'this') gate = no('Choose which of the two suggestions to keep first.');
   else if (needsSourceCheck(p) && !s.sourceChecked) gate = no('Tick “I checked this against the source myself” first.');

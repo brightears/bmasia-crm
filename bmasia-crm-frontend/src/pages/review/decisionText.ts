@@ -152,7 +152,13 @@ export const outcomeOf = (p: ChangeProposal, error: ReviewApiError): ErrorOutcom
   }
   if (error.status === 403) {
     if (error.code === 'not_enabled') return { kind: 'switched_off' };
-    if (error.code === 'human_review_required') return { kind: 'page_read_only', reason: detail };
+    if (
+      error.code === 'human_review_required' ||
+      error.code === 'review_not_configured' ||
+      error.code === 'not_a_reviewer'
+    ) {
+      return { kind: 'page_read_only', reason: detail };
+    }
     if (error.code === 'reviewer_is_party') return { kind: 'card_read_only', reason: detail };
     return { kind: 'notice', refresh: false, notice: { tone: 'error', text: detail } };
   }

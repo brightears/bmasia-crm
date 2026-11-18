@@ -64,6 +64,7 @@ import {
   readQuery,
   sortProposals,
   writeQuery,
+  friendlyRefusal,
 } from './reviewModel';
 import { acceptedText, closedResult, fieldErrorsOf, outcomeOf, rejectedText } from './decisionText';
 import { announceReviewChange } from './useReviewStatus';
@@ -187,6 +188,9 @@ const ReviewQueue: React.FC = () => {
   const [acks, setAcks] = useState<Record<string, string>>({});
   const [choices, setChoices] = useState<Record<string, { choice: ConflictChoice; seen: string }>>({});
   const [sourceChecks, setSourceChecks] = useState<Record<string, string>>({});
+  const [contactChecks, setContactChecks] = useState<Record<string, string>>({});
+  const [partnerFailed, setPartnerFailed] = useState<Record<string, boolean>>({});
+  const [expiringSoon, setExpiringSoon] = useState<{ count: number; atLeast: boolean } | null>(null);
   const armed = useRef<Record<string, boolean>>({});
   const [dialog, setDialog] = useState<DialogState>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
@@ -216,9 +220,7 @@ const ReviewQueue: React.FC = () => {
       setSettings(data);
       setSettingsLoad('ready');
       if (data.you_can_review === false) {
-        setPageReadOnly(
-          data.review_refusal || 'Your account is not on the list of people who may decide on suggestions.',
-        );
+        setPageReadOnly(friendlyRefusal(data.review_refusal, undefined, data.reviewing_configured));
       }
     } catch {
       setSettingsLoad('error');
@@ -299,6 +301,29 @@ const ReviewQueue: React.FC = () => {
     if (enabled && query.tab === 'decided') loadDecided(1);
   }, [enabled, query.tab, loadDecided]);
 
+  // When not everything is loaded, count what expires within 7 days: one read of the soonest-expiring page
+  // (exact up to 200, "200 or more" beyond).
+  const needExpiryCount = enabled && openLoad === 'ready' && openTotal > openRows.length && query.sort === 'newest';
+  useEffect(() => {
+    if (!needExpiryCount) {
+      setExpiringSoon(null);
+      return;
+    }
+    let alive = true;
+    reviewApi
+      .listOpen(1, 'expiring')
+      .then((data) => {
+        if (!alive) return;
+        const limit = Date.now() + 7 * 24 * 3600 * 1000;
+        const count = data.results.filter((r) => Date.parse(r.expires_at) <= limit).length;
+        setExpiringSoon({ count, atLeast: count === data.results.length && data.count > data.results.length });
+      })
+      .catch(() => alive && setExpiringSoon(null));
+    return () => {
+      alive = false;
+    };
+  }, [needExpiryCount]);
+
   // ------------------------------------------------------------------ row bookkeeping
 
   const updateRow = useCallback((fresh: ChangeProposal) => {
@@ -354,6 +379,14 @@ const ReviewQueue: React.FC = () => {
 
   const readOnlyFor = (p: ChangeProposal) => cardReadOnly[p.id] || readOnlyReason(p, me, pageReadOnly);
 
+  /** For a contact target: were its primary/billing flags read, are they being read, or could they not be read? */
+  const contactCheckFor = (p: ChangeProposal): 'ok' | 'pending' | 'failed' | undefined => {
+    if (p.target_collection !== 'contact' || !p.target_id) return undefined;
+    const c = contacts[p.target_id];
+    if (!c) return 'pending';
+    return c.failed ? 'failed' : 'ok';
+  };
+
   /** Everything `cardActions` needs, from page state. The card computes the same from its props. */
   const stateFor = (p: ChangeProposal): CardState => {
     const choice = choices[p.id];
@@ -368,6 +401,9 @@ const ReviewQueue: React.FC = () => {
       conflictChoice: choice && choice.seen === p.seen_version ? choice.choice : null,
       partnersShown: (p.conflicts_with || []).every((c) => partners.some((r) => r.id === c.id)),
       sourceChecked: sourceChecks[p.id] === p.seen_version,
+      contactCheck: contactCheckFor(p),
+      contactChecked: contactChecks[p.id] === p.seen_version,
+      partnersFailed: (p.conflicts_with || []).some((c) => partnerFailed[c.id]),
     };
   };
   const actionsFor = (p: ChangeProposal) => cardActions(p, stateFor(p));
@@ -404,12 +440,12 @@ const ReviewQueue: React.FC = () => {
       return;
     }
     if (outcome.kind === 'page_read_only') {
-      setPageReadOnly(outcome.reason);
+      setPageReadOnly(friendlyRefusal(outcome.reason, error.code));
       setEditingId(null);
       return;
     }
     if (outcome.kind === 'card_read_only') {
-      setCardReadOnly((c) => ({ ...c, [p.id]: outcome.reason }));
+      setCardReadOnly((c) => ({ ...c, [p.id]: friendlyRefusal(outcome.reason, error.code) }));
       setEditingId((id) => (id === p.id ? null : id));
       return;
     }
@@ -484,8 +520,14 @@ const ReviewQueue: React.FC = () => {
       setEditingId((id) => (id === p.id ? null : id));
       setServerErrors((s) => ({ ...s, [p.id]: {} }));
       let text = acceptedText(updated);
+      // PR 67's backend creates proposal contacts inactive and says so; tell the reviewer what is left to do.
+      const createdContact = typeof updated.created_contact_id === 'string' && updated.created_contact_id;
+      const resultLink = createdContact
+        ? { href: `/companies/${updated.company_id}`, label: 'Open company contacts' }
+        : undefined;
+      if (createdContact) text = 'Contact created, inactive. Activate it on the contact page once you have checked it.';
       if (keepThis) text += ` ${await rejectConflicting(p)}`;
-      setResult(p.id, { tone: 'success', text });
+      setResult(p.id, { tone: 'success', text, link: resultLink });
       setSelected((s) => {
         const next = new Set(s);
         next.delete(p.id);
@@ -605,7 +647,7 @@ const ReviewQueue: React.FC = () => {
       const error = asError(e);
       const outcome = outcomeOf(rows[0], error);
       if (outcome.kind === 'switched_off') await loadSettings();
-      else if (outcome.kind === 'page_read_only') setPageReadOnly(outcome.reason);
+      else if (outcome.kind === 'page_read_only') setPageReadOnly(friendlyRefusal(outcome.reason, error.code));
       else {
         setSnack(
           error.noAnswer
@@ -640,6 +682,18 @@ const ReviewQueue: React.FC = () => {
     });
   };
 
+  /** Read a conflict partner again after a failure (outside the look-up limit: the reviewer asked for it). */
+  const retryPartner = async (id: string) => {
+    setPartnerFailed((f) => ({ ...f, [id]: false }));
+    try {
+      const row = await reviewApi.get(id);
+      if (!row || row.id !== id) throw new Error('not the suggestion asked for');
+      setExtraRows((x) => ({ ...x, [row.id]: row }));
+    } catch {
+      setPartnerFailed((f) => ({ ...f, [id]: true }));
+    }
+  };
+
   const toggleSelect = (id: string, checked: boolean) =>
     setSelected((s) => {
       const next = new Set(s);
@@ -649,8 +703,8 @@ const ReviewQueue: React.FC = () => {
     });
 
   // One stable set of callbacks for every card; they call the latest page functions.
-  const live = useRef({ accept, reject, pickOther, toggleSelect, findRow });
-  live.current = { accept, reject, pickOther, toggleSelect, findRow };
+  const live = useRef({ accept, reject, pickOther, toggleSelect, findRow, retryPartner });
+  live.current = { accept, reject, pickOther, toggleSelect, findRow, retryPartner };
   const onArm = useCallback((id: string, value: boolean) => {
     armed.current[id] = value;
   }, []);
@@ -674,6 +728,8 @@ const ReviewQueue: React.FC = () => {
         }),
       onAcknowledge: (p, value) => setAcks((a) => ({ ...a, [p.id]: value ? p.seen_version : '' })),
       onSourceCheck: (p, value) => setSourceChecks((s) => ({ ...s, [p.id]: value ? p.seen_version : '' })),
+      onContactCheck: (p, value) => setContactChecks((s) => ({ ...s, [p.id]: value ? p.seen_version : '' })),
+      onRetryPartner: (id) => live.current.retryPartner(id),
     }),
     [onArm],
   );
@@ -748,10 +804,12 @@ const ReviewQueue: React.FC = () => {
               },
             }));
           } catch {
-            setContacts((all) => ({ ...all, [id]: {} }));
+            setContacts((all) => ({ ...all, [id]: { failed: true } }));
           }
         });
-        if (queued) requested.current.add(id);
+        requested.current.add(id);
+        // Over the look-up limit for this visit: say the contact could not be checked, never show "no warning".
+        if (!queued) setContacts((all) => ({ ...all, [id]: { failed: true } }));
       });
       // The other side of a conflict, when it is not among the loaded rows: read it to show its evidence.
       (p.conflicts_with || []).forEach((c) => {
@@ -760,12 +818,14 @@ const ReviewQueue: React.FC = () => {
         const queued = lookup(async () => {
           try {
             const row = await reviewApi.get(c.id);
+            if (!row || row.id !== c.id) throw new Error('not the suggestion asked for');
             setExtraRows((x) => ({ ...x, [row.id]: row }));
           } catch {
-            // The card keeps saying the evidence is loading, and accepting stays blocked.
+            setPartnerFailed((f) => ({ ...f, [c.id]: true }));
           }
         });
-        if (queued) requested.current.add(key);
+        requested.current.add(key);
+        if (!queued) setPartnerFailed((f) => ({ ...f, [c.id]: true }));
       });
     });
   }, [windowed, openRows, extraRows, lookup]);
@@ -1041,6 +1101,9 @@ const ReviewQueue: React.FC = () => {
         acknowledged={s.acknowledged}
         conflictChoice={s.conflictChoice}
         sourceChecked={s.sourceChecked}
+        contactCheck={s.contactCheck}
+        contactChecked={Boolean(s.contactChecked)}
+        partnersFailed={Boolean(s.partnersFailed)}
         handlers={handlers}
       />
     );
@@ -1089,6 +1152,8 @@ const ReviewQueue: React.FC = () => {
 
   const listLoad = query.tab === 'decided' ? decided.load : openLoad;
   const notLoaded = openTotal - openRows.length;
+  const showExpiring =
+    query.tab !== 'decided' && openLoad === 'ready' && notLoaded > 0 && query.sort === 'newest' && expiringSoon;
 
   return (
     <Box>
@@ -1115,6 +1180,25 @@ const ReviewQueue: React.FC = () => {
           Showing the {query.sort === 'expiring' ? 'soonest-expiring' : 'newest'}{' '}
           {openRows.length.toLocaleString('en-US')} of {openTotal.toLocaleString('en-US')} open suggestions. The counts
           below are for the loaded ones.
+        </Alert>
+      )}
+
+      {showExpiring && expiringSoon && expiringSoon.count > 0 && (
+        <Alert
+          severity="info"
+          sx={{ mb: 2 }}
+          data-testid="expiring-soon"
+          action={
+            <Button color="inherit" onClick={() => setQuery({ sort: 'expiring' })}>
+              Show expiring soonest first
+            </Button>
+          }
+        >
+          {expiringSoon.atLeast
+            ? `${expiringSoon.count.toLocaleString('en-US')} or more`
+            : expiringSoon.count.toLocaleString('en-US')}{' '}
+          open {expiringSoon.count === 1 && !expiringSoon.atLeast ? 'suggestion expires' : 'suggestions expire'} within
+          7 days. Not all of them are in this list.
         </Alert>
       )}
 

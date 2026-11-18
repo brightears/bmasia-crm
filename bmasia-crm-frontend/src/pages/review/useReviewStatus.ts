@@ -52,11 +52,19 @@ export const useReviewNavStatus = (pollMs = 60_000): { enabled: boolean; openCou
       timer = null;
     };
     const check = async () => {
-      on = proposalsOn(await loadReviewSettings());
+      const settings = await loadReviewSettings();
+      on = proposalsOn(settings);
       if (!alive) return;
       if (!on) {
         stopPolling();
         setState({ enabled: false, openCount: 0 });
+        return;
+      }
+      // Someone the server says may not review sees the entry but no count, and nothing is polled for them.
+      if (settings && settings.you_can_review === false) {
+        on = false;
+        stopPolling();
+        setState({ enabled: true, openCount: 0 });
         return;
       }
       await count();

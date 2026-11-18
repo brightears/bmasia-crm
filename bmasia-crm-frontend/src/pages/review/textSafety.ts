@@ -209,8 +209,10 @@ export const describeLink = (value?: string | null): LinkInfo | null => {
   if (url.username || url.password) return refuse('the address contains a user name or password', host);
   if (host.split('.').some((label) => label.startsWith('xn--'))) return refuse('the host is written in punycode', host);
   if (!host || host.includes('@')) return refuse('not a valid host', host);
-  const labels = host.split('.');
-  const n = IPV4.test(host) ? labels.length : TWO_LEVEL.has(labels.slice(-2).join('.')) ? 3 : 2;
+  // A trailing dot ("example.com.") is the same host; it must not make "com." look like the owner.
+  const bare = host.replace(/\.+$/, '');
+  const labels = bare.split('.');
+  const n = IPV4.test(bare) ? labels.length : TWO_LEVEL.has(labels.slice(-2).join('.')) ? 3 : 2;
   const registrable = labels.slice(-n).join('.');
   const prefix = labels.length > n ? `${labels.slice(0, -n).join('.')}.` : '';
   return {

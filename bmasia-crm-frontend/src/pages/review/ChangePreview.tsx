@@ -235,7 +235,9 @@ const ChangePreview: React.FC<ChangePreviewProps> = ({ proposal: p, relatedName,
         </TableBody>
       </Table>
       <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.75 }} data-testid="values-as-of">
-        {p.status === 'proposed' ? 'Current' : 'Earlier'} values as read {asOf}.
+        {p.status === 'proposed' && valuesFollowTarget && !p.target_changed_at
+          ? 'Current values: the server re-reads them whenever the record changes.'
+          : `${p.status === 'proposed' ? 'Current' : 'Earlier'} values as read ${asOf}.`}
         {p.status === 'proposed' && !isNow ? ' The record may have changed since; accepting checks it again.' : ''}
       </Typography>
     </Box>

@@ -83,6 +83,9 @@ export interface ChangeProposal {
   updated_at: string;
   /** Later backend versions: per-field warnings such as `mixed_script`. */
   warnings?: ProposalWarning[];
+  /** Later backend versions, in the answer to accepting a new contact: the contact created (inactive). */
+  created_contact_id?: string;
+  apply_note?: string;
   /** Later backend versions may flag mixed scripts directly. */
   mixed_script?: boolean | string[] | Record<string, unknown>;
 }

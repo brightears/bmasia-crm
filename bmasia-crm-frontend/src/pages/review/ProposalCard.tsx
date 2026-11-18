@@ -47,6 +47,8 @@ export interface ContactInfo {
   contact_type?: string;
   receives_invoice_emails?: boolean;
   receives_payment_emails?: boolean;
+  /** The look-up failed or was over the limit: whether it is the primary or billing contact is unknown. */
+  failed?: boolean;
 }
 
 export interface CardNotice {
@@ -58,6 +60,8 @@ export interface CardNotice {
 export interface DecisionResult {
   tone: 'success' | 'info' | 'warning' | 'error';
   text: string;
+  /** Where the result line's link goes, when it is not the record itself (e.g. a contact to activate). */
+  link?: { href: string; label: string };
 }
 
 export type ConflictChoice = 'this' | 'other';
@@ -76,6 +80,8 @@ export interface CardHandlers {
   onChoose: (p: ChangeProposal, choice: ConflictChoice | null) => void;
   onAcknowledge: (p: ChangeProposal, value: boolean) => void;
   onSourceCheck: (p: ChangeProposal, value: boolean) => void;
+  onContactCheck: (p: ChangeProposal, value: boolean) => void;
+  onRetryPartner: (id: string) => void;
 }
 
 interface ProposalCardProps {
@@ -100,6 +106,11 @@ interface ProposalCardProps {
   acknowledged: boolean;
   conflictChoice: ConflictChoice | null;
   sourceChecked: boolean;
+  /** For a contact target: whether its primary/billing flags could be read. */
+  contactCheck?: 'ok' | 'pending' | 'failed';
+  contactChecked: boolean;
+  /** Conflict partners that could not be read. */
+  partnersFailed: boolean;
   handlers: CardHandlers;
 }
 
@@ -188,6 +199,9 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
     acknowledged,
     conflictChoice,
     sourceChecked,
+    contactCheck,
+    contactChecked,
+    partnersFailed,
     handlers,
   } = props;
   const ref = useRef<HTMLDivElement>(null);
@@ -210,6 +224,9 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
     conflictChoice,
     partnersShown,
     sourceChecked,
+    contactCheck,
+    contactChecked,
+    partnersFailed,
   });
   const canTouch = open && !readOnly && !expired && !result;
   const editable = editableFields(settings, p.kind, p.target_collection);
@@ -290,7 +307,7 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
         <Typography variant="body2" sx={{ flex: '1 1 240px', minWidth: 0 }} role="status">
           <PlainText value={result.text} />
         </Typography>
-        <NewTabLink href={link.href}>{link.label}</NewTabLink>
+        <NewTabLink href={(result.link || link).href}>{(result.link || link).label}</NewTabLink>
         <Button size="small" onClick={() => setShowDetails(true)}>
           Details
         </Button>
@@ -422,6 +439,15 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
                     evidence={
                       row ? (
                         <EvidenceBlock proposal={row} compact />
+                      ) : partnersFailed ? (
+                        <Box data-testid="partner-failed">
+                          <Typography variant="body2" color="error">
+                            Could not load the other suggestion’s evidence.
+                          </Typography>
+                          <Button size="small" onClick={() => handlers.onRetryPartner(c.id)}>
+                            Retry
+                          </Button>
+                        </Box>
                       ) : (
                         <Typography variant="caption" color="text.secondary">
                           Loading its evidence…
@@ -449,6 +475,30 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
             No longer allowed to be changed by a suggestion: {outsideAllowlist.map(fieldLabel).join(', ')}. Use Edit to
             leave {outsideAllowlist.length === 1 ? 'it' : 'them'} out, or reject.
           </Alert>
+        )}
+        {open && p.target_collection === 'contact' && contactCheck === 'failed' && (
+          <Alert severity="warning" data-testid="contact-unchecked">
+            Could not check whether this is the primary or billing contact. Look at the contact on the company page
+            before accepting.
+            <Box>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    size="small"
+                    checked={contactChecked}
+                    disabled={!canTouch || busy}
+                    onChange={(e) => handlers.onContactCheck(p, e.target.checked)}
+                  />
+                }
+                label={<Typography variant="body2">I have checked this contact myself</Typography>}
+              />
+            </Box>
+          </Alert>
+        )}
+        {open && p.target_collection === 'contact' && contactCheck === 'pending' && (
+          <Typography variant="caption" color="text.secondary" data-testid="contact-pending">
+            Checking whether this is the primary or billing contact…
+          </Typography>
         )}
         {open && roleContact && (
           <Alert severity="warning" data-testid="role-contact">
@@ -494,6 +544,9 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
         {open && p.kind === 'new_contact' && (
           <Typography variant="caption" color="text.secondary">
             A contact created from a suggestion receives no automatic or document emails and is not the primary contact.
+            {valuesFollowTarget
+              ? ' It is created inactive: someone activates it on the contact page after checking it.'
+              : ''}
           </Typography>
         )}
       </Box>
