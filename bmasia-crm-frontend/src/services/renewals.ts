@@ -62,6 +62,9 @@ export interface RenewalRow {
   auto_renew: boolean;
   billing_frequency: string;
   // Added for the page.
+  /** The book's product, or where it says 'Other', the contract's service-location platforms. */
+  product_display: string;
+  product_source: 'renewal_book' | 'service_locations';
   property_name: string;
   contract_type: string;
   start_date: string | null;

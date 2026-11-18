@@ -47,7 +47,11 @@ export function filterRows(rows: RenewalRow[], f: RowFilters): RenewalRow[] {
   return rows.filter((r) => {
     if (f.states.length && !f.states.includes(r.renewal.state)) return false;
     if (f.attentionOnly && !r.renewal.attention) return false;
-    if (f.product && r.product !== f.product) return false;
+    if (f.product) {
+      const shown = r.product_display || r.product;
+      // 'Beat Breeze + Soundtrack' counts for either product.
+      if (f.product === 'Other' ? shown !== 'Other' : !shown.split(' + ').includes(f.product)) return false;
+    }
     if (q) {
       const hay = [
         r.company,
@@ -88,7 +92,7 @@ const sortValue = (r: RenewalRow, key: SortKey): string | number | null => {
     case 'contract':
       return r.contract_number;
     case 'product':
-      return r.product;
+      return r.product_display || r.product;
     case 'zones':
       return r.zones;
     case 'end':
@@ -233,6 +237,7 @@ export const CSV_HEADER = [
   'Contract',
   'Property',
   'Product',
+  'Product source',
   'Zones',
   'Zones source',
   'Term start',
@@ -265,7 +270,8 @@ export function rowsToCsv(rows: RenewalRow[]): string {
         r.country,
         r.contract_number,
         r.property_name,
-        r.product,
+        r.product_display || r.product,
+        r.product_source === 'service_locations' ? 'service locations' : 'renewal book',
         r.zones,
         r.zones_source === 'contracted_zone_count' ? 'company funnel count' : 'service locations',
         r.start_date,

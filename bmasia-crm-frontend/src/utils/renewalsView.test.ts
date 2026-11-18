@@ -24,6 +24,8 @@ const row = (over: Partial<RenewalRow> & { state?: RenewalRow['renewal']['state'
     value: 1200,
     currency: 'USD',
     product: 'Soundtrack',
+    product_display: 'Soundtrack',
+    product_source: 'renewal_book',
     lifecycle_type: '',
     status: 'Active',
     auto_renew: false,
@@ -87,7 +89,8 @@ describe('summarize', () => {
 
 describe('filterRows', () => {
   const rows = [
-    row({ company: 'Lumen Bay Résort', contract_number: 'TH-CT99001', product: 'Beat Breeze', state: 'sent' }),
+    row({ company: 'Lumen Bay Résort', contract_number: 'TH-CT99001', product: 'Beat Breeze', product_display: 'Beat Breeze', state: 'sent' }),
+    row({ company: 'Mixed Hall', contract_number: 'TH-CT99004', product: 'Other', product_display: 'Beat Breeze + Soundtrack', product_source: 'service_locations' }),
     row({ company: 'Harbour Hotel', contract_number: 'HK-CT99002', property_name: 'Harbour Lounge', state: 'paid', group: 'renewed' }),
     row({
       company: 'Quiet Inn',
@@ -105,7 +108,9 @@ describe('filterRows', () => {
 
   it('filters by states, product and attention', () => {
     expect(filterRows(rows, { ...none, states: ['sent', 'paid'] })).toHaveLength(2);
-    expect(filterRows(rows, { ...none, product: 'Beat Breeze' })).toHaveLength(1);
+    expect(filterRows(rows, { ...none, product: 'Beat Breeze' }).map((r) => r.company)).toEqual(['Lumen Bay Résort', 'Mixed Hall']);
+    expect(filterRows(rows, { ...none, product: 'Soundtrack' })).toHaveLength(3);
+    expect(filterRows(rows, { ...none, product: 'Other' })).toHaveLength(0);
     expect(filterRows(rows, { ...none, attentionOnly: true }).map((r) => r.company)).toEqual(['Quiet Inn']);
   });
 });

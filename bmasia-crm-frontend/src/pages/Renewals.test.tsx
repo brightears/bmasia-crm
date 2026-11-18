@@ -33,6 +33,8 @@ const row = (n: number, over: any = {}) => ({
   value: 1200,
   currency: 'USD',
   product: 'Soundtrack',
+  product_display: 'Soundtrack',
+  product_source: 'renewal_book',
   lifecycle_type: '',
   status: 'Active',
   auto_renew: false,

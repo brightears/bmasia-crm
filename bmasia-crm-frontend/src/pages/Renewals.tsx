@@ -30,7 +30,7 @@ import {
   useMediaQuery,
   useTheme,
 } from '@mui/material';
-import { alpha } from '@mui/material/styles';
+import { alpha, Theme } from '@mui/material/styles';
 import {
   ChevronLeft,
   ChevronRight,
@@ -97,10 +97,34 @@ const MONTH_LONG = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-const PRODUCT_KEY: Record<string, 'soundtrack' | 'beatbreeze' | undefined> = {
+const PRODUCT_KEY: Record<string, 'soundtrack' | 'beatbreeze' | 'mixed' | undefined> = {
   Soundtrack: 'soundtrack',
   'Beat Breeze': 'beatbreeze',
+  'Beat Breeze + Soundtrack': 'mixed',
 };
+
+const ProductCell: React.FC<{ row: RenewalRow }> = ({ row }) => {
+  const shown = row.product_display || row.product;
+  const key = PRODUCT_KEY[shown];
+  const chip = key ? (
+    <ProductChip value={key} />
+  ) : (
+    <Typography variant="caption" color="text.secondary">
+      No product recorded
+    </Typography>
+  );
+  return row.product_source === 'service_locations' ? (
+    <Tooltip title="From the contract's service locations (the Renewal Book has no product for it).">
+      <Box component="span" sx={{ display: 'inline-flex' }}>{chip}</Box>
+    </Tooltip>
+  ) : (
+    chip
+  );
+};
+
+/** Status text colour that keeps its contrast in dark mode (the lighter shade there). */
+const toneText = (tone: 'success' | 'warning' | 'error') => (t: Theme) =>
+  t.palette.mode === 'dark' ? t.palette[tone].light : tone === 'warning' ? t.palette.warning.dark : t.palette[tone].main;
 
 const isYear = (v: string | number) => /^\d{4}$/.test(String(v)) && Number(v) >= 2000 && Number(v) <= 2100;
 const isMonth = (v: string | number) => /^\d{1,2}$/.test(String(v)) && Number(v) >= 1 && Number(v) <= 12;
@@ -130,7 +154,7 @@ const AttentionNote: React.FC<{ row: RenewalRow }> = ({ row }) =>
     <Typography
       variant="caption"
       component="div"
-      sx={{ color: 'error.main', display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5, lineHeight: 1.3 }}
+      sx={{ color: toneText('error'), display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.5, lineHeight: 1.3 }}
     >
       <WarningAmberRounded sx={{ fontSize: 14 }} aria-hidden />
       {row.renewal.attention_label}
@@ -175,7 +199,7 @@ const ValueChange: React.FC<{ row: RenewalRow }> = ({ row }) => {
           sx={{
             fontVariantNumeric: 'tabular-nums',
             whiteSpace: 'nowrap',
-            color: change > 0 ? 'success.main' : change < 0 ? 'error.main' : 'text.secondary',
+            color: change > 0 ? toneText('success') : change < 0 ? toneText('error') : 'text.secondary',
           }}
         >
           {change === 0
@@ -212,6 +236,12 @@ const SuccessorCell: React.FC<{ row: RenewalRow }> = ({ row }) => {
   );
 };
 
+/** Property name, a status other than Active, and "add-on", as one caption. */
+const contractFacts = (row: RenewalRow) =>
+  [row.property_name, row.status !== 'Active' ? row.status : '', row.lifecycle_type === 'addon' ? 'add-on' : '']
+    .filter(Boolean)
+    .join(' · ');
+
 const ZonesText: React.FC<{ row: RenewalRow }> = ({ row }) => {
   if (!row.zones) return <>no zones</>;
   const text = `${row.zones} zone${row.zones === 1 ? '' : 's'}`;
@@ -242,9 +272,14 @@ interface StripProps {
 
 const MonthStrip: React.FC<StripProps> = ({ data, year, month, openView, today, onMonth, onOpen, onYear }) => {
   const months = data && data.year === year ? data.months : null;
+  const selectedRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    // On narrow screens the strip scrolls sideways: keep the chosen month in view.
+    selectedRef.current?.scrollIntoView?.({ block: 'nearest', inline: 'center' });
+  }, [month, year, openView]);
   const cell = (selected: boolean) => ({
-    flex: '1 0 64px',
-    minWidth: 64,
+    flex: '1 0 54px',
+    minWidth: 54,
     px: 1,
     py: 1,
     borderRadius: 2,
@@ -270,12 +305,12 @@ const MonthStrip: React.FC<StripProps> = ({ data, year, month, openView, today, 
         </IconButton>
       </Box>
       <Box sx={{ display: 'flex', gap: 0.75, overflowX: 'auto', flex: 1, pb: 0.5 }}>
-        <ButtonBase onClick={onOpen} aria-pressed={openView} sx={{ ...cell(openView), flex: '1 0 84px' }}>
+        <ButtonBase onClick={onOpen} aria-pressed={openView} sx={{ ...cell(openView), flex: '0 0 auto', whiteSpace: 'nowrap' }}>
           <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary' }}>
             All open
           </Typography>
-          <Typography variant="body2" sx={{ fontWeight: 700 }}>
-            {openView && data ? data.count : '·'}
+          <Typography variant="body2" sx={{ fontWeight: openView && data ? 700 : 400, color: openView && data ? 'text.primary' : 'text.secondary' }}>
+            {openView && data && data.view === 'open' ? data.count : 'all months'}
           </Typography>
         </ButtonBase>
         {Array.from({ length: 12 }).map((_, i) => {
@@ -287,6 +322,7 @@ const MonthStrip: React.FC<StripProps> = ({ data, year, month, openView, today, 
               key={i}
               onClick={() => onMonth(i + 1)}
               aria-current={selected ? 'page' : undefined}
+              ref={selected ? selectedRef : undefined}
               aria-label={`${MONTH_LONG[i]} ${year}${m ? `: ${m.count} ending, ${m.attention} need attention` : ''}`}
               sx={cell(selected)}
             >
@@ -296,9 +332,11 @@ const MonthStrip: React.FC<StripProps> = ({ data, year, month, openView, today, 
               >
                 {MONTH_SHORT[i]}
                 {isNow && (
-                  <Box component="span" sx={{ fontWeight: 500 }}>
-                    · now
-                  </Box>
+                  <Box
+                    component="span"
+                    title="This month"
+                    sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'primary.main', alignSelf: 'center' }}
+                  />
                 )}
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, width: '100%' }}>
@@ -339,7 +377,12 @@ const MonthStrip: React.FC<StripProps> = ({ data, year, month, openView, today, 
 // Summary strip
 // ---------------------------------------------------------------------------
 
-const Figure: React.FC<{ label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: string }> = ({
+const Figure: React.FC<{
+  label: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  tone?: 'success' | 'warning' | 'error';
+}> = ({
   label,
   value,
   sub,
@@ -349,7 +392,7 @@ const Figure: React.FC<{ label: string; value: React.ReactNode; sub?: React.Reac
     <Typography variant="caption" color="text.secondary" component="div" sx={{ fontWeight: 600 }}>
       {label}
     </Typography>
-    <Typography sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: tone, fontSize: '1rem' }}>
+    <Typography sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: tone ? toneText(tone) : undefined, fontSize: '1rem', whiteSpace: 'nowrap' }}>
       {value}
     </Typography>
     {sub && (
@@ -360,10 +403,14 @@ const Figure: React.FC<{ label: string; value: React.ReactNode; sub?: React.Reac
   </Box>
 );
 
-const SummaryStrip: React.FC<{ summaries: CurrencySummary[]; filtered: boolean }> = ({ summaries, filtered }) => {
+const SummaryStrip: React.FC<{ summaries: CurrencySummary[]; filtered: boolean; openView: boolean }> = ({
+  summaries,
+  filtered,
+  openView,
+}) => {
   if (!summaries.length) return null;
   return (
-    <Box sx={{ display: 'grid', gap: 1.5, mb: 2, gridTemplateColumns: { xs: '1fr', lg: summaries.length > 1 ? '1fr 1fr' : '1fr' } }}>
+    <Box sx={{ display: 'grid', gap: 1.5, mb: 2, gridTemplateColumns: { xs: '1fr', xl: summaries.length > 1 ? '1fr 1fr' : '1fr' } }}>
       {summaries.map((s) => (
         <Paper key={s.currency} component="section" aria-label={`${s.currency} totals`} sx={{ p: 2 }}>
           <Typography variant="overline" sx={{ lineHeight: 1, color: 'text.secondary', fontWeight: 700 }}>
@@ -375,7 +422,7 @@ const SummaryStrip: React.FC<{ summaries: CurrencySummary[]; filtered: boolean }
               display: 'grid',
               gap: 2,
               mt: 1,
-              gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', sm: 'repeat(5, minmax(0, 1fr))' },
+              gridTemplateColumns: { xs: 'repeat(2, minmax(0, 1fr))', sm: `repeat(${openView ? 4 : 5}, minmax(0, 1fr))` },
             }}
           >
             <Figure label="Terms ending" value={s.terms} sub={formatMoney(s.value, s.currency)} />
@@ -383,29 +430,31 @@ const SummaryStrip: React.FC<{ summaries: CurrencySummary[]; filtered: boolean }
               label="Renewed"
               value={s.renewed}
               sub={formatMoney(s.renewedValue, s.currency)}
-              tone="success.main"
+              tone={s.renewed > 0 ? 'success' : undefined}
             />
             <Figure
               label="At risk"
               value={formatMoney(s.atRiskValue, s.currency)}
               sub={`${s.open} not yet renewed`}
-              tone={s.atRiskValue > 0 ? 'warning.dark' : undefined}
+              tone={s.atRiskValue > 0 ? 'warning' : undefined}
             />
             <Figure
               label="Lost"
               value={formatMoney(s.lostValue, s.currency)}
               sub={`${s.lost} cancelled or expired`}
-              tone={s.lostValue > 0 ? 'error.main' : undefined}
+              tone={s.lostValue > 0 ? 'error' : undefined}
             />
-            <Tooltip title="Renewed terms ÷ terms ending, leaving out terms that renew automatically.">
-              <Box>
-                <Figure
-                  label="Renewal rate"
-                  value={s.rate === null ? '—' : `${Math.round(s.rate * 100)}%`}
-                  sub={s.auto ? `${s.auto} auto-renew` : undefined}
-                />
-              </Box>
-            </Tooltip>
+            {!openView && (
+              <Tooltip title="Renewed terms ÷ terms ending, leaving out terms that renew automatically.">
+                <Box>
+                  <Figure
+                    label="Renewal rate"
+                    value={s.rate === null ? '—' : `${Math.round(s.rate * 100)}%`}
+                    sub={s.auto ? `${s.auto} auto-renew` : undefined}
+                  />
+                </Box>
+              </Tooltip>
+            )}
           </Box>
         </Paper>
       ))}
@@ -428,12 +477,12 @@ type Column = {
 const COLUMNS: Column[] = [
   { key: 'company', label: 'Customer' },
   { key: 'contract', label: 'Contract', width: 150 },
-  { key: 'product', label: 'Product', width: 120, hide: { display: { xs: 'none', lg: 'table-cell' } } },
-  { key: 'end', label: 'Term ends', width: 118 },
-  { key: 'value', label: 'Current value', align: 'right', width: 120 },
-  { key: 'state', label: 'Renewal', width: 180 },
-  { key: 'renewal', label: 'Renewal contract', width: 150 },
-  { key: 'change', label: 'New value', align: 'right', width: 130, hide: { display: { xs: 'none', md: 'table-cell' } } },
+  { key: 'product', label: 'Product', width: 150, hide: { display: { xs: 'none', xl: 'table-cell' } } },
+  { key: 'end', label: 'Term ends', width: 108 },
+  { key: 'value', label: 'Current value', align: 'right', width: 116 },
+  { key: 'state', label: 'Renewal', width: 172 },
+  { key: 'renewal', label: 'Renewal contract', width: 140 },
+  { key: 'change', label: 'New value', align: 'right', width: 124 },
   { key: 'owner', label: 'Owner', width: 120, hide: { display: { xs: 'none', xl: 'table-cell' } } },
 ];
 
@@ -584,7 +633,7 @@ const Renewals: React.FC = () => {
     row.renewal.attention ? { boxShadow: `inset 3px 0 0 ${theme.palette.error.main}` } : undefined;
 
   const table = (
-    <TableContainer sx={{ maxHeight: 'calc(100vh - 120px)', borderRadius: 0 }}>
+    <TableContainer sx={{ overflow: 'visible', borderRadius: 0 }}>
       <Table stickyHeader size="small" aria-label={`Renewals, ${viewTitle}`} sx={{ tableLayout: 'auto' }}>
         <TableHead>
           <TableRow>
@@ -596,7 +645,7 @@ const Renewals: React.FC = () => {
                   key={col.key}
                   align={col.align}
                   sortDirection={active ? (sort.startsWith('-') ? 'desc' : 'asc') : false}
-                  sx={{ width: col.width, whiteSpace: 'nowrap', ...(col.hide || {}) }}
+                  sx={{ width: col.width, whiteSpace: 'nowrap', top: { xs: 56, sm: 60 }, zIndex: 2, ...(col.hide || {}) }}
                 >
                   <TableSortLabel
                     active={active}
@@ -648,18 +697,18 @@ const Renewals: React.FC = () => {
                     {row.contract_number}
                   </RecordLink>
                   <Typography variant="caption" color="text.secondary" component="div" sx={{ lineHeight: 1.3 }}>
-                    {[row.property_name, row.status !== 'Active' ? row.status : ''].filter(Boolean).join(' · ')}
-                    {row.lifecycle_type === 'addon' ? ' · add-on' : ''}
+                    {contractFacts(row)}
+                    <Box component="span" sx={{ display: { xl: 'none' } }}>
+                      {contractFacts(row) ? ' · ' : ''}
+                      <ZonesText row={row} />
+                    </Box>
                   </Typography>
+                  <Box sx={{ display: { xs: 'flex', xl: 'none' }, alignItems: 'center', gap: 0.75, mt: 0.5, whiteSpace: 'nowrap' }}>
+                    <ProductCell row={row} />
+                  </Box>
                 </TableCell>
                 <TableCell sx={COLUMNS[2].hide}>
-                  {PRODUCT_KEY[row.product] ? (
-                    <ProductChip value={PRODUCT_KEY[row.product]} />
-                  ) : (
-                    <Typography variant="body2" color="text.secondary">
-                      {row.product}
-                    </Typography>
-                  )}
+                  <ProductCell row={row} />
                   <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.25 }}>
                     <ZonesText row={row} />
                   </Typography>
@@ -689,7 +738,7 @@ const Renewals: React.FC = () => {
                 <TableCell>
                   <SuccessorCell row={row} />
                 </TableCell>
-                <TableCell align="right" sx={COLUMNS[7].hide}>
+                <TableCell align="right">
                   <ValueChange row={row} />
                 </TableCell>
                 <TableCell sx={COLUMNS[8].hide}>
@@ -731,7 +780,7 @@ const Renewals: React.FC = () => {
                     <RecordLink to={`/contracts/${row.contract_id}`} label={`Contract ${row.contract_number}`}>
                       {row.contract_number}
                     </RecordLink>
-                    {row.property_name ? ` · ${row.property_name}` : ''} · {row.product} · <ZonesText row={row} />
+                    {row.property_name ? ` · ${row.property_name}` : ''} · {row.product_display || row.product} · <ZonesText row={row} />
                   </Typography>
                 </Box>
                 <StateChip row={row} />
@@ -822,9 +871,9 @@ const Renewals: React.FC = () => {
         </Alert>
       )}
 
-      {current && <SummaryStrip summaries={summaries} filtered={anyFilter} />}
+      {current && <SummaryStrip summaries={summaries} filtered={anyFilter} openView={openView} />}
 
-      <Paper sx={{ overflow: 'hidden' }}>
+      <Paper sx={{ overflow: 'visible' }}>
         {loading && <LinearProgress aria-label="Loading renewals" sx={{ height: 2 }} />}
         <Box
           sx={{ p: 2, display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: 1, borderColor: 'divider' }}
