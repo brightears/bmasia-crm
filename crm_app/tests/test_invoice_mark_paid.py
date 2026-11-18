@@ -86,16 +86,35 @@ def test_second_request_is_refused_with_the_existing_receipt(api):
     assert Invoice.objects.exclude(receipt_number=None).count() == 1
 
 
-def test_invoice_paid_by_other_means_is_refused(api):
-    invoice = _invoice(status='Paid', paid_date=date(2026, 11, 2))
+def test_paid_invoice_without_a_receipt_gets_one_and_keeps_its_paid_date(api):
+    """An invoice set Paid by another route (admin, an old PATCH) can still get its receipt."""
+    invoice = _invoice(status='Paid', paid_date=date(2026, 11, 2), payment_method='Cash')
     with mock.patch(SEND_RECEIPT) as send:
-        response = api.post(_url(invoice), {}, format='json')
-    assert response.status_code == 409
-    assert response.data['receipt_number'] is None
+        response = api.post(_url(invoice), {'paid_date': '2026-11-05', 'payment_method': 'Bank Transfer'},
+                            format='json')
+
+    assert response.status_code == 200, response.data
+    assert response.data['receipt_only'] is True
+    assert response.data['receipt_number'] == f'REC-TH-{_year()}-0001'
     assert response.data['paid_date'] == '2026-11-02'
+    assert response.data['receipt_email_status'] == 'not_requested'
     send.assert_not_called()
     invoice.refresh_from_db()
-    assert invoice.receipt_number is None
+    assert (invoice.status, invoice.paid_date, invoice.payment_method) == ('Paid', date(2026, 11, 2), 'Cash')
+    log = AuditLog.objects.get(model_name='Invoice', record_id=str(invoice.pk))
+    assert log.changes['action'] == 'Receipt issued for an invoice already marked paid'
+
+
+def test_paid_invoice_without_date_or_receipt_takes_the_request_date(api):
+    invoice = _invoice(status='Paid')
+    with mock.patch(SEND_RECEIPT, return_value=(True, 'sent')) as send:
+        response = api.post(_url(invoice), {'paid_date': '2026-11-05', 'send_receipt': True}, format='json')
+    assert response.status_code == 200
+    assert response.data['paid_date'] == '2026-11-05'
+    assert response.data['receipt_email_status'] == 'sent'
+    send.assert_called_once()
+    # and only once: the receipt now exists
+    assert api.post(_url(invoice), {}, format='json').status_code == 409
 
 
 @pytest.mark.parametrize('status', ['Cancelled', 'Refunded'])
@@ -160,6 +179,35 @@ def test_future_payment_date_is_refused(api):
     response = api.post(_url(invoice), {'paid_date': tomorrow}, format='json')
     assert response.status_code == 400
     assert 'future' in str(response.data['paid_date']).lower()
+
+
+@pytest.mark.parametrize('value', ['1999-12-31', '2025-10-30'])  # issue date 2026-11-01
+def test_payment_date_too_far_back_is_refused(api, value):
+    invoice = _invoice()
+    response = api.post(_url(invoice), {'paid_date': value}, format='json')
+    assert response.status_code == 400
+    assert 'cannot be before 2025-10-31' in str(response.data['paid_date'])
+    invoice.refresh_from_db()
+    assert invoice.status == 'Sent'
+
+
+def test_advance_payment_up_to_a_year_before_issue_is_accepted(api):
+    invoice = _invoice()
+    response = api.post(_url(invoice), {'paid_date': '2025-10-31'}, format='json')
+    assert response.status_code == 200
+    assert response.data['paid_date'] == '2025-10-31'
+
+
+def test_receipt_year_and_default_date_follow_the_bangkok_calendar(api):
+    """00:30 on 1 January in Bangkok is still 31 December in UTC."""
+    from datetime import datetime, timezone as dt_tz
+    from freezegun import freeze_time
+
+    invoice = _invoice()
+    with freeze_time(datetime(2026, 12, 31, 17, 30, tzinfo=dt_tz.utc)):
+        response = api.post(_url(invoice), {}, format='json')
+    assert response.data['receipt_number'] == 'REC-TH-2027-0001'
+    assert response.data['paid_date'] == '2027-01-01'
 
 
 def test_payment_method_and_reference_are_recorded(api, operator):
@@ -234,8 +282,19 @@ def test_receipt_email_error_text_is_not_returned(api):
     with mock.patch(SEND_RECEIPT, side_effect=RuntimeError('smtp.internal.example: auth 535')):
         response = api.post(_url(invoice), {'send_receipt': True}, format='json')
     assert response.status_code == 200
-    assert response.data['receipt_email_status'].startswith('failed')
+    assert response.data['receipt_email_status'].startswith('failed: the receipt email could not be sent. Reference: ')
     assert 'smtp.internal' not in response.data['receipt_email_status']
+
+
+def test_mail_layer_failure_text_is_replaced_by_a_reference(api, caplog):
+    invoice = _invoice()
+    raw = 'Failed to send receipt to any recipients. Errors: a@example.com: (535, b"5.7.8 smtp.internal")'
+    with mock.patch(SEND_RECEIPT, return_value=(False, raw)):
+        response = api.post(_url(invoice), {'send_receipt': True}, format='json',
+                            HTTP_X_REQUEST_ID='ref-mark-paid-1')
+    assert response.data['receipt_email_status'] == (
+        'failed: the receipt email could not be sent. Reference: ref-mark-paid-1')
+    assert any('ref-mark-paid-1' in r.getMessage() and 'smtp.internal' in r.getMessage() for r in caplog.records)
 
 
 # --- concurrency (PostgreSQL: SQLite serialises writers and ignores row locks) -----------
