@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Box,
@@ -75,10 +75,12 @@ export interface CompanyTimelineProps {
   showFilters?: boolean;
   /** Open a contact (contacts have no page of their own). */
   onOpenContact?: (contactId: string) => void;
-  /** Bump to reload from the top, e.g. after something was added. */
-  refreshKey?: number;
+  /** Change to reload from the top, e.g. after something was added or the record changed. */
+  refreshKey?: number | string;
   /** Accessible name of the feed. */
   label?: string;
+  /** Keep the filters and search in the address (tl_* parameters). */
+  urlState?: boolean;
 }
 
 const CATEGORY_LABELS: Record<TimelineCategory, string> = {
@@ -186,7 +188,60 @@ const toIsoDay = (d: Date | null): string | undefined => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-const useDebounced = <T,>(value: T, ms: number): T => {
+const ISO_DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+const fromIsoDay = (value: string | null): Date | null => {
+  const m = value ? ISO_DAY.exec(value) : null;
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
+/** Address parameters that hold the timeline's filters (urlState). */
+export const URL_KEYS = { types: 'tl_types', q: 'tl_q', from: 'tl_from', to: 'tl_to', actor: 'tl_actor' } as const;
+
+interface UrlFilters {
+  types: TimelineCategory[];
+  q: string;
+  from: Date | null;
+  to: Date | null;
+  actor: string;
+}
+
+const EMPTY_FILTERS: UrlFilters = { types: [], q: '', from: null, to: null, actor: '' };
+
+const readUrlFilters = (params: URLSearchParams): UrlFilters => ({
+  types: (params.get(URL_KEYS.types) || '')
+    .split(',')
+    .filter((t): t is TimelineCategory => t in CATEGORY_LABELS),
+  q: (params.get(URL_KEYS.q) || '').slice(0, MAX_SEARCH_LENGTH),
+  from: fromIsoDay(params.get(URL_KEYS.from)),
+  to: fromIsoDay(params.get(URL_KEYS.to)),
+  actor: /^[0-9a-f-]{36}$/i.test(params.get(URL_KEYS.actor) || '') ? (params.get(URL_KEYS.actor) as string) : '',
+});
+
+const MAX_SEARCH_LENGTH = 200;
+/** Empty pages in a row that load by themselves before the user is asked. */
+const AUTO_LOAD_LIMIT = 5;
+
+interface LoadError {
+  /** 'request': the server could not use this request (400); repeating it would fail again. */
+  kind: 'request' | 'server';
+  message: string;
+  param?: string;
+}
+
+const toLoadError = (err: any, fallback: string): LoadError => {
+  const status = err?.response?.status;
+  const data = err?.response?.data;
+  if (status === 400) {
+    const detail = typeof data?.error === 'string' ? data.error : '';
+    return { kind: 'request', message: detail ? `This could not be shown: ${detail}.` : 'This could not be shown.', param: data?.param };
+  }
+  return { kind: 'server', message: fallback };
+};
+
+const useDebounced =<T,>(value: T, ms: number): T => {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
     const id = setTimeout(() => setDebounced(value), ms);
@@ -204,28 +259,34 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
   onOpenContact,
   refreshKey = 0,
   label = 'Activity',
+  urlState = false,
 }) => {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Filters start from the address when it holds them (urlState), so a link or a tab switch keeps them.
+  const [initial] = useState(() => (urlState ? readUrlFilters(searchParams) : EMPTY_FILTERS));
 
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [more, setMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState('');
-  const [moreError, setMoreError] = useState('');
+  const [error, setError] = useState<LoadError | null>(null);
+  const [moreError, setMoreError] = useState<LoadError | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [actors, setActors] = useState<TimelineFacetActor[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [retry, setRetry] = useState(0);
+  // Pages in a row that came back empty while older history remains (rows that show nothing).
+  const [emptyStreak, setEmptyStreak] = useState(0);
 
-  const [types, setTypes] = useState<TimelineCategory[]>([]);
-  const [searchText, setSearchText] = useState('');
+  const [types, setTypes] = useState<TimelineCategory[]>(initial.types);
+  const [searchText, setSearchText] = useState(initial.q);
   const search = useDebounced(searchText, 300);
-  const [dateFrom, setDateFrom] = useState<Date | null>(null);
-  const [dateTo, setDateTo] = useState<Date | null>(null);
-  const [actor, setActor] = useState('');
+  const [dateFrom, setDateFrom] = useState<Date | null>(initial.from);
+  const [dateTo, setDateTo] = useState<Date | null>(initial.to);
+  const [actor, setActor] = useState(initial.actor);
   const [dateAnchor, setDateAnchor] = useState<HTMLElement | null>(null);
   const [draftFrom, setDraftFrom] = useState<Date | null>(null);
   const [draftTo, setDraftTo] = useState<Date | null>(null);
@@ -250,27 +311,48 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
     [typesKey, from, to, actor, search, recordType, recordId, pageSize]
   );
 
+  // Keep the filters in the address (replacing the entry, so Back is not flooded).
+  useEffect(() => {
+    if (!urlState) return;
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        const values: Record<string, string | undefined> = {
+          [URL_KEYS.types]: typesKey || undefined,
+          [URL_KEYS.q]: search || undefined,
+          [URL_KEYS.from]: from,
+          [URL_KEYS.to]: to,
+          [URL_KEYS.actor]: actor || undefined,
+        };
+        Object.entries(values).forEach(([key, value]) => (value ? next.set(key, value) : next.delete(key)));
+        return next.toString() === prev.toString() ? prev : next;
+      },
+      { replace: true }
+    );
+  }, [urlState, setSearchParams, typesKey, search, from, to, actor]);
+
   useEffect(() => {
     const id = ++request.current;
     setLoading(true);
-    setError('');
-    setMoreError('');
+    setError(null);
+    setMoreError(null);
     ApiService.getCompanyTimeline(companyId, { ...baseQuery, facets: showFilters })
       .then((page) => {
         if (id !== request.current) return;
         setEvents(page.results);
         setCursor(page.next_cursor);
         setMore(page.has_more);
+        setEmptyStreak(page.results.length === 0 && page.has_more ? 1 : 0);
         if (page.facets) {
           setCounts(page.facets.types);
           setActors(page.facets.actors);
         }
       })
-      .catch(() => {
+      .catch((err) => {
         if (id !== request.current) return;
         setEvents([]);
         setMore(false);
-        setError('Could not load the activity.');
+        setError(toLoadError(err, 'Could not load the activity.'));
       })
       .finally(() => {
         if (id === request.current) setLoading(false);
@@ -281,7 +363,7 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
     if (!cursor || loadingMore) return;
     const id = request.current;
     setLoadingMore(true);
-    setMoreError('');
+    setMoreError(null);
     ApiService.getCompanyTimeline(companyId, { ...baseQuery, cursor })
       .then((page) => {
         if (id !== request.current) return;
@@ -291,12 +373,25 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
         });
         setCursor(page.next_cursor);
         setMore(page.has_more);
+        setEmptyStreak((n) => (page.results.length === 0 && page.has_more ? n + 1 : 0));
       })
-      .catch(() => {
-        if (id === request.current) setMoreError('Could not load more activity.');
+      .catch((err) => {
+        if (id === request.current) setMoreError(toLoadError(err, 'Could not load more activity.'));
       })
       .finally(() => setLoadingMore(false));
   }, [companyId, baseQuery, cursor, loadingMore]);
+
+  // A page that came back empty with older history left reads on by itself, a few times.
+  useEffect(() => {
+    if (!loading && !loadingMore && !moreError && more && cursor && emptyStreak > 0 && emptyStreak < AUTO_LOAD_LIMIT) {
+      loadMore();
+    }
+  }, [loading, loadingMore, moreError, more, cursor, emptyStreak, loadMore]);
+
+  const lookFurther = () => {
+    setEmptyStreak(1);
+    loadMore();
+  };
 
   const toggleType = (key: TimelineCategory) =>
     setTypes((current) => (current.includes(key) ? current.filter((t) => t !== key) : [...current, key]));
@@ -320,6 +415,10 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
     setDateTo(null);
     setActor('');
   };
+
+  const draftFromDay = toIsoDay(draftFrom);
+  const draftToDay = toIsoDay(draftTo);
+  const rangeReversed = Boolean(draftFromDay && draftToDay && draftFromDay > draftToDay);
 
   const dateLabel =
     from || to
@@ -504,7 +603,7 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               placeholder="Search activity"
-              inputProps={{ 'aria-label': 'Search activity' }}
+              inputProps={{ 'aria-label': 'Search activity', maxLength: MAX_SEARCH_LENGTH }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
@@ -624,6 +723,11 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
                   minDate={draftFrom || undefined}
                   slotProps={{ textField: { size: 'small', fullWidth: true } }}
                 />
+                {rangeReversed && (
+                  <Typography variant="body2" color="error" role="alert">
+                    The start date is after the end date.
+                  </Typography>
+                )}
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1 }}>
                   <Button
                     onClick={() => {
@@ -637,6 +741,7 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
                   </Button>
                   <Button
                     variant="contained"
+                    disabled={rangeReversed}
                     onClick={() => {
                       setDateFrom(draftFrom);
                       setDateTo(draftTo);
@@ -665,16 +770,60 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
           ))}
         </Box>
       ) : error ? (
-        <Alert
-          severity="error"
-          action={
-            <Button color="inherit" size="small" onClick={() => setRetry((n) => n + 1)}>
-              Try again
-            </Button>
-          }
-        >
-          {error}
-        </Alert>
+        error.kind === 'request' ? (
+          // The request itself was refused: repeating it would fail again, so offer a way out instead.
+          <Alert
+            severity="warning"
+            action={
+              filtersActive ? (
+                <Button color="inherit" size="small" onClick={clearFilters}>
+                  Clear filters
+                </Button>
+              ) : undefined
+            }
+          >
+            {error.message}
+          </Alert>
+        ) : (
+          <Alert
+            severity="error"
+            action={
+              <Button color="inherit" size="small" onClick={() => setRetry((n) => n + 1)}>
+                Try again
+              </Button>
+            }
+          >
+            {error.message}
+          </Alert>
+        )
+      ) : events.length === 0 && more ? (
+        // Older history remains but the newest rows show nothing: never claim there is no activity.
+        emptyStreak < AUTO_LOAD_LIMIT && !moreError ? (
+          <Box aria-busy="true" sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 3, justifyContent: 'center' }}>
+            <CircularProgress size={18} />
+            <Typography variant="body2" color="text.secondary">
+              Looking further back…
+            </Typography>
+          </Box>
+        ) : (
+          <EmptyState
+            compact
+            icon={<History />}
+            title="Nothing to show in the most recent history"
+            description={moreError ? moreError.message : 'Older activity may still be further back.'}
+            action={
+              moreError?.kind === 'request' ? (
+                <Button variant="outlined" onClick={() => setRetry((n) => n + 1)}>
+                  Start from the top
+                </Button>
+              ) : (
+                <Button variant="outlined" onClick={lookFurther} disabled={loadingMore}>
+                  Look further back
+                </Button>
+              )
+            }
+          />
+        )
       ) : events.length === 0 ? (
         <EmptyState
           compact
@@ -714,20 +863,31 @@ const CompanyTimeline: React.FC<CompanyTimelineProps> = ({
           ))}
 
           {moreError && (
-            <Alert severity="error" sx={{ mt: 2 }}>
-              {moreError}
+            <Alert
+              severity={moreError.kind === 'request' ? 'warning' : 'error'}
+              sx={{ mt: 2 }}
+              action={
+                moreError.kind === 'request' ? (
+                  // A cursor the server refuses would be refused again: reload from the top instead.
+                  <Button color="inherit" size="small" onClick={() => setRetry((n) => n + 1)}>
+                    Start from the top
+                  </Button>
+                ) : undefined
+              }
+            >
+              {moreError.message}
             </Alert>
           )}
-          {more && (
+          {more && moreError?.kind !== 'request' && (
             <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center' }}>
               <Button
                 variant="outlined"
-                onClick={loadMore}
+                onClick={lookFurther}
                 disabled={loadingMore}
                 startIcon={loadingMore ? <CircularProgress size={16} /> : undefined}
                 sx={{ minWidth: 160 }}
               >
-                {loadingMore ? 'Loading…' : 'Load more'}
+                {loadingMore ? 'Loading…' : moreError ? 'Try again' : 'Load more'}
               </Button>
             </Box>
           )}

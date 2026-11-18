@@ -908,6 +908,9 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
                 companyId={contract.company}
                 record={{ type: 'contract', id: contract.id }}
                 label={`Activity for ${contract.contract_number}`}
+                // Reloads after an action on this page saves the contract (Mark as sent, signed…).
+                refreshKey={`${contract.updated_at}|${contract.status}`}
+                urlState
               />
             </SectionCard>
           </Grid>

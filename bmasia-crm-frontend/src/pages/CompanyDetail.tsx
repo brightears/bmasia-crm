@@ -473,6 +473,7 @@ const CompanyDetail: React.FC = () => {
                 <CompanyTimeline
                   companyId={company.id}
                   label={`Activity for ${company.name}`}
+                  urlState
                   onOpenContact={(contactId) => {
                     const match = contacts.find((c) => c.id === contactId);
                     if (match) setViewContact(match);

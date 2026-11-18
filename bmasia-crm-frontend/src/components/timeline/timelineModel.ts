@@ -34,10 +34,12 @@ export interface TimelineLink {
 export interface TimelineChange {
   field: string;
   label: string;
-  kind: 'text' | 'date' | 'datetime' | 'money' | 'bool' | 'ref' | 'collection' | 'opaque';
+  kind: 'text' | 'date' | 'datetime' | 'money' | 'number' | 'bool' | 'ref' | 'collection' | 'opaque';
   old: string | null;
   new: string | null;
+  /** Money: the currency after the save, and before it when the save changed it ('' = unknown). */
   currency?: string;
+  old_currency?: string;
 }
 
 export interface TimelineEvent {
@@ -95,23 +97,54 @@ export const timelineParams = (query: TimelineQuery): Record<string, string> => 
   return params;
 };
 
-const pad = (n: number) => String(n).padStart(2, '0');
+/**
+ * The business runs on Bangkok time, and the server stores date-only facts as Bangkok
+ * days, so days are grouped, labelled and timed in this zone whatever the viewer's clock.
+ */
+export const BUSINESS_TIME_ZONE = 'Asia/Bangkok';
+export const BUSINESS_TIME_ZONE_LABEL = 'Bangkok time';
 
-/** Local calendar day of an event, as YYYY-MM-DD. Date-only events keep their recorded day. */
-export const eventDay = (event: TimelineEvent): string => {
-  if (event.precision === 'date' && event.date) return event.date;
-  const d = new Date(event.occurred_at);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const zoneParts = (d: Date): Record<string, string> => {
+  const parts: Record<string, string> = {};
+  new Intl.DateTimeFormat('en-GB', {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  })
+    .formatToParts(d)
+    .forEach((p) => {
+      parts[p.type] = p.value;
+    });
+  return parts;
 };
 
-const dayKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+/** The Bangkok calendar day of a moment, as YYYY-MM-DD. */
+export const businessDay = (d: Date): string => {
+  const p = zoneParts(d);
+  return `${p.year}-${p.month}-${p.day}`;
+};
 
-/** "Today", "Yesterday", otherwise "14 Nov 2026". */
+/** Calendar day of an event in Bangkok time. Date-only events keep their recorded day. */
+export const eventDay = (event: TimelineEvent): string => {
+  if (event.precision === 'date' && event.date) return event.date;
+  return businessDay(new Date(event.occurred_at));
+};
+
+const previousDay = (day: string): string => {
+  const [y, m, d] = day.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d) - 24 * 3600 * 1000);
+  return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
+};
+
+/** "Today", "Yesterday" (in Bangkok), otherwise "14 Nov 2026". */
 export const dayLabel = (day: string, now: Date = new Date()): string => {
-  if (day === dayKey(now)) return 'Today';
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (day === dayKey(yesterday)) return 'Yesterday';
+  const today = businessDay(now);
+  if (day === today) return 'Today';
+  if (day === previousDay(today)) return 'Yesterday';
   return formatDate(day);
 };
 
@@ -154,29 +187,45 @@ export const relativeTime = (iso: string, now: Date = new Date()): string => {
   return years <= 1 ? '1 year ago' : `${years} years ago`;
 };
 
-/** "14 Nov 2026, 09:30" (24-hour clock, the viewer's time zone). */
+/** "14 Nov 2026, 09:30 (Bangkok time)". */
 export const exactTime = (iso: string): string => {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return `${formatDate(d)}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const p = zoneParts(d);
+  return `${formatDate(`${p.year}-${p.month}-${p.day}`)}, ${p.hour}:${p.minute} (${BUSINESS_TIME_ZONE_LABEL})`;
 };
 
 /** Time shown in the hover text for an event, honest about date-only records. */
 export const eventExactTime = (event: TimelineEvent): string =>
   event.precision === 'date' && event.date ? `${formatDate(event.date)} (no time recorded)` : exactTime(event.occurred_at);
 
-const changeValue = (change: TimelineChange, value: string | null): string => {
+/** An amount with its currency when known ("THB 108,000"); a plain number when not ("108,000"). */
+export const formatAmount = (amount: number | string | null | undefined, currency?: string | null): string => {
+  if (currency) return formatMoney(amount, currency);
+  if (amount === undefined || amount === null || amount === '') return '—';
+  const n = typeof amount === 'string' ? Number(amount) : amount;
+  if (Number.isNaN(n)) return String(amount);
+  return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+};
+
+const changeValue = (change: TimelineChange, value: string | null, currency?: string): string => {
   if (value === null || value === '') return 'empty';
   if (change.kind === 'date') return formatDate(value);
   if (change.kind === 'datetime') return exactTime(value) || value;
-  if (change.kind === 'money') return formatMoney(value, change.currency || 'USD');
+  if (change.kind === 'money') return formatAmount(value, currency);
+  if (change.kind === 'number') return formatAmount(value, null);
   return value;
 };
 
 /** "Changed End date from 31 Dec 2026 to 31 Dec 2027". */
 export const changeSentence = (change: TimelineChange): string => {
   if (change.kind === 'collection' || change.kind === 'opaque') return `Changed ${change.label}`;
-  return `Changed ${change.label} from ${changeValue(change, change.old)} to ${changeValue(change, change.new)}`;
+  const oldCurrency = change.old_currency ?? change.currency;
+  return `Changed ${change.label} from ${changeValue(change, change.old, oldCurrency)} to ${changeValue(
+    change,
+    change.new,
+    change.currency
+  )}`;
 };
 
 /** Where a link opens in the app; null when the record has no page of its own. */
@@ -205,7 +254,7 @@ export const eventSummary = (event: TimelineEvent): string | null => {
   const parts: string[] = [];
   const money = event.extra?.money;
   if (money && money.amount !== undefined && money.amount !== null) {
-    parts.push(formatMoney(money.amount, money.currency || 'USD'));
+    parts.push(formatAmount(money.amount, money.currency));
   }
   if (event.category === 'email' && event.extra?.email_type_label) parts.push(event.extra.email_type_label);
   if (event.category === 'care' && event.extra?.outcome && event.extra.outcome !== 'none') {

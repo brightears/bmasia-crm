@@ -420,6 +420,7 @@ const OpportunityDetail: React.FC = () => {
                 record={{ type: 'opportunity', id: opportunity.id }}
                 refreshKey={activityRefresh}
                 label={`Activity for ${opportunity.name}`}
+                urlState
               />
             </Box>
           )}

@@ -191,3 +191,73 @@ it('for one record: asks for that record and does not link back to it', async ()
   expect(screen.queryByRole('link', { name: 'Open contract TH-CT26001' })).not.toBeInTheDocument();
   expect(screen.queryByRole('textbox', { name: 'Search activity' })).not.toBeInTheDocument();
 });
+
+const badRequest = (error: string, param: string) =>
+  Object.assign(new Error('400'), { response: { status: 400, data: { error, param } } });
+
+it('a refused request offers to clear the filter, never a Try again that repeats it', async () => {
+  api.getCompanyTimeline
+    .mockResolvedValueOnce(page(FIRST, true))
+    .mockRejectedValueOnce(badRequest('q must not contain control characters', 'q'));
+  renderTimeline();
+  await screen.findByText('Renewal call');
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search activity' }), { target: { value: 'zones' } });
+  expect(await screen.findByText('This could not be shown: q must not contain control characters.')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  api.getCompanyTimeline.mockResolvedValue(page(FIRST, false));
+  fireEvent.click(screen.getAllByRole('button', { name: 'Clear filters' })[0]);
+  expect(await screen.findByText('Renewal call')).toBeInTheDocument();
+  expect(api.getCompanyTimeline).toHaveBeenLastCalledWith('co-1', expect.objectContaining({ q: undefined }));
+});
+
+it('a refused cursor offers to start from the top instead of repeating it', async () => {
+  api.getCompanyTimeline
+    .mockResolvedValueOnce(page(FIRST, true))
+    .mockRejectedValueOnce(badRequest('invalid cursor', 'cursor'));
+  renderTimeline();
+  await screen.findByText('Renewal call');
+  fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+  expect(await screen.findByText('This could not be shown: invalid cursor.')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
+  api.getCompanyTimeline.mockResolvedValue(page(FIRST, false));
+  fireEvent.click(screen.getByRole('button', { name: 'Start from the top' }));
+  await waitFor(() => expect(screen.queryByText('This could not be shown: invalid cursor.')).not.toBeInTheDocument());
+  const calls = api.getCompanyTimeline.mock.calls;
+  expect(calls[calls.length - 1][1].cursor).toBeUndefined();
+});
+
+it('never says "No activity yet" while older history remains: it reads on by itself', async () => {
+  api.getCompanyTimeline
+    .mockResolvedValueOnce(page([], true))
+    .mockResolvedValueOnce(page([], true))
+    .mockResolvedValueOnce(page([FIRST[0]], false));
+  renderTimeline();
+  expect(await screen.findByText('Renewal call')).toBeInTheDocument();
+  expect(screen.queryByText('No activity yet')).not.toBeInTheDocument();
+  expect(api.getCompanyTimeline).toHaveBeenCalledTimes(3);
+});
+
+it('after a few empty pages it asks before reading further back', async () => {
+  api.getCompanyTimeline.mockResolvedValue(page([], true));
+  renderTimeline();
+  expect(await screen.findByRole('button', { name: 'Look further back' })).toBeInTheDocument();
+  expect(screen.queryByText('No activity yet')).not.toBeInTheDocument();
+  expect(api.getCompanyTimeline).toHaveBeenCalledTimes(5);
+  api.getCompanyTimeline.mockResolvedValue(page([FIRST[0]], false));
+  fireEvent.click(screen.getByRole('button', { name: 'Look further back' }));
+  expect(await screen.findByText('Renewal call')).toBeInTheDocument();
+});
+
+it('keeps filters and search in the address, so a link or a tab switch keeps them', async () => {
+  render(
+    <MemoryRouter initialEntries={['/companies/co-1?tl_types=email,bogus&tl_q=zones&tl_from=2026-11-01']}>
+      <CompanyTimeline companyId="co-1" urlState />
+    </MemoryRouter>
+  );
+  await screen.findByText('Renewal call');
+  expect(api.getCompanyTimeline).toHaveBeenCalledWith(
+    'co-1',
+    expect.objectContaining({ types: ['email'], q: 'zones', from: '2026-11-01' })
+  );
+  expect(screen.getByRole('textbox', { name: 'Search activity' })).toHaveValue('zones');
+});
