@@ -1002,7 +1002,9 @@ class TaskViewSet(BaseModelViewSet):
 
 class OpportunityViewSet(BaseModelViewSet):
     """ViewSet for Opportunity management"""
-    queryset = Opportunity.objects.select_related('company', 'owner').prefetch_related('activities').all()
+    queryset = Opportunity.objects.select_related('company', 'owner').prefetch_related(
+        'activities__user', 'activities__contact',
+    ).all()
     serializer_class = OpportunitySerializer
     search_fields = ['name', 'company__name', 'notes']
     ordering_fields = ['created_at', 'expected_value', 'expected_close_date', 'stage']
