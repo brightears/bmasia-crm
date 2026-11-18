@@ -247,6 +247,24 @@ def _owner_of(contract):
     return None, None
 
 
+PLATFORM_PRODUCT = {'beatbreeze': 'Beat Breeze', 'soundtrack': 'Soundtrack'}
+
+
+def product_display(book_product, platforms):
+    """(product, source) shown on the page.
+
+    The Renewal Book's product (service type, then the company's funnel product)
+    stays first. Only where it says 'Other' do the contract's service-location
+    platforms decide, since they are contract-level evidence of the product.
+    """
+    if book_product != 'Other':
+        return book_product, 'renewal_book'
+    found = sorted({PLATFORM_PRODUCT[p] for p in platforms if p in PLATFORM_PRODUCT})
+    if not found:
+        return 'Other', 'renewal_book'
+    return ' + '.join(found), 'service_locations'
+
+
 def _successor_facts(s):
     return SuccessorFacts(
         status=s.status,
@@ -293,7 +311,11 @@ def renewals_row(contract, today):
             'other_company': chosen.company_id != contract.company_id,
         }
 
+    shown_product, product_source = product_display(
+        row['product'], [loc.platform for loc in contract.service_locations.all()])
     row.update({
+        'product_display': shown_product,
+        'product_source': product_source,
         'property_name': contract.property_name or '',
         'contract_type': contract.contract_type,
         'start_date': contract.start_date.isoformat() if contract.start_date else None,

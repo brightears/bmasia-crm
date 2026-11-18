@@ -6,7 +6,7 @@ import pytest
 from crm_app.services.renewals_page_service import (
     AUTO_RENEWS, DRAFTED, INVOICED, LAPSED, LOST, NOT_STARTED, PAID, RENEWED_UNLINKED,
     SENT, SIGNED, STATES, SuccessorFacts as S, TermFacts as T, attention_of,
-    derive_renewal_state, invoice_state_of, pick_successor, term_months, value_change,
+    derive_renewal_state, invoice_state_of, pick_successor, product_display, term_months, value_change,
 )
 
 pytestmark = pytest.mark.unit
@@ -156,3 +156,15 @@ def test_value_change(old, old_m, new, new_m, same, expected):
 
 def test_pick_successor_ignores_addons_and_cancelled():
     assert pick_successor([S('Cancelled', JAN), S('Active', JAN, lifecycle_type='addon')]) is None
+
+
+@pytest.mark.parametrize('book,platforms,expected', [
+    ('Soundtrack', ['beatbreeze'], ('Soundtrack', 'renewal_book')),   # the book's own evidence stays first
+    ('Beat Breeze', [], ('Beat Breeze', 'renewal_book')),
+    ('Other', [], ('Other', 'renewal_book')),
+    ('Other', ['custom'], ('Other', 'renewal_book')),
+    ('Other', ['beatbreeze', 'beatbreeze'], ('Beat Breeze', 'service_locations')),
+    ('Other', ['soundtrack', 'beatbreeze', 'custom'], ('Beat Breeze + Soundtrack', 'service_locations')),
+])
+def test_product_display(book, platforms, expected):
+    assert product_display(book, platforms) == expected

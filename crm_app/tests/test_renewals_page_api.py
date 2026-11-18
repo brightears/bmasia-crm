@@ -106,6 +106,10 @@ def test_page_rows_carry_the_renewal_book_row_unchanged(client):
         assert {k: row[k] for k in book_row} == book_row
     assert by_number[a.contract_number]['zones'] == 2
     assert by_number[a.contract_number]['zones_source'] == 'service_locations'
+    # The book says 'Other' (no service type, no funnel product); the page shows the locations' platform.
+    assert by_number[a.contract_number]['product'] == 'Other'
+    assert (by_number[a.contract_number]['product_display'],
+            by_number[a.contract_number]['product_source']) == ('Beat Breeze', 'service_locations')
 
 
 # ---------------------------------------------------------------------------
