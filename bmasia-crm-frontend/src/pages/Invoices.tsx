@@ -56,7 +56,7 @@ import { Invoice, ApiResponse, Company, Contract } from '../types';
 import ApiService, { MarkInvoicePaidResult } from '../services/api';
 import InvoiceForm from '../components/InvoiceForm';
 import InvoiceDetail from '../components/InvoiceDetail';
-import RecipientFallback, { noRecipientMessage, sendErrorMessage } from '../components/RecipientFallback';
+import RecipientFallback, { noRecipientMessage } from '../components/RecipientFallback';
 import MarkPaidDialog, { describeMarkPaidResult } from '../components/MarkPaidDialog';
 import { formatDate as formatDisplayDate, formatMoney, statusTone, visuallyHidden } from '../theme';
 import { PageHeader, EmptyState } from '../components/ui';
@@ -306,7 +306,7 @@ const Invoices: React.FC = () => {
       if (noRecipient) {
         setSendFallback({ invoice, message: noRecipient });
       } else {
-        setError(sendErrorMessage(err, 'Failed to send invoice'));
+        setError('Failed to send invoice');
       }
     } finally {
       setSendingInvoiceId(null);

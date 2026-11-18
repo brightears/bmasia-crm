@@ -61,7 +61,7 @@ import {
 } from '@mui/icons-material';
 import { Quote, QuoteActivity, EmailLogEntry } from '../types';
 import ApiService from '../services/api';
-import RecipientFallback, { noRecipientMessage, sendErrorMessage } from './RecipientFallback';
+import RecipientFallback, { noRecipientMessage } from './RecipientFallback';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 interface QuoteDetailProps {
@@ -136,7 +136,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
       if (noRecipient) {
         setSendFallback(noRecipient);
       } else {
-        setError(sendErrorMessage(err, 'Failed to send quote'));
+        setError('Failed to send quote');
       }
     } finally {
       setLoading(false);

@@ -15,17 +15,20 @@ import EmailSendDialog, { EmailSendData } from './EmailSendDialog';
 
 /**
  * The server's message when a send found no contact set to receive this kind of
- * email ("No contact of X is set to receive invoice emails. …"), or null.
+ * email, or null. Recognised by the reply's code (422, code "no_recipient"),
+ * never by its text. Any other failure keeps the page's own fixed message.
  */
 export function noRecipientMessage(error: any): string | null {
-  const message = error?.response?.data?.error;
-  return typeof message === 'string' && message.startsWith('No contact of') ? message : null;
+  const data = error?.response?.data;
+  if (error?.response?.status !== 422 || data?.code !== 'no_recipient') {
+    return null;
+  }
+  return typeof data.message === 'string' && data.message ? data.message : 'No contact is set to receive this email.';
 }
 
-/** The server's own message for a failed send, or the fallback text. */
-export function sendErrorMessage(error: any, fallback: string): string {
-  const message = error?.response?.data?.error;
-  return typeof message === 'string' && message ? message : fallback;
+/** The contacts the picker offers: active contacts with an email address. Inactive ones are left out. */
+export function pickableContacts(contacts: Contact[]): Contact[] {
+  return contacts.filter(c => c.email && c.is_active !== false);
 }
 
 interface RecipientFallbackProps {
@@ -66,9 +69,9 @@ const RecipientFallback: React.FC<RecipientFallbackProps> = ({
     setLoadError('');
     try {
       const company: any = await ApiService.getCompany(companyId);
-      const withEmail = ((company?.contacts || []) as Contact[]).filter(c => c.email);
-      setContacts(withEmail);
-      setPickerOpen(true);
+      const pickable = pickableContacts((company?.contacts || []) as Contact[]);
+      setContacts(pickable);
+      setPickerOpen(pickable.length > 0);
     } catch {
       setLoadError('The contacts could not be loaded.');
     }
@@ -85,6 +88,11 @@ const RecipientFallback: React.FC<RecipientFallbackProps> = ({
             {' '}to switch the email setting on for a contact, or choose the recipients for this
             {documentType === 'invoice' ? ' invoice' : ' quote'} now.
           </Typography>
+          {contacts && contacts.length === 0 && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              This company has no active contact with an email address. Activate or add one on its contacts page.
+            </Alert>
+          )}
           {loadError && <Alert severity="error" sx={{ mt: 2 }}>{loadError}</Alert>}
         </DialogContent>
         <DialogActions>
@@ -92,8 +100,9 @@ const RecipientFallback: React.FC<RecipientFallbackProps> = ({
           <Button variant="contained" onClick={choose}>Choose recipients</Button>
         </DialogActions>
       </Dialog>
-      {pickerOpen && contacts && (
+      {pickerOpen && contacts && contacts.length > 0 && (
         <EmailSendDialog
+          standardEmail
           open={pickerOpen}
           onClose={() => { setPickerOpen(false); onClose(); }}
           documentType={documentType}

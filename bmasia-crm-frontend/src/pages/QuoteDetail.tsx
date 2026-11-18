@@ -24,7 +24,7 @@ import {
 } from '@mui/icons-material';
 import { Quote } from '../types';
 import ApiService from '../services/api';
-import RecipientFallback, { noRecipientMessage, sendErrorMessage } from '../components/RecipientFallback';
+import RecipientFallback, { noRecipientMessage } from '../components/RecipientFallback';
 import { QuoteDetail as QuoteDetailComponent } from '../components';
 import { PageHeader } from '../components/ui';
 import { statusTone } from '../theme';
@@ -74,7 +74,7 @@ const QuoteDetailPage: React.FC = () => {
       if (noRecipient) {
         setSendFallback(noRecipient);
       } else {
-        setError(sendErrorMessage(err, 'Failed to send quote'));
+        setError('Failed to send quote');
       }
     } finally {
       setLoading(false);

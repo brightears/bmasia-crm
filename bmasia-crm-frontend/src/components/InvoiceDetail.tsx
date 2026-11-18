@@ -42,7 +42,7 @@ import {
 } from '@mui/icons-material';
 import { Invoice, EmailLogEntry, Contact } from '../types';
 import ApiService, { MarkInvoicePaidResult } from '../services/api';
-import RecipientFallback, { noRecipientMessage, sendErrorMessage } from './RecipientFallback';
+import RecipientFallback, { noRecipientMessage } from './RecipientFallback';
 import EmailSendDialog, { EmailSendData } from './EmailSendDialog';
 import MarkPaidDialog, { describeMarkPaidResult } from './MarkPaidDialog';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
@@ -110,7 +110,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
       if (noRecipient) {
         setSendFallback(noRecipient);
       } else {
-        setError(sendErrorMessage(err, 'Failed to send invoice'));
+        setError('Failed to send invoice');
       }
     } finally {
       setLoading(false);
