@@ -58,6 +58,7 @@ import ProspectSequences from './pages/ProspectSequences';
 import AIEmailDrafts from './pages/AIEmailDrafts';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 import NotFoundPage from './pages/NotFound';
+import ReviewQueue from './pages/review/ReviewQueue';
 
 // Temporary placeholder components for new routes
 const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => (
@@ -307,6 +308,7 @@ function App() {
         {/* New navigation routes */}
         <Route path="/today" element={<ActionCenter />} />
         <Route path="/needs-fixing/:key?" element={<NeedsFixing />} />
+        <Route path="/review" element={<ReviewQueue />} />
         <Route path="/quick-actions" element={<Navigate to="/today" replace />} />
         <Route
           path="/contacts"

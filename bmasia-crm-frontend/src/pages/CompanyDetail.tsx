@@ -48,6 +48,7 @@ import ContactForm from '../components/ContactForm';
 import ContactDetail from '../components/ContactDetail';
 import OpportunityForm from '../components/OpportunityForm';
 import CompanyCareCard from '../components/CompanyCareCard';
+import CompanyReviewLink from './review/CompanyReviewLink';
 import { PageHeader, SectionCard, EmptyState, DetailField, ProductChip } from '../components/ui';
 import { statusTone, humanize, formatDate, formatMoney, initialsOf, totalsByCurrency, visuallyHidden } from '../theme';
 import { currencyForEntity } from '../constants/entities';
@@ -339,6 +340,7 @@ const CompanyDetail: React.FC = () => {
             {location && (
               <Chip label={location} variant="outlined" size="small" icon={<Public />} />
             )}
+            <CompanyReviewLink companyId={company.id} />
           </>
         }
         actions={
