@@ -1,33 +1,41 @@
 import React, { useState } from 'react';
 import { Box, Link, Tooltip } from '@mui/material';
-import { segmentText } from './reviewModel';
+import { segmentText } from './textSafety';
 
 interface PlainTextProps {
   value: string;
   /** Characters shown before "Show all" appears. */
   clampAt?: number;
-  /** Keep line breaks (notes, quotes, descriptions). */
+  /** Kept for callers; line breaks and runs of spaces are always shown as stored. */
   multiline?: boolean;
+  /** A stored value: spaces at its start and end show as "\u2423". */
+  edges?: boolean;
   sx?: object;
-  component?: React.ElementType;
 }
+
+const MARKER_HELP: Record<string, string> = {
+  invisible: 'Invisible or direction-changing character. It would be saved as part of the value.',
+  space: 'Not an ordinary space (for example a non-breaking space). It would be saved as part of the value.',
+  edge: 'A space at the start or end of the value. It would be saved as part of the value.',
+};
 
 /**
  * Text from a proposal, shown exactly as stored and only as text: never HTML, markdown or an
- * automatic link. Invisible and direction-changing characters are shown as small "U+202E" markers
- * so a value cannot display differently from what would be saved. Long values wrap and can be expanded.
+ * automatic link. It sits in its own direction-isolated element, so it cannot reorder what is
+ * around it. Line breaks and runs of spaces are kept; invisible characters and unusual spaces
+ * show as small markers. Long values wrap and can be expanded.
  */
-const PlainText: React.FC<PlainTextProps> = ({ value, clampAt = 400, multiline = false, sx, component = 'span' }) => {
+const PlainText: React.FC<PlainTextProps> = ({ value, clampAt = 400, edges = false, sx }) => {
   const [expanded, setExpanded] = useState(false);
   const long = value.length > clampAt;
   const shown = long && !expanded ? value.slice(0, clampAt) : value;
-  const segments = segmentText(shown);
+  const segments = segmentText(shown, edges);
 
   return (
     <Box
-      component={component}
+      component="bdi"
       sx={{
-        whiteSpace: multiline ? 'pre-wrap' : 'normal',
+        whiteSpace: 'pre-wrap',
         overflowWrap: 'anywhere',
         wordBreak: 'break-word',
         unicodeBidi: 'isolate',
@@ -35,11 +43,11 @@ const PlainText: React.FC<PlainTextProps> = ({ value, clampAt = 400, multiline =
       }}
     >
       {segments.map((seg, i) =>
-        seg.hidden ? (
-          <Tooltip key={i} title="Invisible or direction-changing character. It would be saved as part of the value.">
+        seg.marker ? (
+          <Tooltip key={i} title={MARKER_HELP[seg.kind || 'invisible']}>
             <Box
               component="span"
-              data-hidden-char={seg.hidden}
+              data-hidden-char={seg.marker}
               sx={{
                 mx: '1px',
                 px: '3px',
@@ -47,12 +55,12 @@ const PlainText: React.FC<PlainTextProps> = ({ value, clampAt = 400, multiline =
                 fontSize: '0.7em',
                 fontFamily: 'monospace',
                 verticalAlign: 'middle',
-                bgcolor: 'warning.main',
-                color: 'warning.contrastText',
+                bgcolor: seg.kind === 'invisible' ? 'warning.main' : 'action.selected',
+                color: seg.kind === 'invisible' ? 'warning.contrastText' : 'text.primary',
                 whiteSpace: 'nowrap',
               }}
             >
-              {seg.hidden}
+              {seg.marker}
             </Box>
           </Tooltip>
         ) : (
@@ -77,4 +85,4 @@ const PlainText: React.FC<PlainTextProps> = ({ value, clampAt = 400, multiline =
   );
 };
 
-export default PlainText;
+export default React.memo(PlainText);
