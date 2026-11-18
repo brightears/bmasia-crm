@@ -421,8 +421,8 @@ class BaseModelViewSet(viewsets.ModelViewSet):
             return Response({'message': f'{count} records deleted'})
         
         elif action_type == 'update_status':
-            count = queryset.update(**data)
-            return Response({'message': f'{count} records updated'})
+            from crm_app.services.bulk_updates import bulk_update_status
+            return bulk_update_status(self, queryset, ids, data)
         
         elif action_type == 'assign':
             if 'assigned_to' in data:
@@ -6329,80 +6329,82 @@ class InvoiceViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=['post'])
     def mark_paid(self, request, pk=None):
-        """Mark invoice as paid and auto-generate receipt/tax invoice"""
+        """Mark the invoice paid once and number its receipt (crm_app/services/invoice_payments.py).
+
+        Body (all optional): paid_date (bank date, YYYY-MM-DD, default today), send_receipt
+        (true to email the receipt to the customer; default false), payment_method,
+        transaction_id, notes (audit log only).
+        - An invoice already Paid with a receipt gets 409 with that receipt number; nothing
+          is renumbered or sent again.
+        - An invoice already Paid without a receipt (set Paid by another route) gets its
+          receipt number and keeps its status and its own paid date.
+        """
         from crm_app.services.email_service import EmailService
+        from crm_app.services.invoice_payments import (
+            InvoiceNotPayable, MarkPaidRequestSerializer, earliest_payment_date,
+            mark_invoice_paid, receipt_email_failure_text,
+        )
 
         invoice = self.get_object()
-        old_status = invoice.status
-        invoice.status = 'Paid'
-        invoice.paid_date = timezone.now().date()
+        body = MarkPaidRequestSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        data = body.validated_data
+        if data.get('paid_date') and data['paid_date'] < earliest_payment_date(invoice):
+            return Response({'paid_date': [
+                f'The payment date cannot be before {earliest_payment_date(invoice).isoformat()} '
+                '(more than a year before the invoice was issued, or before 2000).'
+            ]}, status=status.HTTP_400_BAD_REQUEST)
+        paid_date = data.get('paid_date') or timezone.localdate()
 
-        # Auto-generate receipt number
-        entity = effective_billing_entity(invoice)
-        prefix = 'REC-TH' if 'Thailand' in entity else 'REC-HK'
-        year = timezone.now().year
-        pattern = f'{prefix}-{year}-'
-        last = Invoice.objects.filter(
-            receipt_number__startswith=pattern
-        ).order_by('-receipt_number').first()
-        if last:
-            try:
-                last_seq = int(last.receipt_number.split('-')[-1])
-                next_seq = last_seq + 1
-            except (ValueError, IndexError):
-                next_seq = 1
-        else:
-            next_seq = 1
-        invoice.receipt_number = f'{pattern}{str(next_seq).zfill(4)}'
-        invoice.save()
+        try:
+            invoice, old_status, receipt_only = mark_invoice_paid(
+                invoice.pk, paid_date=paid_date,
+                payment_method=data.get('payment_method', ''),
+                transaction_id=data.get('transaction_id', ''),
+            )
+        except InvoiceNotPayable as refusal:
+            return Response({
+                'error': refusal.message,
+                'code': refusal.code,
+                'status': refusal.invoice.status,
+                'receipt_number': refusal.invoice.receipt_number,
+                'paid_date': refusal.invoice.paid_date.isoformat() if refusal.invoice.paid_date else None,
+            }, status=status.HTTP_409_CONFLICT)
+        except ValueError as exc:  # no usable billing entity on the invoice or its company
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        self.log_action('UPDATE', invoice, {
+        changes = {
             'status': {'old': old_status, 'new': 'Paid'},
             'receipt_number': invoice.receipt_number,
-        })
+            'paid_date': invoice.paid_date.isoformat(),
+            'send_receipt': data['send_receipt'],
+        }
+        if receipt_only:
+            changes['action'] = 'Receipt issued for an invoice already marked paid'
+        if data.get('notes'):
+            changes['payment_notes'] = data['notes']
+        self.log_action('UPDATE', invoice, changes)
 
-        # Auto-send receipt email (best-effort — don't fail mark_paid if email fails)
-        receipt_email_status = 'not_sent'
-        try:
-            email_service = EmailService()
-            success, message = email_service.send_receipt_email(
-                invoice_id=invoice.id,
-                request=request
-            )
-            receipt_email_status = 'sent' if success else f'failed: {message}'
-        except Exception as e:
-            logger.warning(f"Receipt email failed for {invoice.invoice_number}: {e}")
-            receipt_email_status = f'failed: {str(e)}'
+        receipt_email_status = 'not_requested'
+        if data['send_receipt']:
+            try:
+                success, message = EmailService().send_receipt_email(invoice_id=invoice.id, request=request)
+            except Exception as exc:
+                success, message = False, exc
+            receipt_email_status = 'sent' if success else (
+                f'failed: {receipt_email_failure_text(request, invoice, message)}')
 
         return Response({
-            'message': 'Invoice marked as paid',
+            'message': ('Receipt issued for an invoice already marked paid' if receipt_only
+                        else 'Invoice marked as paid'),
             'receipt_number': invoice.receipt_number,
+            'paid_date': invoice.paid_date.isoformat(),
+            'receipt_only': receipt_only,
             'receipt_email_status': receipt_email_status,
         })
 
-    @action(detail=False, methods=['get'], url_path='next-receipt-number')
-    def next_receipt_number(self, request):
-        """Generate next sequential receipt number based on billing entity.
-        Format: REC-TH-2026-0001 (Thailand) or REC-HK-2026-0001 (HK/International)
-        """
-        from datetime import datetime
-        entity = request.query_params.get('entity', '')
-        prefix = 'REC-TH' if 'Thailand' in entity else 'REC-HK'
-        year = datetime.now().year
-        pattern = f'{prefix}-{year}-'
-        last = Invoice.objects.filter(
-            receipt_number__startswith=pattern
-        ).order_by('-receipt_number').first()
-        if last:
-            try:
-                last_seq = int(last.receipt_number.split('-')[-1])
-                next_seq = last_seq + 1
-            except (ValueError, IndexError):
-                next_seq = 1
-        else:
-            next_seq = 1
-        receipt_number = f'{pattern}{str(next_seq).zfill(4)}'
-        return Response({'receipt_number': receipt_number})
+    # GET next-receipt-number was removed: nothing called it, and a number handed out without
+    # the numbering lock could be issued twice. mark_paid numbers receipts.
 
     @action(detail=True, methods=['post'], url_path='send-receipt')
     def send_receipt(self, request, pk=None):
@@ -7362,26 +7364,21 @@ class QuoteViewSet(BaseModelViewSet):
 
     @action(detail=True, methods=['post'])
     def add_attachment(self, request, pk=None):
-        """Add attachment to quote"""
-        quote = self.get_object()
-        file = request.FILES.get('file')
+        """Refused for now: uploaded files would sit on the web container's temporary disk.
 
-        if not file:
-            return Response(
-                {'error': 'No file provided'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        attachment = QuoteAttachment.objects.create(
-            quote=quote,
-            name=file.name,
-            file=file,
-            size=file.size,
-            uploaded_by=request.user if request.user.is_authenticated else None
+        No MEDIA_ROOT or storage backend is configured and the service has no persistent
+        disk, so a stored file disappears on the next deploy or restart. Re-enable this
+        once uploads go to persistent storage.
+        """
+        self.get_object()  # 404 for an unknown quote, as before
+        return Response(
+            {
+                'error': 'Quote attachments are not available yet: the server cannot keep '
+                         'uploaded files. Send the file to the customer by email instead.',
+                'code': 'attachments_unavailable',
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
-
-        serializer = QuoteAttachmentSerializer(attachment)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'])
     def pdf(self, request, pk=None):
