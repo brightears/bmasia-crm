@@ -725,6 +725,7 @@ def _flowables(source, width, styles, *, cell=False, execution=True):
                     else:
                         yield value
             children = list(flatten(children))
+            _mark_signing_lead(children)
             # Legal schedules without vertical spans may flow across pages.
             # A short zones table can have more than eight rows but span its
             # Property/Service cells down every row, making it indivisible.
@@ -943,6 +944,14 @@ def _keep_commencement_with_duration(items, width):
 # Points. A section that moves goes to a continuation page, so a section that
 # fits this frame fits the page it moves to.
 _PAGE_FRAME_HEIGHT = PAGE_HEIGHT - CONTINUATION_PAGE_TOP - PAGE_BOTTOM
+# Points. The most text that travels with the signatures: the bound PR 53 and
+# the short service-package lists use. The standard Contacts clause with a
+# status line measures about 140 pt, so it always fits; longer wording only
+# keeps its last lines that fit.
+_EXECUTION_LEAD_MAX_HEIGHT = 200
+# Paragraphs or gaps searched before a signing table. The standard Contacts
+# block with a status line uses 8; the height cap is the real limit.
+_EXECUTION_LOOKBACK = 12
 _CONTACTS_CLAUSE = re.compile(r'\d+\.\s*Contacts:')
 
 
@@ -950,23 +959,63 @@ def _stack_height(items, width):
     return sum(p.wrap(width, 10000)[1] + p.getSpaceBefore() + p.getSpaceAfter() for p in items)
 
 
-def _execution_intro(items, position, *, signatures_heading):
-    """Index of the line that opens the execution section at items[position].
+def _is_signing_table(item):
+    return (getattr(item, '_bmasia_signature_pairs', False) or
+            getattr(item, '_bmasia_execution_table', False))
 
-    The same short closing context the one-pair rule in _flowables uses: a
-    numbered Contacts clause or an "IN WITNESS WHEREOF" line, at most eight
-    paragraphs or gaps back. The master and participation formats open their
-    section with a SIGNATURES heading instead. None when there is no such line.
+
+def _mark_signing_lead(children):
+    """Mark the line a template places right before its signature token.
+
+    A template's signature token arrives in one kept group with the text
+    before it (views.py, render_segment). The last paragraph of that text is
+    the section's opening line, whatever it says and in whatever script.
     """
-    for start in range(position - 1, max(-1, position - 9), -1):
-        previous = items[start]
-        if not isinstance(previous, (Paragraph, Spacer)):
-            return None
-        text = previous.getPlainText().strip() if isinstance(previous, Paragraph) else ''
-        if (_CONTACTS_CLAUSE.fullmatch(text) or text.casefold().startswith('in witness whereof')
-                or (signatures_heading and text == 'SIGNATURES')):
-            return start
-    return None
+    for index, item in enumerate(children):
+        if not _is_signing_table(item):
+            continue
+        position = index - 1
+        while position >= 0 and isinstance(children[position], Spacer):
+            position -= 1
+        if position >= 0 and isinstance(children[position], Paragraph):
+            children[position]._bmasia_signing_lead = True
+
+
+def _execution_lead(items, position, width):
+    """The opening line of the execution section at items[position], with what follows it.
+
+    The opening line is found first by structure: the paragraph a template
+    placed right before its signature token (_mark_signing_lead), or a line
+    that keeps with the next one (a heading such as SIGNATURES, a status
+    line). Text extends it back to a numbered "Contacts:" clause or an
+    "IN WITNESS WHEREOF" line when one is near; for the standard builder and
+    the corporate combined format that is the only route. Of a long lead only
+    the last lines that fit _EXECUTION_LEAD_MAX_HEIGHT travel. [] when none.
+    """
+    start = position
+    while (start > 0 and position - start < _EXECUTION_LOOKBACK and
+           isinstance(items[start - 1], (Paragraph, Spacer))):
+        start -= 1
+    run = items[start:position]
+    paragraphs = [index for index, item in enumerate(run) if isinstance(item, Paragraph)]
+    if not paragraphs:
+        return []
+
+    def opens(paragraph):
+        text = paragraph.getPlainText().strip()
+        return bool(_CONTACTS_CLAUSE.fullmatch(text)) or text.casefold().startswith('in witness whereof')
+
+    opening = next((index for index in reversed(paragraphs) if opens(run[index])), None)
+    last = run[paragraphs[-1]]
+    if opening is None and (getattr(last, '_bmasia_signing_lead', False) or last.getKeepWithNext()):
+        opening = paragraphs[-1]
+    if opening is None:
+        return []
+    lead = run[opening:]
+    while lead and (not isinstance(lead[0], Paragraph) or
+                    _stack_height(lead, width) > _EXECUTION_LEAD_MAX_HEIGHT):
+        lead = lead[1:]
+    return lead
 
 
 def _keep_execution_section(items, width):
@@ -974,13 +1023,18 @@ def _keep_execution_section(items, width):
 
     17 Nov 2026: with a primary customer signer and two witnesses (three
     signer pairs), the supplier and the primary signer ended one page and
-    the witnesses began the next; a SIGNATURES heading could also end a page
-    without its signature table. The section is its opening line (see
-    _execution_intro) and every signer row of both parties. When it fits on
-    a page it moves to the next page as one unit. When it is taller than a
-    page it splits only between signer rows, each row whole, and the opening
-    line stays with the first row. One-pair sections keep the rule in
-    _flowables. Only page flow changes; no text is added, removed or moved.
+    the witnesses began the next; an opening line could also end a page
+    without its signatures. The section is its opening line
+    (_execution_lead) and every signer row of both parties:
+
+    1. Opening line and table fit on a page: they move as one unit.
+    2. Otherwise, the table fits on a page: the table stays whole and the
+       opening line stays on the page before. Signer rows come first.
+    3. Otherwise: the opening line keeps the first signer row and the other
+       rows follow, splitting only between whole rows.
+
+    One-pair sections keep the rule in _flowables. Only page flow changes;
+    no text is added, removed or moved.
     """
     output = []
     for item in items:
@@ -989,27 +1043,30 @@ def _keep_execution_section(items, width):
         if not (pairs or generic):
             output.append(item)
             continue
-        start = _execution_intro(output, len(output), signatures_heading=generic)
-        lead = output[start:] if start is not None else []
-        if not lead and not (pairs and item.splitByRow):
-            # An unsplittable table without an opening line already moves whole.
-            output.append(item)
-            continue
-        section = lead + [item]
-        if _stack_height(section, width) <= _PAGE_FRAME_HEIGHT:
+        lead = _execution_lead(output, len(output), width)
+        if lead:
             del output[len(output) - len(lead):]
-            output.append(KeepTogether(section))
+        table_height = _stack_height([item], width)
+        if lead and _stack_height(lead, width) + table_height <= _PAGE_FRAME_HEIGHT:
+            output.append(KeepTogether(lead + [item]))
+            continue
+        if table_height <= _PAGE_FRAME_HEIGHT:
+            # The table starts a page; the opening line flows before it. Its
+            # first line keeps the next one, so a clause heading never ends
+            # a page alone.
+            if len(lead) > 1 and isinstance(lead[1], Paragraph):
+                lead[0].keepWithNext = True
+            output.extend(lead)
+            output.append(KeepTogether([item]) if pairs and item.splitByRow else item)
             continue
         if pairs:
-            # Taller than a page: the opening line keeps the first signer row
-            # and the remaining rows flow, splitting only between rows.
             rows, row_width = item._cellvalues, item._argW[0]
             first = lead + [_signature_rows(rows[:1], row_width, splittable=False)]
             if _stack_height(first, width) <= _PAGE_FRAME_HEIGHT:
-                del output[len(output) - len(lead):]
                 output.append(KeepTogether(first))
                 output.append(_signature_rows(rows[1:], row_width, splittable=True))
                 continue
+        output.extend(lead)
         output.append(item)
     return output
 
@@ -1019,18 +1076,18 @@ def _keep_execution_intro_with_table(children, width):
 
     The opt-in witness layout arrives in one kept group with the template
     text before it. The group stays whole when it fits on a page; when it is
-    taller, ReportLab flows its content and the "IN WITNESS WHEREOF" line
-    could end a page while the table starts the next. keepWithNext on the
-    opening line and the gaps after it brings them to the table's page.
-    Nothing moves when the group fits, because it then stays whole anyway.
+    taller, ReportLab flows its content and the opening line could end a page
+    while the table starts the next. keepWithNext on the opening line and the
+    gaps after it brings them to the table's page. Nothing moves when the
+    group fits, because it then stays whole anyway.
     """
     for index, item in enumerate(children):
         if not getattr(item, '_bmasia_execution_table', False):
             continue
-        start = _execution_intro(children, index, signatures_heading=True)
-        if start is not None and _stack_height(children[start:index + 1], width) <= _PAGE_FRAME_HEIGHT:
-            for lead in children[start:index]:
-                lead.keepWithNext = True
+        lead = _execution_lead(children, index, width)
+        if lead and _stack_height(lead + [item], width) <= _PAGE_FRAME_HEIGHT:
+            for value in lead:
+                value.keepWithNext = True
     return children
 
 
