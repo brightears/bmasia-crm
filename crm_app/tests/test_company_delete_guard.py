@@ -12,6 +12,7 @@ from unittest import mock
 import pytest
 from django.db import connection
 from django.db.models import ProtectedError
+from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -20,7 +21,9 @@ from crm_app.models import (
     AuditLog, CareTouch, Company, Contact, Contract, ContractLineItem, Invoice, InvoiceLineItem, Note,
     Opportunity, Quote, QuoteLineItem, Task, User,
 )
-from crm_app.services.delete_guards import cascading_relation_keys, reference_counts, referencing_relations
+from crm_app.services.delete_guards import (
+    cascading_relation_keys, protecting_relation_keys, reference_counts, referencing_relations,
+)
 
 # Every relation whose rows a company delete would delete with it, as of this change. The guard
 # finds and counts relations by itself; this list only makes a new one visible in review.
@@ -32,6 +35,8 @@ KNOWN_COMPANY_CASCADES = [
     'crm_app.Opportunity.company', 'crm_app.Quote.company', 'crm_app.SequenceEnrollment.company',
     'crm_app.Task.company', 'crm_app.Ticket.company', 'crm_app.Zone.company',
 ]
+# Relations that block a company delete at the database (the agent inbox keeps its log).
+KNOWN_COMPANY_PROTECTS = ['agent_inbox.Activity.company', 'agent_inbox.ChangeProposal.company']
 
 
 @pytest.fixture
@@ -138,9 +143,29 @@ def test_the_company_guard_queries_every_table_that_points_at_companies():
         assert table in sql, f'{rel} is not counted'
 
 
-def test_known_cascading_relations_are_listed_for_review():
-    """Fails when a new table cascades from Company: check its wording in the refusal, then add it here."""
+def test_known_cascading_and_protecting_relations_are_listed_for_review():
+    """Fails when a new table cascades from or protects Company: check the refusal, then add it here."""
     assert cascading_relation_keys(Company) == KNOWN_COMPANY_CASCADES
+    assert protecting_relation_keys(Company) == KNOWN_COMPANY_PROTECTS
+
+
+@override_settings(AGENT_ACTIVITY_WRITES_ENABLED=True, CHANGE_PROPOSALS_ENABLED=True)
+def test_the_agent_inbox_log_is_counted_in_the_refusal(api):
+    from agent_inbox.activities import record_activity
+    from agent_inbox.proposals import create_proposal
+    from agent_inbox.tests.conftest import activity_body, make_user
+
+    agent = make_user('theo', role='Admin')
+    company = _company()
+    record_activity(agent, activity_body(company), via='rest')
+    create_proposal(agent, {'kind': 'note', 'target_collection': 'company', 'target_id': str(company.pk),
+                            'patch': {'notes': 'x'}, 'evidence_quote': 'x'}, via='rest')
+
+    response = api.delete(f'/api/v1/companies/{company.pk}/')
+
+    assert response.status_code == 409
+    assert response.data['references'] == {'activities': 1, 'change proposals': 1}
+    assert Company.objects.filter(pk=company.pk).exists()
 
 
 # --- contracts, quotes, invoices ----------------------------------------------------------

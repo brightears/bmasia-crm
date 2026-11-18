@@ -96,6 +96,13 @@ def _reference_rows(instance):
     return [(plural, singular, n) for plural, (singular, n) in sorted(rows.items())]
 
 
+def protecting_relation_keys(model):
+    """The relations that block a delete of ``model`` at the database (PROTECT, RESTRICT)."""
+    from django.db.models import PROTECT, RESTRICT
+    return sorted(relation_key(rel) for rel in referencing_relations(model)
+                  if getattr(rel, 'on_delete', None) in (PROTECT, RESTRICT))
+
+
 def reference_counts(instance):
     """{kind: count} of rows pointing at ``instance``, its own parts left out."""
     return {plural: n for plural, _singular, n in _reference_rows(instance)}
