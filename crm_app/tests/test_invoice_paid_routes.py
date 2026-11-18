@@ -160,6 +160,24 @@ def test_mcp_update_record_cannot_set_paid(company):
     invoice.refresh_from_db()
     assert invoice.status == 'Sent'
     assert 'Mark as paid' in out
+    # what an agent can do instead
+    assert 'Payments are recorded by a person in the CRM' in out
+    assert 'tell the person which invoice was paid and the payment date' in out
+
+
+def test_agent_documentation_names_the_real_invoice_statuses():
+    from crm_app import mcp
+    from crm_app.models import Invoice as InvoiceModel
+
+    instructions = mcp.mcp_server.instructions if hasattr(mcp, 'mcp_server') else ''
+    text = ' '.join([instructions or '', mcp.update_record.__doc__ or ''])
+    assert 'Void' not in text
+    assert 'invoice Paid/' not in text
+    assert 'Paid' not in mcp._GUARDED_TERMINAL_STATUSES['invoice']
+    statuses = {value for value, _label in InvoiceModel.INVOICE_STATUS_CHOICES}
+    assert statuses == {'Draft', 'Sent', 'Paid', 'Overdue', 'Cancelled', 'Refunded'}
+    source = open(mcp.__file__).read()
+    assert 'Void' not in source
 
 
 def test_mcp_update_record_cannot_write_a_receipt_number(company):

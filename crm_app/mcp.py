@@ -112,7 +112,9 @@ to recover the raw PDF. On failure returns `{"error": "..."}`.
   terms in notes (internal only). Preserve approved legal text and request a
   clarification for missing issuer, pricing, tax or contractual authority.
 - **Contract status**: Draft → Sent → Active → Renewed/Expired/Cancelled
-- **Invoice status**: Draft → Sent → Paid/Overdue/Void
+- **Invoice status**: Draft → Sent → Overdue, Cancelled or Refunded. Paid is set only by a
+  person in the CRM (Invoices → Mark as paid), which records the payment date and issues the
+  receipt; agents cannot set it. Tell the person which invoice was paid and the payment date.
 - **Quote status**: Draft → Sent → Accepted/Rejected/Expired
 - **Service locations** on contracts are separate from line items — they control
   what appears in the PDF "Locations for Provision of Services" table.
@@ -348,7 +350,7 @@ class InvoiceQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     ]
     search_fields = ['invoice_number', 'notes']
     extra_instructions = (
-        "Status: Draft, Sent, Paid, Overdue, Void, Cancelled. issue_date is the invoice date. "
+        "Status: Draft, Sent, Paid, Overdue, Cancelled, Refunded. issue_date is the invoice date. "
         "There is no stored PDF link: generate_invoice_pdf(id) returns the PDF as base64, and "
         "get_commercial_document_context('invoice', id) returns the full record with no side effects."
     )
@@ -646,7 +648,7 @@ _GUARDED_DOCUMENT_NUMBER_FIELDS = frozenset({'contract_number', 'quote_number', 
 _GUARDED_TERMINAL_STATUSES = {
     'contract': frozenset({'Renewed', 'Expired', 'Cancelled'}),
     'quote': frozenset({'Accepted', 'Rejected', 'Expired'}),
-    'invoice': frozenset({'Paid', 'Cancelled', 'Refunded'}),
+    'invoice': frozenset({'Cancelled', 'Refunded'}),  # Paid: only Mark as paid in the CRM
 }
 # Price and issuer fields of a contract the customer has already received.
 _GUARDED_CONTRACT_PRICING_FIELDS = frozenset({
@@ -1275,7 +1277,7 @@ def update_record(
               - kind=explicit_user_instruction (requested_by norbert, nikki,
                 lyra or theo; source_reference) for a final status (contract
                 Renewed/Expired/Cancelled, quote Accepted/Rejected/Expired,
-                invoice Paid/Cancelled/Refunded) and for price or issuer fields
+                invoice Cancelled/Refunded; Paid cannot be set) and for price or issuer fields
                 on a Sent or Active contract. It also satisfies opportunity
                 value/probability and Won/Lost, which otherwise use
                 kind=explicit_user_commercial with source_thread_id.
