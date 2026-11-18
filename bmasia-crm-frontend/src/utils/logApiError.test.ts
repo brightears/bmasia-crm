@@ -38,8 +38,13 @@ test('a network error without a response and a plain error are described too', (
     .toBe('500 POST /api/v1/companies/c-1/');
 });
 
-// Files left for later because another open change edits them (see the PR text).
-const NOT_YET = new Set(['components/OpportunityForm.tsx']);
+// Files the company-timeline change (PR 60) edits or deletes; done after it merges.
+const NOT_YET = new Set([
+  'components/OpportunityForm.tsx',
+  'components/ContractDetail.tsx',
+  'components/ActivityTimeline.tsx',
+  'pages/ActivityDemo.tsx',
+]);
 
 const sourceFiles = (dir: string): string[] =>
   fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {

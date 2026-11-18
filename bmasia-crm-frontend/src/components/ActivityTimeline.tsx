@@ -47,7 +47,6 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { OpportunityActivity } from '../types';
 import ApiService from '../services/api';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
-import { logApiError } from '../utils/logApiError';
 
 interface ActivityTimelineProps {
   opportunityId?: string;
@@ -131,7 +130,7 @@ const ActivityTimeline: React.FC<ActivityTimelineProps> = ({
       setActivities(result);
     } catch (err: any) {
       setError('Failed to load activities');
-      logApiError('Load activities error:', err);
+      console.error('Load activities error:', err);
     } finally {
       setLoading(false);
     }
@@ -151,7 +150,7 @@ const ActivityTimeline: React.FC<ActivityTimelineProps> = ({
         }
       } catch (err) {
         setError('Failed to delete activity');
-        logApiError('Delete activity error:', err);
+        console.error('Delete activity error:', err);
       }
     }
   };
