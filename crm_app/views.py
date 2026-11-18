@@ -2254,6 +2254,7 @@ class ContractViewSet(BaseModelViewSet):
                 rate = float(contract.value) / zone_count
                 replacements['{{rate_per_zone}}'] = f"{contract.currency} {rate:,.2f}"
 
+        rendered = {}
         for var, value in replacements.items():
             replacement = str(value)
             if escape_for_paragraph:
@@ -2262,7 +2263,10 @@ class ContractViewSet(BaseModelViewSet):
                 # so legal names such as "T&T" render literally without allowing
                 # customer data to be parsed as paragraph markup.
                 replacement = paragraph_text(replacement)
-            content = content.replace(var, replacement)
+            rendered[var] = replacement
+        # One pass: a value that itself contains "{{variable}}" text prints as
+        # written instead of being filled in again.
+        content = re.sub('|'.join(map(re.escape, rendered)), lambda match: rendered[match.group(0)], content)
 
         # Existing Hilton template text places the numeric variable before a
         # literal plural noun. Correct the one-zone grammar without changing
