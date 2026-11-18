@@ -29,8 +29,8 @@ from decimal import Decimal
 from crm_app.services.document_context import customer_legal_entity_name, effective_billing_entity
 from crm_app.services.document_entity_filters import filter_document_entity
 from crm_app.contract_pdf_v2 import (
-    clause_addition_markup, optional_clause_paragraph, paragraph_markup, paragraph_text,
-    split_clause_placements,
+    clause_addition_markup, optional_clause_paragraph, paragraph_text,
+    split_clause_placements, stored_markup,
 )
 
 logger = logging.getLogger(__name__)
@@ -3359,7 +3359,8 @@ class ContractViewSet(BaseModelViewSet):
             if contract.preamble_custom:
                 # Stored wording is markup by design here (it replaces the
                 # default preamble, including its <b> and <br/>).
-                preamble_text = paragraph_markup(contract.preamble_custom)
+                preamble_text = stored_markup(
+                    contract.preamble_custom, field='Contract.preamble_custom', record=contract.pk)
             else:
                 # FIX 2026-05-05 (Lyra): product-aware Whereas clause.
                 # SYB contracts → "BMA is a certified legal reseller of Soundtrack Your Brand (SYB)..."
@@ -3427,7 +3428,7 @@ and<br/><br/>
             # Clause 3: Commencement Date
             elements.append(Paragraph(
                 f"<b>{clause_num}.</b> Commencement Date: {contract.start_date.strftime('%d %B %Y') if contract.start_date else '[Date]'}"
-                f"{clause_addition_markup(placed_terms, 'commencement')}",
+                f"{clause_addition_markup(placed_terms, 'commencement', record=contract.pk)}",
                 clause_style
             ))
             clause_num += 1
@@ -3437,13 +3438,13 @@ and<br/><br/>
                 duration_text = _format_duration(contract.start_date, contract.end_date)
                 elements.append(Paragraph(
                     f"<b>{clause_num}.</b> Duration: {duration_text} from {contract.start_date.strftime('%d %B %Y')} to {contract.end_date.strftime('%d %B %Y')}"
-                    f"{clause_addition_markup(placed_terms, 'duration')}",
+                    f"{clause_addition_markup(placed_terms, 'duration', record=contract.pk)}",
                     clause_style
                 ))
             else:
                 elements.append(Paragraph(
                     f"<b>{clause_num}.</b> Duration: As specified in schedule"
-                    f"{clause_addition_markup(placed_terms, 'duration')}",
+                    f"{clause_addition_markup(placed_terms, 'duration', record=contract.pk)}",
                     clause_style
                 ))
             clause_num += 1
@@ -3589,16 +3590,19 @@ and<br/><br/>
             # Clause 7: Terms of Payment. Stored payment wording and template
             # content are markup by design; their variables are escaped below.
             if contract.payment_custom:
-                payment_text = paragraph_markup(contract.payment_custom)
+                payment_text = stored_markup(
+                    contract.payment_custom, field='Contract.payment_custom', record=contract.pk)
             elif contract.payment_template:
-                payment_text = paragraph_markup(contract.payment_template.content)
+                payment_text = stored_markup(
+                    contract.payment_template.content, field='ContractTemplate.content',
+                    record=contract.payment_template.pk)
             else:
                 payment_text = payment_terms_default
 
             payment_text = self._substitute_template_variables(payment_text, contract)
             elements.append(Paragraph(
                 f"<b>{clause_num}.</b> Terms of payment: {payment_text}"
-                f"{clause_addition_markup(placed_terms, 'payment')}",
+                f"{clause_addition_markup(placed_terms, 'payment', record=contract.pk)}",
                 clause_style
             ))
             payment_schedule = optional_clause_paragraph(
@@ -3684,16 +3688,19 @@ and<br/><br/>
 
             # Clause 8: Activation Date
             if contract.activation_custom:
-                activation_text = paragraph_markup(contract.activation_custom)
+                activation_text = stored_markup(
+                    contract.activation_custom, field='Contract.activation_custom', record=contract.pk)
             elif contract.activation_template:
-                activation_text = paragraph_markup(contract.activation_template.content)
+                activation_text = stored_markup(
+                    contract.activation_template.content, field='ContractTemplate.content',
+                    record=contract.activation_template.pk)
             else:
                 activation_text = "Music service will be activated within 3 business days of receipt of payment and completion of account setup."
 
             activation_text = self._substitute_template_variables(activation_text, contract)
             elements.append(Paragraph(
                 f"<b>{clause_num}.</b> Activation Date: {activation_text}"
-                f"{clause_addition_markup(placed_terms, 'activation')}",
+                f"{clause_addition_markup(placed_terms, 'activation', record=contract.pk)}",
                 clause_style
             ))
             clause_num += 1
@@ -3702,7 +3709,7 @@ and<br/><br/>
             # internal notes are never a source of contractual wording.
             additional_terms = optional_clause_paragraph(
                 'Additional terms and conditions', additional_terms_text,
-                body_style, allow_markup=True,
+                body_style, allow_markup=True, record=contract.pk,
             )
             if additional_terms is not None:
                 elements.append(additional_terms)
@@ -4118,13 +4125,13 @@ and<br/><br/>
         for clause, label in (('commencement', 'Commencement'), ('duration', 'Duration'),
                               ('payment', 'Terms of payment'), ('activation', 'Activation')):
             placed_clause = optional_clause_paragraph(
-                label, placed_terms.get(clause, ''), body_style, allow_markup=True,
+                label, placed_terms.get(clause, ''), body_style, allow_markup=True, record=contract.pk,
             )
             if placed_clause is not None:
                 elements.append(placed_clause)
         additional_terms = optional_clause_paragraph(
             'Additional terms and conditions', additional_terms_text,
-            body_style, allow_markup=True,
+            body_style, allow_markup=True, record=contract.pk,
         )
         if additional_terms is not None:
             elements.append(additional_terms)
@@ -4532,13 +4539,13 @@ and<br/><br/>
         for clause, label in (('commencement', 'Commencement'), ('duration', 'Duration'),
                               ('payment', 'Terms of payment'), ('activation', 'Activation')):
             placed_clause = optional_clause_paragraph(
-                label, placed_terms.get(clause, ''), body_style, allow_markup=True,
+                label, placed_terms.get(clause, ''), body_style, allow_markup=True, record=contract.pk,
             )
             if placed_clause is not None:
                 elements.append(placed_clause)
         additional_terms = optional_clause_paragraph(
             'Additional terms and conditions', additional_terms_text,
-            body_style, allow_markup=True,
+            body_style, allow_markup=True, record=contract.pk,
         )
         if additional_terms is not None:
             elements.append(additional_terms)
@@ -4890,11 +4897,13 @@ and<br/><br/>
 
         # Get warranty text from CorporatePdfTemplate if available
         warranty_text = None
+        warranty_record = None
         if company.parent_company:
             try:
                 pdf_template = company.parent_company.pdf_template
                 if pdf_template.warranty_text:
                     warranty_text = pdf_template.warranty_text
+                    warranty_record = getattr(pdf_template, 'pk', None)
             except:
                 pass
 
@@ -4906,7 +4915,9 @@ and<br/><br/>
             laws and regulations in the provision of Services."""
 
         # Corporate clause text is markup by design.
-        elements.append(Paragraph(paragraph_markup(warranty_text), att_body_style))
+        elements.append(Paragraph(stored_markup(
+            warranty_text, field='CorporatePdfTemplate.warranty_text', record=warranty_record,
+        ), att_body_style))
         elements.append(Spacer(1, 0.3*inch))
 
         # 8. Products & Prices (Service Breakdown)
@@ -5011,17 +5022,21 @@ and<br/><br/>
 
         # Get legal terms from CorporatePdfTemplate if available
         custom_legal_terms = None
+        legal_terms_record = None
         if company.parent_company:
             try:
                 pdf_template = company.parent_company.pdf_template
                 if pdf_template.legal_terms:
                     custom_legal_terms = pdf_template.legal_terms
+                    legal_terms_record = getattr(pdf_template, 'pk', None)
             except:
                 pass
 
         # Legal sections - use custom if provided, otherwise use defaults
         if custom_legal_terms:
-            elements.append(Paragraph(paragraph_markup(custom_legal_terms), exd_body_style))
+            elements.append(Paragraph(stored_markup(
+                custom_legal_terms, field='CorporatePdfTemplate.legal_terms', record=legal_terms_record,
+            ), exd_body_style))
         else:
             # Default Hilton-style legal terms
             legal_sections = [

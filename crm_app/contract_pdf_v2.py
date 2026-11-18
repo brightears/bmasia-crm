@@ -7,11 +7,13 @@ bypass it; full legal templates such as Hilton use this approved design.
 """
 from copy import copy
 from io import BytesIO
+import logging
 import re
 from html import unescape
 from xml.sax.saxutils import escape
 
 from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import CondPageBreak, HRFlowable, Image, KeepTogether, PageBreak, Paragraph, Spacer, Table, TableStyle
 
 from crm_app.commercial_pdf import (
@@ -131,12 +133,16 @@ def split_clause_placements(value):
     return parts[0].strip(), placed
 
 
-def clause_addition_markup(placed, clause):
-    """Markup appended inside a numbered clause, on its own line."""
+def clause_addition_markup(placed, clause, *, record=None):
+    """Markup appended inside a numbered clause, on its own line.
+
+    The placed wording comes from the contract's custom_terms (``record``).
+    """
     value = placed.get(clause, '')
     if not clean_text(value).strip():
         return ''
-    return '<br/>' + _markup(value).replace('\n', '<br/>')
+    text = stored_markup(clean_text(value), field='Contract.custom_terms', record=record)
+    return '<br/>' + text.replace('\n', '<br/>')
 
 
 def full_template_source(contract):
@@ -202,7 +208,8 @@ def tailored_template_content(contract, resolved_content=None):
             # no explicit payment wording is supplied.
             if not value and slot == '{{payment_terms}}':
                 continue
-            content = content.replace(slot, html_text(value) if getattr(contract, field, '') else _markup(value))
+            content = content.replace(slot, html_text(value) if getattr(contract, field, '') else stored_markup(
+                clean_text(value), field='ContractTemplate.content', record=getattr(selected, 'pk', None)))
     additional_terms, placed = split_clause_placements(getattr(contract, 'custom_terms', ''))
     for clause in CLAUSE_PLACEMENTS:
         slot = f'{{{{under_{clause}}}}}'
@@ -315,6 +322,34 @@ def paragraph_markup(value):
     return ''.join(parts)
 
 
+logger = logging.getLogger(__name__)
+_MARKUP_CHECK_STYLE = ParagraphStyle('stored-markup-check')
+
+
+def _markup_parses(text):
+    try:
+        Paragraph(text, _MARKUP_CHECK_STYLE)
+    except Exception:
+        return False
+    return True
+
+
+def stored_markup(value, *, field, record=None):
+    """paragraph_markup() for one stored wording field, sure to render.
+
+    Guarded formatting tags can still fail to pair up (an unclosed <b>, tags
+    closed out of order). Such a value prints as plain text instead, so a
+    malformed value can no longer stop a PDF from rendering. The warning names
+    the field and the record, never the wording.
+    """
+    text = paragraph_markup(value)
+    if _markup_parses(text):
+        return text
+    logger.warning('Contract PDF: %s on record %s has formatting tags that do not pair up; '
+                   'printed as plain text.', field, record)
+    return paragraph_text(value)
+
+
 def _markup(text):
     # A pasted clause may carry Word font/color/size tags. Keep semantic inline
     # emphasis but let the document, not pasted formatting, own typography.
@@ -323,22 +358,23 @@ def _markup(text):
     return text
 
 
-def optional_clause_markup(label, value, *, allow_markup=False):
+def optional_clause_markup(label, value, *, allow_markup=False, record=None):
     """Render supplied optional wording as part of the agreement body.
 
     These fields are not a source of new terms or approval authority. Their
     caller supplies the wording; blank fields produce no label. Keep the label
     inline so it cannot become an oversized or orphaned section heading.
+    Markup is allowed only for the contract's custom_terms (``record``).
     """
     if not clean_text(value).strip():
         return ''
-    text = (_markup(value).replace('\n', '<br/>')
+    text = (stored_markup(clean_text(value), field='Contract.custom_terms', record=record).replace('\n', '<br/>')
             if allow_markup else html_text(value))
     return f'<b>{html_text(label)}:</b> {text}'
 
 
-def optional_clause_paragraph(label, value, style, *, allow_markup=False):
-    text = optional_clause_markup(label, value, allow_markup=allow_markup)
+def optional_clause_paragraph(label, value, style, *, allow_markup=False, record=None):
+    text = optional_clause_markup(label, value, allow_markup=allow_markup, record=record)
     return Paragraph(text, style) if text else None
 
 
@@ -576,8 +612,8 @@ def _flowables(source, width, styles, *, cell=False):
                 parts.append((part, len(re.findall(r'<br\s*/?>', following, flags=re.I))))
             # Inline emphasis may span a paragraph boundary. Keep that one
             # balanced paragraph intact rather than feed malformed fragments.
-            if any(len(re.findall(r'<(?:b|i|u)>', part, re.I)) !=
-                   len(re.findall(r'</(?:b|i|u)>', part, re.I)) for part, _ in parts):
+            if any(len(re.findall(r'<(?:b|i|u|strong|em|super|sub)>', part, re.I)) !=
+                   len(re.findall(r'</(?:b|i|u|strong|em|super|sub)>', part, re.I)) for part, _ in parts):
                 parts = [(item.text, 0)]
             explicit_group = object()
             for part, break_count in parts:
