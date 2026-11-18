@@ -35,18 +35,9 @@ class ProspectEnrollmentService:
         if not opportunity.company:
             return
 
-        # Find the primary contact for this company
-        contact = Contact.objects.filter(
-            company=opportunity.company,
-            is_primary=True,
-        ).first()
-
-        if not contact:
-            # Fall back to any contact with email
-            contact = Contact.objects.filter(
-                company=opportunity.company,
-                email__isnull=False,
-            ).exclude(email='').first()
+        # The primary contact, else another contact, of those still taking automated email
+        from crm_app.services.recipients import prospect_contact
+        contact = prospect_contact(Contact.objects.filter(company=opportunity.company))
 
         if not contact or not contact.email:
             logger.info(
@@ -182,16 +173,9 @@ class ProspectEnrollmentService:
                 if already_enrolled:
                     continue
 
-                # Find primary contact
-                contact = Contact.objects.filter(
-                    company=opp.company,
-                    is_primary=True,
-                ).first()
-                if not contact:
-                    contact = Contact.objects.filter(
-                        company=opp.company,
-                        email__isnull=False,
-                    ).exclude(email='').first()
+                # The primary contact, else another contact, of those still taking automated email
+                from crm_app.services.recipients import prospect_contact
+                contact = prospect_contact(Contact.objects.filter(company=opp.company))
 
                 if not contact or not contact.email:
                     continue
@@ -234,15 +218,8 @@ class ProspectEnrollmentService:
         # Use the quote's contact if set, otherwise primary contact
         contact = quote.contact if hasattr(quote, 'contact') and quote.contact else None
         if not contact:
-            contact = Contact.objects.filter(
-                company=quote.company,
-                is_primary=True,
-            ).first()
-        if not contact:
-            contact = Contact.objects.filter(
-                company=quote.company,
-                email__isnull=False,
-            ).exclude(email='').first()
+            from crm_app.services.recipients import prospect_contact
+            contact = prospect_contact(Contact.objects.filter(company=quote.company))
 
         if not contact or not contact.email:
             return 0
