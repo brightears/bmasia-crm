@@ -26,6 +26,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 _startup_logger = logging.getLogger('bmasia_crm.settings')
 
 
+# Production is decided the way the rest of this file decides it: Render sets RENDER=true
+# in every service, cron and one-off job it runs. Local development and the tests do not.
+IS_PRODUCTION = bool(os.environ.get('RENDER'))
+
+
 def _warn_if_builtin_default(name, value, builtin_default):
     """Log one warning when a sensitive setting resolves to its built-in default.
 
@@ -38,13 +43,33 @@ def _warn_if_builtin_default(name, value, builtin_default):
         )
 
 
+def _require_real_value(name, value, builtin_default, validate=None):
+    """In production, stop at startup when a sensitive setting is missing or is the built-in default.
+
+    Outside production only the warning above is logged. Messages name the setting,
+    never its value.
+    """
+    if not IS_PRODUCTION:
+        _warn_if_builtin_default(name, value, builtin_default)
+        return
+    from django.core.exceptions import ImproperlyConfigured
+
+    if not value or value == builtin_default:
+        raise ImproperlyConfigured(
+            f'{name} must be set in the environment of this service; '
+            f'production does not start with a missing value or the built-in development default.'
+        )
+    if validate is not None and not validate(value):
+        raise ImproperlyConfigured(f'{name} is set but is not in the expected format.')
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
 _BUILTIN_SECRET_KEY = 'django-insecure-fallback-key-for-demo-only'
 SECRET_KEY = config('SECRET_KEY', default=_BUILTIN_SECRET_KEY)
-_warn_if_builtin_default('SECRET_KEY', SECRET_KEY, _BUILTIN_SECRET_KEY)
+_require_real_value('SECRET_KEY', SECRET_KEY, _BUILTIN_SECRET_KEY)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=False, cast=bool)
@@ -446,8 +471,19 @@ SOUNDTRACK_CLIENT_SECRET = config('SOUNDTRACK_CLIENT_SECRET', default='')
 # Generate a new key with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 _BUILTIN_FIELD_ENCRYPTION_KEY = '3gnXjsPSDoeTaNo0hlFuWXCVVI3mox7SeG2r3jGehlE='
 FIELD_ENCRYPTION_KEY = config('FIELD_ENCRYPTION_KEY', default=_BUILTIN_FIELD_ENCRYPTION_KEY)
-_warn_if_builtin_default(
-    'FIELD_ENCRYPTION_KEY', FIELD_ENCRYPTION_KEY, _BUILTIN_FIELD_ENCRYPTION_KEY
+
+
+def _is_fernet_key(value):
+    try:
+        from cryptography.fernet import Fernet
+        Fernet(value)
+        return True
+    except Exception:
+        return False
+
+
+_require_real_value(
+    'FIELD_ENCRYPTION_KEY', FIELD_ENCRYPTION_KEY, _BUILTIN_FIELD_ENCRYPTION_KEY, validate=_is_fernet_key
 )
 
 # Disable admin authentication for development
