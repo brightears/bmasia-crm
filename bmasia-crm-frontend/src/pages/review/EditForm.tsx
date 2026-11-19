@@ -160,7 +160,7 @@ const EditForm: React.FC<EditFormProps> = ({
       )}
       {blockedReason && (
         <Typography variant="body2" color="text.secondary" data-testid="edit-blocked-reason">
-          {blockedReason}
+          <PlainText value={blockedReason} />
         </Typography>
       )}
       <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>

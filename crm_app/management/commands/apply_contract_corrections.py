@@ -74,7 +74,8 @@ FORMAT v2
   mark_renewed (status only, from Active or Expired), mark_expired (status
   only), set_renewed_from, clear_renewed_from (removes a wrong renewal link,
   link only, never calls the lifecycle rule), create_successor, create_contract
-  (a new term with no predecessor), add_note, hand_over_zone_links and
+  (a new term with no predecessor), add_note, set_sent_date (records when the
+  contract was actually sent), hand_over_zone_links and
   redate_zone_link_end. create_successor and create_contract take an optional
   overlap_allowed list ({"contract_id", "expected"} per item) naming contracts
   of the same company that are separate subscriptions and may overlap the new
@@ -82,6 +83,13 @@ FORMAT v2
   with the same safety model (dry-run default, groups all-or-nothing, expected state,
   audit rows, journal, revert, idempotent re-run). Its docstring documents the
   file shape, every refusal and the revert rules. v1 files below are unchanged.
+
+  v1 THEN v2 ON ONE CONTRACT: a v1 file and a v2 file are separate runs. When a
+  v2 step (for example set_sent_date after a class-B activation) follows a v1
+  run on the same contract, the v1 run can no longer be reverted with
+  --revert, even after the v2 run is reverted (each revert moves updated_at):
+  the tool refuses with changed_since_apply. Reverse it with a new corrections
+  file instead.
 
 FILE FORMAT v1 (JSON, ids and values only; unknown keys are rejected)
     {
@@ -434,7 +442,9 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('--file', help='Corrections file (format in the module docstring).')
-        parser.add_argument('--revert', metavar='JOURNAL', help='Revert the changes recorded in this journal.')
+        parser.add_argument('--revert', metavar='JOURNAL', help=(
+            'Revert the changes recorded in this journal. A v1 run followed by a v2 step on the same contract '
+            'cannot be reverted this way (refused as changed_since_apply); write a new corrections file instead.'))
         parser.add_argument('--execute', action='store_true',
                             help='Write. Without this flag the command only reports what it would do.')
         parser.add_argument('--journal', help='Path of the revert journal to create (required with --execute).')

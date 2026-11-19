@@ -66,6 +66,24 @@ describe('every decision carries the seen_version in the request body', () => {
   });
 });
 
+describe('the inactive acknowledgement', () => {
+  it('is sent only when asked for', async () => {
+    await reviewApi.accept('p-1', 'v-a', { acknowledgeInactive: true });
+    expect(http.post).toHaveBeenLastCalledWith('/change-proposals/p-1/accept/', {
+      seen_version: 'v-a',
+      acknowledge_inactive: true,
+    });
+    await reviewApi.acceptWithEdits('p-1', 'v-e', { city: 'X' }, [], { acknowledgeInactive: true });
+    expect(http.post).toHaveBeenLastCalledWith('/change-proposals/p-1/accept-with-edits/', {
+      seen_version: 'v-e',
+      edits: { city: 'X' },
+      acknowledge_inactive: true,
+    });
+    await reviewApi.accept('p-1', 'v-b');
+    expect(http.post).toHaveBeenLastCalledWith('/change-proposals/p-1/accept/', { seen_version: 'v-b' });
+  });
+});
+
 describe('reads and errors', () => {
   it('reads open suggestions a page at a time, in the order asked for', async () => {
     await reviewApi.listOpen(2, 'expiring');

@@ -256,5 +256,13 @@ class ChangeProposalViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, vi
             },
             'proposals_enabled': policy.proposals_enabled(),
             'activity_writes_enabled': policy.activity_writes_enabled(),
+            # What this server understands, so the page need not learn it from a refusal.
+            'supports': sorted(['target_states', *proposal_service.ACKNOWLEDGE_STATES.values()]),
+            'target_states': {
+                'acceptable': sorted({'present', 'no_duplicate'}),
+                'needs_acknowledgement': {state: flag for state, flag in sorted(
+                    proposal_service.ACKNOWLEDGE_STATES.items())},
+                'never_acceptable': sorted(proposal_service.NEVER_ACCEPTABLE_STATES),
+            },
             **policy.account_status(request),
         })

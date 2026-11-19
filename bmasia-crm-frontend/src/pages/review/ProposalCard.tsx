@@ -38,6 +38,13 @@ import {
   formatDateTime,
   kindLabel,
   needsSourceCheck,
+  INACTIVE_TICK_LABEL,
+  INACTIVE_UNSUPPORTED,
+  isUnknownState,
+  isUnusualState,
+  stateReason,
+  targetStateOf,
+  valuesChanged,
 } from './reviewModel';
 import { formatDate } from '../../theme';
 
@@ -82,6 +89,7 @@ export interface CardHandlers {
   onSourceCheck: (p: ChangeProposal, value: boolean) => void;
   onContactCheck: (p: ChangeProposal, value: boolean) => void;
   onRetryPartner: (id: string) => void;
+  onInactiveCheck: (p: ChangeProposal, value: boolean) => void;
 }
 
 interface ProposalCardProps {
@@ -111,6 +119,10 @@ interface ProposalCardProps {
   contactChecked: boolean;
   /** Conflict partners that could not be read. */
   partnersFailed: boolean;
+  /** The inactive-target tick, for the version shown. */
+  inactiveAcknowledged: boolean;
+  /** This server refused the inactive acknowledgement: inactive records cannot be changed from this page. */
+  inactiveUnsupported: boolean;
   handlers: CardHandlers;
 }
 
@@ -202,6 +214,8 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
     contactCheck,
     contactChecked,
     partnersFailed,
+    inactiveAcknowledged,
+    inactiveUnsupported,
     handlers,
   } = props;
   const ref = useRef<HTMLDivElement>(null);
@@ -227,7 +241,18 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
     contactCheck,
     contactChecked,
     partnersFailed,
+    inactiveAcknowledged,
+    inactiveUnsupported,
   });
+  const state = open ? targetStateOf(p) : null;
+  const unusualState = isUnusualState(state);
+  // The fixed "record changed" text the server stores on a refused accept repeats the changed box or the state
+  // notice (both say since when): it is not shown twice. Any other refusal stays visible.
+  const applyError =
+    p.last_apply_error &&
+    !(p.target_changed_at && /^The record changed after this proposal was made/.test(p.last_apply_error))
+      ? p.last_apply_error
+      : '';
   const canTouch = open && !readOnly && !expired && !result;
   const editable = editableFields(settings, p.kind, p.target_collection);
   const outsideAllowlist = editable ? Object.keys(p.patch || {}).filter((k) => !editable.includes(k)) : [];
@@ -387,11 +412,74 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
             This suggestion expired while it was on screen. Nothing can be applied; it will show as expired.
           </Alert>
         )}
-        {open && p.target_changed_at && (
+        {open && unusualState && (
+          <Alert
+            severity={state === 'missing' || state === 'moved' ? 'error' : 'warning'}
+            data-testid="target-state"
+            data-state={state || ''}
+          >
+            <AlertTitle>
+              {state === 'inactive'
+                ? 'The record is inactive'
+                : state === 'duplicate'
+                  ? 'This contact may already exist'
+                  : state === 'moved'
+                    ? 'The record moved to another company'
+                    : state === 'missing'
+                      ? 'The record no longer exists'
+                      : 'This record needs a look'}
+              {p.target_changed_at ? ` (since ${formatDateTime(p.target_changed_at)})` : ''}
+            </AlertTitle>
+            <PlainText value={stateReason(p)} />
+            {state === 'duplicate' && (
+              <Typography variant="body2" sx={{ mt: 0.5 }}>
+                Accept as suggested is not possible. Edit the name or email if this is a different person; the server
+                checks the edited values again.
+              </Typography>
+            )}
+            {(state === 'missing' || state === 'moved') && (
+              <Typography variant="body2" sx={{ mt: 0.5 }}>
+                This suggestion can no longer be applied. Reject it.
+              </Typography>
+            )}
+            {isUnknownState(state) && (
+              <Typography variant="body2" sx={{ mt: 0.5 }}>
+                This page does not know this state, so the suggestion cannot be accepted here.
+              </Typography>
+            )}
+            {state === 'inactive' && inactiveUnsupported && (
+              <Typography variant="body2" sx={{ mt: 0.5 }} data-testid="inactive-unsupported">
+                {INACTIVE_UNSUPPORTED} Activate the record first, or reject the suggestion.
+              </Typography>
+            )}
+            {state === 'inactive' && !inactiveUnsupported && (
+              <Box>
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      size="small"
+                      checked={inactiveAcknowledged}
+                      disabled={!canTouch || busy}
+                      onChange={(e) => handlers.onInactiveCheck(p, e.target.checked)}
+                    />
+                  }
+                  label={<Typography variant="body2">{INACTIVE_TICK_LABEL}</Typography>}
+                />
+              </Box>
+            )}
+          </Alert>
+        )}
+        {open && valuesChanged(p) && (
           <Alert severity="warning" data-testid="record-changed">
             <AlertTitle>The record changed after this was suggested</AlertTitle>
             The values under “Now” were re-read {formatDateTime(p.target_changed_at)}. Compare them with the suggestion
             before deciding.
+            {state === 'inactive' && (
+              <Typography variant="body2" sx={{ mt: 0.5 }} data-testid="inactive-and-changed">
+                The record is also inactive. The server does not say whether only that changed or the values too, so
+                both boxes are needed.
+              </Typography>
+            )}
             <Box>
               <FormControlLabel
                 control={
@@ -464,10 +552,10 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
             </Box>
           </Alert>
         )}
-        {open && p.last_apply_error && !p.target_changed_at && (
+        {open && applyError && applyError !== stateReason(p) && (
           <Alert severity="error" data-testid="apply-error">
             <AlertTitle>The last attempt to apply this failed</AlertTitle>
-            <PlainText value={p.last_apply_error} />
+            <PlainText value={applyError} />
           </Alert>
         )}
         {open && outsideAllowlist.length > 0 && (
@@ -696,7 +784,7 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
           </Box>
           {disabledReason && !busy && (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }} data-testid="accept-blocked-reason">
-              {disabledReason}
+              <PlainText value={disabledReason} />
             </Typography>
           )}
         </>

@@ -111,6 +111,12 @@ interface ChangePreviewProps {
 /** What would change: before → after for updates, the new record's fields, or the note text to add. */
 const ChangePreview: React.FC<ChangePreviewProps> = ({ proposal: p, relatedName, valuesFollowTarget = false }) => {
   const entries = Object.entries(p.patch || {});
+  // Later backends name the fields they compare; anything else shown is context only.
+  const watched = Array.isArray(p.watched_fields) ? p.watched_fields : null;
+  const contextKeys =
+    watched && p.kind === 'field_update'
+      ? Object.keys(p.current_values || {}).filter((k) => !(k in (p.patch || {})))
+      : [];
   const asOf = p.target_changed_at
     ? `again on ${formatDateTime(p.target_changed_at)}`
     : `when the suggestion was made, ${formatDateTime(p.created_at)}`;
@@ -138,8 +144,19 @@ const ChangePreview: React.FC<ChangePreviewProps> = ({ proposal: p, relatedName,
         </Box>
         <ValueWarnings proposal={p} field="notes" value={text} />
         <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 1 }}>
-          Added below the existing notes, which stay as they are.
-          {existing ? ` Existing notes, as read ${asOf}:` : ' There are no notes yet.'}
+          {watched ? (
+            <span data-testid="note-wording">
+              This is added to the notes as they are when you accept; the existing notes stay as they are.
+              {existing
+                ? ' Current notes, shown for context (they may have changed since and are not compared):'
+                : ' There were no notes when this was suggested.'}
+            </span>
+          ) : (
+            <>
+              Added below the existing notes, which stay as they are.
+              {existing ? ` Existing notes, as read ${asOf}:` : ' There are no notes yet.'}
+            </>
+          )}
         </Typography>
         {existing && (
           <Box sx={{ mt: 0.5, color: 'text.secondary', fontSize: '0.875rem' }}>
@@ -210,6 +227,15 @@ const ChangePreview: React.FC<ChangePreviewProps> = ({ proposal: p, relatedName,
               <TableRow key={key} data-testid={`change-row-${key}`}>
                 <TableCell component="th" scope="row" sx={{ color: 'text.secondary', verticalAlign: 'top' }}>
                   {fieldLabel(key)}
+                  {watched && (
+                    <Typography variant="caption" component="div" data-testid={`row-role-${key}`}>
+                      {!watched.includes(key)
+                        ? 'Context, not compared'
+                        : displayValue(p.current_values?.[key]) === displayValue(value)
+                          ? 'Already this value'
+                          : 'Will change'}
+                    </Typography>
+                  )}
                 </TableCell>
                 <TableCell sx={{ verticalAlign: 'top' }}>
                   {before ? (
@@ -232,6 +258,24 @@ const ChangePreview: React.FC<ChangePreviewProps> = ({ proposal: p, relatedName,
               </TableRow>
             );
           })}
+          {contextKeys.map((key) => (
+            <TableRow key={`context-${key}`} data-testid={`context-row-${key}`}>
+              <TableCell component="th" scope="row" sx={{ color: 'text.secondary', verticalAlign: 'top' }}>
+                {fieldLabel(key)}
+                <Typography variant="caption" component="div">
+                  Context, not changed by this suggestion
+                </Typography>
+              </TableCell>
+              <TableCell sx={{ verticalAlign: 'top', color: 'text.secondary' }}>
+                {displayValue(p.current_values?.[key]) ? (
+                  <PlainText value={displayValue(p.current_values?.[key])} edges />
+                ) : (
+                  <Empty />
+                )}
+              </TableCell>
+              <TableCell />
+            </TableRow>
+          ))}
         </TableBody>
       </Table>
       <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.75 }} data-testid="values-as-of">
