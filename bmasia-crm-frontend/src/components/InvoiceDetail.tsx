@@ -45,6 +45,8 @@ import ApiService, { MarkInvoicePaidResult } from '../services/api';
 import EmailSendDialog, { EmailSendData } from './EmailSendDialog';
 import MarkPaidDialog, { describeMarkPaidResult } from './MarkPaidDialog';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { useAuth } from '../contexts/AuthContext';
+import { canDo } from '../utils/access';
 
 interface InvoiceDetailProps {
   open: boolean;
@@ -70,6 +72,8 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
 
   // Record payment ("Mark as Paid"): the dialog asks whether to email the receipt.
   const [markPaidOpen, setMarkPaidOpen] = useState(false);
+  // Recording payments is for Finance and Admin (role table in utils/access.ts).
+  const canRecordPayment = canDo(useAuth().user, 'invoice-money');
 
   useEffect(() => {
     if (open && invoice) {
@@ -586,7 +590,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
             Mark as Sent
           </Button>
         )}
-        {invoice && (invoice.status === 'Sent' || invoice.status === 'Overdue') && (
+        {canRecordPayment && invoice && (invoice.status === 'Sent' || invoice.status === 'Overdue') && (
           <Button
             onClick={() => setMarkPaidOpen(true)}
             variant="contained"
@@ -597,7 +601,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
             Mark as Paid
           </Button>
         )}
-        {invoice && invoice.status === 'Paid' && !invoice.receipt_number && (
+        {canRecordPayment && invoice && invoice.status === 'Paid' && !invoice.receipt_number && (
           <Button
             onClick={() => setMarkPaidOpen(true)}
             variant="contained"

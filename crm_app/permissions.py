@@ -37,6 +37,27 @@ class CommercialDocumentPreviewPermission(permissions.BasePermission):
         return True
 
 
+FINANCE_ROLES = ('Finance', 'Admin')
+
+
+class IsFinanceOrAdmin(permissions.BasePermission):
+    """Finance reports and the QuickBooks export: signed-in, active Finance or Admin users.
+
+    The frontend shows these pages to the same two roles (``finance-reports`` in
+    ``bmasia-crm-frontend/src/utils/access.ts``).
+    """
+
+    message = 'Finance reports are available to the Finance and Admin roles.'
+
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(
+            getattr(user, 'is_authenticated', False)
+            and getattr(user, 'is_active', False)
+            and getattr(user, 'role', None) in FINANCE_ROLES
+        )
+
+
 class RoleBasedPermission(permissions.BasePermission):
     """
     Custom permission class that checks user roles and field-level permissions
