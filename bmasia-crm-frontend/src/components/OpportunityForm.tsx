@@ -29,8 +29,9 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Opportunity, Company, User, OpportunityActivity } from '../types';
 import ApiService from '../services/api';
 import ActivityForm from './ActivityForm';
-import ActivityTimeline from './ActivityTimeline';
+import CompanyTimeline from './timeline/CompanyTimeline';
 import { formatCurrency as formatCurrencyFn } from '../constants/entities';
+import { logApiError } from '../utils/logApiError';
 
 interface OpportunityFormProps {
   open: boolean;
@@ -101,7 +102,8 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
   const [error, setError] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [activityFormOpen, setActivityFormOpen] = useState(false);
-  const [recentActivities, setRecentActivities] = useState<OpportunityActivity[]>([]);
+  // Bumped after an activity is logged so the recent activity reloads.
+  const [activityRefresh, setActivityRefresh] = useState(0);
 
   useEffect(() => {
     if (open) {
@@ -115,7 +117,6 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
           follow_up_date: opportunity.follow_up_date || undefined,
           service_type: opportunity.service_type || null,
         });
-        loadRecentActivities(opportunity.id);
       } else {
         setFormData({
           name: '',
@@ -143,7 +144,7 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
       const companies = await ApiService.getCompaniesSimple();
       setCompanies(companies as any[]);
     } catch (err) {
-      console.error('Failed to load companies:', err);
+      logApiError('Failed to load companies:', err);
     } finally {
       setCompaniesLoading(false);
     }
@@ -155,18 +156,9 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
       const response = await ApiService.getUsers({ page_size: 100 });
       setUsers(response.results);
     } catch (err) {
-      console.error('Failed to load users:', err);
+      logApiError('Failed to load users:', err);
     } finally {
       setUsersLoading(false);
-    }
-  };
-
-  const loadRecentActivities = async (opportunityId: string) => {
-    try {
-      const activities = await ApiService.getActivitiesByOpportunity(opportunityId);
-      setRecentActivities(activities.slice(0, 3)); // Show only 3 most recent
-    } catch (err) {
-      console.error('Failed to load recent activities:', err);
     }
   };
 
@@ -274,9 +266,9 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
   };
 
   const handleActivityCreated = (activity: OpportunityActivity) => {
-    // Refresh recent activities if we're editing an opportunity
+    // Refresh recent activity if we're editing an opportunity
     if (mode === 'edit' && opportunity) {
-      loadRecentActivities(opportunity.id);
+      setActivityRefresh((n) => n + 1);
     }
   };
 
@@ -607,7 +599,7 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
             </Grid>
 
             {/* Recent Activities Section */}
-            {mode === 'edit' && opportunity && recentActivities.length > 0 && (
+            {mode === 'edit' && opportunity && (
               <>
                 <Grid item xs={12}>
                   <Typography variant="h6" gutterBottom color="primary" sx={{ mt: 2 }}>
@@ -615,14 +607,13 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
                   </Typography>
                 </Grid>
                 <Grid item xs={12}>
-                  <ActivityTimeline
-                    activities={recentActivities}
-                    compact={true}
+                  <CompanyTimeline
+                    companyId={opportunity.company}
+                    record={{ type: 'opportunity', id: opportunity.id }}
+                    pageSize={3}
                     showFilters={false}
-                    onEditActivity={(activity) => {
-                      // Could open activity form in edit mode
-                      console.log('Edit activity:', activity);
-                    }}
+                    refreshKey={activityRefresh}
+                    label={`Recent activity for ${opportunity.name}`}
                   />
                 </Grid>
               </>

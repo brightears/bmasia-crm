@@ -32,7 +32,7 @@ from agent_inbox.validation import (
 ACTIVITY_KEYS = frozenset({
     'idempotency_key', 'company_id', 'contact_id', 'contract_id', 'quote_id', 'opportunity_id',
     'kind', 'direction', 'occurred_at', 'summary', 'body', 'participants',
-    'source_system', 'source_ref', 'source_url',
+    'source_system', 'source_ref', 'source_url', 'restricted',
 })
 ACTIVITY_REQUIRED = ('idempotency_key', 'company_id', 'kind', 'direction', 'occurred_at', 'summary', 'source_system')
 ROUTES = ('rest', 'ui', 'mcp', 'job')
@@ -104,8 +104,26 @@ def _validated(user, body):
         'participants': _participants(body.get('participants')),
         'source_system': source_system,
         'source_ref': source_ref_field(body, 'source_ref', source_system, SOURCE_REF_MAX),
-        'source_url': url_field(body, 'source_url', SOURCE_URL_MAX),
+        'source_url': url_field(body, 'source_url', SOURCE_URL_MAX, source_system),
+        'restricted': _flag(body, 'restricted'),
     }
+
+
+def _flag(body, key):
+    value = body.get(key, False)
+    if not isinstance(value, bool):
+        raise bad(f'{key} must be true or false')
+    return value
+
+
+def _refuse_redacted(values):
+    from agent_inbox.redaction import is_redacted_source
+
+    if values['source_ref'] and is_redacted_source(values['source_ref']):
+        raise ServiceError(
+            409, 'source_redacted',
+            'This source was removed under the mail-capture rules and cannot be recorded again',
+        )
 
 
 def _replay(user, key, digest):
@@ -166,6 +184,7 @@ def record_activity(user, body, *, via):
         return replayed, True
 
     values = _validated(user, body)
+    _refuse_redacted(values)
     replayed, displaced = _source_check(user, key, digest, values)
     if replayed is not None:
         return replayed, True

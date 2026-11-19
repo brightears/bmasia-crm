@@ -18,7 +18,7 @@ def post(client, body):
 def test_create_returns_201_and_stores_every_field(agent, company, contact, contract):
     response = post(token_client(agent), activity_body(
         company, contact_id=str(contact.pk), contract_id=str(contract.pk),
-        source_url='https://mail.example.com/thread/1',
+        source_url='https://mail.google.com/mail/u/0/#inbox/thread-1',
     ))
     assert response.status_code == 201, response.content
     data = response.json()
@@ -90,7 +90,8 @@ def test_voided_source_ref_can_be_recorded_again(agent, company):
     ({'direction': 'sideways'}, 'direction must be one of'),
     ({'source_system': 'carrier-pigeon'}, 'source_system must be one of'),
     ({'occurred_at': '2026-11-18T10:00:00'}, 'timezone'),
-    ({'occurred_at': iso_ago(days=-2)}, 'in the future'),
+    # A fixed far-future instant: a value computed at collection time goes stale under a frozen clock.
+    ({'occurred_at': '2999-01-01T00:00:00+00:00'}, 'in the future'),
     ({'occurred_at': '1999-12-31T00:00:00+00:00'}, 'before 2000'),
     ({'idempotency_key': 'short'}, 'idempotency_key must be'),
     ({'idempotency_key': 'has space in it'}, 'idempotency_key must be'),

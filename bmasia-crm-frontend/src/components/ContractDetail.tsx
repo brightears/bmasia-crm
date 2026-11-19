@@ -62,9 +62,11 @@ import {
 } from '@mui/icons-material';
 import { Contract, Invoice, ContractZone, ServiceLocation, EmailLogEntry } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 import ContractDocuments from './ContractDocuments';
 import { formatDate as formatDisplayDate, formatMoney, statusTone } from '../theme';
-import { PageHeader } from './ui';
+import { PageHeader, SectionCard } from './ui';
+import CompanyTimeline from './timeline/CompanyTimeline';
 
 interface ContractDetailProps {
   open: boolean;
@@ -147,7 +149,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
       }
     } catch (err: any) {
       setError('Failed to load contract details');
-      console.error('Contract detail error:', err);
+      logApiError('Contract detail error:', err);
     } finally {
       setLoading(false);
     }
@@ -161,7 +163,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
       const zones = await ApiService.getContractZones(contract.id);
       setContractZones(zones);
     } catch (err) {
-      console.error('Failed to load contract zones:', err);
+      logApiError('Failed to load contract zones:', err);
     } finally {
       setLoadingZones(false);
     }
@@ -183,7 +185,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
       const updatedContract = await ApiService.getContract(contract.id);
       setContract(updatedContract);
     } catch (err) {
-      console.error('Failed to send renewal notice:', err);
+      logApiError('Failed to send renewal notice:', err);
     } finally {
       setSendingRenewal(false);
     }
@@ -199,7 +201,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
       window.open(url, '_blank');
     } catch (err: any) {
       setActionError(`Could not open the PDF preview${err instanceof Error && err.message ? `: ${err.message}` : '.'}`);
-      console.error('Failed to preview PDF:', err);
+      logApiError('Failed to preview PDF:', err);
     } finally {
       setPreviewing(false);
     }
@@ -220,7 +222,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
       setActionError(`Could not download the PDF${err instanceof Error && err.message ? `: ${err.message}` : '.'}`);
-      console.error('Failed to download PDF:', err);
+      logApiError('Failed to download PDF:', err);
     }
   };
 
@@ -347,7 +349,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
                 setContract(updated);
                 onContractUpdated?.(updated);
               } catch (err) {
-                console.error('Failed to send contract:', err);
+                logApiError('Failed to send contract:', err);
               }
             }}
           >
@@ -366,7 +368,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
                 setContract(updated);
                 onContractUpdated?.(updated);
               } catch (err) {
-                console.error('Failed to mark as signed:', err);
+                logApiError('Failed to mark as signed:', err);
               }
             }}
           >
@@ -618,7 +620,7 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
           <Grid item xs={12} md={6}>
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>
-                Contract Timeline
+                Key dates
               </Typography>
 
               <Timeline sx={{ p: 0 }}>
@@ -898,6 +900,20 @@ const ContractDetail: React.FC<ContractDetailProps> = ({
           {/* Contract Documents */}
           <Grid item xs={12}>
             <ContractDocuments contractId={contract.id} />
+          </Grid>
+
+          {/* Everything that happened to this contract, from the company timeline */}
+          <Grid item xs={12}>
+            <SectionCard title="Activity" subtitle="Emails, invoices, tasks, status and field changes for this contract">
+              <CompanyTimeline
+                companyId={contract.company}
+                record={{ type: 'contract', id: contract.id }}
+                label={`Activity for ${contract.contract_number}`}
+                // Reloads after an action on this page saves the contract (Mark as sent, signed…).
+                refreshKey={`${contract.updated_at}|${contract.status}`}
+                urlState
+              />
+            </SectionCard>
           </Grid>
         </Grid>
     </>

@@ -62,6 +62,8 @@ import { formatDate as formatDisplayDate, formatMoney, statusTone, visuallyHidde
 import { PageHeader, EmptyState } from '../components/ui';
 import { useListState, optionValues, idFromList } from '../hooks/useListState';
 import { useListSearchBox } from '../hooks/useListSearchBox';
+import { useAuth } from '../contexts/AuthContext';
+import { canDo } from '../utils/access';
 
 const statusOptions = [
   { value: '', label: 'All Status' },
@@ -147,6 +149,8 @@ const Invoices: React.FC = () => {
 
   // QuickBooks export dialog
   const [qbExportOpen, setQbExportOpen] = useState(false);
+  // Payments and the QuickBooks export are for Finance and Admin (role table in utils/access.ts).
+  const canMoney = canDo(useAuth().user, 'invoice-money');
   const [qbExporting, setQbExporting] = useState(false);
   const [qbEntity, setQbEntity] = useState('');
   const [qbStatus, setQbStatus] = useState('Sent');
@@ -475,9 +479,11 @@ const Invoices: React.FC = () => {
         subtitle="Bills sent to customers, their payment status and receipts. Invoice numbers come from QuickBooks."
         actions={
           <>
-            <Button variant="outlined" startIcon={<GetApp />} onClick={() => setQbExportOpen(true)}>
-              Export to QuickBooks
-            </Button>
+            {canMoney && (
+              <Button variant="outlined" startIcon={<GetApp />} onClick={() => setQbExportOpen(true)}>
+                Export to QuickBooks
+              </Button>
+            )}
             <Button variant="contained" startIcon={<Add />} onClick={handleCreateInvoice}>
               New Invoice
             </Button>
@@ -721,7 +727,7 @@ const Invoices: React.FC = () => {
             <ListItemText>Mark as Sent</ListItemText>
           </MenuItem>
         )}
-        {(actionMenuInvoice?.status === 'Sent' || actionMenuInvoice?.status === 'Overdue') && (
+        {canMoney && (actionMenuInvoice?.status === 'Sent' || actionMenuInvoice?.status === 'Overdue') && (
           <MenuItem onClick={() => handleMarkAsPaid(actionMenuInvoice!)}>
             <ListItemIcon>
               <Payment fontSize="small" />
@@ -729,7 +735,7 @@ const Invoices: React.FC = () => {
             <ListItemText>Mark as Paid</ListItemText>
           </MenuItem>
         )}
-        {actionMenuInvoice?.status === 'Paid' && !actionMenuInvoice?.receipt_number && (
+        {canMoney && actionMenuInvoice?.status === 'Paid' && !actionMenuInvoice?.receipt_number && (
           <MenuItem onClick={() => handleMarkAsPaid(actionMenuInvoice!)}>
             <ListItemIcon>
               <Receipt fontSize="small" />

@@ -82,13 +82,14 @@ def test_rest_patch_cannot_write_a_receipt_number(api, company):
     assert invoice.receipt_number is None
 
 
-def test_a_paid_invoice_can_still_be_edited_and_set_back(api, company):
+def test_a_paid_invoice_can_still_be_edited_but_not_set_back_by_an_edit(api, company):
     invoice = _invoice(company, status='Paid', receipt_number='REC-TH-2026-0003', paid_date=date(2026, 11, 2))
     assert api.patch(f'/api/v1/invoices/{invoice.pk}/', {'status': 'Paid', 'notes': 'x'},
                      format='json').status_code == 200
-    assert api.patch(f'/api/v1/invoices/{invoice.pk}/', {'status': 'Sent'}, format='json').status_code == 200
+    # Undoing a payment is the admin's "Mark selected invoices as unpaid" (test_invoice_status_moves.py).
+    assert api.patch(f'/api/v1/invoices/{invoice.pk}/', {'status': 'Sent'}, format='json').status_code == 400
     invoice.refresh_from_db()
-    assert (invoice.status, invoice.receipt_number) == ('Sent', 'REC-TH-2026-0003')
+    assert (invoice.status, invoice.receipt_number) == ('Paid', 'REC-TH-2026-0003')
 
 
 def test_serializer_lists_receipt_number_as_read_only():

@@ -3,22 +3,29 @@ import { buildNavGroups, filterNavForRole } from './navigation';
 const paths = (role?: string) =>
   filterNavForRole(buildNavGroups(0), role).flatMap((g) => g.items.map((i) => i.path));
 
-describe('menu by role (display only)', () => {
+describe('menu by role (from the role table)', () => {
   const all = paths('Admin');
 
-  it('shows everything to Admin and to unknown or missing roles', () => {
-    expect(all.length).toBe(30);
-    expect(paths(undefined)).toEqual(all);
-    expect(paths('Someone new')).toEqual(all);
+  it('shows everything to Admin and only Today to an account with no role', () => {
+    expect(all.length).toBe(31);
+    expect(all).toEqual(buildNavGroups(0).flatMap((g) => g.items.map((i) => i.path)));
+    expect(paths(undefined)).toEqual(['/today']);
+    expect(paths('')).toEqual(['/today']);
+    expect(paths('Someone new')).toEqual(['/today']);
   });
 
-  it('hides finance reports and admin pages from Sales but keeps Invoices', () => {
+  it('hides finance reports and admin pages from Sales but keeps Invoices and Contract templates', () => {
     const sales = paths('Sales');
     expect(sales).toContain('/invoices');
     expect(sales).toContain('/opportunities');
+    expect(sales).toContain('/email-templates');
+    expect(sales).toContain('/contract-templates');
+    expect(sales).toContain('/renewals');
     expect(sales).not.toContain('/finance/pl');
     expect(sales).not.toContain('/revenue');
     expect(sales).not.toContain('/users');
+    expect(sales).not.toContain('/settings');
+    expect(sales).not.toContain('/email-automations');
   });
 
   it('gives Finance all finance pages and no marketing or support', () => {
@@ -27,12 +34,19 @@ describe('menu by role (display only)', () => {
     expect(finance).toContain('/contracts');
     expect(finance).not.toContain('/campaigns');
     expect(finance).not.toContain('/tickets');
+    expect(finance).not.toContain('/users');
   });
 
-  it('gives Tech support pages plus contracts and tasks, without sales pipeline or finance', () => {
-    const tech = paths('Tech');
-    expect(tech).toEqual(expect.arrayContaining(['/tickets', '/zones', '/tech-details', '/contracts', '/tasks', '/companies']));
+  it.each(['Tech', 'Music'])('gives %s support pages plus contracts and tasks, without sales pipeline or finance', (role) => {
+    const tech = paths(role);
+    expect(tech).toEqual(expect.arrayContaining(['/tickets', '/zones', '/tech-details', '/knowledge-base', '/contracts', '/tasks', '/companies']));
     expect(tech).not.toContain('/opportunities');
+    expect(tech).not.toContain('/quotes');
     expect(tech).not.toContain('/invoices');
+  });
+
+  it('no longer knows the old role names', () => {
+    expect(paths('Marketing')).toEqual(['/today']);
+    expect(paths('Tech Support')).toEqual(['/today']);
   });
 });

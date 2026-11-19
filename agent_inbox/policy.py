@@ -118,17 +118,22 @@ def collections_for(kind: str) -> tuple:
     return tuple(sorted(PROPOSAL_ALLOWLIST.get(kind, {})))
 
 
-# ------------------------------------------------------------------ agent accounts
+# ------------------------------------------------------------------ agent accounts and reviewers
 #
 # An account is an agent account when any of these holds:
-#   - its username is a principal in crm_app.agent_policy (the agent gate's map);
-#   - its username is listed in AGENT_INBOX_AGENT_USERNAMES;
-#   - it holds a DRF API token. Every agent and the shared headless account
-#     authenticate with one; people use the website sign-in (JWT).
-# Usernames are compared case-insensitively. An agent account proposes as agent
-# or ai (never human or job), must give evidence, sees only its own proposals and
-# other recorders' activity bodies stay hidden from it. Research note 08 replaces
-# this with AgentPrincipal rows; is_agent_account() is the one place to switch over.
+#   - its username is a principal in crm_app.agent_policy (the agent gate's map) or
+#     is listed in AGENT_INBOX_AGENT_USERNAMES ("an agent by name");
+#   - it holds a DRF API token and is not a listed reviewer. Every agent and the
+#     shared headless account authenticate with one; people use the website sign-in.
+# Usernames are compared case-insensitively. An agent account proposes as agent or
+# ai (never human or job), must give evidence and sees only its own proposals.
+#
+# A reviewer is a person on CHANGE_PROPOSAL_REVIEWER_USERNAMES (default empty, so
+# nobody can review until it is set). An agent by name is never a reviewer, even if
+# listed (system check agent_inbox.W001). For a listed reviewer, holding an API
+# token does not count against them, but every decision must still be made from a
+# website sign-in (JWT or session). Research note 08 replaces the name rules with
+# AgentPrincipal rows; is_agent_by_name() is the one place to switch over.
 
 AGENT_PROPOSER_KINDS = frozenset({'agent', 'ai'})
 EVIDENCE_REQUIRED_KINDS = frozenset({'agent', 'ai'})
@@ -136,16 +141,51 @@ REVIEW_AUTH_METHODS = frozenset({'jwt', 'session'})
 # Source systems that say a person or the CRM itself wrote the text.
 PERSON_SOURCE_SYSTEMS = frozenset({'manual', 'crm'})
 
+NOT_CONFIGURED_DETAIL = ('Reviewing is not configured on this server: no reviewer is listed in '
+                         'CHANGE_PROPOSAL_REVIEWER_USERNAMES.')
+NOT_LISTED_DETAIL = 'Your account is not on the reviewer list (CHANGE_PROPOSAL_REVIEWER_USERNAMES).'
+
 
 def _name(value) -> str:
     return str(value or '').strip().casefold()
 
 
-def extra_agent_usernames() -> frozenset:
-    raw = getattr(settings, 'AGENT_INBOX_AGENT_USERNAMES', ()) or ()
+def _names(setting) -> frozenset:
+    raw = getattr(settings, setting, ()) or ()
     if isinstance(raw, str):
         raw = raw.split(',')
     return frozenset(_name(name) for name in raw if _name(name))
+
+
+def extra_agent_usernames() -> frozenset:
+    return _names('AGENT_INBOX_AGENT_USERNAMES')
+
+
+def _agent_name(username) -> bool:
+    from crm_app import agent_policy
+    name = _name(username)
+    return agent_policy.principal_for_username(name) is not None or name in extra_agent_usernames()
+
+
+def listed_reviewer_names() -> frozenset:
+    """CHANGE_PROPOSAL_REVIEWER_USERNAMES without agent names (those are never reviewers)."""
+    return frozenset(name for name in _names('CHANGE_PROPOSAL_REVIEWER_USERNAMES') if not _agent_name(name))
+
+
+def ignored_reviewer_names() -> frozenset:
+    return frozenset(name for name in _names('CHANGE_PROPOSAL_REVIEWER_USERNAMES') if _agent_name(name))
+
+
+def is_agent_by_name(user) -> bool:
+    if user is None or not getattr(user, 'is_authenticated', False):
+        return False
+    return _agent_name(getattr(user, 'username', ''))
+
+
+def is_listed_reviewer(user) -> bool:
+    if user is None or not getattr(user, 'is_authenticated', False) or is_agent_by_name(user):
+        return False
+    return _name(getattr(user, 'username', '')) in listed_reviewer_names()
 
 
 def holds_api_token(user) -> bool:
@@ -156,18 +196,63 @@ def holds_api_token(user) -> bool:
 def is_agent_account(user) -> bool:
     if user is None or not getattr(user, 'is_authenticated', False):
         return False
-    username = _name(getattr(user, 'username', ''))
-    from crm_app import agent_policy
-    return (
-        agent_policy.principal_for_username(username) is not None
-        or username in extra_agent_usernames()
-        or holds_api_token(user)
-    )
+    if is_agent_by_name(user):
+        return True
+    return holds_api_token(user) and not is_listed_reviewer(user)
 
 
-def can_read_activity_body(user, activity) -> bool:
-    """People read every body; an agent account only the bodies it recorded."""
-    return not is_agent_account(user) or activity.recorded_by_id == getattr(user, 'pk', None)
+def is_agent_accounts(users) -> dict:
+    """``{user.pk: is_agent_account(user)}`` for any number of accounts, in at most one query.
+
+    The same answer as is_agent_account for each account; only the token lookup
+    goes to the database, once for all the accounts that need it.
+    """
+    from rest_framework.authtoken.models import Token
+
+    accounts = [user for user in users if user is not None]
+    signed_in = [user for user in accounts if getattr(user, 'is_authenticated', False)]
+    need_token = [user.pk for user in signed_in if not is_agent_by_name(user) and not is_listed_reviewer(user)]
+    with_token = (set(Token.objects.filter(user_id__in=need_token).values_list('user_id', flat=True))
+                  if need_token else set())
+    answers = {user.pk: False for user in accounts}
+    for user in signed_in:
+        answers[user.pk] = is_agent_by_name(user) or user.pk in with_token
+    return answers
+
+
+def agent_account_ids(user_ids) -> set:
+    """The ids among ``user_ids`` that are agent accounts, in two queries."""
+    from django.contrib.auth import get_user_model
+    from rest_framework.authtoken.models import Token
+
+    ids = {pk for pk in user_ids if pk is not None}
+    if not ids:
+        return set()
+    users = {user.pk: user for user in get_user_model().objects.filter(pk__in=ids).only('pk', 'username')}
+    with_token = set(Token.objects.filter(user_id__in=ids).values_list('user_id', flat=True))
+    reviewers = listed_reviewer_names()
+    return {
+        pk for pk, user in users.items()
+        if _agent_name(user.username) or (pk in with_token and _name(user.username) not in reviewers)
+    }
+
+
+def can_read_activity_body(user, activity, recorder_is_agent=None) -> bool:
+    """Whether ``user`` may read this activity's body.
+
+    People read every body. An agent account reads the bodies it recorded, and
+    the bodies recorded by a capture job or a person unless the recorder marked
+    the activity ``restricted``. Bodies recorded by other agents stay hidden.
+    """
+    if not is_agent_account(user):
+        return True
+    if activity.recorded_by_id == getattr(user, 'pk', None):
+        return True
+    if activity.restricted or activity.recorded_by_id is None:
+        return False
+    if recorder_is_agent is None:
+        recorder_is_agent = is_agent_account(activity.recorded_by)
+    return not recorder_is_agent
 
 
 def recorded_via_for(request) -> str:
@@ -181,17 +266,22 @@ def recorded_via_for(request) -> str:
 def review_refusal(request, proposal=None) -> str | None:
     """Why this request may not decide on a proposal, or None.
 
-    A reviewer is a person signed in to the website (JWT or session) who is not
-    an agent account, did not make the proposal and did not record its evidence.
+    A reviewer is on the reviewer list, is not an agent by name, decides from a
+    website sign-in (JWT or session), did not make the proposal and did not record
+    its evidence.
     """
     user = getattr(request, 'user', None)
     if user is None or not getattr(user, 'is_authenticated', False):
         return 'Sign in to review proposals.'
-    if is_agent_account(user):
+    if is_agent_by_name(user):
         return 'Agent accounts cannot decide on proposals; a person reviews them on the website.'
     from crm_app.auth_observability import auth_method
     if auth_method(request) not in REVIEW_AUTH_METHODS:
         return 'Proposal decisions need a website sign-in (JWT or session), not an API token.'
+    if not listed_reviewer_names():
+        return NOT_CONFIGURED_DETAIL
+    if not is_listed_reviewer(user):
+        return NOT_LISTED_DETAIL
     if proposal is not None:
         if proposal.proposer_id is not None and proposal.proposer_id == user.pk:
             return 'A reviewer must be a different person from the proposer.'
@@ -199,5 +289,22 @@ def review_refusal(request, proposal=None) -> str | None:
         if activity is not None and activity.recorded_by_id == user.pk:
             return 'A reviewer must be a different person from the one who recorded the evidence.'
     return None
+
+
+def account_status(request) -> dict:
+    """What the calling account may do here, for the review page."""
+    user = getattr(request, 'user', None)
+    refusal = review_refusal(request)
+    agent = is_agent_account(user)
+    reason = None
+    if agent:
+        reason = 'agent name' if is_agent_by_name(user) else 'holds an API token and is not a listed reviewer'
+    return {
+        'you_can_review': refusal is None,
+        'review_refusal': refusal,
+        'treated_as_agent': agent,
+        'treated_as_agent_because': reason,
+        'reviewing_configured': bool(listed_reviewer_names()),
+    }
 
 

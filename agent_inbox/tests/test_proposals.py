@@ -471,13 +471,14 @@ def test_extra_agent_usernames_setting(person, company):
     assert response.status_code == 403 and response.json()['code'] == 'human_review_required'
 
 
-def test_a_person_with_an_api_token_cannot_decide(agent, person, company):
+def test_a_reviewer_decides_from_the_website_not_with_an_api_token(agent, person, company):
     proposal = propose(token_client(agent), **phone_body(company)).json()
     response = accept(token_client(person), proposal['id'])
     assert response.status_code == 403
     assert response.json()['code'] == 'human_review_required'
-    # Holding an API token makes the account an agent account, also on the website.
-    assert accept(jwt_client(person), proposal['id']).status_code == 403
+    assert 'website sign-in' in response.json()['detail']
+    # A listed reviewer who holds a token still reviews, from the website.
+    assert accept(jwt_client(person), proposal['id']).status_code == 200
 
 
 def test_agents_only_see_their_own_proposals(agent, other_agent, person, company, contact):

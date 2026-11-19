@@ -2522,6 +2522,7 @@ def log_activity(
     participants_json: str = '',
     source_ref: str = '',
     source_url: str = '',
+    restricted: bool = False,
 ) -> str:
     """Record one interaction with a customer on the company's timeline.
 
@@ -2549,6 +2550,7 @@ def log_activity(
             RFC 822 Message-ID header (e.g. <CAB12345@mail.example.com>), not a Gmail API
             id. One live activity per company and source_ref.
         source_url: Optional http(s) link to the source.
+        restricted: true when other agents must not read the body (default false).
 
     Returns: JSON {"ok": true, "id", "replayed", ...} or {"ok": false, "status", "code", "detail"}.
     Sends nothing.
@@ -2558,7 +2560,7 @@ def log_activity(
         summary=summary, idempotency_key=idempotency_key, source_system=source_system, body=body,
         contact_id=contact_id, contract_id=contract_id, quote_id=quote_id,
         opportunity_id=opportunity_id, participants_json=participants_json,
-        source_ref=source_ref, source_url=source_url,
+        source_ref=source_ref, source_url=source_url, restricted=restricted,
     )
 
 
@@ -2614,13 +2616,14 @@ def propose_change(
         patch_json: JSON object of field -> proposed value (strings or null).
         evidence_quote: Required for agents and AI. Copy the exact words from the source
             that support the change, verbatim: no paraphrase, no translation. When
-            activity_id points to your logged activity with a body, the quote must occur
+            activity_id points to a logged activity with a body, the quote must occur
             in it word for word (whitespace may differ) or the proposal is refused.
         target_collection, target_id: The record to change (company or contact UUID)
             for field_update and note. Leave target_id empty for new_contact and task.
         company_id: The company for new_contact and task (optional check otherwise).
-        activity_id: An activity you logged yourself that the evidence comes from.
-            Its source becomes the evidence source.
+        activity_id: The logged activity the evidence comes from: one you logged, or one a
+            capture job or a person recorded that is not restricted. Its source becomes
+            the evidence source.
         rationale: One or two sentences on why.
         evidence_source_system / evidence_source_ref / evidence_source_url /
             evidence_occurred_at: Where and when the source said it, when it is not a

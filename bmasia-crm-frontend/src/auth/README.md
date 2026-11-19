@@ -42,27 +42,11 @@ The authentication system provides:
 
 ## User Roles and Permissions
 
-### Role Hierarchy
-1. **Sales** - Basic CRM operations
-2. **Marketing** - Enhanced analytics and reporting
-3. **Tech Support** - Technical operations and system management
-4. **Admin** - Full system access
-
-### Permission Matrix
-
-| Permission | Sales | Marketing | Tech Support | Admin |
-|------------|-------|-----------|--------------|-------|
-| view_companies | ✅ | ✅ | ✅ | ✅ |
-| create_companies | ✅ | ✅ | ❌ | ✅ |
-| edit_companies | ✅ | ✅ | ✅ | ✅ |
-| delete_companies | ❌ | ❌ | ❌ | ✅ |
-| view_opportunities | ✅ | ✅ | ✅ | ✅ |
-| create_opportunities | ✅ | ✅ | ❌ | ✅ |
-| edit_opportunities | ✅ | ✅ | ❌ | ✅ |
-| view_analytics | ❌ | ✅ | ❌ | ✅ |
-| export_data | ❌ | ✅ | ❌ | ✅ |
-| manage_users | ❌ | ❌ | ❌ | ✅ |
-| view_audit_logs | ❌ | ❌ | ❌ | ✅ |
+The roles are the server's: `Admin`, `Sales`, `Finance`, `Tech`, `Music`
+(`User.role` in `crm_app/models.py`). Which role may open which page is one table,
+`MODULE_ROLES` in `src/utils/access.ts`. The router guards (`ProtectedRoute requiredModule`),
+the side menu, the global search and the helpers in `utils/permissions.ts` all read it.
+An account with no role sees Today and My profile, with a notice to ask an administrator.
 
 ## Usage Examples
 
@@ -115,14 +99,14 @@ import PermissionWrapper from '../components/PermissionWrapper';
 </PermissionWrapper>
 
 // Role-based content
-<PermissionWrapper role={['Admin', 'Marketing']}>
+<PermissionWrapper role={['Admin', 'Finance']}>
   <AdvancedFeatures />
 </PermissionWrapper>
 
 // Multiple conditions (all must be true)
 <PermissionWrapper
   permission="export_data"
-  role="Marketing"
+  role="Finance"
   requireAll={true}
 >
   <ExportButton />
@@ -256,18 +240,9 @@ REACT_APP_SESSION_WARNING=5
 
 ### Customizing Permissions
 
-Update `/utils/permissions.ts` to modify role permissions:
-
-```typescript
-export const ROLE_PERMISSIONS = {
-  Sales: [
-    'view_companies',
-    'create_companies',
-    // ... more permissions
-  ],
-  // ... other roles
-};
-```
+Edit `MODULE_ROLES` (pages), `ACTION_ROLES` (actions inside a page) and `MENU_PATH_MODULE`
+(menu entries) in `src/utils/access.ts`. The tests in `src/utils/access.test.tsx` check that
+the menu and the router agree for every role.
 
 ## Testing
 

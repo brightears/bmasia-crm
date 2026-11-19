@@ -5,6 +5,8 @@ import Invoices from './Invoices';
 import ApiService from '../services/api';
 
 jest.mock('react-quill-new', () => ({ __esModule: true, default: () => null }));
+let mockRole = 'Admin';
+jest.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u-1', role: mockRole, is_active: true } }) }));
 jest.mock('../services/authService', () => ({ __esModule: true, default: { getCurrentUser: () => null, isAuthenticated: () => true } }));
 jest.mock('../components/InvoiceForm', () => ({
   __esModule: true,
@@ -200,4 +202,23 @@ it('after a 409 from "Mark as Paid" the list is loaded again', async () => {
   await waitFor(() => expect(api.getInvoices.mock.calls.length).toBeGreaterThan(loadsBefore));
   expect(await within(dialog).findByText(/Already paid\. Nothing was changed or sent\./)).toBeInTheDocument();
   delete api.markInvoicePaid;
+});
+
+describe('payment actions follow the role table', () => {
+  afterEach(() => { mockRole = 'Admin'; });
+
+  it.each([
+    ['Admin', true],
+    ['Finance', true],
+    ['Sales', false],
+  ])('%s: QuickBooks export and Mark as Paid shown = %s', async (role, shown) => {
+    mockRole = role as string;
+    api.getInvoices.mockResolvedValue({ results: [invoice({ status: 'Sent' })], count: 1 });
+    renderAt('/invoices');
+    fireEvent.click(await screen.findByRole('button', { name: /more actions for invoice INV-TEST-1/i }));
+    const labels = within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent);
+    expect(labels.includes('Mark as Paid')).toBe(shown);
+    expect(labels).toContain('Download PDF');
+    expect(Boolean(screen.queryByRole('button', { name: 'Export to QuickBooks', hidden: true }))).toBe(shown);
+  });
 });

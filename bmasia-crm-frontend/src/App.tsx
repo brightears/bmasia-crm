@@ -4,6 +4,8 @@ import { Box, Container, CircularProgress, Typography, Paper } from '@mui/materi
 import { useAuth } from './contexts/AuthContext';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
+import NoRoleNotice from './components/NoRoleNotice';
+import { hasNoRole } from './utils/access';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Companies from './pages/Companies';
@@ -15,6 +17,7 @@ import OpportunityDetail from './pages/OpportunityDetail';
 import Tasks from './pages/Tasks';
 import Contracts from './pages/Contracts';
 import ContractDetail from './pages/ContractDetail';
+import Renewals from './pages/Renewals';
 import Invoices from './pages/Invoices';
 import Contacts from './pages/Contacts';
 import Quotes from './pages/Quotes';
@@ -73,7 +76,7 @@ const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => (
 
 // Protected Layout wrapper component
 const ProtectedLayout: React.FC = () => {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, user } = useAuth();
   const location = useLocation();
 
   // Wait until the saved session has been read. Deciding earlier sent every page reload
@@ -95,6 +98,7 @@ const ProtectedLayout: React.FC = () => {
   return (
     <Layout>
       <Container maxWidth="xl" sx={{ mt: 2, mb: 2 }}>
+        {hasNoRole(user) && location.pathname.startsWith('/today') && <NoRoleNotice compact />}
         <Outlet />
       </Container>
     </Layout>
@@ -194,7 +198,7 @@ function App() {
         <Route
           path="/prospect-sequences"
           element={
-            <ProtectedRoute requiredModule="opportunities">
+            <ProtectedRoute requiredModule="prospect-sequences">
               <ProspectSequences />
             </ProtectedRoute>
           }
@@ -240,6 +244,14 @@ function App() {
           }
         />
         <Route
+          path="/renewals"
+          element={
+            <ProtectedRoute requiredModule="contracts">
+              <Renewals />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/invoices"
           element={
             <ProtectedRoute requiredModule="invoices">
@@ -250,7 +262,7 @@ function App() {
         <Route
           path="/revenue"
           element={
-            <ProtectedRoute requiredModule="invoices">
+            <ProtectedRoute requiredModule="finance-reports">
               <RevenueDashboard />
             </ProtectedRoute>
           }
@@ -258,7 +270,7 @@ function App() {
         <Route
           path="/finance/ar"
           element={
-            <ProtectedRoute requiredModule="invoices">
+            <ProtectedRoute requiredModule="finance-reports">
               <AccountsReceivable />
             </ProtectedRoute>
           }
@@ -266,7 +278,7 @@ function App() {
         <Route
           path="/finance/ap"
           element={
-            <ProtectedRoute requiredModule="invoices">
+            <ProtectedRoute requiredModule="finance-reports">
               <AccountsPayable />
             </ProtectedRoute>
           }
@@ -274,7 +286,7 @@ function App() {
         <Route
           path="/finance/pl"
           element={
-            <ProtectedRoute requiredModule="invoices">
+            <ProtectedRoute requiredModule="finance-reports">
               <ProfitLoss />
             </ProtectedRoute>
           }
@@ -282,7 +294,7 @@ function App() {
         <Route
           path="/finance/cash-flow"
           element={
-            <ProtectedRoute requiredModule="invoices">
+            <ProtectedRoute requiredModule="finance-reports">
               <CashFlow />
             </ProtectedRoute>
           }
@@ -290,7 +302,7 @@ function App() {
         <Route
           path="/finance/balance-sheet"
           element={
-            <ProtectedRoute requiredModule="invoices">
+            <ProtectedRoute requiredModule="finance-reports">
               <BalanceSheet />
             </ProtectedRoute>
           }
@@ -298,7 +310,7 @@ function App() {
         <Route
           path="/finance/revenue-accrual"
           element={
-            <ProtectedRoute requiredModule="invoices">
+            <ProtectedRoute requiredModule="finance-reports">
               <RevenueAccrual />
             </ProtectedRoute>
           }
@@ -378,7 +390,7 @@ function App() {
         <Route
           path="/email-automations"
           element={
-            <ProtectedRoute requiredModule="campaigns">
+            <ProtectedRoute requiredModule="email-automations">
               <EmailAutomations />
             </ProtectedRoute>
           }
@@ -386,7 +398,7 @@ function App() {
         <Route
           path="/email-automations/:id"
           element={
-            <ProtectedRoute requiredModule="campaigns">
+            <ProtectedRoute requiredModule="email-automations">
               <SequenceDetail />
             </ProtectedRoute>
           }
@@ -558,8 +570,22 @@ function App() {
 
         {/* Profile route - accessible to all authenticated users */}
         <Route path="/profile" element={<MyProfile />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/contract-templates" element={<ContractTemplates />} />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute requiredModule="seasonal-dates">
+              <Settings />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/contract-templates"
+          element={
+            <ProtectedRoute requiredModule="contract-templates">
+              <ContractTemplates />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/system-status" element={<PlaceholderPage title="System Status" />} />
 
         {/* Mobile more page */}

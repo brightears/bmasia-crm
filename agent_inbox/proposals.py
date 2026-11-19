@@ -69,7 +69,10 @@ RECORD_CHANGED_DETAIL = (
 STALE_VIEW_DETAIL = (
     'This proposal changed since it was loaded. Nothing was done; reload it and decide again.'
 )
-ACTIVITY_NOT_USABLE_DETAIL = 'activity_id must be a live activity of this company that you recorded yourself'
+ACTIVITY_NOT_USABLE_DETAIL = (
+    'activity_id must be a live activity of this company whose body you may read: one you recorded, '
+    'or one recorded by a capture job or a person and not restricted'
+)
 # Refusals recorded so they count towards the daily cap.
 COUNTED_REFUSAL_STATUSES = frozenset({400, 403, 404, 409, 422})
 
@@ -110,11 +113,52 @@ def _iso(value):
 
 
 def expire_due():
-    """Mark open proposals past their expiry as expired. Returns the number changed."""
+    """Mark open proposals past their expiry as expired. Returns the number changed.
+
+    Run on writes (a new proposal) and by ``manage.py expire_change_proposals``,
+    never on a read: reads show a due proposal as expired (``effective_status``).
+    """
     now = timezone.now()
     return ChangeProposal.objects.filter(status=OPEN_STATUS, expires_at__lte=now).update(
         status='expired', updated_at=now,
     )
+
+
+def _is_due(proposal, now=None):
+    return bool(proposal.expires_at) and proposal.expires_at <= (now or timezone.now())
+
+
+def _store_expired_if_due(proposal):
+    """Store an open proposal that is past its expiry as expired. True when it was."""
+    if proposal.status == OPEN_STATUS and _is_due(proposal):
+        proposal.status = 'expired'
+        proposal.save()
+        return True
+    return False
+
+
+def _expired_error():
+    return ServiceError(409, 'expired', 'Proposal has expired', status='expired')
+
+
+def effective_status(proposal):
+    """The status a reader sees: an open proposal past its expiry reads as expired."""
+    if proposal.status == OPEN_STATUS and _is_due(proposal):
+        return 'expired'
+    return proposal.status
+
+
+def with_effective_status(queryset, statuses):
+    """Filter by the statuses a reader sees, without writing."""
+    from django.db.models import Q
+
+    now = timezone.now()
+    condition = Q(status__in=[s for s in statuses if s not in ('proposed', 'expired')])
+    if 'proposed' in statuses:
+        condition |= Q(status=OPEN_STATUS, expires_at__gt=now)
+    if 'expired' in statuses:
+        condition |= Q(status='expired') | Q(status=OPEN_STATUS, expires_at__lte=now)
+    return queryset.filter(condition)
 
 
 # ------------------------------------------------------------------ what the reviewer saw
@@ -127,6 +171,9 @@ def seen_version(proposal):
         'target': [proposal.target_collection, proposal.target_id], 'patch': proposal.patch,
         'current_values': proposal.current_values, 'expected_version': proposal.expected_version,
         'target_changed_at': _iso(proposal.target_changed_at),
+        # Every decision and reopening adds a history entry, so a view loaded
+        # before a rejection and reopening no longer matches.
+        'decisions': len(proposal.history or []),
     })[:40]
 
 
@@ -346,7 +393,11 @@ def _evidence(body, user, proposer_kind, company):
         if system not in [''] + systems:
             raise bad('evidence_source_system must be one of: ' + ', '.join(systems))
         ref = source_ref_field(body, 'evidence_source_ref', system, SOURCE_REF_MAX)
-        url = url_field(body, 'evidence_source_url', SOURCE_URL_MAX)
+        from agent_inbox.redaction import is_redacted_source
+        if ref and is_redacted_source(ref):
+            raise ServiceError(409, 'source_redacted',
+                               'This source was removed under the mail-capture rules and cannot be cited')
+        url = url_field(body, 'evidence_source_url', SOURCE_URL_MAX, system)
         occurred_at = (past_datetime(body['evidence_occurred_at'], 'evidence_occurred_at')
                        if body.get('evidence_occurred_at') not in (None, '') else None)
     verified = False
@@ -536,6 +587,48 @@ def _supersede_older(proposal):
             row.save(update_fields=['status', 'superseded_by', 'updated_at'])
 
 
+def refresh_snapshots(proposals):
+    """Re-read the target's values for open update proposals whose target changed since.
+
+    Reads only each target's version (one query per collection). A proposal is
+    written only when its target's version differs from the stored one, and then
+    with a conditional update, so concurrent reads cannot overwrite each other or
+    a decision in progress. Its seen_version changes with it.
+    """
+    rows = [p for p in proposals if p.status == OPEN_STATUS and p.kind in policy.UPDATE_KINDS and p.target_id]
+    by_collection = {}
+    for proposal in rows:
+        by_collection.setdefault(proposal.target_collection, []).append(proposal)
+    for collection, group in by_collection.items():
+        model, serializer_class = _collection(collection)
+        versions = dict(model.objects.filter(pk__in={p.target_id for p in group}).values_list('pk', 'updated_at'))
+        for proposal in group:
+            version = versions.get(_uuid_or_none(proposal.target_id))
+            if version is None or _same_version(version.isoformat(), proposal.expected_version):
+                continue
+            instance = model.objects.filter(pk=proposal.target_id).first()
+            if instance is None:
+                continue
+            current = _plain(serializer_class(instance).data)
+            values = {key: current.get(key) for key in proposal.patch}
+            new_version = str(current.get('updated_at') or '')
+            now = timezone.now()
+            updated = ChangeProposal.objects.filter(
+                pk=proposal.pk, status=OPEN_STATUS, expected_version=proposal.expected_version,
+            ).update(current_values=values, expected_version=new_version, target_changed_at=now, updated_at=now)
+            if updated:
+                proposal.current_values, proposal.expected_version = values, new_version
+                proposal.target_changed_at = proposal.updated_at = now
+
+
+def _uuid_or_none(value):
+    from uuid import UUID
+    try:
+        return UUID(str(value))
+    except ValueError:
+        return None
+
+
 def conflicts_for(proposals):
     """For each open field update: the other open field updates of the same record that share a field."""
     rows = [p for p in proposals if p.status == OPEN_STATUS and p.kind == 'field_update' and p.target_id]
@@ -573,8 +666,14 @@ def _require_person(request, proposal=None):
         raise _not_enabled()
     refusal = policy.review_refusal(request, proposal)
     if refusal:
-        code = 'reviewer_is_party' if proposal is not None and policy.review_refusal(request) is None \
-            else 'human_review_required'
+        if refusal == policy.NOT_CONFIGURED_DETAIL:
+            code = 'review_not_configured'
+        elif refusal == policy.NOT_LISTED_DETAIL:
+            code = 'not_a_reviewer'
+        elif proposal is not None and policy.review_refusal(request) is None:
+            code = 'reviewer_is_party'
+        else:
+            code = 'human_review_required'
         raise ServiceError(403, code, refusal)
 
 
@@ -693,13 +792,24 @@ def _keep_error(proposal, error):
     return _Refusal(error)
 
 
+NEW_CONTACT_INACTIVE_NOTE = (
+    'Contact created inactive: activate it on the contact page once you have checked it. '
+    'Until then it receives no email.'
+)
+
+
 def _new_contact_data(company_id, applied):
-    """A contact created from a proposal receives no automated or document email and is not primary."""
+    """A contact created from a proposal is inactive, receives no email and is not primary.
+
+    The CRM's default-recipient choices pick active contacts only (the suspended
+    prospect sequences' last fallback is the one exception), so nothing is sent to
+    it until a person has checked it and activated it.
+    """
     from crm_app.serializers import ContactSerializer
 
     flags = {name: False for name, field in ContactSerializer().fields.items()
              if name.startswith('receives_') and not field.read_only}
-    return {'company': str(company_id), **applied, **flags, 'is_primary': False}
+    return {'company': str(company_id), **applied, **flags, 'is_primary': False, 'is_active': False}
 
 
 def _apply(request, proposal, applied):
@@ -770,7 +880,7 @@ def _apply(request, proposal, applied):
     if proposal.kind == 'new_contact':
         # Model fields the serializer does not expose follow the same rule.
         flags = {field.name: False for field in Contact._meta.concrete_fields if field.name.startswith('receives_')}
-        Contact.objects.filter(pk=record_id).update(**flags, is_primary=False)
+        Contact.objects.filter(pk=record_id).update(**flags, is_primary=False, is_active=False)
     audit = _tag_audit(model.__name__, record_id, before, proposal, request)
     return record_id, audit, detail
 
@@ -789,10 +899,8 @@ def accept(request, proposal_id, body, *, with_edits=False):
         _require_person(request, proposal)
         _check_seen(proposal, body)
         try:
-            if proposal.expires_at <= timezone.now():
-                proposal.status = 'expired'
-                proposal.save()
-                raise _Refusal(ServiceError(409, 'expired', 'Proposal has expired', status='expired'))
+            if _store_expired_if_due(proposal):
+                raise _Refusal(_expired_error())
             applied = _final_patch(proposal, body, with_edits)
             # The allowlist is checked again: it may have narrowed since the proposal was made.
             _check_fields(proposal.kind, proposal.target_collection, applied)
@@ -825,10 +933,15 @@ def reject(request, proposal_id, body):
             raise ServiceError(409, 'not_open', f'Proposal is {proposal.status}', status=proposal.status)
         _require_person(request, proposal)
         _check_seen(proposal, body)
-        proposal.status = 'rejected'
-        _mark_decided(proposal, request, reason)
-        _history(proposal, 'rejected', request, reason)
-        proposal.save()
+        # Like accept: a proposal past its expiry is stored as expired, not rejected.
+        expired = _store_expired_if_due(proposal)
+        if not expired:
+            proposal.status = 'rejected'
+            _mark_decided(proposal, request, reason)
+            _history(proposal, 'rejected', request, reason)
+            proposal.save()
+    if expired:
+        raise _expired_error()
     return proposal
 
 
@@ -837,23 +950,34 @@ def reopen(request, proposal_id, body):
     _require_person(request)
     strict_object(body, {'note', 'seen_version'}, required=('note', 'seen_version'))
     note = text_field(body, 'note', DECISION_NOTE_MAX, required=True, multiline=True)
+    expired = False
     with transaction.atomic():
         proposal = _locked(proposal_id)
-        if proposal.status != 'rejected':
-            raise ServiceError(409, 'not_rejected', f'Only a rejected proposal can be reopened; this one is '
-                                                    f'{proposal.status}', status=proposal.status)
-        _require_person(request, proposal)
-        _check_seen(proposal, body)
-        if ChangeProposal.objects.filter(fingerprint=proposal.fingerprint, status=OPEN_STATUS).exists():
-            raise ServiceError(409, 'duplicate_open', 'The same change is already waiting for review')
-        _history(proposal, 'reopened', request, note)
-        proposal.status = OPEN_STATUS
-        proposal.reviewer = None
-        proposal.reviewer_username = ''
-        proposal.reviewed_at = None
-        proposal.decision_note = ''
-        proposal.expires_at = timezone.now() + timedelta(days=policy.proposal_expiry_days())
-        proposal.save()
+        if proposal.status == OPEN_STATUS and _is_due(proposal):
+            # Reads show it as expired: store that and refuse, as accept and reject do.
+            _require_person(request, proposal)
+            expired = _store_expired_if_due(proposal)
+        else:
+            if proposal.status != 'rejected':
+                raise ServiceError(409, 'not_rejected', f'Only a rejected proposal can be reopened; this one is '
+                                                        f'{proposal.status}', status=proposal.status)
+            _require_person(request, proposal)
+            _check_seen(proposal, body)
+            # An open twin past its expiry no longer counts as waiting for review.
+            twins = ChangeProposal.objects.select_for_update().filter(
+                fingerprint=proposal.fingerprint, status=OPEN_STATUS)
+            if [twin for twin in twins if not _store_expired_if_due(twin)]:
+                raise ServiceError(409, 'duplicate_open', 'The same change is already waiting for review')
+            _history(proposal, 'reopened', request, note)
+            proposal.status = OPEN_STATUS
+            proposal.reviewer = None
+            proposal.reviewer_username = ''
+            proposal.reviewed_at = None
+            proposal.decision_note = ''
+            proposal.expires_at = timezone.now() + timedelta(days=policy.proposal_expiry_days())
+            proposal.save()
+    if expired:
+        raise _expired_error()
     return proposal
 
 
@@ -886,6 +1010,9 @@ def bulk_reject(request, body):
             if seen != seen_version(proposal):
                 skipped.append({'id': proposal_id, 'status': proposal.status, 'code': 'stale_view',
                                 'seen_version': seen_version(proposal)})
+                continue
+            if _store_expired_if_due(proposal):
+                skipped.append({'id': proposal_id, 'status': 'expired', 'code': 'expired'})
                 continue
             proposal.status = 'rejected'
             _mark_decided(proposal, request, reason)

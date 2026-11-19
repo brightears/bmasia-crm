@@ -64,6 +64,12 @@ def test_company_without_history_is_still_deleted(person, other_company):
     assert not Company.objects.filter(pk=other_company.pk).exists()
 
 
+def test_other_requests_pass_through(person, company):
+    client = session_client(person)
+    assert client.get(f'/api/v1/companies/{company.pk}/').status_code == 200
+    assert client.patch(f'/api/v1/companies/{company.pk}/', {'city': 'Hua Hin'}, format='json').status_code == 200
+
+
 def test_mcp_delete_keeps_the_company_and_its_log(agent, company):
     from types import SimpleNamespace
 

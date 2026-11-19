@@ -1,0 +1,26 @@
+{
+  "history_id": "7000",
+  "labels": [],
+  "messages": [
+    {
+      "eml": "01-contact-inbound.eml",
+      "id": "o01",
+      "threadId": "ot1"
+    },
+    {
+      "eml": "10-reply-ops.eml",
+      "id": "o10",
+      "threadId": "ot1",
+      "labelIds": [
+        "SENT"
+      ]
+    }
+  ],
+  "history": [
+    {
+      "messagesAdded": [
+        "o10"
+      ]
+    }
+  ]
+}

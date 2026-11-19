@@ -4,6 +4,7 @@ Tests all 4 ViewSet actions for contract-zone integration.
 """
 import pytest
 from datetime import date, timedelta
+from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework import status
 from django.contrib.auth import get_user_model
@@ -503,7 +504,7 @@ class TestContractRemoveZoneAPI:
         assert response.status_code == status.HTTP_200_OK
 
         contract_zone.refresh_from_db()
-        assert contract_zone.end_date == date.today()
+        assert contract_zone.end_date == timezone.localdate()
 
     def test_zone_remains_in_database(self, api_client):
         """Test zone remains in database (soft delete, not hard delete)"""
