@@ -198,6 +198,32 @@ def test_an_unchanged_encrypted_value_is_written_back_as_stored():
         assert _raw(user) == stored
 
 
+def test_unchanged_legacy_value_is_encrypted_on_the_next_full_save_only_with_a_usable_key(monkeypatch):
+    """Gradual encryption: with a usable key a plain value stored before encryption is encrypted
+    by the user's next full save; with the built-in key in production it is written back exactly."""
+    key = _key()
+    with override_settings(FIELD_ENCRYPTION_KEY=key):
+        user = _user()
+        _write_raw(user, PLAIN)
+        fresh = User.objects.get(pk=user.pk)
+        fresh.first_name = 'Saved'
+        fresh.save()
+        stored = _raw(user)
+        assert stored != PLAIN
+        assert Fernet(key).decrypt(stored.encode()).decode() == PLAIN
+        assert User.objects.get(pk=user.pk).smtp_password == PLAIN
+
+    from bmasia_crm import settings as project_settings
+    other = _user('other')
+    _write_raw(other, PLAIN)
+    monkeypatch.setenv('RENDER', 'true')
+    with override_settings(FIELD_ENCRYPTION_KEY=project_settings._BUILTIN_FIELD_ENCRYPTION_KEY):
+        fresh = User.objects.get(pk=other.pk)
+        fresh.first_name = 'Saved'
+        fresh.save()
+        assert _raw(other) == PLAIN
+
+
 # --- N3 -------------------------------------------------------------------------------------
 
 @pytest.fixture
