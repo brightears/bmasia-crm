@@ -5,7 +5,6 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import ReviewQueue from './ReviewQueue';
 import reviewApi, { ChangeProposal } from '../../services/reviewApi';
 import { makeProposal, settingsOn } from './testFixtures';
-import { resetReviewSettingsCache } from './useReviewStatus';
 
 // The look-up limit, made small so the "over the limit" path can be reached with a few cards.
 jest.mock('./reviewModel', () => ({ ...jest.requireActual('./reviewModel'), LOOKUP_CAP: 2 }));
