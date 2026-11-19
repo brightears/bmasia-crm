@@ -93,7 +93,14 @@ const errorList = (body: Record<string, any>): string[] => {
 };
 
 export type ErrorOutcome =
-  | { kind: 'notice'; notice: CardNotice; refresh: boolean; snapshot?: ProposalSnapshot }
+  | {
+      kind: 'notice';
+      notice: CardNotice;
+      refresh: boolean;
+      snapshot?: ProposalSnapshot;
+      /** The server refused the inactive acknowledgement as an unknown key: it cannot change inactive records. */
+      inactiveUnsupported?: boolean;
+    }
   | { kind: 'page_read_only'; reason: string }
   | { kind: 'card_read_only'; reason: string }
   | { kind: 'switched_off' };
@@ -127,14 +134,37 @@ export const outcomeOf = (p: ChangeProposal, error: ReviewApiError): ErrorOutcom
             text: `Nothing was done: this suggestion changed since it was loaded (${snap ? whatChanged(p, snap) : 'it was updated'}). Look at it again and decide.`,
           },
         };
-      case 'record_changed':
+      case 'record_changed': {
+        // Later backends say what changed (for example that the record became inactive).
+        const reason = typeof error.body?.target_state_reason === 'string' ? error.body.target_state_reason.trim() : '';
         return {
           kind: 'notice',
           refresh: true,
           snapshot: snap,
           notice: {
             tone: 'warning',
-            text: 'Nothing was applied: the record changed after this was suggested. The current values were just re-read; compare them and decide again.',
+            text: reason
+              ? `Nothing was applied: the record changed after this was suggested. ${reason}`
+              : 'Nothing was applied: the record changed after this was suggested. The current values were just re-read; compare them and decide again.',
+          },
+        };
+      }
+      case 'not_acceptable':
+        return {
+          kind: 'notice',
+          refresh: true,
+          snapshot: snap,
+          notice: { tone: 'warning', text: `Nothing was applied. ${detail}` },
+        };
+      case 'needs_acknowledgement':
+        // The server's text names the request flag; the reviewer is told what to do on this page instead.
+        return {
+          kind: 'notice',
+          refresh: true,
+          snapshot: snap,
+          notice: {
+            tone: 'warning',
+            text: 'Nothing was applied. Tick the box to apply the change to this inactive record.',
           },
         };
       case 'not_open':
@@ -161,6 +191,18 @@ export const outcomeOf = (p: ChangeProposal, error: ReviewApiError): ErrorOutcom
     }
     if (error.code === 'reviewer_is_party') return { kind: 'card_read_only', reason: detail };
     return { kind: 'notice', refresh: false, notice: { tone: 'error', text: detail } };
+  }
+  if (error.status === 400 && /unknown keys?:.*acknowledge_inactive/i.test(detail)) {
+    // A backend from before inactive records could be changed with an acknowledgement.
+    return {
+      kind: 'notice',
+      refresh: true,
+      inactiveUnsupported: true,
+      notice: {
+        tone: 'warning',
+        text: 'Nothing was applied: this server cannot apply changes to inactive records yet. Activate the record first.',
+      },
+    };
   }
   if (error.status === 422) {
     const isApply = error.code === 'apply_refused';
