@@ -81,7 +81,10 @@ def test_agents_cannot_move_an_invoice_back_to_draft():
     assert invoice.status == 'Sent', out
 
 
-def test_bulk_update_status_cannot_un_pay(api):
+def test_bulk_update_status_cannot_un_pay(api, monkeypatch):
+    from crm_app.views import InvoiceViewSet
+    # Bulk operations are offered per record type; enable this one to check the rule it would apply.
+    monkeypatch.setattr(InvoiceViewSet, 'bulk_allowed', frozenset({'update_status'}))
     invoice = _invoice('Paid', 'INV-MOVE-BULK')
     response = api.post('/api/v1/invoices/bulk_operations/',
                         {'action': 'update_status', 'ids': [str(invoice.pk)], 'data': {'status': 'Sent'}},

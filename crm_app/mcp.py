@@ -563,6 +563,25 @@ def describe_collection(name: str) -> str:
 
 import json as _json
 
+# Configuration collections: written here only by the principal crm_app.agent_policy allows
+# (Cira for contract templates), as for the same write through REST.
+_CONFIGURATION_COLLECTIONS = frozenset({'contracttemplate'})
+
+
+def _configuration_write_refusal(collection, method):
+    if collection not in _CONFIGURATION_COLLECTIONS:
+        return None
+    user = _agent_gate._current_user()
+    if user is None:  # an in-process call, not an MCP request
+        return None
+    request = _mcp_audit.current_request()
+    from crm_app.request_policy import agent_may_write
+    if agent_may_write(request, collection, method):
+        return None
+    return (f"Error: {collection} records are changed by a person signed in to the CRM website, "
+            "or by the agent that maintains them; this account may read them only.")
+
+
 _COLLECTION_MAP = {
     'company': (Company, 'crm_app.serializers.CompanySerializer'),
     'contact': (Contact, 'crm_app.serializers.ContactSerializer'),
@@ -1206,6 +1225,9 @@ def create_record(collection: str, data: str) -> str:
     if collection not in _COLLECTION_MAP:
         return f"Error: Unknown collection '{collection}'. Valid: {', '.join(sorted(_COLLECTION_MAP))}"
     _agent_gate.observe(tool='create_record', verb='create', collection=collection, data=data)
+    refusal = _configuration_write_refusal(collection, 'POST')
+    if refusal:
+        return refusal
 
     try:
         fields = _json.loads(data)
@@ -1335,6 +1357,9 @@ def update_record(
     _agent_gate.observe(tool='update_record', verb='update', collection=collection, record_id=id,
                         data=data, expected_version=expected_version, expected_values=expected_values,
                         authorization_context=authorization_context)
+    refusal = _configuration_write_refusal(collection, 'PATCH')
+    if refusal:
+        return refusal
 
     # The original three-argument API remains deliberately unchanged. The
     # optimistic path is opt-in: the same writes plus a version and
@@ -2139,6 +2164,11 @@ def delete_record(collection: str, id: str) -> str:
     except model.DoesNotExist:
         return f"Error: {collection} with ID '{id}' not found."
 
+    from crm_app.services.delete_guards import mcp_record_refusal
+    refusal = mcp_record_refusal(instance, collection)  # the same rules as REST deletes
+    if refusal:
+        return refusal
+
     name = getattr(instance, 'name', None) or getattr(instance, 'contract_number', None) or str(id)
     deleted = _mcp_audit.summary(instance)
     with transaction.atomic():
@@ -2655,7 +2685,9 @@ def list_proposals(status: str = '', batch_key: str = '', since: str = '', limit
 
     Use it to see whether your proposals were accepted, edited or rejected (with the
     reviewer's note), so you do not raise a rejected change again and can learn
-    which evidence reviewers accept.
+    which evidence reviewers accept. Each item also carries target_state (present,
+    inactive, moved, missing; for a new contact duplicate or no_duplicate) and
+    target_state_reason, as last checked by a reviewer; reading here changes nothing.
 
     Args:
         status: Optional comma list: proposed, accepted, edited, rejected, expired,

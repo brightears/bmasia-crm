@@ -130,14 +130,182 @@ def test_caller_mistakes_get_the_same_reply_and_one_warning_line(client, records
         assert json.loads(body)['result']['isError'] is True, name
 
 
+def _warnings(records):
+    return [r.getMessage() for r in records if r.name == 'crm_app.mcp_query_help']
+
+
 def test_the_log_line_names_the_unknown_field_and_no_value(client, records):
     call(client, 'contract', [{'$match': {'number_of_zones': 'secret-looking-value'}}])
-    (line,) = [r.getMessage() for r in records if r.name == 'crm_app.mcp_query_help']
-    assert line == ("query_data_collections refused a query: unknown_field by mistakes-agent "
-                    "on collection 'contract' (number_of_zones)")
+    (line,) = _warnings(records)
+    assert line == ("query_data_collections refused a query: kind=unknown_field principal='mistakes-agent' "
+                    "collection='contract' name='number_of_zones'")
+
+
+def test_a_mistake_recognised_by_type_carries_the_type_and_the_site(client, records):
+    from crm_app.mcp_query_help import _VALIDATION_SITES
+
     call(client, 'company', [{'$match': {'id': 'secret-looking-value'}}])
-    line = [r.getMessage() for r in records if r.name == 'crm_app.mcp_query_help'][-1]
-    assert 'secret-looking-value' not in line and line.endswith('(ValidationError)')
+    (line,) = _warnings(records)
+    assert 'secret-looking-value' not in line
+    prefix = ("query_data_collections refused a query: kind=invalid_value principal='mistakes-agent' "
+              "collection='company' error=ValidationError site=django.db.models.fields.to_python:")
+    assert line.startswith(prefix) and line[len(prefix):].isdigit(), line
+    for name, (collection, pipeline) in MISTAKES.items():
+        records.clear()
+        call(client, collection, pipeline)
+        (line,) = _warnings(records)
+        if ' error=' in line:
+            site = line.split(' site=')[1].rsplit(':', 1)[0]
+            assert tuple(site.rsplit('.', 1)) in _VALIDATION_SITES, (name, line)
+
+
+INJECTIONS = [
+    'zz\nTraceback (most recent call last):\n  File "forged.py", line 1',
+    'zz\r\nTraceback (most recent call last):',
+    *[f'zz{separator}Traceback (most recent call last):' for separator in
+      ('\r', '\x0b', '\x0c', '\x1c', '\x1d', '\x1e', '\x85', ' ', ' ', '\x00', '\x1b[2K', '\x7f')],
+    'zz‮Traceback (most recent call last):',
+]
+
+
+def _assert_one_safe_line(line):
+    assert len(line.splitlines()) == 1 and not any(ch in line for ch in '\n\r\x0b\x0c\x1c\x1d\x1e\x85  ')
+    assert not any(0 <= ord(ch) < 0x20 or ord(ch) == 0x7f or ch in '  ‮' for ch in line), line
+    assert not line.startswith('Traceback')
+
+
+@pytest.mark.parametrize('name', INJECTIONS)
+def test_names_cannot_break_or_forge_log_lines(client, records, name):
+    for collection, pipeline in [
+        ('company', [{'$project': {name: 1}}]),
+        ('company', [{'$match': {name: 1}}]),
+        ('company', [{'$sort': {name: 1}}]),
+        (name, []),
+    ]:
+        records.clear()
+        call(client, collection, pipeline)
+        (line,) = _warnings(records)
+        _assert_one_safe_line(line)
+
+
+def test_long_names_are_cut_with_a_marker(client, records):
+    call(client, 'f' * 20000, [{'$project': {'g' * 20000: 1}}])
+    (line,) = _warnings(records)
+    assert line == ("query_data_collections refused a query: kind=unknown_collection principal='mistakes-agent' "
+                    f"collection='{'f' * 80}'...(+19920 chars) name='{'f' * 80}'...(+19920 chars)")
+
+
+def test_loggable_escapes_every_line_break_and_control_character():
+    from crm_app.mcp_query_help import loggable
+
+    every = ''.join(chr(c) for c in list(range(0x20)) + [0x7f, 0x85, 0x2028, 0x2029, 0x202e])
+    shown = loggable('a' + every + 'b', limit=1000)
+    assert shown.startswith("'a") and shown.endswith("b'")
+    assert all(0x20 <= ord(ch) < 0x7f for ch in shown), shown
+    assert loggable('x' * 81) == f"'{'x' * 80}'...(+1 chars)"
+    assert loggable(['not', 'a', 'string']) == '"[\'not\', \'a\', \'string\']"'
+
+
+# ------------------------------------------------------------------ faults stay loud
+
+
+def _errors_with_traceback(records):
+    return [r for r in records if r.levelno >= logging.ERROR and r.exc_info]
+
+
+def test_an_invalid_regex_is_a_database_error_and_keeps_its_traceback(client, records):
+    from django.db import DatabaseError
+
+    response = call(client, 'company', [{'$match': {'name__regex': '('}}])
+    assert response.json()['result']['isError'] is True
+    errors = _errors_with_traceback(records)
+    assert errors and isinstance(errors[0].exc_info[1], DatabaseError)
+    assert not _warnings(records)
+
+
+def test_a_nul_character_rejected_by_postgres_keeps_its_traceback(client, records):
+    from django.db import connection
+
+    if connection.vendor != 'postgresql':
+        pytest.skip('only PostgreSQL refuses NUL characters')
+    response = call(client, 'company', [{'$match': {'name': 'a\x00b'}}])
+    assert response.json()['result']['isError'] is True
+    assert _errors_with_traceback(records) and not _warnings(records)
+
+
+def test_a_programming_error_from_the_database_keeps_its_traceback(client, records, monkeypatch):
+    from django.db import ProgrammingError
+    from django.db.backends import utils
+
+    original = utils.CursorWrapper._execute
+
+    def broken(self, sql, params, *args):
+        if 'FROM "crm_app_company"' in sql:  # only the tool's own query; the token check still runs
+            raise ProgrammingError('relation "crm_app_company" does not exist')
+        return original(self, sql, params, *args)
+
+    monkeypatch.setattr(utils.CursorWrapper, '_execute', broken)
+    response = call(client, 'company', [])
+    assert response.json()['result']['isError'] is True
+    errors = _errors_with_traceback(records)
+    assert errors and isinstance(errors[0].exc_info[1], ProgrammingError)
+    assert not _warnings(records)
+
+
+def test_a_type_error_in_the_renderer_keeps_its_traceback(client, records, monkeypatch):
+    from mcp_server import query_tool
+    from rest_framework import renderers
+
+    class Broken(renderers.JSONRenderer):
+        def render(self, data, *args, **kwargs):
+            raise TypeError('Object of type Decimal is not JSON serializable')
+
+    # Only the renderer the query tool uses for its result, not the one that answers HTTP.
+    monkeypatch.setitem(query_tool._output_formats, 'json', Broken)
+    response = call(client, 'company', [{'$project': {'name': 1}}])
+    assert response.json()['result']['isError'] is True
+    errors = _errors_with_traceback(records)
+    assert errors and isinstance(errors[0].exc_info[1], TypeError)
+    assert not _warnings(records)
+
+
+def _raised_at(module, function, exc, inner=None):
+    """An exception whose innermost frame is `function` in `module` (or in `inner`)."""
+    namespace = {'__name__': module, 'exc': exc, 'inner': inner}
+    exec(compile(f'def {function}():\n    if inner:\n        inner()\n    raise exc\n', f'<{module}>', 'exec'),
+         namespace)
+    try:
+        namespace[function]()
+    except BaseException as raised:  # noqa: BLE001 - returned for inspection
+        return raised
+    raise AssertionError('nothing raised')
+
+
+def test_only_the_listed_types_at_the_listed_sites_are_caller_mistakes():
+    from django.core.exceptions import ValidationError
+    from django.db import DataError, DatabaseError, OperationalError, ProgrammingError
+
+    from crm_app.mcp_query_help import caller_input_kind
+
+    library = ('mcp_server.query_tool', 'apply_json_mango_query')
+    for exc in (ValueError('x'), TypeError('x'), AttributeError('x'), KeyError('x'), ValidationError('x')):
+        assert caller_input_kind(_raised_at(*library, exc)) == 'invalid_pipeline', exc
+    # The type check: database errors and other types are faults even at a validation site.
+    for exc in (OperationalError('statement timeout'), ProgrammingError('x'), DataError('x'),
+                DatabaseError('x'), RuntimeError('x'), LookupError('x'), Exception('x')):
+        assert caller_input_kind(_raised_at(*library, exc)) is None, exc
+    # The innermost frame decides: raised in our code while the library is on the stack.
+    def ours():
+        raise TypeError('renderer bug')
+    assert caller_input_kind(_raised_at(*library, None, inner=ours)) is None
+    # Only the listed functions: QuerySet slicing, not any QuerySet method.
+    assert caller_input_kind(_raised_at('django.db.models.query', '__getitem__', ValueError('x'))) == \
+        'invalid_skip_or_limit'
+    for module, function in [('django.db.models.query', 'filter'), ('django.db.models.query', '_fetch_all'),
+                             ('mcp_server.query_tool', '_postprocess_projection'),
+                             ('django.db.models.fields', 'get_db_prep_value'),
+                             ('django.db.backends.utils', '_execute'), ('crm_app.mcp_query_help', 'validate')]:
+        assert caller_input_kind(_raised_at(module, function, ValueError('x'))) is None, (module, function)
 
 
 def test_a_fault_inside_the_tool_still_logs_its_traceback(client, records, monkeypatch):
@@ -184,8 +352,9 @@ def test_in_process_callers_still_get_the_exception():
 
 # Hints added with this change for names agents asked for (production logs, 18-19 Nov).
 NEW_HINTS = {
-    ('contract', 'number_of_zones'): 'count contractservicelocation rows by contract (one per zone) or zone rows '
-                                     'by company; company.contracted_zone_count is the contracted count',
+    ('contract', 'number_of_zones'): 'count contractservicelocation rows by contract (one per zone or custom '
+                                     'item) or zone rows by company; company.contracted_zone_count is the '
+                                     'contracted count',
     ('company', 'currency'): 'currency is set on each contract, quote and invoice; a company has billing_entity',
     ('company', 'primary_contact'): 'query contact with this company and is_primary true',
     ('contract', 'contract_documents'): "Contract documents are a separate collection: query contractdocument "

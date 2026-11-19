@@ -60,47 +60,90 @@ class QueryInputError(ValueError):
         self.name = name
 
 
-# Where the library and Django raise when the caller's pipeline is malformed or a value
-# does not fit (innermost frame of the exception). (path parts, function or None).
-_CALLER_INPUT_ORIGINS = (
-    (('mcp_server', 'query_tool.py'), None, 'invalid_pipeline'),        # the library reading the stages
-    (('django', 'db', 'models', 'fields'), None, 'invalid_value'),      # a value that does not fit the column
-    (('django', 'db', 'models', 'lookups.py'), None, 'invalid_value'),  # an operator value of the wrong shape
-    (('django', 'db', 'models', 'query.py'), '__getitem__', 'invalid_skip_or_limit'),
-)
+# The known validation sites: the functions (module, name) where the library and Django
+# raise when the caller's pipeline is malformed or a value does not fit. An exception of
+# one of _CALLER_INPUT_TYPES counts as a caller mistake only when its INNERMOST frame is
+# one of these; anything else, database errors included, is a fault and keeps its traceback.
+_VALIDATION_SITES = {
+    # the library reading the stages (its raise sites, and the dict/str access on a stage)
+    ('mcp_server.query_tool', 'apply_json_mango_query'): 'invalid_pipeline',
+    ('mcp_server.query_tool', '_parse_match'): 'invalid_pipeline',
+    ('mcp_server.query_tool', '_translate_field'): 'invalid_pipeline',
+    ('mcp_server.query_tool', '_interpret_projection'): 'invalid_pipeline',
+    ('mcp_server.query_tool', '_validate_lookup'): 'invalid_pipeline',
+    ('mcp_server.query_tool', '_resolve_model_from_path'): 'invalid_pipeline',
+    # Django converting a filter value for a column, or the value of an operator
+    ('django.db.models.fields', 'to_python'): 'invalid_value',
+    ('django.db.models.fields', 'get_prep_value'): 'invalid_value',
+    ('django.db.models.lookups', 'get_prep_lookup'): 'invalid_value',
+    # Django slicing for $skip / $limit
+    ('django.db.models.query', '__getitem__'): 'invalid_skip_or_limit',
+}
 _CALLER_INPUT_TYPES = (ValueError, TypeError, AttributeError, KeyError)
+
+
+def innermost_site(exc):
+    """(module, function, line) of the frame that raised exc, or None."""
+    tb = exc.__traceback__
+    if tb is None:
+        return None
+    while tb.tb_next is not None:
+        tb = tb.tb_next
+    frame = tb.tb_frame
+    return frame.f_globals.get('__name__', '?'), frame.f_code.co_name, tb.tb_lineno
 
 
 def caller_input_kind(exc):
     """The kind of caller mistake an exception from the query tool is, or None for a fault.
 
-    Our own refusals are QueryInputError. Otherwise only these exception types count, and
-    only when raised where the library parses the pipeline or where Django converts a value
-    or a $skip/$limit; anything else (database errors included) is treated as a fault.
+    Our own refusals are QueryInputError. Otherwise only _CALLER_INPUT_TYPES (and Django's
+    ValidationError) count, and only when raised at one of _VALIDATION_SITES.
     """
-    import traceback
-
     from django.core.exceptions import ValidationError
 
     if isinstance(exc, QueryInputError):
         return exc.kind
     if not isinstance(exc, _CALLER_INPUT_TYPES + (ValidationError,)):
         return None
-    frames = traceback.extract_tb(exc.__traceback__)
-    if not frames:
-        return None
-    parts = tuple(re.split(r'[\\/]', frames[-1].filename))
-    for origin, function, kind in _CALLER_INPUT_ORIGINS:
-        n = len(origin)
-        if any(parts[i:i + n] == origin for i in range(len(parts) - n + 1)) and \
-                function in (None, frames[-1].name):
-            return kind
-    return None
+    site = innermost_site(exc)
+    return _VALIDATION_SITES.get(site[:2]) if site else None
+
+
+def loggable(value, limit=80):
+    """A caller-supplied name, safe for a one-line log entry.
+
+    Quoted like repr(), which escapes every character that is not printable: control
+    characters, DEL, U+0085, U+2028/2029 and the other line and paragraph separators, and
+    format characters such as bidi overrides, so the result never breaks the line. Longer
+    names are cut at `limit` characters with a marker saying how many were left out.
+    """
+    text = value if isinstance(value, str) else repr(value)
+    shown = repr(text[:limit])
+    if len(text) > limit:
+        shown += f'...(+{len(text) - limit} chars)'
+    return shown
 
 
 def _principal(request):
     user = getattr(request, 'user', None)
     return getattr(user, 'username', None) or '-'
+
+
+def caller_mistake_log_line(exc, kind, principal, collection):
+    """The one WARNING line for a refused query: no traceback, no values.
+
+    Our own refusals name the unknown field or collection. A mistake recognised by its
+    exception type also carries the type and the site that raised it, so a real bug that
+    happens to look like a caller mistake can still be found without re-running it.
+    """
+    line = (f'{QUERY_TOOL} refused a query: kind={kind} principal={loggable(principal)} '
+            f'collection={loggable(collection)}')
+    if isinstance(exc, QueryInputError):
+        if exc.name is not None:
+            line += f' name={loggable(exc.name)}'
+        return line
+    module, function, lineno = innermost_site(exc)
+    return line + f' error={type(exc).__name__} site={module}.{function}:{lineno}'
 
 
 def tool_error_result(exc):
@@ -185,8 +228,9 @@ FIELD_ALIASES = {
     ('*', 'customer_company_name'): ('hint', 'use company with a $lookup on company'),
     ('company', 'currency'): ('hint', 'currency is set on each contract, quote and invoice; a company has billing_entity'),
     ('company', 'primary_contact'): ('hint', 'query contact with this company and is_primary true'),
-    ('*', 'number_of_zones'): ('hint', 'count contractservicelocation rows by contract (one per zone) or zone rows by '
-                                       'company; company.contracted_zone_count is the contracted count'),
+    ('*', 'number_of_zones'): ('hint', 'count contractservicelocation rows by contract (one per zone or custom '
+                                       'item) or zone rows by company; company.contracted_zone_count is the '
+                                       'contracted count'),
     ('contract', 'contract_documents'): ('hint', _DOCUMENTS_HINT),
     ('contract', 'documents'): ('hint', _DOCUMENTS_HINT),
     ('contract', 'quote'): ('hint', "a contract's source quote is not published; query quote by company"),
@@ -570,10 +614,7 @@ def _install():
             # In-process callers keep getting the exception.
             if self.context is None or kind is None:
                 raise
-            name = exc.name if isinstance(exc, QueryInputError) else None
-            logger.warning('%s refused a query: %s by %s on collection %r (%s)', QUERY_TOOL, kind,
-                           _principal(self.request), str(collection)[:80],
-                           str(name)[:80] if name is not None else type(exc).__name__)
+            logger.warning('%s', caller_mistake_log_line(exc, kind, _principal(self.request), collection))
             return tool_error_result(exc)
 
     query._crm_boundary = True

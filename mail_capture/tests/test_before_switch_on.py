@@ -63,7 +63,8 @@ def test_label_rule_purges_stored_mail_only_after_confirmation(lagoon, admin_cli
     assert MailMessage.objects.count() == 3            # saved, not confirmed: nothing purged
     page = admin_client.get(response['Location']).content.decode()
     assert 'Messages purged: <strong>3</strong>' in page
-    admin_client.post(response['Location'], {'confirm': 'yes'})
+    from .test_purge import preview_form
+    admin_client.post(response['Location'], preview_form(page))
     run(mb, client)
     assert MailMessage.objects.count() == 0
 
@@ -94,14 +95,21 @@ def test_a_non_data_error_aborts_the_run_without_moving_the_cursor(lagoon, monke
         raise error
 
     monkeypatch.setattr(sync._Runner, '_store', broken)
-    for _ in range(4):
+    for _ in range(3):
         with pytest.raises(type(error)):
             run(mb, client)
     mb.refresh_from_db()
-    assert mb.history_id == start and mb.consecutive_errors == 4
+    assert mb.history_id == start and mb.consecutive_errors == 3
     assert CaptureFailure.objects.count() == 0          # no attempt counted, nothing parked
     assert set(CaptureRun.objects.values_list('outcome', flat=True)) == {'error'}
+    # The run names the message and the error class; the third run flags the mailbox.
+    last = CaptureRun.objects.order_by('-started_at').first()
+    assert last.error_gmail_id == 'e0' and last.error_class == type(error).__name__
+    assert mb.needs_attention and 'e0' in mb.attention_reason
+    calls = len(client.calls)
+    assert run(mb, client).outcome == 'needs_attention' and len(client.calls) == calls
     monkeypatch.setattr(sync._Runner, '_store', real)
+    sync.clear_attention(mb, 'operator:test', 'fixed')
     assert run(mb, client).counts['stored'] == 3
 
 
@@ -215,7 +223,7 @@ def test_a_purge_clears_the_message_sample_from_other_queue_rows(capture_on):
     other = UnmatchedSender.objects.get(address='other@another-co.test')
     assert sorted(s['s'] for s in other.samples) == ['Keep me', 'Shared secret subject']
     rule = CaptureRule.objects.create(kind='address', value='secret@unknown-co.test', action='skip')
-    purge.confirm_rule(rule)
+    purge.confirm_rule(rule, expected_fingerprint=rule.fingerprint())
     purge.enforce_rules()
     other.refresh_from_db()
     assert [s['s'] for s in other.samples] == ['Keep me'] and other.message_count == 1

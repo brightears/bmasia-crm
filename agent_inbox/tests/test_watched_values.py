@@ -136,17 +136,17 @@ def test_watched_fields_are_the_patch_and_snapshot_fields(agent, company):
     assert watched_fields(proposal) == ['city']
     note = create_proposal(agent, {'kind': 'note', 'target_collection': 'company', 'target_id': str(company.pk),
                                    'patch': {'notes': 'Likes jazz'}, 'evidence_quote': 'likes jazz'}, via='rest')[0]
-    assert watched_fields(note) == ['notes']
+    assert watched_fields(note) == []  # a note only appends: it watches the record's state, not its notes
 
 
-def test_a_notes_edit_does_change_a_note_suggestion(agent, person, company):
-    """A note suggestion shows the notes it appends to; an edit to them is a change it watches."""
+def test_a_notes_edit_does_not_flag_a_note_suggestion(agent, person, company):
+    """A note is appended to the notes as they are when it is accepted, so an edit to them is no change."""
     note = create_proposal(agent, {'kind': 'note', 'target_collection': 'company', 'target_id': str(company.pk),
                                    'patch': {'notes': 'Likes jazz'}, 'evidence_quote': 'likes jazz'}, via='rest')[0]
     phone = create_proposal(agent, _field(company, 'phone', '+66 2 111 2222'), via='rest')[0]
     _bump(company, notes='Rewritten by a person')
     _read_all(jwt_client(person))
-    assert ChangeProposal.objects.get(pk=note.pk).target_changed_at is not None
+    assert ChangeProposal.objects.get(pk=note.pk).target_changed_at is None
     assert ChangeProposal.objects.get(pk=phone.pk).target_changed_at is None
 
 
@@ -174,20 +174,36 @@ def test_reject_then_reopen_still_gets_a_fresh_version(agent, person, other_pers
     assert seen_of(proposal.pk) != loaded
 
 
-def test_reads_write_nothing_when_no_watched_value_changed(agent, person, company):
+def _proposal_writes(queries):
+    return [q['sql'] for q in queries.captured_queries
+            if q['sql'].lstrip().upper().startswith(('UPDATE', 'INSERT', 'DELETE'))
+            and 'agent_inbox_changeproposal' in q['sql']]
+
+
+def test_an_unrelated_edit_changes_nothing_a_reviewer_sees(agent, person, company):
+    """The first read after an unrelated edit advances the stored version, once, with one small UPDATE.
+
+    That UPDATE sets expected_version only: no seen_version, target_changed_at,
+    updated_at or snapshot moves. Every later read writes nothing.
+    """
     proposals = _five(agent, company)
     client = jwt_client(person)
     _read_all(client)
     _bump(company, notes='Unrelated')
     stamps = dict(ChangeProposal.objects.values_list('pk', 'updated_at'))
-    with CaptureQueriesContext(connection) as queries:
+    seen = {p.pk: seen_of(p.pk) for p in proposals}
+    with CaptureQueriesContext(connection) as first:
+        _read_all(client)
+    writes = _proposal_writes(first)
+    assert len(writes) == 1 and '"expected_version"' in writes[0]
+    assert 'target_changed_at' not in writes[0] and '"updated_at"' not in writes[0]
+    with CaptureQueriesContext(connection) as later:
         _read_all(client)
         client.get(f'{PROPOSALS}{proposals[2].pk}/')
-    writes = [q['sql'] for q in queries.captured_queries
-              if q['sql'].lstrip().upper().startswith(('UPDATE', 'INSERT', 'DELETE'))
-              and 'agent_inbox_changeproposal' in q['sql']]
-    assert writes == []
+    assert _proposal_writes(later) == []
     assert dict(ChangeProposal.objects.values_list('pk', 'updated_at')) == stamps
+    assert {p.pk: seen_of(p.pk) for p in proposals} == seen
+    assert _flagged(proposals) == 0
 
 
 def test_a_read_issues_no_extra_query_when_nothing_moved(agent, person, company, other_company):
@@ -328,17 +344,23 @@ def test_an_accept_after_a_duplicate_appeared_is_refused(agent, person, company)
     assert Contact.objects.filter(company=company, email__iexact='new.person@riverside.example.com').count() == 1
     fresh = response.json()['proposal']
     assert fresh['target_state'] == 'duplicate'
-    # Bound to the new view, the record itself still refuses a second contact with that email.
+    # Bound to the new view it is still refused: a duplicate contact is never created.
     again = decide(jwt_client(person), proposal.pk, 'accept', seen_version=fresh['seen_version'])
-    assert (again.status_code, again.json()['code']) == (422, 'invalid_value')
+    assert (again.status_code, again.json()['code']) == (409, 'not_acceptable')
     assert Contact.objects.filter(company=company, email__iexact='new.person@riverside.example.com').count() == 1
 
 
-def test_a_same_name_duplicate_can_still_be_added_once_seen(agent, person, company):
+def test_a_same_name_duplicate_is_never_added_but_an_edit_can_make_it_new(agent, person, company):
     proposal = _new_contact(agent, company, email='second.pat@riverside.example.com', name='Pat Example')
     seen = seen_of(proposal.pk)
     Contact.objects.create(company=company, name='Pat Example', email='pat@riverside.example.com')
     response = decide(jwt_client(person), proposal.pk, 'accept', seen_version=seen)
     assert (response.status_code, response.json()['code']) == (409, 'record_changed')
-    again = decide(jwt_client(person), proposal.pk, 'accept', seen_version=response.json()['proposal']['seen_version'])
-    assert again.status_code == 200, again.content
+    fresh = response.json()['proposal']['seen_version']
+    again = decide(jwt_client(person), proposal.pk, 'accept', seen_version=fresh)
+    assert (again.status_code, again.json()['code']) == (409, 'not_acceptable')
+    assert again.json()['target_state_reason'] == 'A contact with this email or name already exists at the company.'
+    edited = decide(jwt_client(person), proposal.pk, 'accept-with-edits', seen_version=seen_of(proposal.pk),
+                    edits={'name': 'Pat Example Junior'})
+    assert edited.status_code == 200, edited.content
+    assert Contact.objects.filter(company=company, name='Pat Example Junior').count() == 1

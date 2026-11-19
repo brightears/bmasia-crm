@@ -14,7 +14,7 @@ from django.core.management import call_command
 
 from mail_capture import credentials as creds
 from mail_capture.gmail_client import (
-    FakeGmailClient, GmailNotFound, GmailRateLimited, GmailServerError,
+    FakeGmailClient, GmailError, GmailNotFound, GmailRateLimited, GmailServerError,
 )
 from mail_capture.google_client import BATCH_SIZE, GoogleGmailClient
 from mail_capture.models import MailboxAccessLog, MailMessage
@@ -168,11 +168,13 @@ def test_batches_hold_at_most_fifty_calls():
     assert len(http.requests) == 2
 
 
-def test_a_failed_call_in_a_batch_fails_the_batch():
+def test_a_failed_item_in_a_batch_comes_back_as_its_own_error():
     c, _ = client([(path_is('/batch', 'POST'),
-                    batch_handler({'g1': {'id': 'g1'}}, statuses={'g2': 429}))])
-    with pytest.raises(GmailRateLimited):
-        c.get_messages(['g1', 'g2'])
+                    batch_handler({'g1': {'id': 'g1'}}, statuses={'g2': 429, 'g3': 400, 'g4': 410}))])
+    out = c.get_messages(['g1', 'g2', 'g3', 'g4'])
+    assert out['g1'] == {'id': 'g1'} and out['g4'] is None
+    assert isinstance(out['g2'], GmailRateLimited) and type(out['g3']) is GmailError
+    assert out['g3'].status == 400
 
 
 def test_end_to_end_sync_through_the_real_client(capture_on):
@@ -337,7 +339,7 @@ def test_gmail_sync_check_reports_counts_and_logs_the_read(switched_on, monkeypa
     fake = FakeGmailClient(mb.email, messages=[gmail_message('g1', 'pat@lagoon.test', [SALES], date=recent())])
     monkeypatch.setattr('mail_capture.google_client.client_for', lambda m: fake)
     out = StringIO()
-    call_command('gmail_sync', '--check', stdout=out)
+    call_command('gmail_sync', '--check', '--mailbox', SALES, stdout=out)
     assert f'{SALES}: messages 1, history id {fake.history_id}' in out.getvalue()
     assert MailboxAccessLog.objects.get().purpose == 'check'
 
@@ -361,9 +363,10 @@ def test_gmail_sync_incremental_dry_run_writes_no_mail(switched_on, monkeypatch)
 
 def test_gmail_sync_needs_a_mode(switched_on):
     make_mailbox()
-    out = StringIO()
-    call_command('gmail_sync', stdout=out)
-    assert 'choose' in out.getvalue().lower()
+    err = StringIO()
+    with pytest.raises(SystemExit) as caught:
+        call_command('gmail_sync', stdout=StringIO(), stderr=err)
+    assert caught.value.code == 2 and 'choose' in err.getvalue().lower()
 
 
 # --- the engine with a batching client ---------------------------------------------

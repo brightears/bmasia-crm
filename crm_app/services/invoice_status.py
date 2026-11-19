@@ -67,6 +67,21 @@ def send_refusal(current):
     return reason
 
 
+def record_send(invoice):
+    """After a successful send: a Draft becomes Sent, and only if it is still a Draft in the database.
+
+    A conditional update, so a payment or cancellation recorded while the email was going out is
+    kept. Returns the status the invoice has afterwards (also set on ``invoice``).
+    """
+    from django.utils import timezone
+    target = status_after_send(invoice.status)
+    if target != invoice.status:
+        type(invoice).objects.filter(pk=invoice.pk, status=invoice.status).update(
+            status=target, updated_at=timezone.now())
+    invoice.refresh_from_db(fields=['status', 'updated_at'])
+    return invoice.status
+
+
 def status_after_send(current):
     """The status once the invoice has been emailed: Draft becomes Sent; a resend changes nothing."""
     return 'Sent' if current == 'Draft' else current
