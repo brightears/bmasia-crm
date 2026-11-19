@@ -39,6 +39,8 @@ import {
   kindLabel,
   needsSourceCheck,
   INACTIVE_TICK_LABEL,
+  INACTIVE_UNSUPPORTED,
+  isUnknownState,
   isUnusualState,
   stateReason,
   targetStateOf,
@@ -119,6 +121,8 @@ interface ProposalCardProps {
   partnersFailed: boolean;
   /** The inactive-target tick, for the version shown. */
   inactiveAcknowledged: boolean;
+  /** This server refused the inactive acknowledgement: inactive records cannot be changed from this page. */
+  inactiveUnsupported: boolean;
   handlers: CardHandlers;
 }
 
@@ -211,6 +215,7 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
     contactChecked,
     partnersFailed,
     inactiveAcknowledged,
+    inactiveUnsupported,
     handlers,
   } = props;
   const ref = useRef<HTMLDivElement>(null);
@@ -237,6 +242,7 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
     contactChecked,
     partnersFailed,
     inactiveAcknowledged,
+    inactiveUnsupported,
   });
   const state = open ? targetStateOf(p) : null;
   const unusualState = isUnusualState(state);
@@ -419,7 +425,9 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
                   ? 'This contact may already exist'
                   : state === 'moved'
                     ? 'The record moved to another company'
-                    : 'The record no longer exists'}
+                    : state === 'missing'
+                      ? 'The record no longer exists'
+                      : 'This record needs a look'}
               {p.target_changed_at ? ` (since ${formatDateTime(p.target_changed_at)})` : ''}
             </AlertTitle>
             <PlainText value={stateReason(p)} />
@@ -434,7 +442,17 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
                 This suggestion can no longer be applied. Reject it.
               </Typography>
             )}
-            {state === 'inactive' && (
+            {isUnknownState(state) && (
+              <Typography variant="body2" sx={{ mt: 0.5 }}>
+                This page does not know this state, so the suggestion cannot be accepted here.
+              </Typography>
+            )}
+            {state === 'inactive' && inactiveUnsupported && (
+              <Typography variant="body2" sx={{ mt: 0.5 }} data-testid="inactive-unsupported">
+                {INACTIVE_UNSUPPORTED} Activate the record first, or reject the suggestion.
+              </Typography>
+            )}
+            {state === 'inactive' && !inactiveUnsupported && (
               <Box>
                 <FormControlLabel
                   control={
@@ -456,6 +474,12 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
             <AlertTitle>The record changed after this was suggested</AlertTitle>
             The values under “Now” were re-read {formatDateTime(p.target_changed_at)}. Compare them with the suggestion
             before deciding.
+            {state === 'inactive' && (
+              <Typography variant="body2" sx={{ mt: 0.5 }} data-testid="inactive-and-changed">
+                The record is also inactive. The server does not say whether only that changed or the values too, so
+                both boxes are needed.
+              </Typography>
+            )}
             <Box>
               <FormControlLabel
                 control={
@@ -760,7 +784,7 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
           </Box>
           {disabledReason && !busy && (
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }} data-testid="accept-blocked-reason">
-              {disabledReason}
+              <PlainText value={disabledReason} />
             </Typography>
           )}
         </>

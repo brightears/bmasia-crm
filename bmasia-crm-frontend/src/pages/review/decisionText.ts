@@ -93,7 +93,14 @@ const errorList = (body: Record<string, any>): string[] => {
 };
 
 export type ErrorOutcome =
-  | { kind: 'notice'; notice: CardNotice; refresh: boolean; snapshot?: ProposalSnapshot }
+  | {
+      kind: 'notice';
+      notice: CardNotice;
+      refresh: boolean;
+      snapshot?: ProposalSnapshot;
+      /** The server refused the inactive acknowledgement as an unknown key: it cannot change inactive records. */
+      inactiveUnsupported?: boolean;
+    }
   | { kind: 'page_read_only'; reason: string }
   | { kind: 'card_read_only'; reason: string }
   | { kind: 'switched_off' };
@@ -150,11 +157,15 @@ export const outcomeOf = (p: ChangeProposal, error: ReviewApiError): ErrorOutcom
           notice: { tone: 'warning', text: `Nothing was applied. ${detail}` },
         };
       case 'needs_acknowledgement':
+        // The server's text names the request flag; the reviewer is told what to do on this page instead.
         return {
           kind: 'notice',
           refresh: true,
           snapshot: snap,
-          notice: { tone: 'warning', text: `Nothing was applied. ${detail}` },
+          notice: {
+            tone: 'warning',
+            text: 'Nothing was applied. Tick the box to apply the change to this inactive record.',
+          },
         };
       case 'not_open':
       case 'not_rejected':
@@ -181,14 +192,15 @@ export const outcomeOf = (p: ChangeProposal, error: ReviewApiError): ErrorOutcom
     if (error.code === 'reviewer_is_party') return { kind: 'card_read_only', reason: detail };
     return { kind: 'notice', refresh: false, notice: { tone: 'error', text: detail } };
   }
-  if (error.status === 400 && /acknowledge_inactive/.test(detail)) {
+  if (error.status === 400 && /unknown keys?:.*acknowledge_inactive/i.test(detail)) {
     // A backend from before inactive records could be changed with an acknowledgement.
     return {
       kind: 'notice',
       refresh: true,
+      inactiveUnsupported: true,
       notice: {
         tone: 'warning',
-        text: 'Nothing was applied: this server does not accept changes to inactive records yet. Activate the record first.',
+        text: 'Nothing was applied: this server cannot apply changes to inactive records yet. Activate the record first.',
       },
     };
   }

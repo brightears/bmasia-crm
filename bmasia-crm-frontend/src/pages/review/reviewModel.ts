@@ -424,6 +424,8 @@ export interface CardState {
   partnersFailed?: boolean;
   /** The "This record is inactive. Apply the change anyway" tick, for the version shown. */
   inactiveAcknowledged?: boolean;
+  /** This server refused the inactive acknowledgement (it predates it): inactive records cannot be changed here. */
+  inactiveUnsupported?: boolean;
 }
 
 // ------------------------------------------------------------------ the target's state (later backends)
@@ -440,6 +442,13 @@ export const targetStateOf = (p: ChangeProposal): TargetState | null => {
 export const isUnusualState = (state: TargetState | null): boolean =>
   state !== null && state !== 'present' && state !== 'no_duplicate';
 
+const KNOWN_STATES: string[] = ['present', 'no_duplicate', 'inactive', 'moved', 'missing', 'duplicate'];
+
+/** A state this page does not know (a later backend): shown neutrally and never acceptable here (fail closed). */
+export const isUnknownState = (state: TargetState | null): boolean => state !== null && !KNOWN_STATES.includes(state);
+
+export const INACTIVE_UNSUPPORTED = 'This server cannot apply changes to inactive records yet.';
+
 const DEFAULT_STATE_REASON: Record<string, string> = {
   inactive: 'This record is inactive.',
   moved: 'This record now belongs to another company.',
@@ -455,8 +464,17 @@ export const stateReason = (p: ChangeProposal): string => {
 };
 
 /** The record changed since the suggestion and what changed is its values (not its state). */
-export const valuesChanged = (p: ChangeProposal): boolean =>
-  Boolean(p.target_changed_at) && !isUnusualState(targetStateOf(p));
+/**
+ * Whether the reviewer must compare the current values ("I have compared the current values").
+ * True when the record changed and its state is the normal one. Also true for an inactive record that changed:
+ * inactive is the one unusual state that can be accepted, and the API does not say whether only the state changed
+ * or the values as well (it sends `target_changed_at` for both; there is no field naming what changed), so both
+ * ticks are required.
+ */
+export const valuesChanged = (p: ChangeProposal): boolean => {
+  const state = targetStateOf(p);
+  return Boolean(p.target_changed_at) && (!isUnusualState(state) || state === 'inactive');
+};
 
 export const INACTIVE_TICK_LABEL = 'This record is inactive. Apply the change anyway; it stays inactive.';
 
@@ -493,7 +511,14 @@ export const cardActions = (p: ChangeProposal, s: CardState): CardActions => {
 
   // The target's state (later backends): some states can never be accepted, some only after a tick.
   const state = p.status === 'proposed' ? targetStateOf(p) : null;
-  const blockAll = state === 'missing' || state === 'moved' ? no(stateReason(p)) : null;
+  const blockAll =
+    state === 'missing' || state === 'moved'
+      ? no(stateReason(p))
+      : isUnknownState(state)
+        ? no(stateReason(p) || 'This record needs a look; it cannot be accepted from this page.')
+        : state === 'inactive' && s.inactiveUnsupported
+          ? no(INACTIVE_UNSUPPORTED)
+          : null;
   const blockPlainAccept = state === 'duplicate' ? no(stateReason(p)) : null;
 
   let rest: Allowed = yes;

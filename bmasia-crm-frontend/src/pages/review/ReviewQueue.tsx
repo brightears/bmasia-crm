@@ -191,6 +191,8 @@ const ReviewQueue: React.FC = () => {
   const [sourceChecks, setSourceChecks] = useState<Record<string, string>>({});
   const [contactChecks, setContactChecks] = useState<Record<string, string>>({});
   const [inactiveChecks, setInactiveChecks] = useState<Record<string, string>>({});
+  /** Set once this server refuses the inactive acknowledgement as an unknown key. */
+  const [inactiveUnsupported, setInactiveUnsupported] = useState(false);
   const [partnerFailed, setPartnerFailed] = useState<Record<string, boolean>>({});
   const [expiringSoon, setExpiringSoon] = useState<{ count: number; atLeast: boolean; days: number } | null>(null);
   /** Bumped after every decision and on Refresh, so the expiry count is read again. */
@@ -419,6 +421,7 @@ const ReviewQueue: React.FC = () => {
       contactChecked: contactChecks[p.id] === p.seen_version,
       partnersFailed: (p.conflicts_with || []).some((c) => partnerFailed[c.id]),
       inactiveAcknowledged: inactiveChecks[p.id] === p.seen_version,
+      inactiveUnsupported,
     };
   };
   const actionsFor = (p: ChangeProposal) => cardActions(p, stateFor(p));
@@ -463,6 +466,11 @@ const ReviewQueue: React.FC = () => {
       setCardReadOnly((c) => ({ ...c, [p.id]: friendlyRefusal(outcome.reason, error.code) }));
       setEditingId((id) => (id === p.id ? null : id));
       return;
+    }
+    if (outcome.inactiveUnsupported) {
+      // Said once on this card; from now on inactive records are blocked here instead of offering the tick.
+      setInactiveUnsupported(true);
+      setInactiveChecks({});
     }
     if (outcome.snapshot) mergeSnapshot(p.id, outcome.snapshot);
     if (error.code === 'invalid_value') setServerErrors((s) => ({ ...s, [p.id]: fieldErrorsOf(error) }));
@@ -1132,6 +1140,7 @@ const ReviewQueue: React.FC = () => {
         contactChecked={Boolean(s.contactChecked)}
         partnersFailed={Boolean(s.partnersFailed)}
         inactiveAcknowledged={Boolean(s.inactiveAcknowledged)}
+        inactiveUnsupported={Boolean(s.inactiveUnsupported)}
         handlers={handlers}
       />
     );
@@ -1547,7 +1556,12 @@ const ReviewQueue: React.FC = () => {
         onClose={() => setDialog(null)}
         onConfirm={(note) => dialog?.type === 'reopen' && reopen(dialog.proposal, note)}
       />
-      <Snackbar open={Boolean(snack)} autoHideDuration={5000} onClose={() => setSnack(null)} message={snack || ''} />
+      <Snackbar
+        open={Boolean(snack)}
+        autoHideDuration={5000}
+        onClose={() => setSnack(null)}
+        message={snack ? <PlainText value={snack} /> : ''}
+      />
     </Box>
   );
 };
