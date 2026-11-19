@@ -274,3 +274,112 @@ def test_the_contract_follow_up_sender_is_switched_off():
     _contract(_company(), status='Sent', sent_date=business_today() - timedelta(days=45))
     assert EmailService().send_contract_followups() == {'sent': 0, 'failed': 0, 'skipped': 0}
     assert mail.outbox == []
+
+
+# --- what the output says ------------------------------------------------------------------------
+
+def _lines(out, marker):
+    return [line for line in out.splitlines() if marker in line]
+
+
+def test_a_draft_left_draft_with_a_sent_date_is_warned_about_in_the_dry_run_and_the_run(tmp_path):
+    c = _contract(_company(), status='Draft', is_active=False)
+    path = _file(tmp_path, [_sent(c)])
+    dry = _run('--file', path)
+    assert f'sent date recorded: sent_date empty -> {SENT}; status stays Draft' in dry
+    assert v2.DRAFT_SENT_DATE_WARNING in dry
+    out, _ = _execute(tmp_path, path)
+    assert '[APPLIED] S set_sent_date' in out and v2.DRAFT_SENT_DATE_WARNING in out
+    c.refresh_from_db()
+    assert (c.status, c.sent_date) == ('Draft', date.fromisoformat(SENT))  # a warning, not a refusal
+
+
+@pytest.mark.parametrize('status', ['Sent', 'Active', 'Cancelled'])
+def test_no_warning_when_the_contract_is_not_draft(tmp_path, status):
+    c = _contract(_company(), status=status, is_active=status == 'Active')
+    Contract.objects.filter(pk=c.pk).update(sent_date=None)  # a Sent fixture is stamped with today
+    out = _run('--file', _file(tmp_path, [_sent(c)]))
+    assert f'status stays {status}' in out and 'WARNING' not in out
+
+
+def test_a_combined_group_is_printed_in_write_order_and_says_what_the_group_does(tmp_path):
+    c, _zone, _link = _draft_with_zone()
+    entries = [_note(c, 'Line (fixture).', group='S:1', cls='S'), _cancel(c, group='S:1', cls='S'), _sent(c)]
+    dry = _run('--file', _file(tmp_path, entries))
+    ops = [line.split()[2] for line in _lines(dry, '[WOULD-APPLY]')]
+    assert ops == ['set_sent_date', 'mark_cancelled', 'add_note']
+    sent_line = _lines(dry, 'set_sent_date')[0]
+    assert sent_line.endswith(f'sent date recorded: sent_date empty -> {SENT}; status Draft -> Cancelled in this group')
+    assert 'status stays' not in sent_line and 'WARNING' not in dry
+    assert _lines(dry, 'add_note')[0].endswith('status Draft -> Cancelled in this group')
+
+
+# --- dates are exactly YYYY-MM-DD ----------------------------------------------------------------
+
+@pytest.mark.parametrize('value', ['20241210', '2024-W50-2', '2024-12-10T00:00:00+00:00', '2024-12-10 ',
+                                   ' 2024-12-10', '2024-12-1', '2024-345'])
+def test_only_yyyy_mm_dd_is_a_date(tmp_path, value):
+    c = _contract(_company(), status='Active')
+    with pytest.raises(CommandError, match='want YYYY-MM-DD'):
+        _run('--file', _file(tmp_path, [_sent(c, value)]))
+    expected = _sent(c)
+    expected['expected']['start_date'] = value  # every v2 date field uses the same parser
+    with pytest.raises(CommandError, match='want YYYY-MM-DD'):
+        _run('--file', _file(tmp_path, [expected], 'expected.json'))
+    with pytest.raises(CommandError, match='want YYYY-MM-DD'):
+        _run('--file', _file(tmp_path, [_create(c, group='S:1', cls='S', start_date=value)], 'create.json'))
+
+
+# --- rules the first review found unpinned -------------------------------------------------------
+
+def test_a_zone_link_repair_does_not_share_a_contract(tmp_path):
+    company = _company()
+    old = _contract(company, status='Renewed', is_active=False, start=date(2024, 1, 1))
+    _zone_link(old)
+    new = _contract(company, status='Active', start=date(2025, 1, 1), renewed_from=old)
+    handover = {'op': 'hand_over_zone_links', 'class': 'S', 'group': 'S:1', 'contract_id': str(old.pk),
+                'expected': _expected(old), 'successor_id': str(new.pk), 'successor_expected': _expected(new),
+                'evidence': 'Fixture sheet / Tab / row 10'}
+    redate = {'op': 'redate_zone_link_end', 'class': 'S', 'group': 'S:1', 'contract_id': str(old.pk),
+              'expected': _expected(old), 'closed_on': '2024-12-31', 'evidence': 'Fixture sheet / Tab / row 11'}
+    for n, repair in enumerate((handover, redate)):
+        out = _run('--file', _file(tmp_path, [_sent(old, '2023-12-10'), repair], f'repair{n}.json'))
+        assert '[SKIPPED:duplicate_contract_id]' in out and 'WOULD-APPLY' not in out
+
+
+def test_at_most_one_note_per_contract(tmp_path):
+    c = _contract(_company(), status='Active')
+    out = _run('--file', _file(tmp_path, [_note(c, 'a', group='S:1', cls='S'), _note(c, 'b', group='S:1', cls='S'),
+                                          _sent(c)]))
+    assert out.count('[SKIPPED:duplicate_contract_id]') == 3
+
+
+def test_a_standalone_revert_refuses_after_any_later_edit(tmp_path):
+    c = _contract(_company(), status='Active')
+    _, journal_path = _execute(tmp_path, _file(tmp_path, [_sent(c)]))
+    c.refresh_from_db()
+    c.notes = 'Edited later (fixture)'
+    c.save()  # leaves the date alone and moves updated_at
+    assert '[SKIPPED:changed_since_apply]' in _run('--revert', journal_path, '--execute')
+    c.refresh_from_db()
+    assert c.sent_date == date.fromisoformat(SENT)
+
+
+def test_revert_runs_in_reverse_write_order(tmp_path):
+    c, _zone, _link = _draft_with_zone()
+    _, journal_path = _execute(tmp_path, _file(tmp_path, [_sent(c), _cancel(c, group='S:1', cls='S'),
+                                                          _note(c, 'x', group='S:1', cls='S')]))
+    _run('--revert', journal_path, '--execute')
+    rows = _audits(c.pk).filter(additional_data__mode='revert').order_by('additional_data__timestamp')
+    assert [r.additional_data['op'] for r in rows] == ['add_note', 'mark_cancelled', 'set_sent_date']
+
+
+@pytest.mark.parametrize('field', ['status', 'start_date', 'end_date', 'updated_at'])
+def test_expected_differs_on_any_field(tmp_path, field):
+    c = _contract(_company(), status='Draft', is_active=False)
+    entry = _sent(c)
+    entry['expected'] = {**entry['expected'], field: {
+        'status': 'Sent', 'start_date': '2025-01-02', 'end_date': '2025-12-30',
+        'updated_at': (c.updated_at - timedelta(seconds=1)).isoformat()}[field]}
+    out = _run('--file', _file(tmp_path, [_cancel(c, group='S:1', cls='S'), entry]))
+    assert out.count('[SKIPPED:expected_differs]') == 2
