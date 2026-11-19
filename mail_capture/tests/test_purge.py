@@ -334,9 +334,46 @@ class TestLabelsAndDeletion:
         client.add_labels('g1', ['Label_5'])
         run(mb, client)                       # 'Personal' is not a rule yet: kept
         assert MailMessage.objects.count() == 1
-        CaptureRule.objects.create(kind='label', value='Personal', action='private')
+        rule = CaptureRule.objects.create(kind='label', value='Personal', action='private')
+        run(mb, client)                       # saved, not confirmed: stored mail stays
+        assert MailMessage.objects.count() == 1
+        preview = purge.preview_rule(rule)
+        assert (preview['messages'], preview['copies']) == (1, 1)
+        client.add_message(gmail_message('g2', 'pat@lagoon.test', [SALES], date=recent(),
+                                         labels=('INBOX', 'Label_5'), message_id='<new@mail.example.org>'))
+        assert run(mb, client).counts['skipped_by_rule'] == 1   # but new capture is blocked at once
+        purge.confirm_rule(rule)
         run(mb, client)
         assert _nothing_left()
+
+    def test_a_label_added_later_under_an_unconfirmed_rule_purges_nothing(self, stored):
+        mb, client = stored
+        CaptureRule.objects.create(kind='label', value='Personal', action='private')
+        run(mb, client)
+        client.add_labels('g1', ['Label_5'])
+        run(mb, client)
+        assert MailMessage.objects.count() == 1
+        assert MailboxCopy.objects.get().label_ids == ['INBOX', 'Label_5']
+
+    @pytest.mark.parametrize('kind, value', [('domain', 'lagoon.test'), ('address', 'pat@lagoon.test'),
+                                             ('label', 'Personal')])
+    def test_a_rule_changed_after_confirmation_counts_as_unconfirmed(self, stored, kind, value):
+        """QuerySet.update() skips save(): the fingerprint still catches it."""
+        mb, client = stored
+        client.add_labels('g1', ['Label_5'])
+        run(mb, client)
+        rule = CaptureRule.objects.create(kind=kind, value='nothing-here.test' if kind == 'domain' else
+                                          ('nobody@nothing-here.test' if kind == 'address' else 'Other'),
+                                          action='skip')
+        purge.confirm_rule(rule)
+        run(mb, client)
+        CaptureRule.objects.filter(pk=rule.pk).update(value=value)
+        run(mb, client)
+        assert MailMessage.objects.count() == 1
+        rule.refresh_from_db()
+        assert not rule.is_confirmed
+        if kind != 'label':
+            assert rule.purge_state == 'awaiting_confirmation'
 
     def test_gmail_deletion_of_the_last_copy_removes_the_message(self, stored):
         mb, client = stored

@@ -22,20 +22,24 @@ class ActivitySerializer(serializers.ModelSerializer):
             'kind', 'direction', 'occurred_at', 'summary', 'body', 'participants',
             'source_system', 'source_ref', 'source_url',
             'recorded_by_username', 'recorded_via', 'idempotency_key',
-            'is_void', 'void_reason', 'voided_at', 'duplicate_of_id', 'is_redacted',
+            'is_void', 'void_reason', 'voided_at', 'duplicate_of_id', 'restricted', 'is_redacted',
             'created_at', 'updated_at',
         ]
         read_only_fields = fields
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        # Bodies, participants, keys and links of other recorders are withheld
-        # from agent accounts, as on the MCP query boundary.
-        if self.context.get('hide_private_from') is not None and (
-            instance.recorded_by_id != self.context['hide_private_from']
-        ):
-            for name in PRIVATE_ACTIVITY_FIELDS:
-                data.pop(name, None)
+        # An agent account sees the body, participants, key and link only of the
+        # activities whose body it may read (agent_inbox.policy.can_read_activity_body).
+        viewer = self.context.get('agent_viewer')
+        if viewer is not None:
+            from agent_inbox.policy import can_read_activity_body
+
+            agent_ids = self.context.get('agent_recorder_ids')
+            recorder_is_agent = None if agent_ids is None else instance.recorded_by_id in agent_ids
+            if not can_read_activity_body(viewer, instance, recorder_is_agent=recorder_is_agent):
+                for name in PRIVATE_ACTIVITY_FIELDS:
+                    data.pop(name, None)
         return data
 
 
@@ -63,6 +67,7 @@ class ChangeProposalSerializer(serializers.ModelSerializer):
     evidence_recorded_by = serializers.SerializerMethodField()
     evidence_recorded_via = serializers.SerializerMethodField()
     conflicts_with = serializers.SerializerMethodField()
+    warnings = serializers.SerializerMethodField()
 
     class Meta:
         model = ChangeProposal
@@ -74,10 +79,16 @@ class ChangeProposalSerializer(serializers.ModelSerializer):
             'evidence_recorded_via', 'evidence_recorder_is_agent', 'rationale',
             'proposer_username', 'proposer_kind', 'proposed_via', 'model', 'prompt_version', 'confidence',
             'status', 'fingerprint', 'batch_key', 'reviewer_username', 'reviewed_at', 'decision_note',
-            'history', 'conflicts_with', 'target_changed_at', 'last_apply_error', 'applied_record_id',
+            'history', 'conflicts_with', 'warnings', 'target_changed_at', 'last_apply_error', 'applied_record_id',
             'applied_audit_id', 'superseded_by_id', 'expires_at', 'created_at', 'updated_at',
         ]
         read_only_fields = fields
+
+    def to_representation(self, instance):
+        from agent_inbox.proposals import effective_status
+        data = super().to_representation(instance)
+        data['status'] = effective_status(instance)
+        return data
 
     def get_seen_version(self, proposal):
         from agent_inbox.proposals import seen_version
@@ -91,6 +102,17 @@ class ChangeProposalSerializer(serializers.ModelSerializer):
 
     def get_evidence_recorded_via(self, proposal):
         return proposal.activity.recorded_via if proposal.activity else None
+
+    def get_warnings(self, proposal):
+        """Things a reviewer should look at closely; never a reason the API refused."""
+        from agent_inbox.validation import mixed_script
+
+        return [
+            {'field': key, 'code': 'mixed_script',
+             'detail': 'Mixes scripts that can look alike or display in a different order than stored'}
+            for key, value in sorted((proposal.patch or {}).items())
+            if isinstance(value, str) and mixed_script(value)
+        ]
 
     def get_conflicts_with(self, proposal):
         from agent_inbox.proposals import conflicts_for

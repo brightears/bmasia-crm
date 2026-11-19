@@ -33,7 +33,7 @@ from django.utils import timezone
 from . import conf
 from .models import (
     CapturePurge, CaptureRule, CaptureRun, MailboxAccessLog, MailboxCopy, MailConversation,
-    MailMessage, MailParticipant, UnmatchedSender,
+    MailMatch, MailMessage, MailParticipant, UnmatchedSender,
 )
 from .parse import normalise_subject
 from .rules import ACTION_HEADERS_ONLY, DROP_ACTIONS, rule_problem
@@ -75,7 +75,8 @@ def _strip_row(row, keys, mailbox=None):
     pairs = [p for p in (row.message_keys or []) if isinstance(p, (list, tuple)) and len(p) == 2]
     samples = [s for s in (row.samples or []) if isinstance(s, dict)]
     kept_pairs = [p for p in pairs if not hit(p[0], p[1])]
-    kept_samples = [s for s in samples if not hit(s.get('k'), s.get('m'))]
+    kept_keys = {p[0] for p in kept_pairs}
+    kept_samples = [s for s in samples if not hit(s.get('k'), s.get('m')) and s.get('k') in kept_keys]
     removed = len(samples) - len(kept_samples)
     if not kept_pairs:
         row.delete()
@@ -98,7 +99,7 @@ def scrub_queue(keys, mailbox=None):
         chunk = key_list[start:start + QUEUE_KEY_BATCH]
         query = Q()
         for key in chunk:
-            query |= Q(message_keys__icontains=key)
+            query |= Q(message_keys__icontains=key) | Q(samples__icontains=key)
         for row in UnmatchedSender.objects.select_for_update().filter(query).order_by('address'):
             deleted, removed = _strip_row(row, keys, mailbox)
             counts['queue_rows'] += int(deleted)
@@ -168,10 +169,12 @@ def refresh_conversations(conversation_ids):
             v=Max('sent_at'))['v']
         conversation.last_outbound_at = messages.filter(direction='outbound').aggregate(
             v=Max('sent_at'))['v']
+        conversation.last_claimed_internal_at = messages.filter(direction='claimed_internal').aggregate(
+            v=Max('sent_at'))['v']
         conversation.subject_normalised = normalise_subject(earliest)
         conversation.save(update_fields=[
             'message_count', 'first_message_at', 'last_message_at', 'last_inbound_at',
-            'last_outbound_at', 'subject_normalised', 'updated_at',
+            'last_outbound_at', 'last_claimed_internal_at', 'subject_normalised', 'updated_at',
         ])
     return deleted
 
@@ -193,9 +196,24 @@ def _rewrite_references(purged_ids, conversation_ids):
             message.save(update_fields=['references', 'in_reply_to', 'updated_at'])
     for conversation in MailConversation.objects.filter(conversation_key__in=purged_ids):
         token = tokens[conversation.conversation_key]
-        if not MailConversation.objects.filter(conversation_key=token).exists():
+        existing = MailConversation.objects.filter(conversation_key=token).first()
+        if existing is None:
             conversation.conversation_key = token
             conversation.save(update_fields=['conversation_key', 'updated_at'])
+            continue
+        # A conversation already carries the token: fold this one into it, so
+        # the purged Message-ID survives nowhere.
+        MailMessage.objects.filter(conversation=conversation).update(conversation=existing)
+        for row in MailMatch.objects.filter(conversation=conversation):
+            if MailMatch.objects.filter(conversation=existing, target_type=row.target_type,
+                                        target_id=row.target_id).exists():
+                row.delete()
+            else:
+                MailMatch.objects.filter(pk=row.pk).update(conversation=existing)
+        if conversation.is_mixed and not existing.is_mixed:
+            MailConversation.objects.filter(pk=existing.pk).update(is_mixed=True)
+        conversation.delete()
+        refresh_conversations([existing.pk])
 
 
 # --- messages and copies ------------------------------------------------------
@@ -285,8 +303,7 @@ def _rule_message_ids(rule):
 def preview_rule(rule):
     """What confirming ``rule`` would remove, as counts. Reads only."""
     if rule.kind == 'label':
-        return {'messages': None, 'conversations': None, 'queue_rows': None,
-                'note': 'Label rules are applied per mailbox on its next run.'}
+        return _preview_label_rule(rule)
     message_ids = set(_rule_message_ids(rule))
     if rule.action == ACTION_HEADERS_ONLY:
         bodies = MailMessage.objects.filter(pk__in=message_ids, body_text__isnull=False).count()
@@ -308,13 +325,61 @@ def preview_rule(rule):
     }
 
 
+def _preview_label_rule(rule):
+    """Copies carrying the rule's label, from each mailbox's last-seen label
+    ids (recorded by the sync engine), and the messages left with no copy."""
+    from .models import CaptureMailbox
+    name = rule.value.strip().lower()
+    mailboxes = CaptureMailbox.objects.all()
+    if rule.scope == 'mailbox':
+        mailboxes = mailboxes.filter(pk=rule.mailbox_id)
+    copy_ids, message_ids = set(), set()
+    for mailbox in mailboxes:
+        ids = set(((mailbox.enforced_label_ids or {}).get('rule_labels') or {}).get(name) or ())
+        if not ids:
+            continue
+        for pk, message_id, labels in MailboxCopy.objects.filter(mailbox=mailbox).values_list(
+                'pk', 'message_id', 'label_ids').iterator():
+            if set(labels or ()) & ids:
+                copy_ids.add(pk)
+                message_ids.add(message_id)
+    if rule.action == ACTION_HEADERS_ONLY:
+        bodies = MailMessage.objects.filter(pk__in=message_ids, body_text__isnull=False).count()
+        return {'messages': 0, 'bodies': bodies, 'copies': 0, 'conversations': 0, 'queue_rows': 0}
+    held_elsewhere = set(MailboxCopy.objects.filter(message_id__in=message_ids)
+                         .exclude(pk__in=copy_ids).values_list('message_id', flat=True))
+    purged = message_ids - held_elsewhere
+    conversations = set(MailMessage.objects.filter(pk__in=purged).values_list('conversation_id', flat=True))
+    return {'messages': len(purged), 'copies': len(copy_ids), 'conversations': len(conversations),
+            'queue_rows': 0,
+            'note': 'Counted from the labels each mailbox showed at its last run; applied per '
+                    'mailbox on its next run after confirmation.'}
+
+
 def confirm_rule(rule, user=None):
+    """Confirm a rule as it stands now; the fingerprint pins what was confirmed."""
+    rule.refresh_from_db()
     rule.purge_state = 'confirmed'
     rule.confirmed_by = user if (user is not None and getattr(user, 'is_authenticated', False)) else None
     rule.confirmed_at = timezone.now()
+    rule.confirmed_fingerprint = rule.fingerprint()
     CaptureRule.objects.filter(pk=rule.pk).update(
         purge_state=rule.purge_state, confirmed_by=rule.confirmed_by, confirmed_at=rule.confirmed_at,
+        confirmed_fingerprint=rule.confirmed_fingerprint, purge_done_at=None,
     )
+
+
+def demote_changed_rules():
+    """Rules changed after confirmation by any route (QuerySet.update, a
+    shell, a data migration) go back to awaiting confirmation."""
+    changed = [r.pk for r in CaptureRule.objects.filter(purge_state__in=('confirmed', 'done'))
+               if not r.is_confirmed]
+    if changed:
+        CaptureRule.objects.filter(pk__in=changed).update(
+            purge_state='awaiting_confirmation', confirmed_fingerprint='', confirmed_at=None,
+            confirmed_by=None, purge_done_at=None,
+        )
+    return len(changed)
 
 
 def _enforce_one(rule, cap, actor):
@@ -352,10 +417,12 @@ def enforce_rules(rules=None, cap=PURGE_CAP, actor='job'):
     most ``cap`` messages per rule per call. Rules whose value is refused
     (``rules.rule_problem``) are never applied. Returns total counts."""
     if rules is None:
+        demote_changed_rules()
         rules = CaptureRule.objects.filter(purge_state='confirmed').select_related('mailbox')
     total = _empty_counts()
     for rule in rules:
-        if rule.purge_state != 'confirmed' or rule_problem(rule.kind, rule.value):
+        if rule.purge_state != 'confirmed' or not rule.is_confirmed or rule.kind == 'label' \
+                or rule_problem(rule.kind, rule.value):
             continue
         with transaction.atomic():
             counts, remaining = _enforce_one(rule, cap, actor)

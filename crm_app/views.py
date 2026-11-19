@@ -112,7 +112,7 @@ from .serializers import (
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
     TaskAssigneePermission, ReadOnlyForNonOwner,
-    CommercialDocumentPreviewPermission,
+    CommercialDocumentPreviewPermission, PersonSignedInToWebsite,
 )
 from .rene_auth import (
     IsReneRenewalReaderOrAuthenticatedUser,
@@ -472,11 +472,25 @@ class UserViewSet(BaseModelViewSet):
     ordering_fields = ['username', 'email', 'role', 'date_joined', 'last_login']
     ordering = ['-date_joined']
 
+    # Reads, and the actions that act only on the caller's own account. Every
+    # other action, inherited ones included, changes who may sign in, with which
+    # password or role: staff and a person signed in to the website only.
+    # crm_app/tests/test_user_admin_routes.py fails when an action is added
+    # without being listed here or guarded.
+    OPEN_READ_ACTIONS = frozenset({'list', 'retrieve'})
+    SELF_SERVICE_ACTIONS = frozenset({'me', 'change_password', 'update_smtp', 'test_smtp', 'upload_avatar'})
+
     def get_permissions(self):
-        """Admin required for create/update/delete, authenticated for list/retrieve"""
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminUser()]
-        return [IsAuthenticated()]
+        if self.action in self.OPEN_READ_ACTIONS or self.action in self.SELF_SERVICE_ACTIONS:
+            return [IsAuthenticated()]
+        return [IsAdminUser(), PersonSignedInToWebsite()]
+
+    @action(detail=False, methods=['post'])
+    def bulk_operations(self, request):
+        """Not available for users: accounts are changed one at a time."""
+        return Response({'error': 'Users are changed one at a time on the Users page; '
+                                  'bulk changes to users are not available.'},
+                        status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     @action(detail=False, methods=['get', 'patch'])
     def me(self, request):
@@ -495,7 +509,9 @@ class UserViewSet(BaseModelViewSet):
                             status=status.HTTP_400_BAD_REQUEST)
         data.pop('username', None)
         # A new password needs the current one, as in change_password.
-        current_password = data.pop('current_password', None)
+        # .get, not .pop: on a multipart body QueryDict.pop returns a list.
+        current_password = request.data.get('current_password')
+        data.pop('current_password', None)
         if data.get('password') and not (
                 current_password and request.user.check_password(current_password)):
             return Response({'current_password': ['Enter your current password to set a new one.']},
@@ -692,14 +708,9 @@ class CompanyViewSet(BaseModelViewSet):
 
         # For list action, optimize for serialization
         if self.action == 'list':
-            # Prefetch related objects that are used in the serializer
-            queryset = queryset.select_related('parent_company').prefetch_related(
-                'contacts',
-                'zones',
-                'opportunities',
-                'contracts',
-                'child_companies'
-            )
+            # Everything CompanySerializer reads, fetched once per page (no per-row queries).
+            from crm_app.services.list_querysets import company_list_queryset
+            queryset = company_list_queryset(queryset)
         elif self.action == 'retrieve':
             # For detail view, include even more related data
             queryset = queryset.select_related('parent_company').prefetch_related(
@@ -900,7 +911,14 @@ class NoteViewSet(BaseModelViewSet):
             queryset = queryset.filter(
                 Q(is_private=False) | Q(author=user)
             )
-        
+
+        # The list sorts every note on created_at (no index) before LIMIT, so joins there
+        # would run over the whole table: it fetches the page's authors, companies and
+        # contacts in three queries instead. A single note is joined.
+        if self.action == 'list':
+            queryset = queryset.prefetch_related('author', 'company', 'contact')
+        else:
+            queryset = queryset.select_related('author', 'company', 'contact')
         return queryset
 
 
@@ -1019,7 +1037,9 @@ class TaskViewSet(BaseModelViewSet):
 
 class OpportunityViewSet(BaseModelViewSet):
     """ViewSet for Opportunity management"""
-    queryset = Opportunity.objects.select_related('company', 'owner').prefetch_related('activities').all()
+    queryset = Opportunity.objects.select_related('company', 'owner').prefetch_related(
+        'activities__user', 'activities__contact',
+    ).all()
     serializer_class = OpportunitySerializer
     search_fields = ['name', 'company__name', 'notes']
     ordering_fields = ['created_at', 'expected_value', 'expected_close_date', 'stage']
@@ -1315,7 +1335,15 @@ class ContractViewSet(BaseModelViewSet):
     ordering_fields = ['created_at', 'start_date', 'end_date', 'value', 'updated_at', 'company__name', 'contract_number']
     ordering = ['-start_date']
     filterset_fields = ['company', 'contract_type', 'status', 'auto_renew', 'is_active', 'contract_category', 'opportunity']
-    
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.action == 'list':
+            # Everything ContractSerializer reads, fetched once per page (no per-row queries).
+            from crm_app.services.list_querysets import contract_list_queryset
+            queryset = contract_list_queryset(queryset)
+        return queryset
+
     @action(detail=False, methods=['get'])
     def expiring_soon(self, request):
         """Get contracts expiring within 30 days"""
@@ -7131,7 +7159,9 @@ class QuoteViewSet(BaseModelViewSet):
         queryset = super().get_queryset()
 
         if self.action == 'list':
-            queryset = queryset.prefetch_related('line_items')
+            queryset = queryset.prefetch_related(
+                'line_items', 'attachments__uploaded_by', 'activities__user',
+            )
         elif self.action == 'retrieve':
             queryset = queryset.prefetch_related(
                 'line_items',
@@ -7472,7 +7502,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['user__username', 'model_name', 'action']
     ordering_fields = ['timestamp', 'action', 'model_name']
     ordering = ['-timestamp']
-    filterset_fields = ['user', 'action', 'model_name']
+    filterset_fields = ['user', 'action', 'model_name', 'record_id']
 
 
 def _sum_by_currency(items, amount):
@@ -7553,7 +7583,9 @@ class DashboardViewSet(viewsets.ViewSet):
         elif user.role == 'Finance':
             pass  # Finance sees all financial data
         elif user.role in ['Tech', 'Music']:
-            tasks = tasks.filter(Q(assigned_to=user) | Q(department=user.role))
+            # Their own tasks and their team's. Task.department was removed as unused
+            # (2026-02-10); a task's team is now the role of the person it is assigned to.
+            tasks = tasks.filter(Q(assigned_to=user) | Q(assigned_to__role=user.role))
             companies = companies.filter(tasks__in=tasks).distinct()
 
         # Calculate statistics
@@ -9466,6 +9498,10 @@ class TicketViewSet(viewsets.ModelViewSet):
         queryset = queryset.select_related(
             'company', 'contact', 'zone', 'assigned_to', 'created_by'
         ).prefetch_related('comments', 'attachments')
+        if self.action == 'list':
+            # Comment authors, uploaders and comment counts once per page (no per-row queries).
+            from crm_app.services.list_querysets import ticket_list_queryset
+            queryset = ticket_list_queryset(queryset)
 
         return queryset
 
@@ -11086,6 +11122,14 @@ class ZoneViewSet(viewsets.ModelViewSet):
     filterset_fields = ['company', 'platform', 'status']
     search_fields = ['name', 'company__name']
     ordering = ['company__name', 'name']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.action == 'list':
+            # Device and contract links once per page (no per-row queries).
+            from crm_app.services.list_querysets import zone_list_queryset
+            queryset = zone_list_queryset(queryset)
+        return queryset
 
     @action(detail=False, methods=['get'])
     def by_company(self, request):
