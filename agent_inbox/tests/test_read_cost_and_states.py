@@ -174,24 +174,6 @@ def test_a_read_flags_a_moved_contact(agent, person, other_company, contact):
 # ------------------------------------------------------------------ states the server never accepts
 
 
-@pytest.mark.parametrize('collection', ['company', 'contact'])
-def test_an_inactive_record_is_never_accepted_even_with_a_fresh_view(agent, person, company, contact, collection):
-    target = company if collection == 'company' else contact
-    field, value = ('city', 'Chiang Mai') if collection == 'company' else ('title', 'Director')
-    proposal = create_proposal(agent, {'kind': 'field_update', 'target_collection': collection,
-                                       'target_id': str(target.pk), 'patch': {field: value},
-                                       'evidence_quote': 'as written'}, via='rest')[0]
-    type(target).objects.filter(pk=target.pk).update(is_active=False)
-    shown = jwt_client(person).get(f'{PROPOSALS}{proposal.pk}/').json()
-    assert shown['target_state'] == 'inactive'
-    assert shown['target_state_reason'] == f'This {collection} is inactive. Activate it first to accept this suggestion.'
-    for route, extra in (('accept', {}), ('accept-with-edits', {'edits': {field: value + ' (edited)'}})):
-        response = decide(jwt_client(person), proposal.pk, route, seen_version=shown['seen_version'], **extra)
-        assert (response.status_code, response.json()['code']) == (409, 'not_acceptable')
-    target.refresh_from_db()
-    assert getattr(target, field) != value
-
-
 def test_a_deleted_record_reads_with_its_reason_and_fails_on_accept(agent, person, contact):
     proposal = create_proposal(agent, {'kind': 'field_update', 'target_collection': 'contact',
                                        'target_id': str(contact.pk), 'patch': {'title': 'Director'},
@@ -258,7 +240,7 @@ def test_two_same_name_new_contacts_accepted_at_once_create_one(agent, other_age
 
 @pytest.mark.parametrize('url', [
     'https://outlook.office365.com/mail/', 'https://outlook.live.com/mail/', 'https://login.microsoftonline.com/x',
-    'https://outlook.office.com/x', 'https://docs.google.co.th/x', 'https://www.google.de/x',
+    'https://outlook.office.com/x', 'https://docs.google.co.th/x', 'https://www.google.co.jp/x',
     'https://mail.google.com.vn/x', 'https://accounts.google.co.uk/x', 'https://www.hotmail.com/x',
     'https://www.google.co.kr/x',
 ])

@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.forms import UserChangeForm
 from django.contrib.admin import SimpleListFilter
 from django.utils.html import format_html, format_html_join
 from django.utils.formats import number_format
@@ -33,29 +34,74 @@ from .models import (
 )
 
 
+class UserAdminChangeForm(UserChangeForm):
+    """The admin user form. The stored SMTP app password is never sent to the browser.
+
+    ``smtp_password`` itself is not a form field: a new value comes in through
+    ``new_smtp_password`` (blank keeps the stored one) and ``clear_smtp_password``
+    removes it.
+    """
+
+    new_smtp_password = forms.CharField(
+        label='SMTP app password',
+        required=False,
+        strip=True,
+        widget=forms.PasswordInput(attrs={'autocomplete': 'new-password'}, render_value=False),
+        help_text='Leave blank to keep the current password.',
+    )
+    clear_smtp_password = forms.BooleanField(
+        label='Remove the stored password',
+        required=False,
+    )
+
+    class Meta(UserChangeForm.Meta):
+        model = User
+        exclude = ('smtp_password',)
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get('new_smtp_password') and cleaned.get('clear_smtp_password'):
+            raise forms.ValidationError(
+                'Either enter a new SMTP app password or remove the stored one, not both.'
+            )
+        return cleaned
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        if self.cleaned_data.get('clear_smtp_password'):
+            user.smtp_password = None
+        elif self.cleaned_data.get('new_smtp_password'):
+            user.smtp_password = self.cleaned_data['new_smtp_password']
+        if commit:
+            user.save()
+            self.save_m2m()
+        return user
+
+
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
+    form = UserAdminChangeForm
     fieldsets = BaseUserAdmin.fieldsets + (
         ('CRM Info', {'fields': ('role', 'phone', 'department', 'last_login_ip')}),
         ('Email SMTP Configuration', {
-            'fields': ('smtp_email', 'smtp_password'),
+            'fields': ('smtp_email', 'smtp_password_status', 'new_smtp_password', 'clear_smtp_password'),
             'description': 'Configure Gmail credentials for sending emails as this user. Get app password from: https://myaccount.google.com/apppasswords'
         }),
     )
-    list_display = ['username', 'email', 'role', 'is_active', 'date_joined']
+    readonly_fields = ('smtp_password_status',)
+    list_display = ['username', 'email', 'role', 'is_active', 'smtp_password_set', 'date_joined']
     list_filter = ['role', 'is_active', 'date_joined']
     search_fields = ['username', 'email', 'first_name', 'last_name']
 
-    def get_form(self, request, obj=None, **kwargs):
-        """Customize form to use password widget for smtp_password field"""
-        form = super().get_form(request, obj, **kwargs)
-        if 'smtp_password' in form.base_fields:
-            # Use PasswordInput with render_value=True to show asterisks but allow viewing
-            form.base_fields['smtp_password'].widget = forms.PasswordInput(
-                attrs={'autocomplete': 'new-password'},
-                render_value=True
-            )
-        return form
+    @admin.display(boolean=True, description='SMTP password set')
+    def smtp_password_set(self, obj):
+        return bool(obj.smtp_password)
+
+    @admin.display(description='Stored SMTP app password')
+    def smtp_password_status(self, obj):
+        if obj is None or obj.pk is None:
+            return 'Not set'
+        return 'Set' if obj.smtp_password else 'Not set'
 
 
 class ContactInline(admin.TabularInline):

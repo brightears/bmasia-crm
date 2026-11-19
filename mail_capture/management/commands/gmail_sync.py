@@ -268,8 +268,10 @@ class Command(BaseCommand):
             MailboxAccessLog.objects.filter(pk=log.pk).update(finished_at=timezone.now(), api_calls=1)
             self.stdout.write(f"{mailbox.email}: messages {profile.get('messagesTotal')}, "
                               f"history id {profile.get('historyId')}")
-            # A token was made and accepted: a recorded auth problem is over.
-            CaptureMailbox.objects.filter(pk=mailbox.pk).exclude(auth_problem='').update(auth_problem='')
+            # A token was made and accepted: a recorded auth problem, and the
+            # backoff it caused, are over.
+            CaptureMailbox.objects.filter(pk=mailbox.pk).exclude(auth_problem='').update(
+                auth_problem='', retry_not_before=None, transient_errors=0)
             fresh = CaptureMailbox.objects.get(pk=mailbox.pk)
             if fresh.needs_attention:
                 self.stdout.write(f'{mailbox.email}: needs attention: {fresh.attention_reason} '

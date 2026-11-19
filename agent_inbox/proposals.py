@@ -188,9 +188,13 @@ def with_effective_status(queryset, statuses):
 # nothing here. updated_at is only the cheap signal to re-read the values.
 
 # States in which a suggestion can never be accepted, whatever the reviewer saw:
-# the record is gone, it now belongs to another company, it is inactive (activate
-# it first), or the contact to be created already exists at the company.
-NEVER_ACCEPTABLE_STATES = frozenset({'missing', 'moved', 'inactive', 'duplicate'})
+# the record is gone, it now belongs to another company, or the contact to be
+# created already exists at the company.
+NEVER_ACCEPTABLE_STATES = frozenset({'missing', 'moved', 'duplicate'})
+# States in which an accept must carry the reviewer's explicit acknowledgement:
+# an inactive record (a contact created from a suggestion starts inactive, and a
+# company's active flag is not always right). Applying never activates it.
+ACKNOWLEDGE_STATES = {'inactive': 'acknowledge_inactive'}
 
 
 def watched_fields(proposal):
@@ -254,7 +258,11 @@ def target_state_reason(proposal):
     """A short sentence the review page can show as it is, or '' when there is nothing to say."""
     noun = {'contact': 'contact', 'company': 'company'}.get(proposal.target_collection, 'record')
     return {
-        'inactive': f'This {noun} is inactive. Activate it first to accept this suggestion.',
+        'inactive': (
+            'This contact is inactive: nothing is emailed to it until someone activates it. Applying the change '
+            'keeps it inactive.' if noun == 'contact' else
+            f'This {noun} is marked inactive. Applying the change keeps it inactive.'
+        ),
         'missing': 'This record no longer exists.',
         'moved': f'This {noun} now belongs to another company.',
         'duplicate': 'A contact with this email or name already exists at the company.',
@@ -991,13 +999,25 @@ def _record_changed(proposal, serializer_class, current, state='present'):
                         proposal=_plain(snapshot(proposal)))
 
 
-def _not_acceptable(proposal):
-    """A state in which the suggestion can never be accepted, even by a reviewer who has seen it."""
-    reason = target_state_reason(proposal)
+def _not_acceptable(proposal, reason=None):
+    """A state in which the suggestion can never be accepted, even by a reviewer who has seen it.
+
+    Only last_apply_error is stored; the watched state stays what the reviewer saw.
+    """
+    reason = reason or target_state_reason(proposal)
     proposal.last_apply_error = reason[:APPLY_ERROR_MAX]
-    proposal.save()
+    proposal.save(update_fields=['last_apply_error', 'updated_at'])
     return ServiceError(409, 'not_acceptable', reason, target_state=stored_state(proposal),
-                        target_state_reason=reason, proposal=_plain(snapshot(proposal)))
+                        target_state_reason=target_state_reason(proposal), proposal=_plain(snapshot(proposal)))
+
+
+def _needs_acknowledgement(proposal):
+    """The accept is allowed only with the reviewer's explicit acknowledgement; nothing is stored."""
+    reason = target_state_reason(proposal)
+    flag = ACKNOWLEDGE_STATES[stored_state(proposal)]
+    return ServiceError(409, 'needs_acknowledgement', f'{reason} To apply it, accept again with {flag}: true.',
+                        acknowledge=flag, target_state=stored_state(proposal), target_state_reason=reason,
+                        proposal=_plain(snapshot(proposal)))
 
 
 def _keep_error(proposal, error):
@@ -1026,7 +1046,7 @@ def _new_contact_data(company_id, applied):
     return {'company': str(company_id), **applied, **flags, 'is_primary': False, 'is_active': False}
 
 
-def _apply(request, proposal, applied):
+def _apply(request, proposal, applied, acknowledged=frozenset()):
     """Apply ``applied`` to the target as the reviewer. Returns the write tool's data or raises _Refusal."""
     from crm_app.mcp import create_record, update_record
     from crm_app.models import AuditLog, Contact
@@ -1036,9 +1056,11 @@ def _apply(request, proposal, applied):
         instance = model.objects.select_for_update().filter(pk=proposal.target_id).first()
         if instance is None:
             proposal.status = 'failed'
+            proposal.target_state = 'missing'
             proposal.last_apply_error = 'The target record no longer exists.'
             proposal.save()
-            raise _Refusal(ServiceError(409, 'target_missing', proposal.last_apply_error))
+            raise _Refusal(ServiceError(409, 'target_missing', proposal.last_apply_error, target_state='missing',
+                                        target_state_reason=target_state_reason(proposal)))
         current = _plain(serializer_class(instance).data)
         # Under the row lock: the values the reviewer saw must still be the record's.
         # An edit to a field the proposal does not watch does not block the accept.
@@ -1047,6 +1069,8 @@ def _apply(request, proposal, applied):
             raise _Refusal(_record_changed(proposal, serializer_class, current, state))
         if state in NEVER_ACCEPTABLE_STATES:
             raise _Refusal(_not_acceptable(proposal))
+        if state in ACKNOWLEDGE_STATES and ACKNOWLEDGE_STATES[state] not in acknowledged:
+            raise _Refusal(_needs_acknowledgement(proposal))
         if proposal.target_collection == 'contact':
             try:
                 _check_billing_email(instance, applied)
@@ -1090,9 +1114,12 @@ def _apply(request, proposal, applied):
                                             target_state=state, target_state_reason=reason,
                                             proposal=_plain(snapshot(proposal))))
             # ...and the contact as it will be created (after any edits) must not exist yet.
-            if _duplicate_answer(existing, proposal.company_id, applied) == 'duplicate':
-                proposal.target_state = 'duplicate'
+            # The watched state stays what the reviewer saw: only the edits collided.
+            if state == 'duplicate' and _duplicate_answer(existing, proposal.company_id, applied) == 'duplicate':
                 raise _Refusal(_not_acceptable(proposal))
+            if _duplicate_answer(existing, proposal.company_id, applied) == 'duplicate':
+                raise _Refusal(_not_acceptable(
+                    proposal, 'The edited contact already exists at the company: change the email or name.'))
             data = _new_contact_data(proposal.company_id, applied)
         else:
             data = {'company': str(proposal.company_id), **applied}
@@ -1124,9 +1151,18 @@ def _apply(request, proposal, applied):
 def accept(request, proposal_id, body, *, with_edits=False):
     """Accept a proposal (optionally with edits) and apply it. Returns (proposal, tool_reply)."""
     _require_person(request)
-    allowed = {'note', 'seen_version', 'edits', 'drop_fields'} if with_edits else {'note', 'seen_version'}
+    allowed = {'note', 'seen_version', *ACKNOWLEDGE_STATES.values()}
+    if with_edits:
+        allowed |= {'edits', 'drop_fields'}
     strict_object(body, allowed, required=('seen_version',))
     note = text_field(body, 'note', DECISION_NOTE_MAX, multiline=True)
+    acknowledged = set()
+    for flag in ACKNOWLEDGE_STATES.values():
+        value = body.get(flag, False)
+        if not isinstance(value, bool):
+            raise bad(f'{flag} must be true or false')
+        if value:
+            acknowledged.add(flag)
     refused = None
     with transaction.atomic():
         proposal = _locked(proposal_id)
@@ -1140,7 +1176,7 @@ def accept(request, proposal_id, body, *, with_edits=False):
             applied = _final_patch(proposal, body, with_edits)
             # The allowlist is checked again: it may have narrowed since the proposal was made.
             _check_fields(proposal.kind, proposal.target_collection, applied)
-            record_id, audit, reply = _apply(request, proposal, applied)
+            record_id, audit, reply = _apply(request, proposal, applied, frozenset(acknowledged))
         except _Refusal as refusal:
             # The proposal's own bookkeeping (expired, failed, refreshed values) is
             # committed; the target record was not written.

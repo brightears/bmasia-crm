@@ -2653,7 +2653,9 @@ def list_proposals(status: str = '', batch_key: str = '', since: str = '', limit
 
     Use it to see whether your proposals were accepted, edited or rejected (with the
     reviewer's note), so you do not raise a rejected change again and can learn
-    which evidence reviewers accept.
+    which evidence reviewers accept. Each item also carries target_state (present,
+    inactive, moved, missing; for a new contact duplicate or no_duplicate) and
+    target_state_reason, as last checked by a reviewer; reading here changes nothing.
 
     Args:
         status: Optional comma list: proposed, accepted, edited, rejected, expired,
