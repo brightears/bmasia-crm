@@ -15,6 +15,8 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 import logging
 
+from crm_app.services.exception_safety import describe_exception, log_exception, mail_link
+
 from crm_app.models import (
     ProspectEnrollment,
     ProspectStepExecution,
@@ -111,9 +113,11 @@ class Command(BaseCommand):
 
             except Exception as e:
                 errors += 1
-                logger.error(f"Error processing execution {execution.id}: {e}")
+                # A send sits below this: no mail server reply in the log or the row
+                # (crm_app/services/exception_safety.py).
+                log_exception(logger, f"Error processing execution {execution.id}", e)
                 execution.status = 'failed'
-                execution.error_message = str(e)[:1000]
+                execution.error_message = describe_exception(e)[:1000] if mail_link(e) else str(e)[:1000]
                 execution.executed_at = now
                 execution.save(update_fields=['status', 'error_message', 'executed_at'])
 

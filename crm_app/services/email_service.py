@@ -23,7 +23,8 @@ from crm_app.models import (
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution
 )
 
-from crm_app.api_errors import describe_mail_exception, mail_failure_text
+from crm_app.api_errors import mail_failure_text
+from crm_app.services.exception_safety import describe_mail_exception, log_exception, safe_exception_message
 
 logger = logging.getLogger(__name__)
 
@@ -66,16 +67,29 @@ def contract_followup_candidates():
 
 
 def exception_text(exc):
-    """The only way a caught exception becomes text in this module.
+    """The text of a caught exception for what users and EmailLog rows see.
 
-    Log lines, ``EmailLog.error_message``, sequence execution errors and the detail passed
-    to ``mail_failure_text`` all go through here. A mail error becomes its type, SMTP code
-    and a fixed description (per refused recipient: the domain and the code), never the
-    mail server's raw reply, which can echo what it was sent. Any other error keeps its own
-    message. crm_app/tests/test_smtp_error_logging_and_redaction.py checks this module's
-    source so that no except block turns an exception into text another way.
+    ``EmailLog.error_message``, sequence execution errors and the detail passed to
+    ``mail_failure_text`` go through here. A mail error becomes its type, SMTP code and a
+    fixed description (per refused recipient: the domain and the code), never the mail
+    server's raw reply, which can echo what it was sent. Any other error keeps its own
+    message, unless that message repeats a chained mail error's text: then only its type.
+    See crm_app/services/exception_safety.py.
     """
-    return describe_mail_exception(exc) or str(exc)
+    return describe_mail_exception(exc) or safe_exception_message(exc)
+
+
+def log_caught_exception(context, exc, mail_level=logging.ERROR, bug_level=logging.ERROR):
+    """Log a caught exception: the one place in this module that may log a traceback.
+
+    By the rule in crm_app/services/exception_safety.py: a mail error, or any error chained
+    to one, is logged without its chain (a mail traceback carries the server's raw reply);
+    any other error is a bug and is logged with its type, message and full traceback.
+    crm_app/tests/test_mail_error_text_everywhere.py checks this module's source: every
+    except block logs through this function, and nothing else here logs or formats a traceback.
+    """
+    log_exception(logger, context, exc, mail_level=mail_level, bug_level=bug_level)
+
 
 class EmailService:
     """Main email service for sending automated emails"""
@@ -183,7 +197,7 @@ class EmailService:
                 return None
 
         except Exception as e:
-            logger.warning(f"Error getting SMTP connection for {clean_email}: {exception_text(e)}")
+            log_caught_exception(f"Error getting SMTP connection for {clean_email}", e, mail_level=logging.WARNING)
             return None
 
     def _inject_tracking_pixel(self, body_html: str, tracking_token: str) -> str:
@@ -274,7 +288,7 @@ class EmailService:
                         msg.attach_file(attachment.file.path)
                         logger.info(f"Attached file: {attachment.name}")
                     except Exception as e:
-                        logger.warning(f"Failed to attach file {attachment.name}: {exception_text(e)}")
+                        log_caught_exception(f"Failed to attach file {attachment.name}", e, mail_level=logging.WARNING)
             
             # Send email with a Message-ID fixed beforehand, so the stored id
             # is the one that went out (used for reply matching).
@@ -300,7 +314,7 @@ class EmailService:
             # A mail server's raw reply can echo what it was sent; keep only a fixed description.
             error_msg = exception_text(e)
             email_log.mark_as_failed(error_msg)
-            logger.error(f"Failed to send email to {to_email}: {error_msg}")
+            log_caught_exception(f"Failed to send email to {to_email}", e)
             return False, mail_failure_text(None, 'Failed to send email', error_msg)
     
     def send_template_email(
@@ -651,7 +665,7 @@ class EmailService:
                     logger.warning(f"Failed to send follow-up for quote {quote.quote_number}: {message}")
             except Exception as e:
                 results['failed'] += 1
-                logger.error(f"Error sending follow-up for quote {quote.quote_number}: {exception_text(e)}")
+                log_caught_exception(f"Error sending follow-up for quote {quote.quote_number}", e)
 
         logger.info(f"Quote follow-ups: {results}")
         return results
@@ -752,7 +766,7 @@ class EmailService:
                     logger.warning(f"Failed to send follow-up for contract {contract.contract_number}: {message}")
             except Exception as e:
                 results['failed'] += 1
-                logger.error(f"Error sending follow-up for contract {contract.contract_number}: {exception_text(e)}")
+                log_caught_exception(f"Error sending follow-up for contract {contract.contract_number}", e)
 
         logger.info(f"Contract follow-ups: {results}")
         return results
@@ -894,7 +908,7 @@ class EmailService:
                     from_email = user_smtp['email']
                     sender_name = request.user.get_full_name() or request.user.username
                 except Exception as e:
-                    logger.error(f"Failed to create user SMTP connection: {exception_text(e)}")
+                    log_caught_exception("Failed to create user SMTP connection", e)
                     # Fall back to default
                     sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
                     from_email = f"{sender_config['display']} <{sender_config['email']}>"
@@ -967,7 +981,7 @@ class EmailService:
             pdf_data = pdf_response.content
             pdf_filename = f"Quote_{quote.quote_number}.pdf"
         except Exception as e:
-            logger.error(f"Failed to generate PDF for quote {quote.quote_number}: {exception_text(e)}")
+            log_caught_exception(f"Failed to generate PDF for quote {quote.quote_number}", e)
             return False, mail_failure_text(caller_request, 'Failed to generate the PDF', exception_text(e))
 
         # Send to each recipient
@@ -1035,7 +1049,7 @@ class EmailService:
 
             except Exception as e:
                 error_msg = exception_text(e)
-                logger.error(f"Failed to send quote email to {recipient}: {error_msg}")
+                log_caught_exception(f"Failed to send quote email to {recipient}", e)
                 error_messages.append(f"{recipient}: {error_msg}")
                 # Mark log as failed if it was created
                 if 'email_log' in locals() and email_log and email_log.status == 'pending':
@@ -1113,7 +1127,7 @@ class EmailService:
                     from_email = user_smtp['email']
                     sender_name = request.user.get_full_name() or request.user.username
                 except Exception as e:
-                    logger.error(f"Failed to create user SMTP connection: {exception_text(e)}")
+                    log_caught_exception("Failed to create user SMTP connection", e)
                     # Fall back to default
                     sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
                     from_email = f"{sender_config['display']} <{sender_config['email']}>"
@@ -1192,7 +1206,7 @@ class EmailService:
             pdf_data = pdf_response.content
             pdf_filename = f"Contract_{contract.contract_number}.pdf"
         except Exception as e:
-            logger.error(f"Failed to generate PDF for contract {contract.contract_number}: {exception_text(e)}")
+            log_caught_exception(f"Failed to generate PDF for contract {contract.contract_number}", e)
             return False, mail_failure_text(request, 'Failed to generate the PDF', exception_text(e))
 
         # Send to each recipient
@@ -1260,7 +1274,7 @@ class EmailService:
 
             except Exception as e:
                 error_msg = exception_text(e)
-                logger.error(f"Failed to send contract email to {recipient}: {error_msg}")
+                log_caught_exception(f"Failed to send contract email to {recipient}", e)
                 error_messages.append(f"{recipient}: {error_msg}")
                 if 'email_log' in locals() and email_log and email_log.status == 'pending':
                     email_log.mark_as_failed(error_msg)
@@ -1353,7 +1367,7 @@ class EmailService:
                     from_email = user_smtp['email']
                     sender_name = request.user.get_full_name() or request.user.username
                 except Exception as e:
-                    logger.error(f"Failed to create user SMTP connection: {exception_text(e)}")
+                    log_caught_exception("Failed to create user SMTP connection", e)
                     # Fall back to default
                     sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
                     from_email = f"{sender_config['display']} <{sender_config['email']}>"
@@ -1426,7 +1440,7 @@ class EmailService:
             pdf_data = pdf_response.content
             pdf_filename = f"Invoice_{invoice.invoice_number}.pdf"
         except Exception as e:
-            logger.error(f"Failed to generate PDF for invoice {invoice.invoice_number}: {exception_text(e)}")
+            log_caught_exception(f"Failed to generate PDF for invoice {invoice.invoice_number}", e)
             return False, mail_failure_text(caller_request, 'Failed to generate the PDF', exception_text(e))
 
         # Send to each recipient
@@ -1494,7 +1508,7 @@ class EmailService:
 
             except Exception as e:
                 error_msg = exception_text(e)
-                logger.error(f"Failed to send invoice email to {recipient}: {error_msg}")
+                log_caught_exception(f"Failed to send invoice email to {recipient}", e)
                 error_messages.append(f"{recipient}: {error_msg}")
                 if 'email_log' in locals() and email_log and email_log.status == 'pending':
                     email_log.mark_as_failed(error_msg)
@@ -1572,7 +1586,7 @@ class EmailService:
                     from_email = user_smtp['email']
                     sender_name = request.user.get_full_name() or request.user.username
                 except Exception as e:
-                    logger.error(f"Failed to create user SMTP connection: {exception_text(e)}")
+                    log_caught_exception("Failed to create user SMTP connection", e)
                     sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
                     from_email = f"{sender_config['display']} <{sender_config['email']}>"
                     sender_name = sender_config['name']
@@ -1621,7 +1635,7 @@ class EmailService:
             pdf_data = pdf_response.content
             pdf_filename = f"Receipt_Tax_Invoice_{invoice.receipt_number}.pdf"
         except Exception as e:
-            logger.error(f"Failed to generate receipt PDF for {invoice.receipt_number}: {exception_text(e)}")
+            log_caught_exception(f"Failed to generate receipt PDF for {invoice.receipt_number}", e)
             return False, mail_failure_text(request, 'Failed to generate the receipt PDF', exception_text(e))
 
         # Send to each recipient
@@ -1674,7 +1688,7 @@ class EmailService:
 
             except Exception as e:
                 error_msg = exception_text(e)
-                logger.error(f"Failed to send receipt email to {recipient}: {error_msg}")
+                log_caught_exception(f"Failed to send receipt email to {recipient}", e)
                 error_messages.append(f"{recipient}: {error_msg}")
                 if 'email_log' in locals() and email_log and email_log.status == 'pending':
                     email_log.mark_as_failed(error_msg)
@@ -1768,7 +1782,7 @@ class EmailService:
                     from_email = user_smtp['email']
                     sender_name = request.user.get_full_name() or request.user.username
                 except Exception as e:
-                    logger.error(f"Failed to create user SMTP connection: {exception_text(e)}")
+                    log_caught_exception("Failed to create user SMTP connection", e)
                     # Fall back to default
                     sender_config = settings.EMAIL_SENDERS.get(sender, settings.EMAIL_SENDERS['admin'])
                     from_email = f"{sender_config['display']} <{sender_config['email']}>"
@@ -1877,7 +1891,7 @@ class EmailService:
                 logger.info(f"Manual renewal reminder sent successfully to {recipient}")
 
             except Exception as e:
-                logger.error(f"Failed to send renewal reminder to {recipient}: {exception_text(e)}")
+                log_caught_exception(f"Failed to send renewal reminder to {recipient}", e)
 
         # Update contract reminder tracking
         if success_count > 0:
@@ -2141,7 +2155,7 @@ class EmailService:
             html_content = rendered['body_html']
             text_content = rendered['body_text']
         except Exception as e:
-            logger.error(f"Failed to render template for execution {execution_id}: {exception_text(e)}")
+            log_caught_exception(f"Failed to render template for execution {execution_id}", e)
             execution.status = 'failed'
             execution.error_message = f"Template rendering error: {exception_text(e)}"
             execution.save()
@@ -2215,7 +2229,7 @@ class EmailService:
             execution.error_message = error_msg
             execution.save()
 
-            logger.error(f"Failed to execute sequence step {execution_id}: {error_msg}")
+            log_caught_exception(f"Failed to execute sequence step {execution_id}", e)
 
             # Retry logic: if attempt_count < 3, reset to 'scheduled' to retry later
             if execution.attempt_count < 3:

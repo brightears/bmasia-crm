@@ -122,8 +122,12 @@ def receipt_email_failure_text(request, invoice, failure):
     if isinstance(failure, str) and failure in _RECEIPT_EMAIL_REASONS:
         return failure
     reference = request_id_for(request)
-    logger.error('Receipt email failed for invoice %s [request_id=%s]: %s', invoice.pk, reference,
-                 failure, exc_info=failure if isinstance(failure, BaseException) else None)
+    if isinstance(failure, BaseException):
+        from crm_app.services.exception_safety import log_exception
+        # Never a mail server's reply, even chained (crm_app/services/exception_safety.py).
+        log_exception(logger, f'Receipt email failed for invoice {invoice.pk} [request_id={reference}]', failure)
+    else:
+        logger.error('Receipt email failed for invoice %s [request_id=%s]: %s', invoice.pk, reference, failure)
     return f'the receipt email could not be sent. Reference: {reference}'
 
 

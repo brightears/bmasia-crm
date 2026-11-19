@@ -22,6 +22,9 @@ from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler, set_rollback
 
 from crm_app.request_ids import request_id_for  # noqa: F401 (re-exported)
+from crm_app.services.exception_safety import (  # noqa: F401 (describe_mail_exception re-exported)
+    describe_exception, describe_mail_exception, log_exception,
+)
 
 logger = logging.getLogger('crm_app.api_errors')
 
@@ -29,12 +32,11 @@ GENERIC_ERROR = 'Something went wrong on the server'
 
 
 def _log(request, exc, summary):
+    """Log an unexpected error with a reference; never a mail server's reply (exception_safety rule)."""
     raw = getattr(request, '_request', request)
-    logger.error(
-        '%s [request_id=%s] %s %s', summary, request_id_for(request),
-        getattr(raw, 'method', '-'), getattr(raw, 'path', '-'),
-        exc_info=(type(exc), exc, exc.__traceback__),
-    )
+    message = '%s [request_id=%s] %s %s' % (
+        summary, request_id_for(request), getattr(raw, 'method', '-'), getattr(raw, 'path', '-'))
+    log_exception(logger, message, exc)
 
 
 def internal_error_text(request, exc, summary=GENERIC_ERROR):
@@ -74,7 +76,7 @@ def mail_failure_text(request, summary, detail):
     """The mail layer failed: log what happened (never a mail server's raw reply); give a reference."""
     reference = request_id_for(request)  # a fresh id when there is no request (crons)
     if isinstance(detail, BaseException):
-        detail = describe_mail_exception(detail) or f'{type(detail).__name__}: {detail}'
+        detail = describe_exception(detail)
     logger.error('%s [request_id=%s]: %s', summary, reference, detail)
     return f'{summary}. Reference: {reference}'
 
@@ -94,48 +96,6 @@ def safe_mail_message(request, message):
     if isinstance(message, str) and _OWN_MAIL_MESSAGES.match(message):
         return message
     return mail_failure_text(request, 'Failed to send the email', message)
-
-
-def describe_mail_exception(exc):
-    """A log-safe description of a mail error: type, SMTP code and a fixed text, or None.
-
-    A mail server's raw reply can echo what it was sent (including a password), so it is
-    never part of the description, and these errors are logged without their traceback.
-    """
-    import smtplib
-
-    descriptions = (
-        (smtplib.SMTPAuthenticationError, 'the mail server did not accept the login'),
-        (smtplib.SMTPSenderRefused, 'the mail server refused the sender address'),
-        (smtplib.SMTPRecipientsRefused, 'the mail server refused the recipients'),
-        (smtplib.SMTPDataError, 'the mail server refused the message'),
-        (smtplib.SMTPConnectError, 'the mail server refused the connection'),
-        (smtplib.SMTPServerDisconnected, 'the mail server closed the connection'),
-        (smtplib.SMTPNotSupportedError, 'the mail server does not support a required command'),
-        (smtplib.SMTPException, 'the mail server refused the request'),
-        (OSError, 'could not connect to the mail server'),
-    )
-    if isinstance(exc, smtplib.SMTPRecipientsRefused):
-        return f'{type(exc).__name__}: {_refused_recipients_text(exc)}'
-    for kind, text in descriptions:
-        if isinstance(exc, kind):
-            code = getattr(exc, 'smtp_code', None)
-            code_text = f' (SMTP code {code})' if isinstance(code, int) else ''
-            return f'{type(exc).__name__}{code_text}: {text}'
-    return None
-
-
-def _refused_recipients_text(exc):
-    """'the mail server refused N recipient(s) (example.com: 550; ...)': domain and code only."""
-    recipients = getattr(exc, 'recipients', None) or {}
-    parts = []
-    for address, reply in sorted(recipients.items(), key=lambda item: str(item[0])):
-        address = str(address)
-        domain = address.rsplit('@', 1)[-1] if '@' in address else 'unknown domain'
-        code = reply[0] if isinstance(reply, (tuple, list)) and reply and isinstance(reply[0], int) else None
-        parts.append(f'{domain}: {code if code is not None else "no code"}')
-    detail = f" ({'; '.join(parts)})" if parts else ''
-    return f'the mail server refused {len(recipients)} recipient(s){detail}'
 
 
 def smtp_error_text(request, exc):

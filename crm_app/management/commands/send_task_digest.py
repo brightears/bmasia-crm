@@ -15,7 +15,7 @@ from datetime import timedelta
 from django.core.management.base import BaseCommand
 from django.core.mail import send_mail
 
-from crm_app.services.email_service import exception_text
+from crm_app.services.email_service import log_caught_exception
 from django.conf import settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
@@ -76,7 +76,7 @@ class Command(BaseCommand):
                 emails_sent += 1
                 logger.info(f"Task digest sent to {user.email}")
             except Exception as e:
-                logger.error(f"Failed to send digest to {user.email}: {exception_text(e)}")
+                log_caught_exception(f"Failed to send digest to {user.email}", e)
 
         self.stdout.write(self.style.SUCCESS(f'Task digest sent to {emails_sent} users'))
 
