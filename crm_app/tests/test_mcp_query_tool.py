@@ -40,10 +40,21 @@ def run_query(collection, pipeline):
     return json.loads(content[0].text)
 
 
+def tool_error_text(name, arguments):
+    """The error text of a failed tool call. A caller mistake comes back as an error result
+    (the reply clients get over HTTP is the same either way); a fault raises ToolError."""
+    from mcp.types import CallToolResult
+
+    try:
+        result = async_to_sync(mcp_server.call_tool)(name, arguments)
+    except ToolError as exc:
+        return str(exc)
+    assert isinstance(result, CallToolResult) and result.isError, result
+    return result.content[0].text
+
+
 def query_error(collection, pipeline):
-    with pytest.raises(ToolError) as caught:
-        run_query(collection, pipeline)
-    text = str(caught.value)
+    text = tool_error_text('query_data_collections', {'collection': collection, 'search_pipeline': pipeline})
     assert text.startswith(TOOL_ERROR_PREFIX), text
     message = text[len(TOOL_ERROR_PREFIX):]
     assert '\n' not in message
