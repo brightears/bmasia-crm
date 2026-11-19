@@ -23,7 +23,7 @@ from crm_app.models import (
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution
 )
 
-from crm_app.api_errors import mail_failure_text
+from crm_app.api_errors import describe_mail_exception, mail_failure_text
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +284,8 @@ class EmailService:
             return True, "Email sent successfully"
             
         except Exception as e:
-            error_msg = str(e)
+            # A mail server's raw reply can echo what it was sent; keep only a fixed description.
+            error_msg = describe_mail_exception(e) or str(e)
             email_log.mark_as_failed(error_msg)
             logger.error(f"Failed to send email to {to_email}: {error_msg}")
             return False, mail_failure_text(None, 'Failed to send email', error_msg)

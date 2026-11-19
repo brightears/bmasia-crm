@@ -133,23 +133,18 @@ def serialize_audit_changes(obj):
     return json.loads(json.dumps(obj, cls=DjangoJSONEncoder))
 
 
-_SECRET_AUDIT_FIELD = re.compile(r'password|passwd|secret|token|api_?key|credential', re.IGNORECASE)
 REDACTED_AUDIT_VALUE = '[redacted]'
 
 
 def redact_secret_changes(changes):
-    """Replace the old and new values of secret-like fields in an audit ``changes`` dict.
+    """Replace the values of secret-like keys in an audit ``changes`` dict, at any depth.
 
     The REST serializers already leave such fields out of their output; this keeps an
-    audit row free of them if a serializer ever includes one.
+    audit row free of them if a serializer ever includes one. See
+    crm_app/services/audit_redaction.py.
     """
-    if not isinstance(changes, dict):
-        return changes
-    return {
-        key: ({'old': REDACTED_AUDIT_VALUE, 'new': REDACTED_AUDIT_VALUE}
-              if _SECRET_AUDIT_FIELD.search(str(key)) else value)
-        for key, value in changes.items()
-    }
+    from crm_app.services.audit_redaction import redact_changes
+    return redact_changes(changes)
 
 
 def _format_duration(start_date, end_date):
