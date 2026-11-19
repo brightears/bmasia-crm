@@ -197,5 +197,8 @@ def list_proposals(status='', batch_key='', since='', limit=50):
     for row in rows:
         item = {name: getattr(row, name) for name in OWN_PROPOSAL_FIELDS}
         item['status'] = proposal_service.effective_status(row)
+        # As stored by the last reviewer read or decision: an agent's read never refreshes, advances or flags.
+        item['target_state'] = proposal_service.stored_state(row)
+        item['target_state_reason'] = proposal_service.target_state_reason(row)
         items.append(item)
     return _reply({'ok': True, 'count': len(items), 'proposals': items})

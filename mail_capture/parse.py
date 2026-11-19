@@ -880,10 +880,35 @@ class ParsedMessage:
         return sorted(self.flags)
 
 
+_DKIM_DOMAIN = r'([a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?)'
+_DKIM_HEADER_D = re.compile(r'(?:^|[\s(])header\.d=' + _DKIM_DOMAIN + r'(?=$|[\s;)])')
+_DKIM_HEADER_I = re.compile(r'(?:^|[\s(])header\.i=([^\s;()]{1,320})')
+_DKIM_DOMAIN_ONLY = re.compile(_DKIM_DOMAIN + '$')
+
+
+def _dkim_signing_domain(part):
+    """The signing domain of one ``dkim=pass`` result: ``header.d`` when
+    present, else the part of ``header.i`` after its last ``@`` (Gmail writes
+    ``header.i=@domain``). The local part of ``header.i`` is never read: the
+    signer chooses it freely ("header.i=ourco.example@other.example" is
+    other.example). Comments in parentheses are dropped first."""
+    part = re.sub(r'\([^()]*\)', ' ', part)
+    found = _DKIM_HEADER_D.search(part)
+    if found:
+        return found.group(1)
+    found = _DKIM_HEADER_I.search(part)
+    if not found or '@' not in found.group(1):
+        return ''
+    domain = found.group(1).rsplit('@', 1)[1]
+    return domain if _DKIM_DOMAIN_ONLY.match(domain) else ''
+
+
 def gmail_dkim_pass_domains(values):
     """Domains with dkim=pass in the first Authentication-Results header,
     only when Gmail itself wrote it (authserv-id mx.google.com). Gmail adds its
-    own header on top; one a sender wrote further down is never read."""
+    own header on top; one a sender wrote further down is never read.
+
+    Only the signing domain counts (``_dkim_signing_domain``)."""
     if not values:
         return []
     first = clean(unfold(values[0], 4096))
@@ -895,9 +920,9 @@ def gmail_dkim_pass_domains(values):
         part = part.strip().lower()
         if not part.startswith('dkim=pass'):
             continue
-        found = re.search(r'header\.(?:d|i)=@?([a-z0-9.-]{1,253})', part)
-        if found and found.group(1) not in out:
-            out.append(found.group(1).rstrip('.'))
+        domain = _dkim_signing_domain(part)
+        if domain and domain not in out:
+            out.append(domain)
     return out[:5]
 
 

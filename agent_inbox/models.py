@@ -93,12 +93,14 @@ PROPOSAL_STATUS_CHOICES = [
     ('failed', 'Failed'),
 ]
 # The target as last compared with the suggestion. For an update: the record is
-# there, was made inactive (is_active false) or was deleted. For a new contact:
+# there, was made inactive (is_active false), moved to another company (a contact)
+# or was deleted. For a new contact:
 # whether a contact with the proposed email or name exists at the company.
 TARGET_STATE_CHOICES = [
     ('', 'As when suggested'),
     ('present', 'Present'),
     ('inactive', 'Made inactive'),
+    ('moved', 'Moved to another company'),
     ('missing', 'Deleted'),
     ('no_duplicate', 'No contact with that email or name'),
     ('duplicate', 'A contact with that email or name exists'),

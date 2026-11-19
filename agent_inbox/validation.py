@@ -209,14 +209,28 @@ GMAIL_HOST = 'mail.google.com'
 # (WHATWG URL "ends in a number"): 0x7f.0x0.0x0.0x1 and 1.2.3.0x4 both open an IP.
 _NUMERIC_LABEL_RE = re.compile(r'(0[xX][0-9a-fA-F]*|[0-9]+)\Z')
 # Well-known names a link may imitate, with the registrable domains that really are them.
+_MICROSOFT_DOMAINS = frozenset({
+    'microsoft.com', 'microsoftonline.com', 'office.com', 'office365.com', 'outlook.com', 'live.com', 'hotmail.com',
+})
 LOOKALIKE_NAMES = {
     'google': frozenset({'google.com'}),
     'gmail': frozenset({'gmail.com', 'google.com'}),
-    'microsoft': frozenset({'microsoft.com'}),
-    'outlook': frozenset({'outlook.com', 'office.com', 'microsoft.com'}),
-    'office': frozenset({'office.com', 'microsoft.com'}),
+    'microsoft': _MICROSOFT_DOMAINS,
+    'outlook': _MICROSOFT_DOMAINS,
+    'office': _MICROSOFT_DOMAINS,
+    'office365': _MICROSOFT_DOMAINS,
     'bmasia': frozenset({'bmasiamusic.com', 'bmasia-crm.onrender.com', 'bmasia-crm-frontend.onrender.com'}),
 }
+# Google's own country domains for the markets this company serves (Asia-Pacific, plus the UK).
+# An explicit list: a pattern such as google.com.<cc> would also match names that a third party
+# can hold under a private second-level registry (com.de, com.se, co.no). Extend it by hand.
+GOOGLE_COUNTRY_DOMAINS = frozenset({
+    'google.co.th', 'google.com.hk', 'google.com.vn', 'google.com.sg', 'google.com.my', 'google.co.id',
+    'google.com.ph', 'google.com.kh', 'google.la', 'google.com.mm', 'google.co.jp', 'google.co.kr',
+    'google.com.tw', 'google.cn', 'google.co.in', 'google.com.au', 'google.co.nz', 'google.co.uk',
+})
+# Second-level labels under which a country domain registers names (co.th, com.au, or.jp ...).
+_COUNTRY_SECOND_LEVELS = frozenset({'co', 'com', 'net', 'org', 'or', 'ac', 'go', 'gov', 'edu', 'in', 'ne'})
 # Suffixes under which each name is its own registrable domain (a small, explicit list).
 _MULTI_LABEL_SUFFIXES = frozenset({
     'onrender.com', 'co.uk', 'com.au', 'co.th', 'in.th', 'or.th', 'ac.th', 'go.th', 'com.sg', 'com.hk',
@@ -227,7 +241,8 @@ _MULTI_LABEL_SUFFIXES = frozenset({
 def registrable_domain(host):
     """The host's registrable domain: its last two labels, or three under a listed multi-label suffix."""
     labels = host.split('.')
-    if len(labels) >= 3 and '.'.join(labels[-2:]) in _MULTI_LABEL_SUFFIXES:
+    if len(labels) >= 3 and ('.'.join(labels[-2:]) in _MULTI_LABEL_SUFFIXES
+                             or (labels[-2] in _COUNTRY_SECOND_LEVELS and len(labels[-1]) == 2)):
         return '.'.join(labels[-3:])
     return '.'.join(labels[-2:])
 
@@ -237,8 +252,11 @@ def lookalike_name(host):
     domain = registrable_domain(host)
     words = {word for label in host.split('.') for word in label.split('-')}
     for name, domains in LOOKALIKE_NAMES.items():
-        if name in words and domain not in domains:
-            return name
+        if name not in words or domain in domains:
+            continue
+        if name in ('google', 'gmail') and domain in GOOGLE_COUNTRY_DOMAINS:
+            continue
+        return name
     return None
 _DEFAULT_PORTS = {'http': 80, 'https': 443}
 _HOST_LABEL_RE = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z')
