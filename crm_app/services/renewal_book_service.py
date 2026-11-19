@@ -95,9 +95,17 @@ def _row_of(c):
 def _book_queryset():
     from crm_app.models import Contract
 
+    # Rows are sorted by group and company below (a stable sort), so contracts of the same
+    # company keep this order: newest start first, then the contract id, never a tie the
+    # database may break differently from one request to the next.
+    # The successor shown is the newest renewal; among renewals that start the same day, the
+    # lowest id (before, the database picked one of them).
+    from django.db.models import Prefetch
+    renewals = Contract.objects.order_by('-start_date', 'pk')
     return (
         Contract.objects.select_related('company', 'company__parent_company')
-        .prefetch_related('service_locations', 'invoices', 'renewals')
+        .prefetch_related('service_locations', 'invoices', Prefetch('renewals', queryset=renewals))
+        .order_by('-start_date', 'pk')
     )
 
 
