@@ -15,7 +15,7 @@ from mail_capture import purge, sync
 from mail_capture.gmail_client import FakeGmailClient
 from mail_capture.models import (
     CaptureFailure, CaptureMailbox, CaptureRule, CaptureRun, CaptureSkip, MailboxAccessLog, MailboxCopy,
-    MailMessage,
+    MailMessage, UnmatchedSender,
 )
 from mail_capture.sync import sync_mailbox
 
@@ -69,9 +69,17 @@ def use_client(monkeypatch, client):
 
 # --- G1: the runbook's sequence, end to end ------------------------------------------------
 
-def test_runbook_first_supervised_run_sequence(switched_on, lagoon, monkeypatch):
-    """Runbook section 1, step by step, with the commands exactly as written
-    there (the test also checks the runbook still says them)."""
+TEST_SENDER = 'test-sender@example.org'
+
+
+def test_runbook_first_supervised_run_sequence(switched_on, monkeypatch):
+    """Runbook sections 0 to 2, step by step, with the commands exactly as
+    written there (the test also checks the runbook still says them). As in
+    production, the test mailbox is on our own domain; the test mail comes
+    from the one outside address that has a CRM test contact, alongside mail
+    from a colleague and from an unknown sender, which must not be stored."""
+    from crm_app.models import Contact
+    switched_on.CAPTURE_INTERNAL_DOMAINS = ['example.com']
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     text = RUNBOOK.read_text('utf-8')
     commands = [
@@ -83,43 +91,56 @@ def test_runbook_first_supervised_run_sequence(switched_on, lagoon, monkeypatch)
     ]
     for command in commands:
         assert command in text, command
-    assert f'enabled mailboxes: {TEST_MAILBOX}' in text
+    for phrase in (f'enabled mailboxes: {TEST_MAILBOX}', TEST_SENDER, 'create **one test contact**',
+                   '`skipped_internal`', 'Afterwards: remove the test contact'):
+        assert phrase in text, phrase
 
     def args(command):
         return command.replace('<yesterday>', yesterday).split()[3:]
 
+    def mail(gid, sender):
+        return gmail_message(gid, sender, [TEST_MAILBOX], date=recent(5), message_id=f'<{gid}@example.org>')
+
+    # Section 0: one test contact for the outside address that sends the test mail.
+    company = make_company('Synthetic Test Sender Company')
+    contact = make_contact(company, TEST_SENDER, 'Test Sender')
     mailbox = make_mailbox(TEST_MAILBOX)
     client = FakeGmailClient(TEST_MAILBOX)
-    client.add_message(inbound('t1', to=[TEST_MAILBOX]))          # the test mail, sent before step 1
+    client.add_message(mail('t1', f'Test Sender <{TEST_SENDER}>'))          # the test mail, before step 1
+    client.add_message(mail('c1', 'A Colleague <colleague@example.com>'))  # our own domain: skipped
+    client.add_message(mail('u1', 'Someone <someone@unknown.example.net>'))  # unknown: queued only
     use_client(monkeypatch, client)
 
     # Step 1: --check. Only the test mailbox is enabled; 1 unit; nothing stored.
     code, out = gmail_sync(*args(commands[0]))
     lines = out.splitlines()
     assert code == 0 and lines[0] == f'enabled mailboxes: {TEST_MAILBOX}'
-    assert lines[1] == f'{TEST_MAILBOX}: messages 1, history id {client.history_id}'
+    assert lines[1] == f'{TEST_MAILBOX}: messages 3, history id {client.history_id}'
     assert MailboxAccessLog.objects.get().purpose == 'check'
 
     # Step 2: the backfill dry run shows what would be read, and stores no mail.
     code, out = gmail_sync(*args(commands[1]))
-    assert code == 0 and f'{TEST_MAILBOX}: ok' in out and 'fetched=1' in out and 'matched=1' in out
-    assert MailMessage.objects.count() == 0
+    assert code == 0 and f'{TEST_MAILBOX}: ok' in out and 'fetched=3' in out and 'matched=1' in out
+    assert 'skipped_internal=1' in out and 'unmatched=1' in out
+    assert MailMessage.objects.count() == 0 and UnmatchedSender.objects.count() == 0
     log = MailboxAccessLog.objects.get(dry_run=True)
-    assert log.purpose == 'backfill' and log.messages_read == 1 and log.finished_at is not None
+    assert log.purpose == 'backfill' and log.messages_read == 3 and log.finished_at is not None
     run_row = CaptureRun.objects.get(dry_run=True)
-    assert run_row.outcome == 'ok' and run_row.fetched == 1 and run_row.error_summary == ''
+    assert run_row.outcome == 'ok' and run_row.fetched == 3 and run_row.error_summary == ''
     mailbox.refresh_from_db()
     assert mailbox.last_error == '' and mailbox.history_id == ''
 
-    # Step 3: the same without --dry-run stores the test mail and sets the starting point.
+    # Step 3: the same without --dry-run stores only the test contact's mail and sets the starting point.
     code, out = gmail_sync(*args(commands[2]))
     assert code == 0 and 'stored=1' in out
-    assert list(MailMessage.objects.values_list('rfc_message_id', flat=True)) == ['t1@lagoon.test']
+    assert list(MailMessage.objects.values_list('rfc_message_id', flat=True)) == ['t1@example.org']
+    assert list(UnmatchedSender.objects.values_list('address', flat=True)) == ['someone@unknown.example.net']
     mailbox.refresh_from_db()
     assert mailbox.history_id and mailbox.last_error == '' and mailbox.consecutive_errors == 0
+    assert CaptureFailure.objects.count() == 0
 
-    # Step 4: send a second test mail, then one incremental run reads it.
-    client.add_message(inbound('t2', to=[TEST_MAILBOX]))
+    # Step 4: a second test mail from the test contact, then one incremental run reads it.
+    client.add_message(mail('t2', f'Test Sender <{TEST_SENDER}>'))
     code, out = gmail_sync(*args(commands[3]))
     assert code == 0 and 'stored=1' in out and MailMessage.objects.count() == 2
 
@@ -128,6 +149,21 @@ def test_runbook_first_supervised_run_sequence(switched_on, lagoon, monkeypatch)
         lease_token='another-run', lease_expires_at=timezone.now() + timedelta(minutes=5))
     code, out = gmail_sync(*args(commands[3]))
     assert code == 7 and 'busy' in out
+    CaptureMailbox.objects.filter(pk=mailbox.pk).update(lease_token='', lease_expires_at=None)
+
+    # Section 2, route A: label the test mail CRM private, one incremental run, then untick the mailbox.
+    client._labels.append({'id': 'Label_9', 'name': 'CRM private', 'type': 'user'})
+    for gid in ('t1', 't2'):
+        client.add_labels(gid, ['Label_9'])
+    code, out = gmail_sync(*args(commands[3]))
+    assert code == 0 and MailMessage.objects.count() == 0 and MailboxCopy.objects.count() == 0
+    CaptureMailbox.objects.filter(pk=mailbox.pk).update(enabled=False)
+    # Afterwards: remove the test contact and its company (the mail went first).
+    contact.delete()
+    company.delete()
+    assert not Contact.objects.filter(email=TEST_SENDER).exists()
+    code, out = gmail_sync(*args(commands[0]))
+    assert code == 2 and 'is not enabled' in out
 
 
 def test_a_dry_run_never_sets_the_starting_point(lagoon):
@@ -266,26 +302,39 @@ def test_a_refused_token_shows_at_once_and_the_next_good_token_clears_it(switche
     client = primed(mb)
     use_client(monkeypatch, client)
     client.fail('list_labels', 403, times=5, reason='insufficientPermissions')
-    for _ in range(5):
-        assert run(mb, client).outcome == 'auth_error'          # never deferred, never needs attention
+    assert run(mb, client).outcome == 'auth_error'
     mb.refresh_from_db()
-    assert mb.auth_problem.startswith('auth permission_denied') and not mb.needs_attention
-    assert mb.retry_not_before is None
+    assert mb.auth_problem.startswith('auth permission_denied') and mb.retry_not_before is not None
+    calls = len(client.calls)
+    assert run(mb, client).outcome == 'deferred' and len(client.calls) == calls    # no hot loop
+    for _ in range(4):
+        _expire_backoff(mb)
+        assert run(mb, client).outcome == 'auth_error'
+    mb.refresh_from_db()
+    assert not mb.needs_attention and mb.attention_errors == 0      # never a reason to stop the mailbox
+    CaptureMailbox.objects.filter(pk=mb.pk).update(transient_since=timezone.now() - timedelta(hours=30))
+    _expire_backoff(mb)
+    client.fail('list_labels', 403, times=1, reason='insufficientPermissions')
+    run(mb, client)
+    mb.refresh_from_db()
+    assert not mb.needs_attention                                  # the 24-hour rule is for temporary failures
     client.fail('get_profile', 403, times=1, reason='insufficientPermissions')
     code, out = gmail_sync('--check', '--mailbox', SALES)
     assert code == 3 and 'auth_error permission_denied' in out
-    # The operator fixes the setup: the next check makes a token and clears it, no --clear-attention.
+    # The operator fixes the setup: the next check makes a token and clears the
+    # problem and its backoff, no --clear-attention.
     code, out = gmail_sync('--check', '--mailbox', SALES)
     assert code == 0
     mb.refresh_from_db()
-    assert mb.auth_problem == ''
+    assert mb.auth_problem == '' and mb.retry_not_before is None
     client.fail('list_labels', 401, times=1)
     run(mb, client)
     mb.refresh_from_db()
     assert mb.auth_problem.startswith('auth gmail_unauthorized')
-    assert run(mb, client).outcome == 'ok'
+    _expire_backoff(mb)
+    assert run(mb, client).outcome == 'ok'                      # the next good token clears it
     mb.refresh_from_db()
-    assert mb.auth_problem == ''
+    assert mb.auth_problem == '' and mb.retry_not_before is None
 
 
 def test_exit_4_covers_unavailable_and_deferred(switched_on, lagoon, monkeypatch):
@@ -354,8 +403,8 @@ def _labelled_mailbox():
 
 def _form(page):
     import re
-    return dict(re.findall(r'<input type="hidden" name="(fingerprint|previewed)" value="([^"]*)"', page),
-                confirm='yes')
+    return dict(re.findall(r'<input type="hidden" name="(fingerprint|previewed|preview_token)" value="([^"]*)"',
+                           page), confirm='yes')
 
 
 def test_a_label_rule_purges_only_what_its_preview_showed(lagoon, admin_client):
@@ -399,15 +448,15 @@ def test_a_stale_label_preview_cannot_be_confirmed(lagoon):
     mb, client = _labelled_mailbox()
     rule = CaptureRule.objects.create(kind='label', value='Clients', action='skip')
     run(mb, client)
-    purge.store_label_preview(rule)
+    _, token = purge.store_label_preview(rule)
     rule.refresh_from_db()
     snap = dict(rule.preview_snapshot, at=(timezone.now() - timedelta(minutes=61)).isoformat())
     CaptureRule.objects.filter(pk=rule.pk).update(preview_snapshot=snap)
     with pytest.raises(purge.RuleChanged, match='more than 60 minutes old'):
-        purge.confirm_rule(rule, expected_fingerprint=rule.fingerprint())
+        purge.confirm_rule(rule, expected_fingerprint=rule.fingerprint(), preview_token=token)
     CaptureRule.objects.filter(pk=rule.pk).update(preview_snapshot={})
-    with pytest.raises(purge.RuleChanged):                     # no preview at all
-        purge.confirm_rule(rule, expected_fingerprint=rule.fingerprint())
+    with pytest.raises(purge.RuleChanged, match='no current preview'):     # no preview at all
+        purge.confirm_rule(rule, expected_fingerprint=rule.fingerprint(), preview_token=token)
 
 
 def test_the_built_in_private_label_is_still_immediate(lagoon):
@@ -484,3 +533,176 @@ def test_confirm_rule_waits_for_the_row_lock(capture_on):
             purge_state='confirmed', confirmed_fingerprint=fingerprint, confirmed_at=timezone.now())
     thread.join(10)
     assert outcome == ['this rule is already confirmed as it stands']
+
+
+# --- H1: each preview has its own token ------------------------------------------------------
+
+def _labelled_rule(admin_client):
+    mb, client = _labelled_mailbox()
+    rule = CaptureRule(kind='label', value='Clients', action='skip')
+    rule.full_clean()
+    rule.save()
+    run(mb, client)
+    return mb, client, rule, f'/admin/mail_capture/capturerule/{rule.pk}/confirm-purge/'
+
+
+def test_a_superseded_preview_cannot_be_confirmed(lagoon, admin_client, django_user_model, client):
+    from django.contrib.admin.models import LogEntry
+    mb, gmail, rule, url = _labelled_rule(admin_client)
+    page_a = admin_client.get(url).content.decode()              # admin A sees 1 copy
+    assert 'Messages purged: <strong>1</strong>' in page_a
+    gmail.add_labels('l1', ['Label_3'])
+    gmail.add_labels('l2', ['Label_3'])
+    run(mb, gmail)
+    other = django_user_model.objects.create_superuser('second-admin', 'second@ourco.example', 'x-synthetic')
+    client.force_login(other)
+    page_b = client.get(url).content.decode()                    # admin B sees 3 and leaves
+    assert 'Messages purged: <strong>3</strong>' in page_b
+    from django.contrib.messages import get_messages
+    response = admin_client.post(url, _form(page_a))            # not followed: a new GET would preview again
+    assert [str(m) for m in get_messages(response.wsgi_request)] == [
+        'a newer preview of this rule replaced the one on this page: preview again']
+    rule.refresh_from_db()
+    assert rule.purge_state == 'awaiting_confirmation' and rule.purge_copy_ids == []
+    run(mb, gmail)
+    assert MailMessage.objects.count() == 3                      # nothing purged
+    # B's own page confirms exactly B's preview, and the history says whose preview it was.
+    client.post(url, _form(page_b))
+    rule.refresh_from_db()
+    record = rule.preview_snapshot['confirmed']
+    assert len(rule.purge_copy_ids) == 3 and record['count'] == 3
+    assert record['previewed_by'] == record['confirmed_by'] == f'user:{other.pk}'
+    entry = LogEntry.objects.filter(object_id=str(rule.pk)).latest('action_time')
+    assert entry.user_id == other.pk and '(3 stored copies)' in entry.change_message
+    assert f'made by user:{other.pk}' in entry.change_message
+    run(mb, gmail)
+    assert MailMessage.objects.count() == 0
+
+
+def test_a_preview_token_must_be_current_known_and_unexpired(lagoon):
+    mb, gmail = _labelled_mailbox()
+    rule = CaptureRule.objects.create(kind='label', value='Clients', action='skip')
+    run(mb, gmail)
+    fp = rule.fingerprint()
+    _, first = purge.store_label_preview(rule)
+    _, second = purge.store_label_preview(rule)
+    assert first != second and len(second) >= 20
+    for token, message in ((None, 'no current preview'), ('made-up-token', 'newer preview'),
+                           (first, 'newer preview')):
+        with pytest.raises(purge.RuleChanged, match=message):
+            purge.confirm_rule(rule, expected_fingerprint=fp, preview_token=token)
+    rule.refresh_from_db()
+    snap = dict(rule.preview_snapshot, expires=(timezone.now() - timedelta(seconds=1)).isoformat())
+    CaptureRule.objects.filter(pk=rule.pk).update(preview_snapshot=snap)
+    with pytest.raises(purge.RuleChanged, match='more than 60 minutes old'):
+        purge.confirm_rule(rule, expected_fingerprint=fp, preview_token=second)
+    _, third = purge.store_label_preview(rule)
+    confirmed = purge.confirm_rule(rule, expected_fingerprint=fp, preview_token=third)
+    assert confirmed.confirmed_preview['token'] == third[:8] and confirmed.confirmed_preview['count'] == 1
+    with pytest.raises(purge.RuleChanged, match='no current preview'):        # a token is used once
+        purge.confirm_rule(rule, expected_fingerprint=fp, preview_token=third)
+
+
+# --- the four test gaps the mutation pass found ----------------------------------------------
+
+def test_the_backoff_is_capped_at_60_minutes(lagoon):
+    mb = make_mailbox()
+    client = primed(mb)
+    client.fail('list_history', 503, times=100)
+    waits = []
+    for _ in range(12):
+        _expire_backoff(mb)
+        before = timezone.now()
+        run(mb, client)
+        mb.refresh_from_db()
+        waits.append(round((mb.retry_not_before - before).total_seconds() / 60))
+    assert waits == [1, 2, 4, 8, 16, 32, 60, 60, 60, 60, 60, 60]
+
+
+def test_clear_attention_ends_a_backoff(switched_on, lagoon, monkeypatch):
+    mb = make_mailbox()
+    client = primed(mb)
+    use_client(monkeypatch, client)
+    client.fail('list_history', 503, times=4)                    # every retry in the run fails
+    assert run(mb, client).outcome == 'unavailable'
+    assert run(mb, client).outcome == 'deferred'
+    code, _ = gmail_sync('--clear-attention', '--mailbox', SALES, '--by', 'Test Operator', '--reason', 'retry now')
+    assert code == 0
+    mb.refresh_from_db()
+    assert (mb.retry_not_before, mb.transient_errors, mb.transient_since) == (None, 0, None)
+    assert run(mb, client).outcome == 'ok'
+
+
+def test_a_headers_only_label_rule_strips_only_previewed_bodies(lagoon, admin_client):
+    mb = make_mailbox(body_mode='body')
+    gmail = primed(mb, labels=[LABEL])
+    gmail.add_message(inbound('h0', labels=('INBOX', 'Label_3')))
+    gmail.add_message(inbound('h1'))
+    run(mb, gmail)
+    assert MailMessage.objects.filter(body_text__isnull=False).count() == 2
+    rule = CaptureRule(kind='label', value='Clients', action='headers_only')
+    rule.full_clean()
+    rule.save()
+    run(mb, gmail)
+    url = f'/admin/mail_capture/capturerule/{rule.pk}/confirm-purge/'
+    page = admin_client.get(url).content.decode()
+    gmail.add_labels('h1', ['Label_3'])                          # labelled after the preview
+    run(mb, gmail)
+    admin_client.post(url, _form(page))
+    run(mb, gmail)
+    bodies = dict(MailMessage.objects.values_list('rfc_message_id', 'body_text'))
+    assert bodies['h0@lagoon.test'] is None and bodies['h1@lagoon.test'] is not None
+
+
+def test_a_copy_labelled_after_the_preview_waits_on_every_path(lagoon, admin_client):
+    mb, gmail, rule, url = _labelled_rule(admin_client)
+    page = admin_client.get(url).content.decode()
+    admin_client.post(url, _form(page))
+    run(mb, gmail)                                               # l0 (previewed) goes
+    gmail.add_labels('l1', ['Label_3'])                          # history: labelAdded on a stored copy
+    run(mb, gmail)
+    run(mb, gmail, kind='backfill', since=date.today() - timedelta(days=3))
+    CaptureMailbox.objects.filter(pk=mb.pk).update(needs_resync=True)
+    run(mb, gmail)                                               # a resync re-reads the labels
+    assert sorted(MailMessage.objects.values_list('rfc_message_id', flat=True)) == ['l1@lagoon.test',
+                                                                                    'l2@lagoon.test']
+    rule.refresh_from_db()
+    assert purge.label_rule_pending(rule) == 1
+
+
+# --- before any cron -------------------------------------------------------------------------
+
+def test_a_new_code_version_also_clears_the_backoff(lagoon):
+    mb = make_mailbox()
+    client = primed(mb)
+    CaptureMailbox.objects.filter(pk=mb.pk).update(
+        needs_attention=True, attention_reason='only temporary failures for 24 hours (last: gmail 503)',
+        attention_code_version='old-version', transient_errors=40,
+        transient_since=timezone.now() - timedelta(hours=30), retry_not_before=timezone.now() + timedelta(hours=1))
+    client.fail('list_history', 503, times=4)
+    # The deploy clears the flag and the backoff: the run goes ahead (not deferred), and its
+    # temporary failure starts a new 24-hour window instead of flagging the mailbox again at once.
+    assert run(mb, client).outcome == 'unavailable'
+    mb.refresh_from_db()
+    assert not mb.needs_attention and mb.transient_errors == 1
+
+
+def test_a_huge_retry_after_is_capped(lagoon):
+    from mail_capture.gmail_client import GmailRateLimited
+    mb = make_mailbox()
+    client = primed(mb)
+
+    def refuse(*a, **k):
+        raise GmailRateLimited(429, 'rateLimitExceeded', retry_after=10 ** 7)
+    client.list_history = refuse
+    before = timezone.now()
+    assert run(mb, client).outcome == 'rate_limited'
+    mb.refresh_from_db()
+    assert (mb.retry_not_before - before).total_seconds() <= sync.MAX_RETRY_AFTER + 5
+
+
+def test_sync_all_enabled_must_be_asked_for(capture_on):
+    from mail_capture.sync import sync_all_enabled
+    make_mailbox()
+    with pytest.raises(ValueError, match='all_mailboxes=True'):
+        sync_all_enabled(lambda m: (_ for _ in ()).throw(AssertionError('client made')))

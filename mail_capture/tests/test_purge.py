@@ -33,9 +33,10 @@ def run(mailbox, client, **kwargs):
 
 
 def _confirm(rule):
+    token = None
     if rule.kind == 'label':
-        purge.store_label_preview(rule)     # a label rule covers what its preview showed
-    return purge.confirm_rule(rule, expected_fingerprint=rule.fingerprint())
+        _, token = purge.store_label_preview(rule)     # a label rule covers what its preview showed
+    return purge.confirm_rule(rule, expected_fingerprint=rule.fingerprint(), preview_token=token)
 
 
 def confirmed_rule(**kwargs):
@@ -48,7 +49,8 @@ def confirmed_rule(**kwargs):
 def preview_form(page):
     """The hidden fields of the confirmation page, as the browser posts them."""
     import re
-    fields = dict(re.findall(r'<input type="hidden" name="(fingerprint|previewed)" value="([^"]*)"', page))
+    fields = dict(re.findall(r'<input type="hidden" name="(fingerprint|previewed|preview_token)" value="([^"]*)"',
+                             page))
     return dict(fields, confirm='yes')
 
 
