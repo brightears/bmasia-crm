@@ -61,6 +61,41 @@ const ROUTES: RouteInfo[] = fs
   })
   .filter((r): r is RouteInfo => r !== null);
 
+// Every <Route> path in App.tsx with whether it has a guard, redirects included, for the allow-list check.
+const ALL_ROUTES = fs
+  .readFileSync(path.join(__dirname, '..', 'App.tsx'), 'utf8')
+  .split('<Route')
+  .slice(1)
+  .map((chunk) => {
+    const route = /^\s*path="([^"]+)"/.exec(chunk)?.[1];
+    const redirect = /^\s*path="[^"]+"\s*element=\{\s*<Navigate/.test(chunk);
+    const guarded = /requiredModule="([^"]+)"/.test(chunk.split('/>\n')[0]);
+    return route ? { route, redirect, guarded } : null;
+  })
+  .filter((r): r is { route: string; redirect: boolean; guarded: boolean } => r !== null);
+
+/**
+ * Routes that may have no guard. Anything else added to App.tsx without `requiredModule` would be
+ * open to every role, so the test below refuses it.
+ */
+const UNGUARDED_ALLOWED = [
+  '/login', // sign-in
+  '/', // redirects by sign-in state
+  '/today', // home page; shows its own notice to an account without a role
+  '/profile', // every account's own profile
+  '/needs-fixing/:key?', // read-only checks; the server decides what it returns
+  '/my-queue', // placeholder pages
+  '/analytics',
+  '/slas',
+  '/system-status',
+  '/more',
+  '*', // the 404 page
+];
+
+// The Review menu entry as Layout builds it, with the switch on and off.
+const REVIEW_ON = { enabled: true, openCount: 0 };
+const REVIEW_OFF = { enabled: false, openCount: 0 };
+
 type Outcome = 'opens' | 'denied' | 'no-role';
 
 const visit = (role: string, url: string): Outcome => {
@@ -103,8 +138,25 @@ it('every route guard names a module of the role table', () => {
   expect(unknown).toEqual([]);
 });
 
+it('only the allow-listed routes have no guard', () => {
+  const unguarded = ALL_ROUTES.filter((r) => !r.guarded && !r.redirect).map((r) => r.route);
+  expect(unguarded.filter((r) => !UNGUARDED_ALLOWED.includes(r))).toEqual([]);
+  // The check really reads the routes: the Review page is guarded, Today is not.
+  expect(ALL_ROUTES.find((r) => r.route === '/review')?.guarded).toBe(true);
+  expect(unguarded).toContain('/today');
+});
+
+it('the Review entry is absent for every role while suggestions are switched off', () => {
+  for (const role of [...SERVER_ROLES, '']) {
+    const paths = filterNavForRole(buildNavGroups(0, REVIEW_OFF), role).flatMap((g) => g.items.map((i) => i.path));
+    expect(paths).not.toContain('/review');
+  }
+  expect(ROUTES.find((r) => r.route === '/review')?.module).toBe('review');
+});
+
 it('every menu entry is mapped in the role table and is a route', () => {
-  const menuPaths = buildNavGroups(0).flatMap((g) => g.items.map((i) => i.path));
+  const menuPaths = buildNavGroups(0, REVIEW_ON).flatMap((g) => g.items.map((i) => i.path));
+  expect(menuPaths).toContain('/review');
   for (const p of menuPaths) {
     expect(MENU_PATH_MODULE[p]).toBeDefined();
     expect(ROUTES.map((r) => r.route)).toContain(p);
@@ -129,9 +181,11 @@ describe.each(ROLES)('role "%s"', (role) => {
       }
       expect(wrong).toEqual([]);
 
-      // The invariant: a menu entry shows if and only if the router opens its page.
-      const menu = new Set(filterNavForRole(buildNavGroups(0), role).flatMap((g) => g.items.map((i) => i.path)));
-      const mismatched = buildNavGroups(0)
+      // The invariant: a menu entry shows if and only if the router opens its page (Review switched on).
+      const menu = new Set(
+        filterNavForRole(buildNavGroups(0, REVIEW_ON), role).flatMap((g) => g.items.map((i) => i.path))
+      );
+      const mismatched = buildNavGroups(0, REVIEW_ON)
         .flatMap((g) => g.items.map((i) => i.path))
         .filter((p) => menu.has(p) !== opened.get(p))
         .map((p) => `${p}: menu ${menu.has(p) ? 'shows' : 'hides'}, router ${opened.get(p) ? 'opens' : 'refuses'}`);
@@ -173,4 +227,7 @@ it('spot checks of the table', () => {
   expect(can('Music', 'quotes')).toBe(false);
   expect(canOpenModule({ role: 'Admin', is_active: false }, 'today')).toBe(false);
   expect(canOpenModule({ role: 'Admin', is_active: true }, 'no-such-module')).toBe(false);
+  for (const role of SERVER_ROLES) expect(can(role, 'review')).toBe(true);
+  expect(can('', 'review')).toBe(false);
+  expect(can('Someone new', 'review')).toBe(false);
 });
