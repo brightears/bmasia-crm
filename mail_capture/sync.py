@@ -1,7 +1,8 @@
 """The sync engine: reads one mailbox through a ``GmailClient`` and stores
 what the matcher accepts.
 
-Entry points are ``sync_mailbox`` and ``sync_all_enabled``. Both return
+Entry points are ``sync_mailbox`` and ``sync_all_enabled`` (which reads every
+enabled mailbox, so it must be asked for with ``all_mailboxes=True``). Both return
 "capture disabled" before creating a client while the master switch is off,
 while our own domains are not configured soundly, or when the mailbox (or
 every mailbox) is not enabled.
@@ -65,7 +66,13 @@ Guarantees (research/11 B.7 "Idempotency and ordering", plus the PR-A review):
     of nothing but temporary failures;
   - **refused authentication** (``auth_error``): shown at once
     (``auth_problem``, ``gmail_sync --check``), never a reason to stop the
-    mailbox; the next successful token clears it.
+    mailbox. For scheduling it backs off like a temporary failure (so a cron
+    does not hammer the token endpoint); the next successful token clears it
+    and the backoff.
+
+  ``Retry-After`` is never trusted beyond ``MAX_RETRY_AFTER`` (300 s). A
+  person's ``--clear-attention`` or a new code version clears the backoff
+  state too.
 * Pacing: before every call the engine asks the client's token buckets
   (``QuotaPacer``) for the call's quota units, so a backfill stays under
   Gmail's per-mailbox per-minute quota instead of hitting 429. A real 429
@@ -216,10 +223,13 @@ def _disabled(reason, mailbox_id='', kind='', dry_run=False):
                       kind=kind, dry_run=dry_run)
 
 
-def sync_all_enabled(client_factory, kind='incremental', **kwargs):
+def sync_all_enabled(client_factory, kind='incremental', *, all_mailboxes=False, **kwargs):
     """Run ``sync_mailbox`` for every enabled mailbox, one after another.
     A failure in one mailbox is recorded on that mailbox and does not stop
-    the others."""
+    the others. Like ``gmail_sync --all-mailboxes``, it reads every enabled
+    mailbox, so it refuses unless ``all_mailboxes=True`` is passed on purpose."""
+    if all_mailboxes is not True:
+        raise ValueError('sync_all_enabled reads every enabled mailbox: pass all_mailboxes=True on purpose')
     state = conf.capture_state()
     dry_run = kwargs.get('dry_run', False)
     if not state.enabled:
@@ -279,20 +289,27 @@ def record_health(mailbox_pk, kind=None, error='', needs_resync=None, retry_afte
     if kind == CODE:
         updates['attention_errors'] = F('attention_errors') + 1
     elif kind == AUTH:
-        updates['auth_problem'] = error[:200]
+        # Shown at once; for scheduling it backs off like a temporary failure
+        # (no hot loop on the token endpoint under a cron), without the
+        # 24-hour attention rule. The next good token clears both.
+        updates.update(auth_problem=error[:200], transient_errors=F('transient_errors') + 1)
     elif kind == TRANSIENT:
         updates.update(transient_errors=F('transient_errors') + 1,
                        transient_since=Coalesce(F('transient_since'), Value(now)))
     CaptureMailbox.objects.filter(pk=mailbox_pk).update(**updates)
     if kind == CODE:
         mark_attention_if_due(mailbox_pk, reason or error)
-    elif kind == TRANSIENT:
+    elif kind in (TRANSIENT, AUTH):
         row = CaptureMailbox.objects.filter(pk=mailbox_pk).values('transient_errors', 'transient_since').first()
-        step = TRANSIENT_BACKOFF_MINUTES[min(row['transient_errors'], len(TRANSIENT_BACKOFF_MINUTES)) - 1]
-        wait = max(step * 60.0, float(retry_after or 0))
+        step = TRANSIENT_BACKOFF_MINUTES[min(max(row['transient_errors'], 1), len(TRANSIENT_BACKOFF_MINUTES)) - 1]
+        try:
+            hinted = min(MAX_RETRY_AFTER, max(0.0, float(retry_after or 0)))   # never trust a huge Retry-After
+        except (TypeError, ValueError):
+            hinted = 0.0
+        wait = max(step * 60.0, hinted)
         CaptureMailbox.objects.filter(pk=mailbox_pk).update(retry_not_before=now + timedelta(seconds=wait))
         hours = conf.transient_attention_hours()
-        if row['transient_since'] and now - row['transient_since'] >= timedelta(hours=hours):
+        if kind == TRANSIENT and row['transient_since'] and now - row['transient_since'] >= timedelta(hours=hours):
             mark_attention(mailbox_pk, f'only temporary failures for {hours} hours (last: {error})'[:200],
                            f'{hours} hours of temporary failures')
 
@@ -361,7 +378,9 @@ def sync_mailbox(mailbox_id, client_factory, kind='incremental', dry_run=False, 
         if mailbox.attention_code_version and mailbox.attention_code_version != code_version():
             # New code since the flag was set (a deploy with a fix): try again.
             CaptureMailbox.objects.filter(pk=mailbox.pk).update(
-                needs_attention=False, attention_code_version='', consecutive_errors=0, attention_errors=0)
+                needs_attention=False, attention_code_version='', consecutive_errors=0, attention_errors=0,
+                transient_errors=0, transient_since=None, retry_not_before=None)
+            mailbox.refresh_from_db()
             logger.info('mail capture mailbox=%s attention cleared by a new code version', mailbox.pk)
         else:
             return SyncResult(outcome='needs_attention', reason=mailbox.attention_reason,
@@ -369,7 +388,7 @@ def sync_mailbox(mailbox_id, client_factory, kind='incremental', dry_run=False, 
     if mailbox.retry_not_before and mailbox.retry_not_before > timezone.now():
         return SyncResult(
             outcome='deferred', mailbox_id=str(mailbox.pk), kind=kind, dry_run=dry_run,
-            reason=f'backing off after a temporary failure ({mailbox.last_error}) until '
+            reason=f'backing off after a failure ({mailbox.last_error}) until '
                    f'{mailbox.retry_not_before:%Y-%m-%d %H:%M:%S} UTC'[:200])
     try:
         client = client_factory(mailbox)

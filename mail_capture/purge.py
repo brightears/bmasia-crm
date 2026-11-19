@@ -29,6 +29,8 @@ Purge mechanics:
   ``CRM private`` label acts at once on any copy.
 """
 import hashlib
+import hmac
+import secrets
 from datetime import timedelta
 
 from django.db import transaction
@@ -367,20 +369,40 @@ PREVIEW_TTL = timedelta(minutes=60)
 PREVIEW_CAP = 10000
 
 
-def store_label_preview(rule):
+def _actor(user):
+    if user is not None and getattr(user, 'is_authenticated', False):
+        return f'user:{user.pk}'
+    return 'unknown'
+
+
+def store_label_preview(rule, user=None):
     """Remember which copies a label rule's preview showed (at most
-    PREVIEW_CAP), with the time and the rule's fingerprint: confirming covers
-    exactly these, within PREVIEW_TTL. Returns the preview counts."""
+    PREVIEW_CAP): a new random token, who previewed, when, the rule's
+    fingerprint, the copy ids and an expiry (PREVIEW_TTL). The rule holds the
+    latest preview only; the confirm form carries the token, so confirming an
+    older page (superseded by a later preview) is refused. Returns
+    ``(counts, token)``."""
     counts = preview_rule(rule)
     copies = sorted(str(pk) for pk in _label_copies(rule))
     if rule.is_confirmed:
         covered = {str(x) for x in (rule.purge_copy_ids or ())}
         copies = [pk for pk in copies if pk not in covered]
-    CaptureRule.objects.filter(pk=rule.pk).update(preview_snapshot={
-        'at': timezone.now().isoformat(), 'fingerprint': rule.fingerprint(), 'copy_ids': copies[:PREVIEW_CAP],
-        'more': max(0, len(copies) - PREVIEW_CAP),
-    })
-    return counts
+    now = timezone.now()
+    token = secrets.token_urlsafe(18)
+    with transaction.atomic():
+        current = CaptureRule.objects.select_for_update().filter(pk=rule.pk).first()
+        if current is None:
+            return counts, ''
+        snap = {
+            'token': token, 'at': now.isoformat(), 'expires': (now + PREVIEW_TTL).isoformat(),
+            'by': _actor(user), 'fingerprint': rule.fingerprint(), 'copy_ids': copies[:PREVIEW_CAP],
+            'more': max(0, len(copies) - PREVIEW_CAP),
+        }
+        confirmed = (current.preview_snapshot or {}).get('confirmed')
+        if confirmed:
+            snap['confirmed'] = confirmed           # the record of the last confirmation stays
+        CaptureRule.objects.filter(pk=rule.pk).update(preview_snapshot=snap)
+    return counts, token
 
 
 def _preview_label_rule(rule):
@@ -405,6 +427,8 @@ def _preview_label_rule(rule):
 
 
 RULE_CHANGED = 'the rule changed since the preview: preview again'
+PREVIEW_UNKNOWN = 'no current preview for this rule: preview again'
+PREVIEW_SUPERSEDED = 'a newer preview of this rule replaced the one on this page: preview again'
 
 
 class RuleChanged(Exception):
@@ -412,31 +436,47 @@ class RuleChanged(Exception):
     confirmed as it stands): nothing was confirmed."""
 
 
-def confirm_rule(rule, user=None, *, expected_fingerprint):
+def confirm_rule(rule, user=None, *, expected_fingerprint, preview_token=None):
     """Confirm exactly the rule that was previewed. ``expected_fingerprint``
     is ``rule.fingerprint()`` as shown on the preview; it is compared with
     the rule as it stands now, under a row lock, and a mismatch (an edit since
     the preview, by any route) raises ``RuleChanged`` and confirms nothing.
     Every confirm route (the admin page, a shell, a future command) must pass
     it; there is no default. A rule whose earlier confirmation went stale
-    (changed by ``QuerySet.update``) can be confirmed again the same way."""
+    (changed by ``QuerySet.update``) can be confirmed again the same way.
+
+    A label rule also needs ``preview_token``, the token of the preview being
+    confirmed: it must be the rule's current preview (not superseded by a later
+    one) and unexpired, and the confirmation covers exactly that preview's
+    copies. Which preview was confirmed, by whom, is kept in
+    ``preview_snapshot['confirmed']`` and returned as ``rule.confirmed_preview``."""
     with transaction.atomic():
         current = CaptureRule.objects.select_for_update().filter(pk=rule.pk).first()
         if current is None or not expected_fingerprint or current.fingerprint() != expected_fingerprint:
             raise RuleChanged(RULE_CHANGED)
         extra = {}
+        confirmed_preview = None
         if current.kind == 'label':
             # A label rule covers exactly the copies its preview showed.
             snap = current.preview_snapshot or {}
             at = parse_datetime(str(snap.get('at') or ''))
-            if snap.get('fingerprint') != expected_fingerprint or at is None:
+            expires = parse_datetime(str(snap.get('expires') or ''))
+            if not preview_token or not snap.get('token'):
+                raise RuleChanged(PREVIEW_UNKNOWN)
+            if not hmac.compare_digest(str(preview_token), str(snap['token'])):
+                raise RuleChanged(PREVIEW_SUPERSEDED)
+            if snap.get('fingerprint') != expected_fingerprint or at is None or expires is None:
                 raise RuleChanged(RULE_CHANGED)
-            if timezone.now() - at > PREVIEW_TTL:
+            if timezone.now() > expires or timezone.now() - at > PREVIEW_TTL:
                 raise RuleChanged('the preview is more than 60 minutes old: preview again')
             covered = [str(x) for x in snap.get('copy_ids') or ()]
+            record = {'token': snap['token'][:8], 'previewed_by': snap.get('by', 'unknown'),
+                      'previewed_at': snap.get('at'), 'count': len(covered),
+                      'confirmed_by': _actor(user), 'confirmed_at': timezone.now().isoformat()}
             if current.is_confirmed:
                 covered = sorted(set(covered) | {str(x) for x in (current.purge_copy_ids or ())})
-            extra = {'purge_copy_ids': covered, 'preview_snapshot': {}}
+            extra = {'purge_copy_ids': covered, 'preview_snapshot': {'confirmed': record}}
+            confirmed_preview = record
         elif current.is_confirmed:
             raise RuleChanged('this rule is already confirmed as it stands')
         current.purge_state = 'confirmed'
@@ -449,6 +489,7 @@ def confirm_rule(rule, user=None, *, expected_fingerprint):
             purge_done_at=None, **extra,
         )
     rule.refresh_from_db()
+    rule.confirmed_preview = confirmed_preview
     return rule
 
 
