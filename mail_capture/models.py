@@ -115,6 +115,11 @@ class MailConversation(models.Model):
     last_message_at = models.DateTimeField(null=True, blank=True)
     last_inbound_at = models.DateTimeField(null=True, blank=True)
     last_outbound_at = models.DateTimeField(null=True, blank=True)
+    last_claimed_internal_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Latest message whose From claims an internal sender but no captured '
+                  'copy carries SENT: a hint only; it never moves last_outbound_at',
+    )
     message_count = models.PositiveIntegerField(default=0)
     company = models.ForeignKey(
         'crm_app.Company', on_delete=models.SET_NULL, null=True, blank=True,
@@ -484,8 +489,15 @@ class CaptureRule(models.Model):
     soon as it is saved. Removing mail already stored is a separate step: the
     rule starts ``awaiting_confirmation``; a superuser confirms it after seeing
     a preview; the purge then runs in capped chunks (``purge.enforce_rules``)
-    until nothing is left (``done``). Changing a rule's kind, value, scope or
-    action sends it back to ``awaiting_confirmation``.
+    until nothing is left (``done``). This holds for every rule a person
+    creates: address, domain and label, organisation or mailbox scope. Only the
+    built-in ``CRM private`` label purges at once.
+
+    Changing a rule's kind, value, scope or action sends it back to
+    ``awaiting_confirmation``. The confirmation also stores a fingerprint of
+    what was confirmed; a rule that no longer matches its fingerprint (for
+    example after ``QuerySet.update()``) is treated as unconfirmed everywhere
+    (``is_confirmed``).
     """
 
     KIND_CHOICES = [('address', 'Address'), ('domain', 'Domain'), ('label', 'Gmail label')]
@@ -517,6 +529,11 @@ class CaptureRule(models.Model):
     )
     confirmed_at = models.DateTimeField(null=True, blank=True)
     purge_done_at = models.DateTimeField(null=True, blank=True)
+    confirmed_fingerprint = models.CharField(
+        max_length=64, blank=True, default='',
+        help_text='Hash of kind, value, scope, mailbox and action at confirmation; a rule '
+                  'that no longer matches it counts as unconfirmed, however it was changed',
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='+',
@@ -548,6 +565,16 @@ class CaptureRule(models.Model):
     def __str__(self):
         return f'{self.kind} rule ({self.action}, {self.scope})'
 
+    def fingerprint(self):
+        return rule_fingerprint(self.kind, self.value, self.scope, self.mailbox_id, self.action)
+
+    @property
+    def is_confirmed(self):
+        """Confirmed (or done) and unchanged since the confirmation."""
+        return (self.purge_state in ('confirmed', 'done')
+                and bool(self.confirmed_fingerprint)
+                and self.confirmed_fingerprint == self.fingerprint())
+
     def clean(self):
         from django.core.exceptions import ValidationError
         from .rules import rule_problem
@@ -568,7 +595,15 @@ class CaptureRule(models.Model):
                 self.confirmed_by = None
                 self.confirmed_at = None
                 self.purge_done_at = None
+                self.confirmed_fingerprint = ''
         super().save(*args, **kwargs)
+
+
+def rule_fingerprint(kind, value, scope, mailbox_id, action):
+    import hashlib
+    text = '|'.join([kind or '', normalise_rule_value(kind, value), scope or '',
+                     str(mailbox_id or ''), action or ''])
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 
 def normalise_rule_value(kind, value):
@@ -624,6 +659,10 @@ class CaptureFailure(models.Model):
     gmail_id = models.CharField(max_length=64)
     attempts = models.PositiveIntegerField(default=1)
     error = models.CharField(max_length=80, blank=True, default='')
+    code_version = models.CharField(
+        max_length=80, blank=True, default='',
+        help_text='Code version that failed; parked messages are retried when it changes',
+    )
     parked = models.BooleanField(default=False)
     first_failed_at = models.DateTimeField()
     last_failed_at = models.DateTimeField()
@@ -649,6 +688,7 @@ class CaptureRun(models.Model):
     ]
     OUTCOME_CHOICES = [
         ('running', 'Running'), ('ok', 'OK'), ('partial', 'Partial; continues next run'),
+        ('ok_with_failures', 'Finished; some messages failed or were parked'),
         ('disabled', 'Capture disabled'), ('busy', 'Another runner holds the mailbox'),
         ('resync_needed', 'Resync needed'), ('rate_limited', 'Rate limited'), ('error', 'Error'),
     ]
@@ -659,7 +699,7 @@ class CaptureRun(models.Model):
     )
     kind = models.CharField(max_length=12, choices=KIND_CHOICES)
     dry_run = models.BooleanField(default=False)
-    outcome = models.CharField(max_length=14, choices=OUTCOME_CHOICES, default='running')
+    outcome = models.CharField(max_length=16, choices=OUTCOME_CHOICES, default='running')
     started_at = models.DateTimeField()
     finished_at = models.DateTimeField(null=True, blank=True)
     listed = models.PositiveIntegerField(default=0)

@@ -8,6 +8,11 @@ Configuration (mailboxes, rules, company domains) is editable by superusers.
 * Changing a mailbox's ``enabled``, ``body_mode`` or ``visibility`` (or
   creating one) is written to the mailbox access log with the actor. A
   mailbox's address cannot change after it is created.
+* There is no search box on captured data or on rule values: Django admin
+  search puts the terms in the URL, and URLs reach request logs. Use the
+  filters.
+* Parked messages (``CaptureFailure``) have an "Unpark" action; the next run
+  of that mailbox retries them. ``manage.py mail_capture_unpark`` does the same.
 * Saving a rule never purges by itself. A rule blocks new capture at once;
   removing mail already stored needs a second step: the confirmation page
   shows how many messages, conversations and queue rows would go, and only
@@ -105,7 +110,6 @@ class CaptureMailboxAdmin(SuperuserAdmin):
 class CaptureRuleAdmin(SuperuserAdmin):
     list_display = ('kind', 'value', 'action', 'scope', 'mailbox', 'purge_state', 'created_at')
     list_filter = ('kind', 'action', 'scope', 'purge_state')
-    search_fields = ('value', 'note')
     readonly_fields = ('purge_state', 'confirmed_by', 'confirmed_at', 'purge_done_at',
                        'created_by', 'created_at', 'updated_at')
 
@@ -202,7 +206,6 @@ class MailParticipantInline(admin.TabularInline):
 class MailMessageAdmin(ReadOnlyAdmin):
     list_display = ('sent_at', 'direction', 'subject', 'capture_state', 'conversation')
     list_filter = ('direction', 'capture_state', 'message_id_synthetic')
-    search_fields = ('subject', 'rfc_message_id', 'from_address')
     date_hierarchy = 'sent_at'
     exclude = ('body_text',)
     inlines = (MailParticipantInline, MailboxCopyInline)
@@ -213,7 +216,6 @@ class MailConversationAdmin(ReadOnlyAdmin):
     list_display = ('subject_normalised', 'company', 'link_state', 'is_mixed', 'message_count',
                     'last_message_at', 'last_inbound_at', 'last_outbound_at')
     list_filter = ('link_state', 'is_mixed')
-    search_fields = ('subject_normalised', 'conversation_key')
 
 
 @admin.register(MailboxCopy)
@@ -226,7 +228,6 @@ class MailboxCopyAdmin(ReadOnlyAdmin):
 class MailParticipantAdmin(ReadOnlyAdmin):
     list_display = ('role', 'address', 'domain', 'is_internal', 'contact')
     list_filter = ('role', 'is_internal')
-    search_fields = ('address', 'domain')
 
 
 @admin.register(MailMatch)
@@ -239,7 +240,6 @@ class MailMatchAdmin(ReadOnlyAdmin):
 class UnmatchedSenderAdmin(ReadOnlyAdmin):
     list_display = ('address', 'domain', 'reason', 'status', 'message_count', 'last_seen', 'expires_at')
     list_filter = ('status', 'reason')
-    search_fields = ('address', 'domain', 'display_name')
 
 
 @admin.register(CaptureRun)
@@ -265,5 +265,14 @@ class CapturePurgeAdmin(ReadOnlyAdmin):
 
 @admin.register(CaptureFailure)
 class CaptureFailureAdmin(ReadOnlyAdmin):
-    list_display = ('mailbox', 'gmail_id', 'attempts', 'error', 'parked', 'last_failed_at')
-    list_filter = ('parked', 'error')
+    list_display = ('mailbox', 'gmail_id', 'attempts', 'error', 'parked', 'code_version', 'last_failed_at')
+    list_filter = ('parked', 'error', 'mailbox')
+    actions = ('unpark',)
+
+    @admin.action(description='Unpark: retry on the next run of the mailbox')
+    def unpark(self, request, queryset):
+        if not _superuser(request):
+            from django.core.exceptions import PermissionDenied
+            raise PermissionDenied
+        count = queryset.update(parked=False, attempts=0)
+        messages.info(request, f'{count} messages will be retried on the next run.')
