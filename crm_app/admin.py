@@ -1337,26 +1337,46 @@ class InvoiceAdmin(admin.ModelAdmin):
         if skipped:
             self.message_user(request, f'Not changed: {"; ".join(skipped)}', level='WARNING')
     bulk_mark_paid.short_description = 'Mark selected invoices as paid'
+    bulk_mark_paid.allowed_permissions = ('change',)
+
+    @staticmethod
+    def _audit_status_moves(request, pks, old, new, action):
+        """One audit row per invoice an admin action moved."""
+        from crm_app.models import AuditLog
+        AuditLog.objects.bulk_create([AuditLog(
+            user=request.user, action='UPDATE', model_name='Invoice', record_id=str(pk),
+            ip_address=request.META.get('REMOTE_ADDR'), user_agent=request.META.get('HTTP_USER_AGENT', ''),
+            changes={'status': {'old': old, 'new': new}, 'action': action},
+            additional_data={'timestamp': timezone.now().isoformat(), 'view': 'InvoiceAdmin'},
+        ) for pk in pks])
 
     def bulk_mark_unpaid(self, request, queryset):
         """Undo payments recorded by mistake: Paid invoices only, back to Sent (receipt numbers kept)."""
         skipped = queryset.exclude(status='Paid').count()
-        updated_count = queryset.filter(status='Paid').update(status='Sent', paid_date=None)
+        moved = list(queryset.filter(status='Paid').values_list('pk', flat=True))
+        updated_count = queryset.model.objects.filter(pk__in=moved, status='Paid').update(
+            status='Sent', paid_date=None, updated_at=timezone.now())
+        self._audit_status_moves(request, moved, 'Paid', 'Sent', 'Marked unpaid (admin)')
         self.message_user(request, f'Marked {updated_count} paid invoice(s) as unpaid; receipt numbers are kept.')
         if skipped:
             self.message_user(request, f'{skipped} selected invoice(s) were not Paid and were left as they are.',
                               level='WARNING')
     bulk_mark_unpaid.short_description = 'Mark selected invoices as unpaid'
+    bulk_mark_unpaid.allowed_permissions = ('change',)
 
     def bulk_reopen_cancelled(self, request, queryset):
         """Reopen invoices cancelled by mistake: Cancelled invoices only, back to Sent."""
         skipped = queryset.exclude(status='Cancelled').count()
-        updated_count = queryset.filter(status='Cancelled').update(status='Sent')
+        moved = list(queryset.filter(status='Cancelled').values_list('pk', flat=True))
+        updated_count = queryset.model.objects.filter(pk__in=moved, status='Cancelled').update(
+            status='Sent', updated_at=timezone.now())
+        self._audit_status_moves(request, moved, 'Cancelled', 'Sent', 'Reopened (admin)')
         self.message_user(request, f'Reopened {updated_count} cancelled invoice(s) as Sent.')
         if skipped:
             self.message_user(request, f'{skipped} selected invoice(s) were not Cancelled and were left as they are.',
                               level='WARNING')
     bulk_reopen_cancelled.short_description = 'Reopen selected cancelled invoices'
+    bulk_reopen_cancelled.allowed_permissions = ('change',)
 
     def export_invoices_csv(self, request, queryset):
         """Export selected invoices to CSV"""

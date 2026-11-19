@@ -48,7 +48,7 @@ def test_bulk_delete_never_deletes_a_company_with_history(agent, person, company
     assert Activity.objects.filter(company=company).count() == 1
     assert _no_delete_audit(company)
     if response.status_code in (405, 409):
-        # Refused as a whole: nothing deleted and nothing recorded.
+        # Refused as a whole (or bulk delete not offered): nothing deleted and nothing recorded.
         assert Company.objects.filter(pk=other_company.pk).exists()
         assert _no_delete_audit(other_company)
     else:

@@ -221,8 +221,14 @@ LOOKALIKE_NAMES = {
     'office365': _MICROSOFT_DOMAINS,
     'bmasia': frozenset({'bmasiamusic.com', 'bmasia-crm.onrender.com', 'bmasia-crm-frontend.onrender.com'}),
 }
-# Google's country domains: google.<cc>, google.co.<cc>, google.com.<cc>.
-_GOOGLE_COUNTRY_RE = re.compile(r'google\.(?:co\.|com\.)?[a-z]{2}\Z')
+# Google's own country domains for the markets this company serves (Asia-Pacific, plus the UK).
+# An explicit list: a pattern such as google.com.<cc> would also match names that a third party
+# can hold under a private second-level registry (com.de, com.se, co.no). Extend it by hand.
+GOOGLE_COUNTRY_DOMAINS = frozenset({
+    'google.co.th', 'google.com.hk', 'google.com.vn', 'google.com.sg', 'google.com.my', 'google.co.id',
+    'google.com.ph', 'google.com.kh', 'google.la', 'google.com.mm', 'google.co.jp', 'google.co.kr',
+    'google.com.tw', 'google.cn', 'google.co.in', 'google.com.au', 'google.co.nz', 'google.co.uk',
+})
 # Second-level labels under which a country domain registers names (co.th, com.au, or.jp ...).
 _COUNTRY_SECOND_LEVELS = frozenset({'co', 'com', 'net', 'org', 'or', 'ac', 'go', 'gov', 'edu', 'in', 'ne'})
 # Suffixes under which each name is its own registrable domain (a small, explicit list).
@@ -248,7 +254,7 @@ def lookalike_name(host):
     for name, domains in LOOKALIKE_NAMES.items():
         if name not in words or domain in domains:
             continue
-        if name in ('google', 'gmail') and _GOOGLE_COUNTRY_RE.match(domain):
+        if name in ('google', 'gmail') and domain in GOOGLE_COUNTRY_DOMAINS:
             continue
         return name
     return None

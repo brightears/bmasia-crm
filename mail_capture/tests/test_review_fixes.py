@@ -134,7 +134,7 @@ def test_one_failing_mailbox_does_not_stop_the_next(lagoon):
             raise RuntimeError('credential failure in the first mailbox')
         return cb
 
-    results = sync_all_enabled(factory, sleep=lambda s: None)
+    results = sync_all_enabled(factory, sleep=lambda s: None, all_mailboxes=True)
     assert [r.outcome for r in results] == ['error', 'ok']
     assert MailMessage.objects.count() == 1
     a.refresh_from_db()
@@ -155,7 +155,7 @@ def test_an_engine_error_in_one_mailbox_does_not_stop_the_next(lagoon, monkeypat
         return real(self)
 
     monkeypatch.setattr(sync._Runner, '_incremental', boom)
-    results = sync_all_enabled(factory_for(ca, cb), sleep=lambda s: None)
+    results = sync_all_enabled(factory_for(ca, cb), sleep=lambda s: None, all_mailboxes=True)
     assert [r.outcome for r in results] == ['error', 'ok']
     a.refresh_from_db()
     assert a.consecutive_errors == 1
