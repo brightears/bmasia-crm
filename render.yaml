@@ -5,7 +5,14 @@ services:
     buildCommand: "./build.sh"
     startCommand: "./start.sh"
     envVars:
+      # SECRET_KEY and FIELD_ENCRYPTION_KEY are required in production: with either one
+      # missing or equal to the built-in development default, the app stops at startup
+      # (build, pre-deploy and start all fail, so the running version keeps serving).
+      # The crons that run this app are defined in the Render dashboard, not here; each
+      # needs both variables too. One-off jobs use this service's environment.
       - key: SECRET_KEY
+        sync: false
+      - key: FIELD_ENCRYPTION_KEY
         sync: false
       - key: DEBUG
         value: "False"
