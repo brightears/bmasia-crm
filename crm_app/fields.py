@@ -29,6 +29,9 @@ so is every lookup except ``isnull`` and ``exact`` with an empty string: a looku
 compare encrypted values.
 
 In production (RENDER set) the field refuses to encrypt with the built-in development key.
+A value saved unchanged (as loaded) is written back as stored when it is already encrypted,
+or when no usable key is configured; a new value is refused then (``secret_input_error``
+gives forms and views a plain message to show instead).
 """
 import base64
 import logging
@@ -165,6 +168,31 @@ def encrypt_text(text):
     return crypter().encrypt(text.encode('utf-8')).decode('utf-8')
 
 
+def can_encrypt():
+    """False while no usable key is configured, or the built-in key is configured in production."""
+    try:
+        refuse_builtin_key_in_production()
+        current_fernet()
+        return True
+    except ImproperlyConfigured:
+        return False
+
+
+TOKEN_INPUT_MESSAGE = 'This looks like an encrypted value, not a password. Enter the mail password itself.'
+KEY_NOT_CONFIGURED_MESSAGE = 'Mail passwords cannot be saved until the encryption key is configured.'
+
+
+def secret_input_error(text):
+    """Why a typed secret cannot be stored, or None. For forms, serializers and views."""
+    if not text:
+        return None
+    if is_token_shaped(text):
+        return TOKEN_INPUT_MESSAGE
+    if not can_encrypt():
+        return KEY_NOT_CONFIGURED_MESSAGE
+    return None
+
+
 def read_stored(stored):
     """What a stored value reads as (see the module docstring)."""
     if stored is None or stored == '':
@@ -231,6 +259,12 @@ class EncryptedSecretField(models.CharField):
             return None
         if isinstance(value, UnreadableSecret):
             return value.stored
+        if isinstance(value, DecryptedSecret) and value.stored is not None:
+            # The value as loaded, unchanged: an encrypted one is written back as stored;
+            # a plain one stored before encryption is encrypted now when a usable key is
+            # configured, and otherwise written back exactly as stored.
+            if is_token_shaped(value.stored) or not can_encrypt():
+                return value.stored
         if hasattr(value, 'resolve_expression'):
             raise FieldError(f'{self.name} cannot be written from a database expression; assign the text.')
         text = value if isinstance(value, str) else str(value)

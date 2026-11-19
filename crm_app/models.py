@@ -175,6 +175,7 @@ SMTP_PASSWORD_STATE_LABELS = {
     'unreadable': 'Set (unreadable: needs re-entry)',
 }
 SMTP_PASSWORD_UNREADABLE_MESSAGE = "This user's mail password cannot be read: ask them to enter it again."
+SMTP_FALLBACK_NOTICE = 'Sent from the shared address because your mail password needs re-entering.'
 
 
 class Company(TimestampedModel):

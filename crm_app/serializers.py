@@ -60,6 +60,13 @@ class UserSerializer(serializers.ModelSerializer):
         """Return full name or username as fallback"""
         return f"{obj.first_name} {obj.last_name}".strip() or obj.username
 
+    def validate_smtp_password(self, value):
+        from crm_app.fields import secret_input_error
+        problem = secret_input_error(value)
+        if problem:
+            raise serializers.ValidationError(problem)
+        return value
+
     def create(self, validated_data):
         """Create user with hashed password"""
         password = validated_data.pop('password', None)

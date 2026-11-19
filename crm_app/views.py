@@ -68,7 +68,7 @@ def _unicode_base_fonts(styles):
             s.fontName = _map[s.fontName]
     return styles
 
-from .models import SMTP_PASSWORD_UNREADABLE_MESSAGE
+from .models import SMTP_FALLBACK_NOTICE, SMTP_PASSWORD_UNREADABLE_MESSAGE
 from .models import (
     User, Company, Contact, Note, Task, AuditLog, start_of_local_day,
     Opportunity, OpportunityActivity, Contract, Invoice, InvoiceLineItem, ContractZone,
@@ -136,6 +136,14 @@ def serialize_audit_changes(obj):
 
 _SECRET_AUDIT_FIELD = re.compile(r'password|passwd|secret|token|api_?key|credential', re.IGNORECASE)
 REDACTED_AUDIT_VALUE = '[redacted]'
+
+
+def sender_notice(request):
+    """{'notice': ...} when the sender's own mail password is unreadable and the send used the shared address."""
+    user = getattr(request, 'user', None)
+    if getattr(user, 'is_authenticated', False) and getattr(user, 'smtp_password_state', None) == 'unreadable':
+        return {'notice': SMTP_FALLBACK_NOTICE}
+    return {}
 
 
 def redact_secret_changes(changes):
@@ -580,6 +588,11 @@ class UserViewSet(BaseModelViewSet):
                 'smtp_configured': False
             })
 
+        if smtp_password:
+            from crm_app.fields import secret_input_error
+            problem = secret_input_error(smtp_password)
+            if problem:
+                return Response({'error': problem}, status=status.HTTP_400_BAD_REQUEST)
         if smtp_email:
             user.smtp_email = smtp_email
         if smtp_password:
@@ -1443,6 +1456,7 @@ class ContractViewSet(BaseModelViewSet):
 
         return Response({
             'message': message,
+            **sender_notice(request),
             'status': contract.status
         })
 
@@ -6350,6 +6364,7 @@ class InvoiceViewSet(BaseModelViewSet):
 
         return Response({
             'message': message,
+            **sender_notice(request),
             'status': invoice.status,
             'email_details': [{
                 'to_email': log.to_email,
@@ -6481,6 +6496,7 @@ class InvoiceViewSet(BaseModelViewSet):
 
         return Response({
             'message': message,
+            **sender_notice(request),
             'receipt_number': invoice.receipt_number,
         })
 
@@ -7351,6 +7367,7 @@ class QuoteViewSet(BaseModelViewSet):
 
         return Response({
             'message': message,
+            **sender_notice(request),
             'status': quote.status,
             'sent_date': str(quote.sent_date) if quote.sent_date else None,
             'email_details': [{

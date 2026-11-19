@@ -58,6 +58,14 @@ class UserAdminChangeForm(UserChangeForm):
         model = User
         exclude = ('smtp_password',)
 
+    def clean_new_smtp_password(self):
+        from crm_app.fields import secret_input_error
+        value = self.cleaned_data.get('new_smtp_password')
+        problem = secret_input_error(value)
+        if problem:
+            raise forms.ValidationError(problem)
+        return value
+
     def clean(self):
         cleaned = super().clean()
         if cleaned.get('new_smtp_password') and cleaned.get('clear_smtp_password'):
