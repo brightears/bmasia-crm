@@ -1,4 +1,5 @@
 from django.db import models
+from crm_app.fields import EncryptedSecretField
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import EmailValidator, RegexValidator
@@ -96,11 +97,14 @@ class User(AbstractUser):
         null=True,
         help_text="Gmail address for sending emails (e.g., user@bmasiamusic.com)"
     )
-    smtp_password = models.CharField(
+    # Stored encrypted with FIELD_ENCRYPTION_KEY (Fernet; see crm_app/fields.py).
+    # Reads also accept a value stored before encryption (plain text) until
+    # `manage.py encrypt_smtp_passwords --execute` has run; every save encrypts.
+    smtp_password = EncryptedSecretField(
         max_length=255,
         blank=True,
         null=True,
-        help_text="Gmail app password (will be encrypted)"
+        help_text="Gmail app password (stored encrypted)"
     )
 
     avatar_url = models.TextField(

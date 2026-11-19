@@ -568,3 +568,10 @@ EMAIL_SENDERS = {
 
 # Site URL for email links and redirects
 SITE_URL = config('SITE_URL', default='https://bmasia-crm.onrender.com')
+
+# Key rotation for encrypted fields. While FIELD_ENCRYPTION_KEY_PREVIOUS is set, values
+# encrypted with the previous key still read; every save uses FIELD_ENCRYPTION_KEY.
+# Procedure: crm_app/management/commands/encrypt_smtp_passwords.py.
+FIELD_ENCRYPTION_KEY_PREVIOUS = config('FIELD_ENCRYPTION_KEY_PREVIOUS', default='')
+if FIELD_ENCRYPTION_KEY_PREVIOUS:
+    FIELD_ENCRYPTION_KEY = [FIELD_ENCRYPTION_KEY, FIELD_ENCRYPTION_KEY_PREVIOUS]
