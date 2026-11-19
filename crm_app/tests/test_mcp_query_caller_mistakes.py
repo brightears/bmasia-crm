@@ -188,8 +188,10 @@ NEW_HINTS = {
                                      'by company; company.contracted_zone_count is the contracted count',
     ('company', 'currency'): 'currency is set on each contract, quote and invoice; a company has billing_entity',
     ('company', 'primary_contact'): 'query contact with this company and is_primary true',
-    ('contract', 'contract_documents'): 'no stored PDF link; call generate_contract_pdf / generate_quote_pdf / '
-                                        'generate_invoice_pdf',
+    ('contract', 'contract_documents'): "Contract documents are a separate collection: query contractdocument "
+                                        "with contract = the contract's id",
+    ('contract', 'documents'): "Contract documents are a separate collection: query contractdocument "
+                               "with contract = the contract's id",
     ('contract', 'quote'): "a contract's source quote is not published; query quote by company",
     ('contract', 'source_quote'): "a contract's source quote is not published; query quote by company",
     ('quote', 'sent_date'): 'quote send dates are not published; status shows whether it was sent',

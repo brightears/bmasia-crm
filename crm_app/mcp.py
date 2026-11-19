@@ -22,7 +22,7 @@ from crm_app.models import (
     Company, Contact, Contract, Invoice, Quote, Opportunity, AuditLog,
     Task, Zone, ContractTemplate, ContractLineItem, InvoiceLineItem, QuoteLineItem,
     ContractServiceLocation, ClientTechDetail, Device, Ticket, KBArticle,
-    ContractSendReceiptUse, QuoteSendReceiptUse,
+    ContractSendReceiptUse, QuoteSendReceiptUse, ContractDocument,
 )
 from crm_app.contract_send_receipts import (
     ReceiptVerificationError, verify_signed_contract_send_context,
@@ -506,6 +506,38 @@ class InvoiceLineItemQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     ]
     search_fields = ['description', 'product_service']
     extra_instructions = "Line items attached to invoices. Use to verify what's on an invoice PDF or audit nested-write results."
+
+
+class ContractDocumentQuery(_CaseInsensitiveFilters, ModelQueryToolset):
+    """Read-only metadata of the documents attached to contracts.
+
+    Never the file itself: no file field, URL or storage path is published, and
+    the write tools do not know this collection (crm_app/mcp.py _COLLECTION_MAP;
+    the agent gate denies it too). A retired agent principal reads nothing.
+    """
+    model = ContractDocument
+    fields = [
+        'id', 'contract', 'document_type', 'title', 'is_official', 'is_signed', 'signed_date',
+        'uploaded_at',
+    ]
+    search_fields = ['title']
+    extra_instructions = (
+        "Metadata of documents attached to contracts; filter by contract (the contract's id). "
+        "Read-only, and never the file. is_signed and signed_date are set by the person who "
+        "uploads the document (nothing reads the file): treat a row with is_signed true or a "
+        "signed_date as the CRM's record of a signed copy. is_official marks the version meant "
+        "for signing; document_type 'generated' is a PDF the CRM produced, usually unsigned."
+    )
+
+    def get_queryset(self):
+        from crm_app.agent_policy import principal_for_username
+
+        queryset = super().get_queryset()
+        user = getattr(self.request, 'user', None)
+        principal = principal_for_username(getattr(user, 'username', '') or '')
+        if principal is not None and principal.retired:
+            return queryset.none()
+        return queryset
 
 
 @mcp_server.tool()
