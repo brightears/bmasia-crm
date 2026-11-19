@@ -201,6 +201,25 @@ def is_agent_account(user) -> bool:
     return holds_api_token(user) and not is_listed_reviewer(user)
 
 
+def is_agent_accounts(users) -> dict:
+    """``{user.pk: is_agent_account(user)}`` for any number of accounts, in at most one query.
+
+    The same answer as is_agent_account for each account; only the token lookup
+    goes to the database, once for all the accounts that need it.
+    """
+    from rest_framework.authtoken.models import Token
+
+    accounts = [user for user in users if user is not None]
+    signed_in = [user for user in accounts if getattr(user, 'is_authenticated', False)]
+    need_token = [user.pk for user in signed_in if not is_agent_by_name(user) and not is_listed_reviewer(user)]
+    with_token = (set(Token.objects.filter(user_id__in=need_token).values_list('user_id', flat=True))
+                  if need_token else set())
+    answers = {user.pk: False for user in accounts}
+    for user in signed_in:
+        answers[user.pk] = is_agent_by_name(user) or user.pk in with_token
+    return answers
+
+
 def agent_account_ids(user_ids) -> set:
     """The ids among ``user_ids`` that are agent accounts, in two queries."""
     from django.contrib.auth import get_user_model

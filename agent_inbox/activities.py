@@ -104,7 +104,7 @@ def _validated(user, body):
         'participants': _participants(body.get('participants')),
         'source_system': source_system,
         'source_ref': source_ref_field(body, 'source_ref', source_system, SOURCE_REF_MAX),
-        'source_url': url_field(body, 'source_url', SOURCE_URL_MAX),
+        'source_url': url_field(body, 'source_url', SOURCE_URL_MAX, source_system),
         'restricted': _flag(body, 'restricted'),
     }
 

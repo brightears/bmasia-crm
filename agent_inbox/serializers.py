@@ -40,6 +40,11 @@ class ActivitySerializer(serializers.ModelSerializer):
             if not can_read_activity_body(viewer, instance, recorder_is_agent=recorder_is_agent):
                 for name in PRIVATE_ACTIVITY_FIELDS:
                     data.pop(name, None)
+        from agent_inbox.validation import url_warnings
+
+        # Shown only with the link itself.
+        data['warnings'] = (url_warnings('source_url', instance.source_url, instance.source_system)
+                            if 'source_url' in data else [])
         return data
 
 
@@ -105,14 +110,14 @@ class ChangeProposalSerializer(serializers.ModelSerializer):
 
     def get_warnings(self, proposal):
         """Things a reviewer should look at closely; never a reason the API refused."""
-        from agent_inbox.validation import mixed_script
+        from agent_inbox.validation import mixed_script, url_warnings
 
         return [
             {'field': key, 'code': 'mixed_script',
              'detail': 'Mixes scripts that can look alike or display in a different order than stored'}
             for key, value in sorted((proposal.patch or {}).items())
             if isinstance(value, str) and mixed_script(value)
-        ]
+        ] + url_warnings('evidence_source_url', proposal.evidence_source_url, proposal.evidence_source_system)
 
     def get_conflicts_with(self, proposal):
         from agent_inbox.proposals import conflicts_for

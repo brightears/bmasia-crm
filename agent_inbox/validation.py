@@ -204,11 +204,90 @@ def source_ref_field(body, key, source_system, max_length):
     return token_field(body, key, max_length)
 
 
-def url_field(body, key, max_length):
+GMAIL_HOST = 'mail.google.com'
+_DEFAULT_PORTS = {'http': 80, 'https': 443}
+_HOST_LABEL_RE = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z')
+
+
+def checked_url(value, source_system=''):
+    """``(url, None)`` with the URL rebuilt from its checked parts, or ``(None, reason)``.
+
+    Accepted: scheme exactly http or https; no user name or password (no @ in
+    the host part); a host name that is an ASCII domain after IDNA, with at
+    least two labels, not an IP address and not localhost; no port other than
+    the scheme's default (dropped when given). For a gmail source the host must
+    be exactly mail.google.com. What is stored is the rebuilt URL, so what a
+    reviewer sees is what was checked.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+    import ipaddress
+
+    scheme, sep, _rest = value.partition(':')
+    if not sep or scheme not in _DEFAULT_PORTS or not value.startswith(scheme + '://'):
+        return None, 'must be an http or https URL'
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except ValueError:
+        return None, 'is not a valid URL'
+    netloc = parts.netloc
+    if '@' in netloc or parts.username is not None or parts.password is not None:
+        return None, 'must not contain a user name or password'
+    if '[' in netloc or ']' in netloc:
+        return None, 'must name a host, not an IP address'
+    host = parts.hostname or ''
+    if netloc.count(':') > 1 or (':' in netloc and port is None):
+        return None, 'has an invalid port'
+    if port is not None and port != _DEFAULT_PORTS[scheme]:
+        return None, 'must use the default port'
+    try:
+        ascii_host = host.encode('idna').decode('ascii') if not host.isascii() else host
+    except UnicodeError:
+        return None, 'has a host name that is not a valid domain'
+    ascii_host = ascii_host.lower()
+    try:
+        ipaddress.ip_address(ascii_host)
+        return None, 'must name a host, not an IP address'
+    except ValueError:
+        pass
+    labels = ascii_host.split('.')
+    if len(ascii_host) > 253 or len(labels) < 2 or not all(_HOST_LABEL_RE.match(label) for label in labels):
+        return None, 'has a host name that is not a valid domain'
+    if labels[-1].isdigit():
+        return None, 'must name a host, not an IP address'
+    if labels[-1] == 'localhost':
+        return None, 'must not point at localhost'
+    if source_system == 'gmail' and ascii_host != GMAIL_HOST:
+        return None, f'must be a {GMAIL_HOST} link for a gmail source'
+    return urlunsplit((scheme, ascii_host, parts.path, parts.query, parts.fragment)), None
+
+
+def url_field(body, key, max_length, source_system=''):
     value = token_field(body, key, max_length)
-    if value and not re.match(r'https?://[^/\s]+', value):
-        raise bad(f'{key} must be an http or https URL')
-    return value
+    if not value:
+        return value
+    url, reason = checked_url(value, source_system)
+    if reason:
+        raise bad(f'{key} {reason}')
+    if len(url) > max_length:
+        raise bad(f'{key} must be at most {max_length} characters')
+    return url
+
+
+def url_warnings(field, value, source_system=''):
+    """Reviewer warnings for a stored link: a punycode host, or a link that would now be refused."""
+    if not value:
+        return []
+    url, reason = checked_url(value, source_system)
+    if reason:
+        return [{'field': field, 'code': 'url_not_accepted',
+                 'detail': f'This link {reason}; it was stored before links were checked. Do not follow it.'}]
+    from urllib.parse import urlsplit
+    if any(label.startswith('xn--') for label in (urlsplit(url).hostname or '').split('.')):
+        return [{'field': field, 'code': 'url_punycode_host',
+                 'detail': 'The link\'s host is written in punycode (xn--) and may imitate another name; '
+                           'check where it really points'}]
+    return []
 
 
 def choice(body, key, choices, default=None):
