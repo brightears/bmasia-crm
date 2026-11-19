@@ -240,10 +240,11 @@ const ProposalCard: React.FC<ProposalCardProps> = (props) => {
   });
   const state = open ? targetStateOf(p) : null;
   const unusualState = isUnusualState(state);
-  // The fixed "record changed" text the server stores on a refused accept repeats the changed box: not shown twice.
+  // The fixed "record changed" text the server stores on a refused accept repeats the changed box or the state
+  // notice (both say since when): it is not shown twice. Any other refusal stays visible.
   const applyError =
     p.last_apply_error &&
-    !(valuesChanged(p) && /^The record changed after this proposal was made/.test(p.last_apply_error))
+    !(p.target_changed_at && /^The record changed after this proposal was made/.test(p.last_apply_error))
       ? p.last_apply_error
       : '';
   const canTouch = open && !readOnly && !expired && !result;

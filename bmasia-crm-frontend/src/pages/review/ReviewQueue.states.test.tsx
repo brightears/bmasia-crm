@@ -265,6 +265,24 @@ describe('the changed box is worded by what changed', () => {
   });
 });
 
+describe('the stored "record changed" text is not repeated', () => {
+  it.each([
+    ['values changed', 'present'],
+    ['state changed', 'inactive'],
+  ] as const)('%s', async (_name, state) => {
+    const p = withState(state, {
+      target_changed_at: '2026-11-19T08:00:00Z',
+      last_apply_error:
+        'The record changed after this proposal was made. Nothing was applied; the current values were re-read.',
+    });
+    show([p]);
+    renderPage('/review?tab=look');
+    const card = await findCard(p);
+    expect(card.queryByTestId('apply-error')).not.toBeInTheDocument();
+    expect(card.getByTestId(state === 'present' ? 'record-changed' : 'target-state')).toBeInTheDocument();
+  });
+});
+
 describe('refusals carry the server’s reason', () => {
   it('a 409 record_changed shows what changed', async () => {
     const p = withState('present');
