@@ -207,6 +207,7 @@ def never_publish_reason(model, field):
 # when the target is published on that collection. ('hint', text) explains
 # where the information lives instead.
 _PDF_HINT = 'no stored PDF link; call generate_contract_pdf / generate_quote_pdf / generate_invoice_pdf'
+_DOCUMENTS_HINT = "Contract documents are a separate collection: query contractdocument with contract = the contract's id"
 FIELD_ALIASES = {
     ('*', 'legal_name'): ('field', 'legal_entity_name'),
     ('contact', 'first_name'): ('field', 'name'),
@@ -230,7 +231,8 @@ FIELD_ALIASES = {
     ('*', 'number_of_zones'): ('hint', 'count contractservicelocation rows by contract (one per zone or custom '
                                        'item) or zone rows by company; company.contracted_zone_count is the '
                                        'contracted count'),
-    ('contract', 'contract_documents'): ('hint', _PDF_HINT),
+    ('contract', 'contract_documents'): ('hint', _DOCUMENTS_HINT),
+    ('contract', 'documents'): ('hint', _DOCUMENTS_HINT),
     ('contract', 'quote'): ('hint', "a contract's source quote is not published; query quote by company"),
     ('contract', 'source_quote'): ('hint', "a contract's source quote is not published; query quote by company"),
     ('quote', 'sent_date'): ('hint', 'quote send dates are not published; status shows whether it was sent'),
@@ -239,6 +241,7 @@ FIELD_ALIASES = {
 
 COLLECTION_ALIASES = {
     'servicelocation': 'contractservicelocation',
+    'document': 'contractdocument',
     'template': 'contracttemplate',
 }
 
