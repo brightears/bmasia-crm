@@ -47,32 +47,73 @@ interface RouteInfo {
   module: string | undefined;
 }
 
+interface RouteTag {
+  /** The `path` attribute of the <Route …> opening tag, wherever it sits in the tag. */
+  route: string | undefined;
+  /** The `element={…}` expression, when there is one. */
+  element: string;
+  /** The `requiredModule` named inside the element (its <ProtectedRoute>). */
+  module: string | undefined;
+}
+
+/**
+ * Every <Route …> opening tag in a source file, read with a small scanner so attributes may come in any order
+ * and tags may span lines: the tag ends at the first ">" outside braces and quotes.
+ */
+const routeTags = (source: string): RouteTag[] => {
+  const tags: RouteTag[] = [];
+  const opener = /<Route\b/g;
+  let match: RegExpExecArray | null;
+  while ((match = opener.exec(source)) !== null) {
+    let depth = 0;
+    let quote = '';
+    let end = match.index + match[0].length;
+    let topLevel = '';
+    let element = '';
+    let elementStart = -1;
+    for (; end < source.length; end += 1) {
+      const ch = source[end];
+      if (quote) {
+        if (ch === quote) quote = '';
+      } else if (ch === '"') {
+        quote = ch;
+      } else if (ch === '{') {
+        if (depth === 0 && /element=\s*$/.test(topLevel)) elementStart = end + 1;
+        depth += 1;
+      } else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0 && elementStart >= 0 && !element) element = source.slice(elementStart, end);
+      } else if (ch === '>' && depth === 0) {
+        break;
+      }
+      if (depth === 0) topLevel += ch;
+    }
+    tags.push({
+      route: /\bpath="([^"]+)"/.exec(topLevel)?.[1],
+      element,
+      module: /requiredModule="([^"]+)"/.exec(element)?.[1],
+    });
+  }
+  return tags;
+};
+
+const APP_ROUTES = routeTags(fs.readFileSync(path.join(__dirname, '..', 'App.tsx'), 'utf8'));
+const isRedirect = (element: string) => /^\s*<Navigate\b/.test(element);
+
 // Every <Route> in App.tsx, read from the source so routes added later are walked too.
-const ROUTES: RouteInfo[] = fs
-  .readFileSync(path.join(__dirname, '..', 'App.tsx'), 'utf8')
-  .split('<Route')
-  .slice(1)
-  .map((chunk): RouteInfo | null => {
-    const route = /^\s*path="([^"]+)"/.exec(chunk)?.[1];
-    if (!route || ['/login', '/', '*'].includes(route) || /element=\{\s*<Navigate/.test(chunk)) return null;
-    const module = /requiredModule="([^"]+)"/.exec(chunk.split('/>\n')[0])?.[1];
-    const url = route.replace(/\/:[a-zA-Z]+\?/g, '').replace(/:[a-zA-Z]+/g, 'fixture-id');
-    return { route, url, module };
-  })
-  .filter((r): r is RouteInfo => r !== null);
+const ROUTES: RouteInfo[] = APP_ROUTES.map((tag): RouteInfo | null => {
+  const route = tag.route;
+  if (!route || ['/login', '/', '*'].includes(route) || isRedirect(tag.element)) return null;
+  const url = route.replace(/\/:[a-zA-Z]+\?/g, '').replace(/:[a-zA-Z]+/g, 'fixture-id');
+  return { route, url, module: tag.module };
+}).filter((r): r is RouteInfo => r !== null);
 
 // Every <Route> path in App.tsx with whether it has a guard, redirects included, for the allow-list check.
-const ALL_ROUTES = fs
-  .readFileSync(path.join(__dirname, '..', 'App.tsx'), 'utf8')
-  .split('<Route')
-  .slice(1)
-  .map((chunk) => {
-    const route = /^\s*path="([^"]+)"/.exec(chunk)?.[1];
-    const redirect = /^\s*path="[^"]+"\s*element=\{\s*<Navigate/.test(chunk);
-    const guarded = /requiredModule="([^"]+)"/.test(chunk.split('/>\n')[0]);
-    return route ? { route, redirect, guarded } : null;
-  })
-  .filter((r): r is { route: string; redirect: boolean; guarded: boolean } => r !== null);
+const ALL_ROUTES = APP_ROUTES.filter((tag) => tag.route).map((tag) => ({
+  route: tag.route as string,
+  redirect: isRedirect(tag.element),
+  guarded: Boolean(tag.module),
+}));
 
 /**
  * Routes that may have no guard. Anything else added to App.tsx without `requiredModule` would be
@@ -136,6 +177,25 @@ it('reads the routes of App.tsx', () => {
 it('every route guard names a module of the role table', () => {
   const unknown = ROUTES.filter((r) => r.module && !(r.module in MODULE_ROLES));
   expect(unknown).toEqual([]);
+});
+
+it('reads <Route> tags whatever the attribute order, also across lines', () => {
+  const tags = routeTags(
+    [
+      '<Route path="/a" element={<Page />} />',
+      '<Route element={<Odd />} path="/sneaky-two" />',
+      '<Route\n  element={\n    <ProtectedRoute requiredModule="users">\n      <Users />\n    </ProtectedRoute>\n  }\n  path="/three"\n/>',
+      '<Route path="/four" element={<Navigate to="/a" replace />} />',
+    ].join('\n'),
+  );
+  expect(tags.map((t) => [t.route, t.module ?? null, isRedirect(t.element)])).toEqual([
+    ['/a', null, false],
+    ['/sneaky-two', null, false],
+    ['/three', 'users', false],
+    ['/four', null, true],
+  ]);
+  // A path inside the element (not an attribute of the Route) is not taken for the Route's own path.
+  expect(routeTags('<Route element={<Link path="/inner" />} />')[0].route).toBeUndefined();
 });
 
 it('only the allow-listed routes have no guard', () => {
