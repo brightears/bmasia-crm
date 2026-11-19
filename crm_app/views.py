@@ -117,6 +117,7 @@ from .rene_auth import (
     IsReneRenewalReaderOrAuthenticatedUser,
     ReneRenewalBearerAuthentication,
 )
+from .permissions import IsFinanceOrAdmin
 
 
 def serialize_audit_changes(obj):
@@ -6476,7 +6477,8 @@ class InvoiceViewSet(BaseModelViewSet):
             'receipt_number': invoice.receipt_number,
         })
 
-    @action(detail=False, methods=['get'], url_path='export-quickbooks')
+    @action(detail=False, methods=['get'], url_path='export-quickbooks',
+            permission_classes=[IsAuthenticated, IsFinanceOrAdmin])
     def export_quickbooks(self, request):
         """
         Export invoices as IIF file for QuickBooks Pro 2016 import.
@@ -11545,7 +11547,7 @@ class RevenueViewSet(viewsets.ViewSet):
     - GET /api/v1/revenue/year-over-year/?year=2026&compare_year=2025 - YoY comparison
     - GET /api/v1/revenue/events/ - List revenue events
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
 
     @action(detail=False, methods=['get'], url_path='monthly')
     def monthly(self, request):
@@ -12019,7 +12021,7 @@ class ARAgingViewSet(viewsets.ViewSet):
     - GET /api/v1/ar-aging/overdue/ - List of overdue invoices
     - GET /api/v1/ar-aging/collection-priority/ - Prioritized collection list
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
 
     @action(detail=False, methods=['get'], url_path='report')
     def report(self, request):
@@ -12618,7 +12620,7 @@ class APAgingViewSet(viewsets.ViewSet):
     - GET /api/v1/ap-aging/payment-priority/ - Prioritized payment list
     - GET /api/v1/ap-aging/monthly-summary/?year=2026&month=1 - Monthly expense summary (for P&L)
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
 
     @action(detail=False, methods=['get'], url_path='report')
     def report(self, request):
@@ -12804,7 +12806,7 @@ class ProfitLossViewSet(viewsets.ViewSet):
     - GET /api/v1/profit-loss/comparative/?year=2026&month=1&compare_year=2025 - YoY comparison
     - GET /api/v1/profit-loss/trend/?year=2026 - Monthly trend data
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
 
     @action(detail=False, methods=['get'], url_path='monthly')
     def monthly(self, request):
@@ -13103,7 +13105,7 @@ class CashFlowViewSet(viewsets.ViewSet):
     - GET /api/v1/cash-flow/ytd/?year=2026&through_month=6 - Year-to-date Cash Flow
     - GET /api/v1/cash-flow/trend/?year=2026 - Monthly trend data
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
 
     @action(detail=False, methods=['get'], url_path='monthly')
     def monthly(self, request):
@@ -13352,7 +13354,7 @@ class BalanceSheetViewSet(viewsets.ViewSet):
     - GET /api/v1/balance-sheet/quarterly/?year=2026&quarter=1 - Quarterly Balance Sheet
     - GET /api/v1/balance-sheet/trend/?year=2026 - Quarterly trend data
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
 
     @action(detail=False, methods=['get'], url_path='quarterly')
     def quarterly(self, request):
@@ -13548,7 +13550,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
     - GET  /api/v1/revenue-recognition/deferred-revenue/ - Balance for B/S
     - GET  /api/v1/revenue-recognition/export/excel/   - Export in Pom's format
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
 
     @action(detail=False, methods=['get'], url_path='summary')
     def summary(self, request):
