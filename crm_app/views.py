@@ -7502,12 +7502,33 @@ class DashboardViewSet(viewsets.ViewSet):
     """ViewSet for dashboard statistics"""
     permission_classes = [IsAuthenticated]
 
+    def _load_earliest_starts(self, contracts):
+        """Evaluate `contracts` and look up, in one query, the earliest start of any contract
+        of each company whose lifecycle _classify_lifecycle has to infer. Kept per request."""
+        from django.db.models import Min
+        earliest = self.__dict__.setdefault('_earliest_start', {})
+        ids = {c.company_id for c in contracts
+               if not c.lifecycle_type and not c.renewed_from_id} - set(earliest)
+        if ids:
+            earliest.update(
+                Contract.objects.filter(company_id__in=ids).order_by()
+                .values('company_id').annotate(first=Min('start_date'))
+                .values_list('company_id', 'first'))
+        return contracts
+
     def _classify_lifecycle(self, contract):
         """Classify contract lifecycle type with inference when lifecycle_type is blank."""
         if contract.lifecycle_type:
             return contract.lifecycle_type
         if contract.renewed_from_id:
             return 'renewal'
+        # "Another contract of the company started earlier" is the same as "the company's
+        # earliest contract started before this one" (start_date is never empty).
+        earliest = self.__dict__.get('_earliest_start', {})
+        if contract.company_id in earliest:
+            if earliest[contract.company_id] < contract.start_date:
+                return 'renewal'
+            return 'new'
         if Contract.objects.filter(
             company=contract.company, start_date__lt=contract.start_date
         ).exists():
@@ -7547,6 +7568,11 @@ class DashboardViewSet(viewsets.ViewSet):
             tasks = tasks.filter(Q(assigned_to=user) | Q(assigned_to__role=user.role))
             companies = companies.filter(tasks__in=tasks).distinct()
 
+        # The rows the per-item figures below read, with only the fields they read
+        # (same filters and order as before; one query each).
+        invoice_rows = list(invoices.only('id', 'status', 'due_date', 'total_amount', 'currency'))
+        contract_rows = list(contracts.only('id', 'end_date', 'value', 'currency'))
+
         # Calculate statistics
         stats = {
             'total_companies': companies.count(),
@@ -7555,8 +7581,8 @@ class DashboardViewSet(viewsets.ViewSet):
             'active_contracts': contracts.count(),
             'contracts_value': contracts.aggregate(Sum('value'))['value__sum'] or 0,
             'overdue_tasks': tasks.overdue().count(),
-            'overdue_invoices': sum(1 for invoice in invoices if invoice.is_overdue),
-            'pending_renewals': sum(1 for contract in contracts if contract.is_expiring_soon),
+            'overdue_invoices': sum(1 for invoice in invoice_rows if invoice.is_overdue),
+            'pending_renewals': sum(1 for contract in contract_rows if contract.is_expiring_soon),
         }
 
         # Sales funnel stats
@@ -7615,12 +7641,12 @@ class DashboardViewSet(viewsets.ViewSet):
 
         # Overdue invoice total amount
         stats['total_overdue_amount'] = sum(
-            float(inv.total_amount) for inv in invoices if inv.is_overdue
+            float(inv.total_amount) for inv in invoice_rows if inv.is_overdue
         )
 
         # Pending renewal total value
         stats['pending_renewal_value'] = sum(
-            float(c.value) for c in contracts if c.is_expiring_soon and c.value
+            float(c.value) for c in contract_rows if c.is_expiring_soon and c.value
         )
 
         # Pipeline stages with values
@@ -7641,7 +7667,7 @@ class DashboardViewSet(viewsets.ViewSet):
         renewal_revenue = Decimal('0')
         new_contracts = []
         renewal_contracts = []
-        for c in monthly_contracts:
+        for c in self._load_earliest_starts(monthly_contracts):
             ltype = self._classify_lifecycle(c)
             val = c.value or Decimal('0')
             if ltype == 'new':
@@ -7691,7 +7717,7 @@ class DashboardViewSet(viewsets.ViewSet):
             m_renewal = 0.0
             m_new_contracts = []
             m_renewal_contracts = []
-            for c in started_qs:
+            for c in self._load_earliest_starts(started_qs):
                 ltype = self._classify_lifecycle(c)
                 val = float(c.value or 0)
                 if ltype == 'new':
@@ -7753,14 +7779,14 @@ class DashboardViewSet(viewsets.ViewSet):
         renewal_by = _sum_by_currency(renewal_contracts, contract_value)
         churned_by = _sum_by_currency(churned_qs, contract_value)
         stats.update({
-            'contracts_value_by_currency': _sum_by_currency(contracts, contract_value),
+            'contracts_value_by_currency': _sum_by_currency(contract_rows, contract_value),
             'monthly_revenue_by_currency': _sum_by_currency(monthly_contracts, contract_value),
             'previous_month_revenue_by_currency': _sum_by_currency(prev_month_contracts, contract_value),
             'total_overdue_amount_by_currency': _sum_by_currency(
-                [inv for inv in invoices if inv.is_overdue], lambda inv: inv.total_amount
+                [inv for inv in invoice_rows if inv.is_overdue], lambda inv: inv.total_amount
             ),
             'pending_renewal_value_by_currency': _sum_by_currency(
-                [c for c in contracts if c.is_expiring_soon and c.value], contract_value
+                [c for c in contract_rows if c.is_expiring_soon and c.value], contract_value
             ),
             'new_revenue_by_currency': new_by,
             'renewal_revenue_by_currency': renewal_by,
@@ -7776,16 +7802,42 @@ class ActionCenterViewSet(viewsets.ViewSet):
     """Today page: prioritized feed of items needing attention."""
     permission_classes = [IsAuthenticated]
 
+    def _load_primary_contacts(self, companies):
+        """Look up the contact of many companies at once (two queries, not two per item).
+
+        Same rule as before: the company's first active primary contact by name, else its
+        first active contact by name; among equal names, the lowest id. Kept for the rest of
+        this request.
+        """
+        cache = self.__dict__.setdefault('_primary_contacts', {})
+        ids = {company.pk for company in companies if company is not None} - set(cache)
+        if not ids:
+            return
+        found = {}
+        # By name, then id, so that two contacts with the same name never swap between requests.
+        for contact in Contact.objects.filter(company_id__in=ids, is_primary=True,
+                                              is_active=True).order_by('name', 'pk'):
+            found.setdefault(contact.company_id, contact)
+        missing = ids - set(found)
+        if missing:
+            for contact in Contact.objects.filter(company_id__in=missing,
+                                                  is_active=True).order_by('name', 'pk'):
+                found.setdefault(contact.company_id, contact)
+        for pk in ids:
+            cache[pk] = found.get(pk)
+
+    def _with_contacts(self, rows):
+        """The rows as a list, with their companies' contacts loaded in one go."""
+        rows = list(rows)
+        self._load_primary_contacts(row.company for row in rows)
+        return rows
+
     def _get_primary_contact(self, company):
         """Get primary contact for a company, fallback to first active."""
-        contact = Contact.objects.filter(
-            company=company, is_primary=True, is_active=True
-        ).first()
-        if not contact:
-            contact = Contact.objects.filter(
-                company=company, is_active=True
-            ).first()
-        return contact
+        if company is None:
+            return None  # contacts always belong to a company
+        self._load_primary_contacts([company])
+        return self._primary_contacts[company.pk]
 
     def _contact_dict(self, contact):
         if not contact:
@@ -7816,7 +7868,7 @@ class ActionCenterViewSet(viewsets.ViewSet):
             task_qs = task_qs.filter(assigned_to=user)
 
         # --- OVERDUE TASKS (the shared rule: open, due on an earlier Bangkok day) ---
-        for t in task_qs.overdue(today):
+        for t in self._with_contacts(task_qs.overdue(today)):
             days = (today - timezone.localdate(t.due_date)).days
             contact = t.related_contact or self._get_primary_contact(t.company)
             items.append({
@@ -7836,7 +7888,7 @@ class ActionCenterViewSet(viewsets.ViewSet):
         overdue_invoices = Invoice.objects.filter(
             status__in=['Sent', 'Overdue'], due_date__lt=today
         ).select_related('company')
-        for inv in overdue_invoices:
+        for inv in self._with_contacts(overdue_invoices):
             company = inv.company
             contact = self._get_primary_contact(company) if company else None
             items.append({
@@ -7863,7 +7915,7 @@ class ActionCenterViewSet(viewsets.ViewSet):
         if user.role == 'Sales':
             stale_opps = stale_opps.filter(owner=user)
 
-        for opp in stale_opps:
+        for opp in self._with_contacts(stale_opps):
             contact = self._get_primary_contact(opp.company) if opp.company else None
             ref_date = opp.follow_up_date if opp.follow_up_date else opp.updated_at.date()
             days_stale = (today - ref_date).days
@@ -7880,8 +7932,9 @@ class ActionCenterViewSet(viewsets.ViewSet):
             })
 
         # --- TASKS DUE TODAY & TOMORROW (Bangkok days, including earlier today) ---
-        for t in task_qs.open().filter(due_date__gte=start_of_local_day(today),
-                                       due_date__lt=start_of_local_day(today + timedelta(days=2))):
+        for t in self._with_contacts(task_qs.open().filter(
+                due_date__gte=start_of_local_day(today),
+                due_date__lt=start_of_local_day(today + timedelta(days=2)))):
             is_today = timezone.localdate(t.due_date) == today
             contact = t.related_contact or self._get_primary_contact(t.company)
             items.append({
@@ -7898,9 +7951,9 @@ class ActionCenterViewSet(viewsets.ViewSet):
             })
 
         # --- INVOICES DUE THIS WEEK ---
-        for inv in Invoice.objects.filter(
+        for inv in self._with_contacts(Invoice.objects.filter(
             status='Sent', due_date__gte=today, due_date__lte=week_end
-        ).select_related('company'):
+        ).select_related('company')):
             company = inv.company
             contact = self._get_primary_contact(company) if company else None
             days_until = (inv.due_date - today).days
@@ -7916,9 +7969,9 @@ class ActionCenterViewSet(viewsets.ViewSet):
             })
 
         # --- CONTRACTS EXPIRING WITHIN 60 DAYS ---
-        for c in Contract.objects.filter(
+        for c in self._with_contacts(Contract.objects.filter(
             status='Active', end_date__gte=today, end_date__lte=sixty_days
-        ).select_related('company'):
+        ).select_related('company')):
             contact_name = c.customer_signatory_name
             contact = None
             if not contact_name and c.company:
@@ -7941,8 +7994,9 @@ class ActionCenterViewSet(viewsets.ViewSet):
             })
 
         # --- TASKS DUE THIS WEEK (not today/tomorrow) ---
-        for t in task_qs.open().filter(due_date__gte=start_of_local_day(today + timedelta(days=2)),
-                                       due_date__lt=start_of_local_day(today + timedelta(days=8))):
+        for t in self._with_contacts(task_qs.open().filter(
+                due_date__gte=start_of_local_day(today + timedelta(days=2)),
+                due_date__lt=start_of_local_day(today + timedelta(days=8)))):
             days_until = (timezone.localdate(t.due_date) - today).days
             contact = t.related_contact or self._get_primary_contact(t.company)
             items.append({
@@ -7965,7 +8019,7 @@ class ActionCenterViewSet(viewsets.ViewSet):
         if user.role == 'Sales':
             upcoming_opps = upcoming_opps.filter(owner=user)
 
-        for opp in upcoming_opps:
+        for opp in self._with_contacts(upcoming_opps):
             contact = self._get_primary_contact(opp.company) if opp.company else None
             days_until = (opp.follow_up_date - today).days
             items.append({

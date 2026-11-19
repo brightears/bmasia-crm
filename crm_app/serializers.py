@@ -326,12 +326,14 @@ class CompanySerializer(serializers.ModelSerializer):
 
     def get_primary_contact(self, obj):
         try:
-            # The company list prefetches the same filter in the same order (list_querysets.py).
+            # The company list prefetches the same filter in the same order (list_querysets.py):
+            # by name, then id, so two primaries with the same name never swap between requests.
             prefetched = getattr(obj, '_prefetched_primary_contacts', None)
             if prefetched is not None:
                 primary = prefetched[0] if prefetched else None
             else:
-                primary = obj.contacts.filter(is_primary=True, is_active=True).first()
+                primary = obj.contacts.filter(is_primary=True, is_active=True).order_by(
+                    'name', 'pk').first()
             if primary:
                 return ContactSerializer(primary).data
             return None
