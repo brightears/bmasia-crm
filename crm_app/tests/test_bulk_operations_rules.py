@@ -612,6 +612,20 @@ def test_finance_permission_matrix(account, how, kind):
         assert response.status_code in (401, 403), (account, how, kind, response.status_code)
 
 
+@pytest.mark.parametrize('path', [
+    '/api/v1/invoices/export-quickbooks/?start_date=2026-01-01&end_date=2026-12-31',
+    '/api/v1/profit-loss/export/pdf/?year=2026&month=1', '/api/v1/profit-loss/export/excel/?year=2026&month=1',
+    '/api/v1/cash-flow/export/pdf/?year=2026&month=1', '/api/v1/cash-flow/export/excel/?year=2026&month=1',
+    '/api/v1/balance-sheet/export/pdf/?year=2026&quarter=1', '/api/v1/balance-sheet/export/excel/?year=2026&quarter=1',
+    '/api/v1/revenue-recognition/export/excel/?year=2026',
+    '/api/v1/opportunities/export/pdf/', '/api/v1/opportunities/export/sales-performance-pdf/?year=2026',
+])
+def test_the_export_buttons_work_for_an_admin_on_the_website(path):
+    """The pages download with the website sign-in (JWT); every production user is Admin."""
+    response = website_client(_account(f'export-admin-{abs(hash(path)) % 10000}', 'Admin')).get(path)
+    assert response.status_code not in (401, 403, 405), (path, response.status_code)
+
+
 def test_a_superuser_without_the_role_passes_none_of_the_role_rules():
     """No superuser exception: the role must be given."""
     client = website_client(_account('fresh-superuser', 'Sales', superuser=True))
