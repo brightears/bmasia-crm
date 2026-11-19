@@ -110,6 +110,10 @@ class GmailClient(Protocol):
     def get_attachment(self, message_id, attachment_id) -> dict:
         """users.messages.attachments.get."""
 
+    # Optional: a client with ``supports_batch = True`` also offers
+    # ``get_messages(ids, format, metadata_headers) -> {id: message or None}``,
+    # many messages.get in one HTTP batch (None for a message gone since listed).
+
 
 # --- .eml conversion --------------------------------------------------------
 
@@ -185,8 +189,10 @@ def _metadata_view(message, metadata_headers):
 class FakeGmailClient:
     """In-memory Gmail for one mailbox. Records every call in ``calls``."""
 
-    def __init__(self, mailbox_email, messages=(), labels=(), history_id=1000, errors=()):
+    def __init__(self, mailbox_email, messages=(), labels=(), history_id=1000, errors=(), batch=False):
         self.mailbox_email = mailbox_email.lower()
+        # With batch=True the fake answers get_messages, like the real client.
+        self.supports_batch = bool(batch)
         self.calls = []
         self._messages = {}          # gmail id -> full message dict
         self._order = []             # gmail ids, oldest first
@@ -356,6 +362,22 @@ class FakeGmailClient:
         if format == 'minimal':
             return {k: copy.deepcopy(message.get(k)) for k in ('id', 'threadId', 'labelIds', 'internalDate')}
         return _metadata_view(message, metadata_headers)
+
+    def get_messages(self, message_ids, format='metadata', metadata_headers=None):
+        if not self.supports_batch:
+            raise AttributeError('this fake was built without batch support')
+        ids = list(message_ids)
+        self._enter('get_messages', ids=ids, format=format)
+        out = {}
+        for message_id in ids:
+            message = self._messages.get(message_id)
+            if message is None:
+                out[message_id] = None
+            elif format == 'full':
+                out[message_id] = copy.deepcopy(message)
+            else:
+                out[message_id] = _metadata_view(message, metadata_headers)
+        return out
 
     def get_attachment(self, message_id, attachment_id):
         self._enter('get_attachment', message_id=message_id, attachment_id=attachment_id)

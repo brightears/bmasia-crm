@@ -84,6 +84,7 @@ LEASE_SECONDS = 15 * 60
 MAX_ATTEMPTS = 4
 MAX_MESSAGE_ATTEMPTS = 3
 MAX_FAILED_IDS = 100
+BATCH_SIZE = 50          # messages per Gmail batch request (Gmail allows 100, recommends 50)
 UNMATCHED_TTL = timedelta(days=30)
 SUBJECT_FALLBACK_WINDOW = timedelta(days=30)
 RESYNC_DEFAULT_WINDOW = timedelta(days=7)
@@ -299,6 +300,7 @@ class _Runner:
         target[name] = target.get(name, 0) + n
 
     def _call(self, name, *args, **kwargs):
+        units = kwargs.pop('_units', None)
         units_key = name
         if name == 'get_message' and kwargs.get('format') in ('full', 'minimal'):
             units_key = f'get_message_{kwargs["format"]}'
@@ -309,7 +311,7 @@ class _Runner:
             if self.access_row is None:
                 self._open_access_log()
             self.api_calls += 1
-            self.quota_units += QUOTA_UNITS.get(units_key, 1)
+            self.quota_units += units if units is not None else QUOTA_UNITS.get(units_key, 1)
             try:
                 return fn(*args, **kwargs)
             except (GmailRateLimited, GmailServerError):
@@ -613,6 +615,10 @@ class _Runner:
         )
         self._bump('listed', len(wanted))
         self._bump('already_known', len(known))
+        todo = [g for g in wanted if g not in known]
+        if self.max_messages is not None:
+            todo = todo[:max(0, self.max_messages - self.fetched_total)]
+        self._plan_fetch(todo)
         done, raws, fetched = [], [], set()
         for record in records:
             ids = [
@@ -688,6 +694,7 @@ class _Runner:
             )
             raws, relabel = [], []
             stopped = False
+            self._plan_fetch([g for g in ids if g not in known])
             for gid in ids:
                 if gid in known:
                     self._bump('already_known')
@@ -756,14 +763,44 @@ class _Runner:
         return {gid for gid in held if gid not in listed}
 
     # -- fetching ------------------------------------------------------------
+    def _plan_fetch(self, gids):
+        """Announce the ids the next loop will ask for, in order, so a client
+        that supports batches can fetch them BATCH_SIZE at a time. Chunks are
+        fetched lazily, so a loop that stops early (bound, max_messages, budget)
+        never fetches far past where it stopped."""
+        self._pending = [g for g in gids if g]
+        self._pending_set = set(self._pending)
+        self._prefetched = {}
+
     def _fetch_one(self, gid):
-        try:
-            raw = self._call('get_message', gid, format='metadata', metadata_headers=list(METADATA_HEADERS))
-        except GmailNotFound:
-            return None  # deleted since it was listed
-        self.messages_read += 1
+        if gid in getattr(self, '_prefetched', {}):
+            raw = self._prefetched.pop(gid)
+        elif getattr(self.client, 'supports_batch', False) and gid in getattr(self, '_pending_set', ()):
+            self._fetch_chunk_from(gid)
+            raw = self._prefetched.pop(gid, None)
+        else:
+            try:
+                raw = self._call('get_message', gid, format='metadata', metadata_headers=list(METADATA_HEADERS))
+            except GmailNotFound:
+                return None  # deleted since it was listed
+            self.messages_read += 1
+        if not isinstance(raw, dict):
+            return None
         self._bump('fetched')
-        return raw if isinstance(raw, dict) else None
+        return raw
+
+    def _fetch_chunk_from(self, gid):
+        start = self._pending.index(gid)
+        chunk = self._pending[start:start + BATCH_SIZE]
+        result = self._call('get_messages', chunk, format='metadata',
+                            metadata_headers=list(METADATA_HEADERS),
+                            _units=QUOTA_UNITS['get_message'] * len(chunk))
+        for item in chunk:
+            self._pending_set.discard(item)
+            message = (result or {}).get(item)
+            if message is not None:
+                self.messages_read += 1
+            self._prefetched[item] = message
 
     # -- planning ------------------------------------------------------------
     def _plan(self, raws):
