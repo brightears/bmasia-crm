@@ -44,7 +44,7 @@ from agent_inbox.models import (
     SOURCE_URL_MAX, Activity, ChangeProposal, ProposalRefusal,
 )
 from agent_inbox.validation import (
-    ServiceError, bad, batch_field, choice, has_control, optional_uuid, past_datetime, payload_sha256,
+    ServiceError, bad, batch_field, checked_url, choice, has_control, optional_uuid, past_datetime, payload_sha256,
     quote_occurs_in, source_ref_field, strict_object, text_field, unprocessable, url_field, uuid_value,
 )
 
@@ -148,6 +148,16 @@ def effective_status(proposal):
     return proposal.status
 
 
+EXPIRY_WARNING_DAYS = 7
+
+
+def expiring_soon_count(queryset, days=EXPIRY_WARNING_DAYS):
+    """How many of ``queryset`` are open and expire within ``days`` (one COUNT query)."""
+    now = timezone.now()
+    return queryset.filter(status=OPEN_STATUS, expires_at__gt=now,
+                           expires_at__lte=now + timedelta(days=days)).count()
+
+
 def with_effective_status(queryset, statuses):
     """Filter by the statuses a reader sees, without writing."""
     from django.db.models import Q
@@ -162,14 +172,101 @@ def with_effective_status(queryset, statuses):
 
 
 # ------------------------------------------------------------------ what the reviewer saw
+#
+# A proposal watches the values its before/after shows: the fields it patches,
+# which are also the fields of its stored snapshot (current_values). It is
+# "changed since the suggestion" only when one of those values differs from the
+# snapshot (compared as below), or when the target's state changed:
+# - an update proposal's record was deleted ('missing') or made inactive
+#   ('inactive', is_active false on the company or contact), or came back;
+# - a new-contact proposal's duplicate check changed: a contact with the proposed
+#   email or name now exists at the company ('duplicate'), or no longer does.
+# An edit to any other field of the record moves its updated_at but changes
+# nothing here. updated_at is only the cheap signal to re-read the values.
+
+
+def watched_fields(proposal):
+    """The fields whose values a reviewer compares for this proposal."""
+    return sorted(set(proposal.patch or {}) | set(proposal.current_values or {}))
+
+
+# Fields whose letter case carries no meaning.
+_CASELESS_FIELDS = frozenset({'email'})
+
+
+def _watched_value(key, value):
+    """A value as compared for "changed": None and '' alike, spacing ignored, case where meaningless."""
+    if value is None:
+        return ''
+    if not isinstance(value, str):
+        return value
+    text = ' '.join(value.split())
+    if key in _CASELESS_FIELDS:
+        return text.casefold()
+    if key in ('website', 'linkedin_url'):
+        return _fingerprint_value(key, text)
+    return text
+
+
+def _watched_same(serializer_class, key, left, right):
+    return _watched_value(key, left) == _watched_value(key, right) or _same(serializer_class, key, left, right)
+
+
+def _values_differ(serializer_class, proposal, current):
+    snapshot_values = proposal.current_values or {}
+    return any(not _watched_same(serializer_class, key, current.get(key), snapshot_values.get(key))
+               for key in watched_fields(proposal))
+
+
+def stored_state(proposal):
+    if proposal.target_state:
+        return proposal.target_state
+    return 'no_duplicate' if proposal.kind == 'new_contact' else 'present'
+
+
+def _state_of(instance):
+    return 'inactive' if getattr(instance, 'is_active', True) is False else 'present'
+
+
+def _contact_keys(company_ids):
+    """{company id: (emails, names)} of the companies' contacts, compared as watched values; one query."""
+    from crm_app.models import Contact
+
+    existing = {}
+    rows = Contact.objects.filter(company_id__in=set(company_ids)).values_list('company_id', 'email', 'name')
+    for company_id, email, name in rows:
+        emails, names = existing.setdefault(company_id, (set(), set()))
+        if email:
+            emails.add(_watched_value('email', email))
+        if name:
+            names.add(_watched_value('name', name).casefold())
+    return existing
+
+
+def _duplicate_answer(existing, company_id, patch):
+    """'duplicate' when a contact of the company has the proposed email or name, else 'no_duplicate'."""
+    emails, names = existing.get(company_id, (set(), set()))
+    email = _watched_value('email', (patch or {}).get('email'))
+    name = _watched_value('name', (patch or {}).get('name')).casefold()
+    return 'duplicate' if (email and email in emails) or (name and name in names) else 'no_duplicate'
+
+
+def _duplicate_states(proposals):
+    """{proposal pk: 'duplicate' | 'no_duplicate'} for new-contact proposals, in one query."""
+    existing = _contact_keys(p.company_id for p in proposals)
+    return {p.pk: _duplicate_answer(existing, p.company_id, p.patch) for p in proposals}
 
 
 def seen_version(proposal):
-    """Digest of everything a decision is about. Changes whenever any of it changes."""
+    """Digest of everything a decision is about. Changes whenever any of it changes.
+
+    The record's own version (updated_at) is not part of it: an edit to a field
+    the proposal does not watch leaves the reviewer's view valid.
+    """
     return payload_sha256({
         'id': str(proposal.pk), 'status': proposal.status, 'kind': proposal.kind,
         'target': [proposal.target_collection, proposal.target_id], 'patch': proposal.patch,
-        'current_values': proposal.current_values, 'expected_version': proposal.expected_version,
+        'current_values': proposal.current_values, 'target_state': stored_state(proposal),
         'target_changed_at': _iso(proposal.target_changed_at),
         # Every decision and reopening adds a history entry, so a view loaded
         # before a rejection and reopening no longer matches.
@@ -181,7 +278,8 @@ def snapshot(proposal):
     return {
         'id': str(proposal.pk), 'seen_version': seen_version(proposal), 'status': proposal.status,
         'patch': proposal.patch, 'current_values': proposal.current_values,
-        'expected_version': proposal.expected_version, 'target_changed_at': _iso(proposal.target_changed_at),
+        'expected_version': proposal.expected_version, 'target_state': stored_state(proposal),
+        'target_changed_at': _iso(proposal.target_changed_at),
     }
 
 
@@ -377,7 +475,11 @@ def _evidence(body, user, proposer_kind, company):
                 source_ref_field(body, 'evidence_source_ref', activity.source_system, SOURCE_REF_MAX),
                 activity.source_ref,
             ),
-            'evidence_source_url': (body.get('evidence_source_url'), activity.source_url),
+            # Links are compared in their checked form (host case, a default port).
+            'evidence_source_url': (
+                url_field(body, 'evidence_source_url', SOURCE_URL_MAX, activity.source_system),
+                checked_url(activity.source_url, activity.source_system)[0] or activity.source_url,
+            ),
         }
         for key, (value, actual) in given.items():
             if value not in (None, '') and value != actual:
@@ -509,6 +611,12 @@ def _create(user, body, via):
     _, serializer_class = _collection(collection)
     current_values, expected_version = {}, ''
     if instance is not None:
+        target_state = _state_of(instance)
+    elif kind == 'new_contact':
+        target_state = _duplicate_answer(_contact_keys([company.pk]), company.pk, patch)
+    else:
+        target_state = ''
+    if instance is not None:
         if collection == 'contact':
             _check_billing_email(instance, patch)
         current = _plain(serializer_class(instance).data)
@@ -541,6 +649,7 @@ def _create(user, body, via):
                 patch=patch,
                 current_values=current_values,
                 expected_version=expected_version,
+                target_state=target_state,
                 rationale=rationale,
                 proposer=user,
                 proposer_username=str(user.username)[:150],
@@ -588,37 +697,68 @@ def _supersede_older(proposal):
 
 
 def refresh_snapshots(proposals):
-    """Re-read the target's values for open update proposals whose target changed since.
+    """Re-compare open proposals with their targets; mark only those whose watched values or state changed.
 
-    Reads only each target's version (one query per collection). A proposal is
-    written only when its target's version differs from the stored one, and then
-    with a conditional update, so concurrent reads cannot overwrite each other or
-    a decision in progress. Its seen_version changes with it.
+    Cheap when nothing moved: one query per collection reads each target's
+    version and active flag (plus one query for new-contact proposals' duplicate
+    check). Only targets whose version moved are re-read, together, and compared
+    value by value. A proposal is written only when a watched value or the
+    target's state differs, and then with a conditional update, so concurrent
+    reads cannot overwrite each other or a decision in progress.
     """
-    rows = [p for p in proposals if p.status == OPEN_STATUS and p.kind in policy.UPDATE_KINDS and p.target_id]
+    rows = [p for p in proposals if p.status == OPEN_STATUS]
     by_collection = {}
     for proposal in rows:
-        by_collection.setdefault(proposal.target_collection, []).append(proposal)
+        if proposal.kind in policy.UPDATE_KINDS and proposal.target_id:
+            by_collection.setdefault(proposal.target_collection, []).append(proposal)
     for collection, group in by_collection.items():
         model, serializer_class = _collection(collection)
-        versions = dict(model.objects.filter(pk__in={p.target_id for p in group}).values_list('pk', 'updated_at'))
+        has_active = any(field.name == 'is_active' for field in model._meta.concrete_fields)
+        columns = ('pk', 'updated_at', 'is_active') if has_active else ('pk', 'updated_at')
+        found = {row[0]: row for row in model.objects.filter(
+            pk__in={_uuid_or_none(p.target_id) for p in group}).values_list(*columns)}
+        reread = []
         for proposal in group:
-            version = versions.get(_uuid_or_none(proposal.target_id))
-            if version is None or _same_version(version.isoformat(), proposal.expected_version):
+            row = found.get(_uuid_or_none(proposal.target_id))
+            if row is None:
+                if stored_state(proposal) != 'missing':
+                    _mark_changed(proposal, 'missing')
                 continue
-            instance = model.objects.filter(pk=proposal.target_id).first()
+            state = 'inactive' if has_active and row[2] is False else 'present'
+            if state != stored_state(proposal) or not _same_version(row[1].isoformat(), proposal.expected_version):
+                reread.append((proposal, state))
+        if not reread:
+            continue
+        instances = model.objects.in_bulk([_uuid_or_none(p.target_id) for p, _ in reread])
+        for proposal, state in reread:
+            instance = instances.get(_uuid_or_none(proposal.target_id))
             if instance is None:
                 continue
             current = _plain(serializer_class(instance).data)
-            values = {key: current.get(key) for key in proposal.patch}
-            new_version = str(current.get('updated_at') or '')
-            now = timezone.now()
-            updated = ChangeProposal.objects.filter(
-                pk=proposal.pk, status=OPEN_STATUS, expected_version=proposal.expected_version,
-            ).update(current_values=values, expected_version=new_version, target_changed_at=now, updated_at=now)
-            if updated:
-                proposal.current_values, proposal.expected_version = values, new_version
-                proposal.target_changed_at = proposal.updated_at = now
+            if state != stored_state(proposal) or _values_differ(serializer_class, proposal, current):
+                _mark_changed(proposal, state, values={key: current.get(key) for key in watched_fields(proposal)},
+                              version=str(current.get('updated_at') or ''))
+    creates = [p for p in rows if p.kind == 'new_contact']
+    if creates:
+        states = _duplicate_states(creates)
+        for proposal in creates:
+            if states[proposal.pk] != stored_state(proposal):
+                _mark_changed(proposal, states[proposal.pk])
+
+
+def _mark_changed(proposal, state, values=None, version=None):
+    """Store what changed, unless another read or a decision got there first."""
+    now = timezone.now()
+    fields = {'target_state': state, 'target_changed_at': now, 'updated_at': now}
+    if values is not None:
+        fields.update(current_values=values, expected_version=version)
+    updated = ChangeProposal.objects.filter(
+        pk=proposal.pk, status=OPEN_STATUS, expected_version=proposal.expected_version,
+        target_state=proposal.target_state,
+    ).update(**fields)
+    if updated:
+        for name, value in fields.items():
+            setattr(proposal, name, value)
 
 
 def _uuid_or_none(value):
@@ -674,7 +814,7 @@ def _require_person(request, proposal=None):
             code = 'reviewer_is_party'
         else:
             code = 'human_review_required'
-        raise ServiceError(403, code, refusal)
+        raise ServiceError(403, code, policy.refusal_text(request, refusal))
 
 
 def _locked(proposal_id):
@@ -772,9 +912,10 @@ def _tag_audit(model_name, record_id, before_ids, proposal, request):
     return row
 
 
-def _record_changed(proposal, serializer_class, current):
-    proposal.current_values = {key: current.get(key) for key in proposal.patch}
+def _record_changed(proposal, serializer_class, current, state='present'):
+    proposal.current_values = {key: current.get(key) for key in watched_fields(proposal)}
     proposal.expected_version = str(current.get('updated_at') or '')
+    proposal.target_state = state
     proposal.target_changed_at = timezone.now()
     proposal.last_apply_error = RECORD_CHANGED_DETAIL[:APPLY_ERROR_MAX]
     if proposal.kind == 'field_update' and all(
@@ -826,28 +967,28 @@ def _apply(request, proposal, applied):
             proposal.save()
             raise _Refusal(ServiceError(409, 'target_missing', proposal.last_apply_error))
         current = _plain(serializer_class(instance).data)
-        changed = not _same_version(current.get('updated_at'), proposal.expected_version) or any(
-            not _same(serializer_class, key, current.get(key), proposal.current_values.get(key))
-            for key in proposal.patch
-        )
-        if changed:
-            raise _Refusal(_record_changed(proposal, serializer_class, current))
+        # Under the row lock: the values the reviewer saw must still be the record's.
+        # An edit to a field the proposal does not watch does not block the accept.
+        state = _state_of(instance)
+        if state != stored_state(proposal) or _values_differ(serializer_class, proposal, current):
+            raise _Refusal(_record_changed(proposal, serializer_class, current, state))
         if proposal.target_collection == 'contact':
             try:
                 _check_billing_email(instance, applied)
             except ServiceError as error:
                 raise _keep_error(proposal, error) from None
         if proposal.kind == 'note':
-            data = {'notes': _join_notes(proposal.current_values.get('notes'), applied['notes'])}
+            data = {'notes': _join_notes(current.get('notes'), applied['notes'])}
         else:
             data = applied
-        expected = {key: proposal.current_values.get(key) for key in data}
+        # The write is guarded by the locked row's own version and values.
+        expected = {key: current.get(key) for key in data}
         record_id = proposal.target_id
         before = set(AuditLog.objects.filter(model_name=model.__name__, record_id=record_id)
                      .values_list('pk', flat=True))
         reply = _as_reviewer(request, lambda: update_record(
             proposal.target_collection, record_id, json.dumps(data),
-            expected_version=proposal.expected_version, expected_values=json.dumps(expected),
+            expected_version=str(current.get('updated_at') or ''), expected_values=json.dumps(expected),
         ))
     else:
         if proposal.kind == 'task':
@@ -857,6 +998,15 @@ def _apply(request, proposal, applied):
                 raise _keep_error(proposal, error) from None
         before = set()
         if proposal.kind == 'new_contact':
+            # The duplicate check must give the answer the reviewer saw.
+            state = _duplicate_states([proposal])[proposal.pk]
+            if state != stored_state(proposal):
+                proposal.target_state = state
+                proposal.target_changed_at = timezone.now()
+                proposal.last_apply_error = RECORD_CHANGED_DETAIL[:APPLY_ERROR_MAX]
+                proposal.save()
+                raise _Refusal(ServiceError(409, 'record_changed', RECORD_CHANGED_DETAIL,
+                                            proposal=_plain(snapshot(proposal))))
             data = _new_contact_data(proposal.company_id, applied)
         else:
             data = {'company': str(proposal.company_id), **applied}
