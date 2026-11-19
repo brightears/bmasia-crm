@@ -68,6 +68,28 @@ it.each([
   ['an unticked source check', { evidence: 'unverified' as const, patch: { phone: '+66 2 000 0000' } }, '/review'],
   ['a read-only card', { proposer_username: 'reviewer.one' }, '/review'],
   ['an expired card', { expires_at: '2020-01-01T00:00:00Z' }, '/review'],
+  [
+    'a missing target',
+    { target_state: 'missing', target_state_reason: 'This record no longer exists.' },
+    '/review?tab=look',
+  ],
+  [
+    'a moved target',
+    { target_state: 'moved', target_state_reason: 'This contact now belongs to another company.' },
+    '/review?tab=look',
+  ],
+  [
+    'a duplicate new contact (plain accept)',
+    {
+      kind: 'new_contact',
+      target_collection: 'contact',
+      target_id: '',
+      patch: { name: 'A', email: 'a@example.com' },
+      target_state: 'duplicate',
+    },
+    '/review?tab=look',
+  ],
+  ['an inactive target without its tick', { target_state: 'inactive' }, '/review?tab=look'],
 ])('refuses to send an accept for %s', async (_name, overrides, entry) => {
   const p = makeProposal(overrides as any);
   api.listOpen.mockResolvedValue(page([p]));
