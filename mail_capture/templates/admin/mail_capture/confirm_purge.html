@@ -14,6 +14,7 @@ already blocks new capture. Confirming also removes mail stored before the rule 
   <li>Conversations affected: <strong>{{ preview.conversations }}</strong></li>
   <li>Unmatched-sender rows removed: <strong>{{ preview.queue_rows }}</strong></li>
 </ul>
+{% if preview.note %}<p>{{ preview.note }}</p>{% endif %}
 {% endif %}
 <p>A purge cannot be undone; the mail could only be read again from Gmail.</p>
 {% if rule.purge_state == 'awaiting_confirmation' %}

@@ -10,6 +10,7 @@ from mail_capture import rules as capture_rules
 from mail_capture import sync
 from mail_capture.gmail_client import FakeGmailClient
 from django.core.exceptions import ValidationError
+from django.db import DataError
 
 from mail_capture.models import (
     CaptureFailure, CaptureMailbox, CaptureRule, CaptureRun, CompanyDomain, MailboxAccessLog, MailboxCopy,
@@ -152,22 +153,23 @@ class TestCursor:
 
         def poison(self, plan, now, queue_ops):
             if plan.parsed.gmail_id == 'g1':
-                raise ValueError('simulated database refusal')
+                raise DataError('simulated database refusal')
             return real(self, plan, now, queue_ops)
 
         monkeypatch.setattr(sync._Runner, '_store', poison)
         first = run(mb, client)
         mb.refresh_from_db()
-        assert first.outcome == 'ok' and first.counts['stored'] == 2 and first.counts['failed'] == 1
+        assert first.outcome == 'ok_with_failures' and first.counts['stored'] == 2 and first.counts['failed'] == 1
         assert first.counts['matched'] == 2                  # the failed one is not counted
         assert mb.history_id == client.history_id            # the cursor moved on
         assert CaptureRun.objects.get(pk=first.run_id).failed_gmail_ids == ['g1']
         failure = CaptureFailure.objects.get()
-        assert (failure.gmail_id, failure.attempts, failure.parked, failure.error) == ('g1', 1, False, 'ValueError')
+        assert (failure.gmail_id, failure.attempts, failure.parked, failure.error) == ('g1', 1, False, 'DataError')
         run(mb, client)
         third = run(mb, client)
         failure.refresh_from_db()
         assert failure.attempts == 3 and failure.parked and third.counts['parked'] == 1
+        assert third.outcome == 'ok_with_failures' and '1 parked' in third.reason
         run(mb, client)                                      # parked: not fetched again
         assert CaptureFailure.objects.get().attempts == 3
         monkeypatch.setattr(sync._Runner, '_store', real)

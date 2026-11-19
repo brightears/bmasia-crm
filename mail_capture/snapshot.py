@@ -129,7 +129,9 @@ def build_snapshot(parsed_messages, conversation_keys=(), body_texts=(), rules=N
 
     external = []
     for parsed in parsed_messages:
-        for item in parsed.addresses():
+        # Overflow addresses (past the recipient cap) are looked up too, so a
+        # customer late in a long list is still recognised.
+        for item in list(parsed.addresses()) + list(getattr(parsed, 'overflow', ()) or ()):
             if not is_internal(item, domains_internal, addresses_internal):
                 external.append(item)
     keys = {item.match_key for item in external} | {item.address for item in external}
