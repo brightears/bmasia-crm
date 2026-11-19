@@ -722,6 +722,7 @@ def test_exit_codes_follow_the_outcome(switched_on, monkeypatch, lagoon):
     code, text = gmail_sync('--incremental')
     assert code == 3 and 'auth_error' in text and 'permission denied' in text
     client._errors.clear()
+    CaptureMailbox.objects.filter(pk=mb.pk).update(retry_not_before=None)    # refused auth backs off too
     CaptureMailbox.objects.filter(pk=mb.pk).update(lease_token='other', lease_expires_at=timezone.now() + timedelta(hours=1))
     assert gmail_sync('--incremental')[0] == 7
     CaptureMailbox.objects.filter(pk=mb.pk).update(

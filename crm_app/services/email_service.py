@@ -55,6 +55,15 @@ def assign_message_id(msg, from_email):
     return message_id
 
 
+def contract_followup_candidates():
+    """Contracts the unsigned-contract follow-ups (day 5 and day 10 after sent_date) would look at.
+
+    Only Sent contracts: an Active, Cancelled, Expired or Renewed contract is never chased,
+    whatever its sent_date says.
+    """
+    return Contract.objects.filter(status='Sent', sent_date__isnull=False)
+
+
 class EmailService:
     """Main email service for sending automated emails"""
     
@@ -638,10 +647,7 @@ class EmailService:
         }
 
         # Find contracts in 'Sent' status with a sent_date
-        sent_contracts = Contract.objects.filter(
-            status='Sent',
-            sent_date__isnull=False
-        ).select_related('company')
+        sent_contracts = contract_followup_candidates().select_related('company')
 
         today = timezone.now().date()
 
@@ -1448,11 +1454,8 @@ class EmailService:
 
         # Draft becomes Sent; a resend leaves the status alone (crm_app/services/invoice_status.py).
         if success_count > 0:
-            from crm_app.services.invoice_status import status_after_send
-            new_status = status_after_send(invoice.status)
-            if new_status != invoice.status:
-                invoice.status = new_status
-                invoice.save(update_fields=['status', 'updated_at'])
+            from crm_app.services.invoice_status import record_send
+            record_send(invoice)
 
             return True, f"Invoice sent successfully to {success_count} recipient(s)"
         else:

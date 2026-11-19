@@ -30,7 +30,7 @@ class TestDisabled:
         before = _table_counts()
         result = sync_mailbox(mb.pk, no_client)
         assert result.outcome == 'disabled' and 'GOOGLE_CAPTURE_ENABLED' in result.reason
-        assert sync_all_enabled(no_client)[0].outcome == 'disabled'
+        assert sync_all_enabled(no_client, all_mailboxes=True)[0].outcome == 'disabled'
         assert _table_counts() == before
 
     def test_flag_off_refuses_a_real_client_even_for_the_selfcheck_path(self, settings):
@@ -58,7 +58,7 @@ class TestDisabled:
     def test_mailbox_not_enabled(self, capture_on):
         mb = make_mailbox(enabled=False)
         assert sync_mailbox(mb.pk, no_client).outcome == 'disabled'
-        assert sync_all_enabled(no_client)[0].reason == 'no mailbox is enabled'
+        assert sync_all_enabled(no_client, all_mailboxes=True)[0].reason == 'no mailbox is enabled'
         assert CaptureRun.objects.count() == 0
 
     def test_all_enabled_skips_disabled_mailboxes(self, capture_on):
@@ -66,7 +66,7 @@ class TestDisabled:
         make_mailbox('off@ourco.example', enabled=False)
         client = primed(on)
         factory = factory_for(client)
-        results = sync_all_enabled(factory, sleep=lambda s: None)
+        results = sync_all_enabled(factory, sleep=lambda s: None, all_mailboxes=True)
         assert [r.outcome for r in results] == ['ok'] and factory.calls == [SALES]
 
     def test_selfcheck_command_flag_off_leaves_nothing(self, settings):

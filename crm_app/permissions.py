@@ -38,24 +38,60 @@ class CommercialDocumentPreviewPermission(permissions.BasePermission):
 
 
 FINANCE_ROLES = ('Finance', 'Admin')
+SALES_ROLES = ('Sales', 'Admin')
+TECH_ROLES = ('Tech', 'Admin')
+ADMIN_ROLES = ('Admin',)
 
 
-class IsFinanceOrAdmin(permissions.BasePermission):
+class HasRole(permissions.BasePermission):
+    """A signed-in, active user whose ``role`` is in ``roles``; with ``staff_too``, staff as well.
+
+    The role decides, not ``is_superuser``: an account made with ``createsuperuser`` gets the
+    default role and sees a role's pages once someone gives it that role.
+    """
+
+    roles = ()
+    staff_too = False
+    message = 'This needs a different role.'
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (getattr(user, 'is_authenticated', False) and getattr(user, 'is_active', False)):
+            return False
+        return getattr(user, 'role', None) in self.roles or bool(self.staff_too and getattr(user, 'is_staff', False))
+
+
+class IsFinanceOrAdmin(HasRole):
     """Finance reports and the QuickBooks export: signed-in, active Finance or Admin users.
 
     The frontend shows these pages to the same two roles (``finance-reports`` in
     ``bmasia-crm-frontend/src/utils/access.ts``).
     """
 
+    roles = FINANCE_ROLES
     message = 'Finance reports are available to the Finance and Admin roles.'
 
-    def has_permission(self, request, view):
-        user = request.user
-        return bool(
-            getattr(user, 'is_authenticated', False)
-            and getattr(user, 'is_active', False)
-            and getattr(user, 'role', None) in FINANCE_ROLES
-        )
+
+class IsSalesOrAdmin(HasRole):
+    roles = SALES_ROLES
+    message = 'This is available to the Sales and Admin roles.'
+
+
+class IsAdminRole(HasRole):
+    roles = ADMIN_ROLES
+    message = 'This is available to the Admin role.'
+
+
+class IsTechAdminOrStaff(HasRole):
+    roles = TECH_ROLES
+    staff_too = True
+    message = 'This is available to the Tech and Admin roles and to staff.'
+
+
+class IsAdminOrStaff(HasRole):
+    roles = ADMIN_ROLES
+    staff_too = True
+    message = 'This is available to the Admin role and to staff.'
 
 
 class RoleBasedPermission(permissions.BasePermission):

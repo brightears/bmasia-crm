@@ -54,6 +54,19 @@ given on purpose, so a run never reads every enabled mailbox by omission.
 2. Filter the list on `enabled = yes`. **Only the test mailbox may be listed.** Domain-wide delegation can read any
    mailbox in the domain, so a mistyped real address in a mailbox row would read a real person's mail.
 
+### The test sender and its CRM contact
+
+Who sends the test mail decides what is stored:
+
+- mail from our own domains is counted `skipped_internal` and never stored;
+- mail from an outside sender the CRM does not know is only queued in Unmatched senders, for matching later;
+- only mail from a CRM contact is stored.
+
+So before step 1, pick **one outside address** that will send every test mail, for example
+`test-sender@example.org`. In the CRM, create **one test contact** with exactly that address, on a company made for
+the test. Remove both afterwards (section 2). Without that contact, step 3's "only the test mail is stored" and
+step 4's `stored=1` will not hold.
+
 ### The self-check
 
 This runs on synthetic fixtures, is rolled back, and makes no Gmail call:
@@ -66,9 +79,9 @@ It must report the switch state you expect and a passing pipeline.
 
 ## 1. The first supervised run, in this order
 
-Run each step only after the one before it looked right. Send one or two test messages to the test mailbox
-**before step 1**, so the backfill in steps 2 and 3 has something to read. `<yesterday>` is yesterday's date,
-written `YYYY-MM-DD`.
+Run each step only after the one before it looked right. **Before step 1**, send one or two test messages to the
+test mailbox from the test contact's outside address, so the backfill in steps 2 and 3 has something to read.
+`<yesterday>` is yesterday's date, written `YYYY-MM-DD`.
 
 ### Step 1: check the credential
 
@@ -107,6 +120,7 @@ echo "exit code $?"
 This reads and counts, and stores no mail.
 
 - **Expect:** `test-mailbox@example.com: ok ...`, with counts such as `fetched=1` and `matched=1`, and exit code 0.
+  Mail from a colleague shows as `skipped_internal`, mail from an unknown sender as `unmatched`; neither is stored.
 - **Look at:**
   - Admin → Capture runs: the newest row has `dry_run` ticked. Check the outcome, the counts, `error_summary`,
     `error_class` and `error_gmail_id`; the last three are empty when all is well.
@@ -130,12 +144,13 @@ echo "exit code $?"
   - **Mailbox access logs:** the read is on record.
   - **Capture mailboxes:** `history id` is now set (this run saved the starting point), `last_error` is empty and
     `consecutive_errors` is 0.
-  - **Mail messages and Unmatched senders:** only the test mail.
+  - **Mail messages:** only the test contact's mail. **Unmatched senders:** any unknown outside sender, nothing
+    else.
   - **Capture failures:** empty.
 
 ### Step 4: one incremental run
 
-Send one more test message to the test mailbox, then run:
+Send one more test message to the test mailbox from the test contact's address, then run:
 
 ```
 python manage.py gmail_sync --incremental --mailbox test-mailbox@example.com
@@ -182,6 +197,11 @@ Choose one route.
    If the rule was edited after the preview, the confirmation is refused: "the rule changed since the preview:
    preview again". Open the preview again.
 
+### Afterwards: remove the test contact
+
+Once the test mail is gone (route A or B), delete the test contact and the company made for the test in the CRM.
+Remove the mail first, so no stored message is left pointing at a contact that no longer exists.
+
 ### What stays
 
 Run rows and access-log rows hold no mail content. They are the record that the mailbox was read, and they expire
@@ -189,7 +209,11 @@ after `CAPTURE_RUN_RETENTION_DAYS` and `CAPTURE_ACCESS_LOG_RETENTION_DAYS`.
 
 ### Label rules
 
-A label rule (for example one on a label `Clients`) purges only the stored copies its preview showed. Copies
+A label rule (for example one on a label `Clients`) purges only the stored copies its preview showed. Each
+preview has its own token, and the confirm form carries it: if someone opened a newer preview of the same rule in
+the meantime, confirming the older page is refused ("a newer preview of this rule replaced the one on this page:
+preview again"). The rule's admin history records which preview (who made it, when, how many copies) was confirmed
+by whom. Copies
 labelled after the preview are reported ("2 more messages carry this label since the preview: preview again to
 purge them") and wait for a new preview and confirmation.
 
@@ -256,8 +280,14 @@ default) of nothing else. The reason then reads "only temporary failures for 24 
 
 ### Refused authentication
 
-A refused token or a permission error shows at once: `auth_problem` on the mailbox, and in `--check`. It never stops
-the mailbox, and the next good token clears it. No `--clear-attention` is needed after fixing the setup.
+A refused token or a permission error shows at once: `auth_problem` on the mailbox, and in `--check`. It never marks
+the mailbox "needs attention". For scheduling, the mailbox backs off as after a temporary failure, so a later cron
+would not ask the token endpoint again every few minutes; runs in that window end `deferred`. After fixing the
+setup, run `--check`: its good token clears `auth_problem` and the backoff. A run's good token does the same. No
+`--clear-attention` is needed.
+
+`Retry-After` is never followed beyond 300 seconds. A deploy (a new code version) or `--clear-attention` that clears
+"needs attention" also clears the backoff, so the next temporary failure starts a fresh 24-hour window.
 
 ### Needs attention
 

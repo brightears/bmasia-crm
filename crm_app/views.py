@@ -109,6 +109,11 @@ from .serializers import (
     ProspectSequenceSerializer, ProspectSequenceStepSerializer, ProspectEnrollmentSerializer,
     ProspectStepExecutionSerializer, ProspectReplySerializer, AIEmailDraftSerializer
 )
+from .services.delete_guards import GuardedDestroyMixin
+from .request_policy import (
+    AdminOnWebsite, FinanceOrAdminOnWebsite, PersonForConfigurationWrites, SalesOrAdminOnWebsite,
+    StaffOrAdminOnWebsite, StaffOrTechOnWebsite, WritesOnWebsite,
+)
 from .api_errors import (
     client_error_text, error_response, internal_error_text, mail_failure_text, safe_mail_message, smtp_error_text,
 )
@@ -371,11 +376,11 @@ class BaseModelViewSet(viewsets.ModelViewSet):
         self.log_action('UPDATE', instance, changes)
     
     def destroy(self, request, *args, **kwargs):
-        """DELETE /{id}/ under the rules in crm_app/services/delete_guards.py (409 when refused)."""
+        """DELETE /{id}/ under the rules in crm_app/services/delete_guards.py (409/403 when refused)."""
         from crm_app.services.delete_guards import destroy_one
-        deleted, refusal = destroy_one(self, self.get_object())
+        deleted, refusal, http_status = destroy_one(self, self.get_object())
         if not deleted:
-            return Response(refusal, status=status.HTTP_409_CONFLICT)
+            return Response(refusal, status=http_status)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @transaction.atomic
@@ -415,36 +420,15 @@ class BaseModelViewSet(viewsets.ModelViewSet):
             ip = request.META.get('REMOTE_ADDR')
         return ip
     
+    # Bulk operations this record type offers (crm_app/services/bulk_updates.py). None by default;
+    # each operation follows the same rules as the single edit or delete, record by record.
+    bulk_allowed = frozenset()
+
     @action(detail=False, methods=['post'])
     def bulk_operations(self, request):
-        """Handle bulk operations on multiple records"""
-        serializer = BulkOperationSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        
-        action_type = serializer.validated_data['action']
-        ids = serializer.validated_data['ids']
-        data = serializer.validated_data.get('data', {})
-        
-        # Get queryset filtered by IDs
-        queryset = self.get_queryset().filter(id__in=ids)
-        
-        if action_type == 'delete':
-            from crm_app.services.delete_guards import bulk_delete
-            return bulk_delete(self, queryset, ids)
-        
-        elif action_type == 'update_status':
-            from crm_app.services.bulk_updates import bulk_update_status
-            return bulk_update_status(self, queryset, ids, data)
-        
-        elif action_type == 'assign':
-            if 'assigned_to' in data:
-                count = queryset.update(assigned_to_id=data['assigned_to'])
-                return Response({'message': f'{count} records assigned'})
-        
-        elif action_type == 'export':
-            return self.export_csv(queryset)
-        
-        return Response({'error': 'Invalid action'}, status=status.HTTP_400_BAD_REQUEST)
+        """Bulk operations enabled for this record type (bulk_allowed), one record at a time."""
+        from crm_app.services.bulk_updates import run_bulk_operation
+        return run_bulk_operation(self, request)
     
     def export_csv(self, queryset):
         """Export queryset to CSV"""
@@ -1119,7 +1103,7 @@ class OpportunityViewSet(BaseModelViewSet):
         return Response({'error': 'Opportunity is already at final stage'},
                        status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=False, methods=['get'], url_path='export/pdf')
+    @action(detail=False, methods=['get'], url_path='export/pdf', permission_classes=[SalesOrAdminOnWebsite])
     def export_pdf(self, request):
         """
         GET /api/v1/opportunities/export/pdf/?stage=Won&company__billing_entity=BMAsia+Limited&search=...&owner=...&ordering=-expected_value
@@ -1190,7 +1174,7 @@ class OpportunityViewSet(BaseModelViewSet):
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         return response
 
-    @action(detail=False, methods=['get'], url_path='export/sales-performance-pdf')
+    @action(detail=False, methods=['get'], url_path='export/sales-performance-pdf', permission_classes=[SalesOrAdminOnWebsite])
     def export_sales_performance_pdf(self, request):
         """
         GET /api/v1/opportunities/export/sales-performance-pdf/?year=2026&entity=BMAsia+Limited&period_type=monthly
@@ -6487,8 +6471,8 @@ class InvoiceViewSet(BaseModelViewSet):
             'receipt_number': invoice.receipt_number,
         })
 
-    @action(detail=False, methods=['get'], url_path='export-quickbooks',
-            permission_classes=[IsAuthenticated, IsFinanceOrAdmin])
+    # An export: the finance role (crm_app.permissions.IsFinanceOrAdmin) and a website sign-in.
+    @action(detail=False, methods=['get'], url_path='export-quickbooks', permission_classes=[FinanceOrAdminOnWebsite])
     def export_quickbooks(self, request):
         """
         Export invoices as IIF file for QuickBooks Pro 2016 import.
@@ -8671,7 +8655,7 @@ class AutomationViewSet(viewsets.ViewSet):
             'recent_stats': recent_stats,
         })
 
-    @action(detail=False, methods=['post'], url_path='test-run')
+    @action(detail=False, methods=['post'], url_path='test-run', permission_classes=[AdminOnWebsite])
     def test_run(self, request):
         """
         POST /api/v1/automation/test-run/
@@ -8682,7 +8666,16 @@ class AutomationViewSet(viewsets.ViewSet):
         import sys
 
         email_type = request.data.get('type', 'all')
+        from django.conf import settings
         dry_run = request.data.get('dry_run', True)
+        if isinstance(dry_run, str):
+            dry_run = dry_run.strip().lower() not in ('false', '0', 'no', 'off')
+        if not dry_run and not getattr(settings, 'EMAIL_AUTOMATION_MANUAL_SEND_ENABLED', False):
+            return Response(
+                {'error': 'Sending from the test run is switched off (EMAIL_AUTOMATION_MANUAL_SEND_ENABLED). '
+                          'Run it with dry_run to see what would be sent.', 'code': 'manual_send_disabled'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         # Validate type
         valid_types = ['all', 'renewal', 'payment', 'quarterly']
@@ -8769,7 +8762,7 @@ class EmailTemplateViewSet(BaseModelViewSet):
     """ViewSet for EmailTemplate management with preview and duplication"""
     queryset = EmailTemplate.objects.all()
     serializer_class = EmailTemplateSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     search_fields = ['name', 'template_type', 'subject', 'body_text']
     ordering_fields = ['created_at', 'name', 'template_type', 'language']
     ordering = ['-created_at', 'name']
@@ -8795,50 +8788,9 @@ class EmailTemplateViewSet(BaseModelViewSet):
 
         return queryset
 
-    @action(detail=False, methods=['post'])
-    def bulk_operations(self, request):
-        """
-        Handle bulk operations on email templates with activate/deactivate support.
-
-        POST /api/v1/email-templates/bulk_operations/
-        Body: {
-            "action": "activate" | "deactivate" | "delete" | "export",
-            "ids": ["uuid1", "uuid2", ...]
-        }
-        """
-        serializer = BulkOperationSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        action_type = serializer.validated_data['action']
-        ids = serializer.validated_data['ids']
-
-        # Get queryset filtered by IDs
-        queryset = self.get_queryset().filter(id__in=ids)
-
-        if action_type == 'activate':
-            count = queryset.update(is_active=True)
-            return Response({
-                'message': f'{count} template{"s" if count != 1 else ""} activated',
-                'count': count
-            })
-
-        elif action_type == 'deactivate':
-            count = queryset.update(is_active=False)
-            return Response({
-                'message': f'{count} template{"s" if count != 1 else ""} deactivated',
-                'count': count
-            })
-
-        elif action_type == 'delete':
-            # Let parent class handle delete with audit logging
-            return super().bulk_operations(request)
-
-        elif action_type == 'export':
-            # Let parent class handle export
-            return super().bulk_operations(request)
-
-        # If action is not recognized, fall back to parent
-        return super().bulk_operations(request)
+    # The Email Templates page selects templates and activates, deactivates or deletes them.
+    bulk_allowed = frozenset({'activate', 'deactivate', 'delete'})
+    bulk_noun = 'template'
 
     @action(detail=True, methods=['get'])
     def preview(self, request, pk=None):
@@ -9021,14 +8973,14 @@ class EmailTemplateViewSet(BaseModelViewSet):
         })
 
 
-class EmailSequenceViewSet(viewsets.ModelViewSet):
+class EmailSequenceViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for EmailSequence model.
     Provides CRUD operations for email sequences.
     """
     queryset = EmailSequence.objects.all().prefetch_related('steps')
     serializer_class = EmailSequenceSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status']
     search_fields = ['name', 'description']
@@ -9040,14 +8992,14 @@ class EmailSequenceViewSet(viewsets.ModelViewSet):
         serializer.save(created_by=self.request.user)
 
 
-class SequenceStepViewSet(viewsets.ModelViewSet):
+class SequenceStepViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for SequenceStep model.
     Provides CRUD operations for sequence steps.
     """
     queryset = SequenceStep.objects.all().select_related('sequence', 'email_template')
     serializer_class = SequenceStepSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['sequence', 'is_active']
     search_fields = ['name']
@@ -9055,7 +9007,7 @@ class SequenceStepViewSet(viewsets.ModelViewSet):
     ordering = ['sequence', 'step_number']
 
 
-class SequenceEnrollmentViewSet(viewsets.ModelViewSet):
+class SequenceEnrollmentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for SequenceEnrollment model.
     Provides CRUD operations plus custom actions for enrollment management.
@@ -9242,14 +9194,14 @@ class SequenceStepExecutionViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['-scheduled_for']
 
 
-class CustomerSegmentViewSet(viewsets.ModelViewSet):
+class CustomerSegmentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for CustomerSegment model.
     Provides CRUD operations plus custom actions for segment management.
     """
     queryset = CustomerSegment.objects.all().select_related('created_by')
     serializer_class = CustomerSegmentSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['status', 'segment_type', 'created_by']
     search_fields = ['name', 'description', 'tags']
@@ -9502,7 +9454,7 @@ class CustomerSegmentViewSet(viewsets.ModelViewSet):
 
 
 # Support Ticket System ViewSets
-class TicketViewSet(viewsets.ModelViewSet):
+class TicketViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing support tickets with filtering, search, and custom actions.
     Provides comprehensive ticket management including assignment, comments, and statistics.
@@ -9687,7 +9639,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         })
 
 
-class TicketCommentViewSet(viewsets.ModelViewSet):
+class TicketCommentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing ticket comments.
     Supports filtering by ticket and auto-sets author from request user.
@@ -9711,7 +9663,7 @@ class TicketCommentViewSet(viewsets.ModelViewSet):
         return queryset
 
 
-class TicketAttachmentViewSet(viewsets.ModelViewSet):
+class TicketAttachmentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing ticket file attachments.
     Supports file uploads with metadata tracking.
@@ -9770,14 +9722,14 @@ class TicketAttachmentViewSet(viewsets.ModelViewSet):
 # Knowledge Base System ViewSets
 # ============================================================================
 
-class KBCategoryViewSet(viewsets.ModelViewSet):
+class KBCategoryViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing KB categories with hierarchical support.
     Supports parent/child relationships and active/inactive filtering.
     """
     queryset = KBCategory.objects.all().prefetch_related('parent', 'children')
     serializer_class = KBCategorySerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['is_active', 'parent']
     search_fields = ['name', 'description']
@@ -9785,20 +9737,20 @@ class KBCategoryViewSet(viewsets.ModelViewSet):
     ordering = ['display_order', 'name']
 
 
-class KBTagViewSet(viewsets.ModelViewSet):
+class KBTagViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing KB tags.
     Simple CRUD operations for article tagging.
     """
     queryset = KBTag.objects.all().order_by('name')
     serializer_class = KBTagSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['name']
     ordering = ['name']
 
 
-class KBArticleViewSet(viewsets.ModelViewSet):
+class KBArticleViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing KB articles with full-text search and analytics.
     Supports custom actions for view tracking, ratings, and related articles.
@@ -10450,7 +10402,7 @@ class KBArticleViewViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['-viewed_at']
 
 
-class KBArticleRatingViewSet(viewsets.ModelViewSet):
+class KBArticleRatingViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing KB article ratings.
     Enforces unique constraint: one vote per user per article.
@@ -10479,7 +10431,7 @@ class KBArticleRatingViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
 
-class KBArticleRelationViewSet(viewsets.ModelViewSet):
+class KBArticleRelationViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing relationships between KB articles.
     Validates that articles cannot be related to themselves.
@@ -10492,7 +10444,7 @@ class KBArticleRelationViewSet(viewsets.ModelViewSet):
     ordering = ['from_article', 'display_order']
 
 
-class KBArticleAttachmentViewSet(viewsets.ModelViewSet):
+class KBArticleAttachmentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing KB article file attachments.
     Supports file uploads with metadata tracking.
@@ -10529,7 +10481,7 @@ class KBArticleAttachmentViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
 
-class TicketKBArticleViewSet(viewsets.ModelViewSet):
+class TicketKBArticleViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for linking KB articles to support tickets.
     Tracks which articles were helpful for resolving tickets.
@@ -10563,7 +10515,7 @@ class TicketKBArticleViewSet(viewsets.ModelViewSet):
 # ============================================================================
 
 
-class DeviceViewSet(viewsets.ModelViewSet):
+class DeviceViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for Device model - simple device tracking.
     """
@@ -10591,10 +10543,10 @@ class DeviceViewSet(viewsets.ModelViewSet):
 # Sales Automation ViewSets
 # ============================================================
 
-class ProspectSequenceViewSet(viewsets.ModelViewSet):
+class ProspectSequenceViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     queryset = ProspectSequence.objects.prefetch_related('steps').all()
     serializer_class = ProspectSequenceSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['trigger_type', 'is_active']
     search_fields = ['name', 'description']
@@ -10643,7 +10595,7 @@ class ProspectSequenceViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
-class ProspectEnrollmentViewSet(viewsets.ModelViewSet):
+class ProspectEnrollmentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     queryset = ProspectEnrollment.objects.select_related(
         'sequence', 'opportunity', 'opportunity__company', 'contact'
     ).prefetch_related('executions').all()
@@ -10711,7 +10663,7 @@ class ProspectReplyViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['-received_at']
 
 
-class AIEmailDraftViewSet(viewsets.ModelViewSet):
+class AIEmailDraftViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     queryset = AIEmailDraft.objects.select_related(
         'execution', 'execution__enrollment', 'execution__enrollment__opportunity',
         'execution__enrollment__opportunity__company', 'execution__enrollment__contact',
@@ -10896,7 +10848,7 @@ class AIEmailDraftViewSet(viewsets.ModelViewSet):
             enrollment.save()
 
 
-class ClientTechDetailViewSet(viewsets.ModelViewSet):
+class ClientTechDetailViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for ClientTechDetail model — per-outlet technical specifications.
     Stores remote access IDs, PC specs, audio equipment, etc.
@@ -11151,7 +11103,7 @@ class ClientTechDetailViewSet(viewsets.ModelViewSet):
         return response
 
 
-class ZoneViewSet(viewsets.ModelViewSet):
+class ZoneViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """ViewSet for Zone model with company filtering"""
     queryset = Zone.objects.select_related('company')
     serializer_class = ZoneSerializer
@@ -11208,7 +11160,7 @@ class ZoneViewSet(viewsets.ModelViewSet):
         serializer = ContractZoneSerializer(queryset, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['post'], url_path='sync-all')
+    @action(detail=False, methods=['post'], url_path='sync-all', permission_classes=[StaffOrTechOnWebsite])
     def sync_all(self, request):
         """
         Trigger manual sync for all Soundtrack zones across all companies.
@@ -11225,7 +11177,7 @@ class ZoneViewSet(viewsets.ModelViewSet):
             'message': f'Synced {synced} zones with {errors} errors'
         })
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[StaffOrTechOnWebsite])
     def sync(self, request, pk=None):
         """
         Sync single company's zones from Soundtrack API.
@@ -11299,7 +11251,7 @@ class ZoneViewSet(viewsets.ModelViewSet):
             'message': f'Found {orphaned_zones.count()} orphaned zones'
         })
 
-    @action(detail=True, methods=['delete'], url_path='hard-delete')
+    @action(detail=True, methods=['delete'], url_path='hard-delete', permission_classes=[StaffOrAdminOnWebsite])
     def hard_delete(self, request, pk=None):
         """
         Permanently delete an orphaned zone.
@@ -11436,13 +11388,13 @@ class ZoneViewSet(viewsets.ModelViewSet):
         return Response(conflicts)
 
 
-class StaticDocumentViewSet(viewsets.ModelViewSet):
+class StaticDocumentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for managing static documents (standard T&Cs, etc.)
     """
     queryset = StaticDocument.objects.all()
     serializer_class = StaticDocumentSerializer
-    permission_classes = [IsAuthenticated]  # hardened 2026-07-02: was AllowAny — anon could POST forged legal T&Cs served on every contract pack
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]  # hardened 2026-07-02: was AllowAny — anon could POST forged legal T&Cs served on every contract pack
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['document_type', 'is_active']
     search_fields = ['name', 'description']
@@ -11483,14 +11435,16 @@ class StaticDocumentViewSet(viewsets.ModelViewSet):
 # Contract Content Management ViewSets
 # ============================================================================
 
-class ContractTemplateViewSet(viewsets.ModelViewSet):
+class ContractTemplateViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for ContractTemplate model.
     Manages reusable contract content templates (preamble, payment, activation).
     """
     queryset = ContractTemplate.objects.all()
     serializer_class = ContractTemplateSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
+    # Cira creates and updates contract templates (crm_app.agent_policy); the same holds here as in MCP.
+    agent_write_collection = 'contracttemplate'
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['template_type', 'is_default', 'is_active']
     search_fields = ['name', 'content']
@@ -11512,14 +11466,14 @@ class ServicePackageItemViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ['name', 'display_order']
 
 
-class CorporatePdfTemplateViewSet(viewsets.ModelViewSet):
+class CorporatePdfTemplateViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for CorporatePdfTemplate model.
     Manages company-specific PDF templates for contracts.
     """
     queryset = CorporatePdfTemplate.objects.select_related('company')
     serializer_class = CorporatePdfTemplateSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['company', 'template_format', 'use_corporate_branding']
     search_fields = ['name', 'company__name']
@@ -11527,7 +11481,7 @@ class CorporatePdfTemplateViewSet(viewsets.ModelViewSet):
     ordering = ['company__name', 'name']
 
 
-class ContractDocumentViewSet(viewsets.ModelViewSet):
+class ContractDocumentViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for ContractDocument model.
     Manages uploaded contract documents (PDFs, scans, etc.).
@@ -11560,7 +11514,7 @@ class ContractDocumentViewSet(viewsets.ModelViewSet):
 # Settings ViewSets
 # ============================================================================
 
-class SeasonalTriggerDateViewSet(viewsets.ModelViewSet):
+class SeasonalTriggerDateViewSet(GuardedDestroyMixin, viewsets.ModelViewSet):
     """
     ViewSet for SeasonalTriggerDate model.
     Manages variable holiday trigger dates for seasonal email campaigns.
@@ -11568,7 +11522,7 @@ class SeasonalTriggerDateViewSet(viewsets.ModelViewSet):
     """
     queryset = SeasonalTriggerDate.objects.select_related('updated_by').order_by('-year', 'holiday_type')
     serializer_class = SeasonalTriggerDateSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PersonForConfigurationWrites]
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['holiday_type', 'year']
     ordering_fields = ['year', 'trigger_date', 'holiday_type']
@@ -11600,7 +11554,8 @@ class RevenueViewSet(viewsets.ViewSet):
     - GET /api/v1/revenue/year-over-year/?year=2026&compare_year=2025 - YoY comparison
     - GET /api/v1/revenue/events/ - List revenue events
     """
-    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
+    # Reads: the finance role. Writes: the finance role and a person signed in to the website.
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin, WritesOnWebsite]
 
     @action(detail=False, methods=['get'], url_path='monthly')
     def monthly(self, request):
@@ -11922,7 +11877,7 @@ class RevenueViewSet(viewsets.ViewSet):
         serializer = MonthlyRevenueSnapshotSerializer(queryset, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['post'], url_path='classify-contracts')
+    @action(detail=False, methods=['post'], url_path='classify-contracts', permission_classes=[FinanceOrAdminOnWebsite])
     def classify_contracts(self, request):
         """
         POST /api/v1/revenue/classify-contracts/
@@ -11956,7 +11911,7 @@ class RevenueViewSet(viewsets.ViewSet):
                 'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['post'], url_path='generate-snapshots')
+    @action(detail=False, methods=['post'], url_path='generate-snapshots', permission_classes=[FinanceOrAdminOnWebsite])
     def generate_snapshots(self, request):
         """
         POST /api/v1/revenue/generate-snapshots/
@@ -12028,7 +11983,7 @@ class RevenueViewSet(viewsets.ViewSet):
                 'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['post'], url_path='initialize')
+    @action(detail=False, methods=['post'], url_path='initialize', permission_classes=[FinanceOrAdminOnWebsite])
     def initialize(self, request):
         """
         POST /api/v1/revenue/initialize/
@@ -12074,7 +12029,8 @@ class ARAgingViewSet(viewsets.ViewSet):
     - GET /api/v1/ar-aging/overdue/ - List of overdue invoices
     - GET /api/v1/ar-aging/collection-priority/ - Prioritized collection list
     """
-    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
+    # Reads: the finance role. Writes: the finance role and a person signed in to the website.
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin, WritesOnWebsite]
 
     @action(detail=False, methods=['get'], url_path='report')
     def report(self, request):
@@ -12324,7 +12280,7 @@ class ExpenseCategoryViewSet(BaseModelViewSet):
         serializer = self.get_serializer(categories, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=['post'], url_path='initialize-defaults')
+    @action(detail=False, methods=['post'], url_path='initialize-defaults', permission_classes=[FinanceOrAdminOnWebsite])
     def initialize_defaults(self, request):
         """
         POST /api/v1/expense-categories/initialize-defaults/
@@ -12408,7 +12364,7 @@ class RecurringExpenseViewSet(BaseModelViewSet):
         serializer = self.get_serializer(expenses, many=True)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'], url_path='generate-entries')
+    @action(detail=True, methods=['post'], url_path='generate-entries', permission_classes=[FinanceOrAdminOnWebsite])
     def generate_entries(self, request, pk=None):
         """
         POST /api/v1/recurring-expenses/{id}/generate-entries/
@@ -12536,7 +12492,7 @@ class ExpenseEntryViewSet(BaseModelViewSet):
             return ExpenseEntryCreateSerializer
         return ExpenseEntrySerializer
 
-    @action(detail=True, methods=['post'], url_path='approve')
+    @action(detail=True, methods=['post'], url_path='approve', permission_classes=[FinanceOrAdminOnWebsite])
     def approve(self, request, pk=None):
         """POST /api/v1/expenses/{id}/approve/ - Approve expense"""
         expense = self.get_object()
@@ -12554,7 +12510,7 @@ class ExpenseEntryViewSet(BaseModelViewSet):
         serializer = self.get_serializer(expense)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'], url_path='pay')
+    @action(detail=True, methods=['post'], url_path='pay', permission_classes=[FinanceOrAdminOnWebsite])
     def pay(self, request, pk=None):
         """
         POST /api/v1/expenses/{id}/pay/
@@ -12594,7 +12550,7 @@ class ExpenseEntryViewSet(BaseModelViewSet):
         serializer = self.get_serializer(expense)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'], url_path='cancel')
+    @action(detail=True, methods=['post'], url_path='cancel', permission_classes=[FinanceOrAdminOnWebsite])
     def cancel(self, request, pk=None):
         """POST /api/v1/expenses/{id}/cancel/ - Cancel expense"""
         expense = self.get_object()
@@ -12673,7 +12629,8 @@ class APAgingViewSet(viewsets.ViewSet):
     - GET /api/v1/ap-aging/payment-priority/ - Prioritized payment list
     - GET /api/v1/ap-aging/monthly-summary/?year=2026&month=1 - Monthly expense summary (for P&L)
     """
-    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
+    # Reads: the finance role. Writes: the finance role and a person signed in to the website.
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin, WritesOnWebsite]
 
     @action(detail=False, methods=['get'], url_path='report')
     def report(self, request):
@@ -12859,7 +12816,8 @@ class ProfitLossViewSet(viewsets.ViewSet):
     - GET /api/v1/profit-loss/comparative/?year=2026&month=1&compare_year=2025 - YoY comparison
     - GET /api/v1/profit-loss/trend/?year=2026 - Monthly trend data
     """
-    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
+    # Reads: the finance role. Writes: the finance role and a person signed in to the website.
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin, WritesOnWebsite]
 
     @action(detail=False, methods=['get'], url_path='monthly')
     def monthly(self, request):
@@ -13040,7 +12998,7 @@ class ProfitLossViewSet(viewsets.ViewSet):
                 'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='export/pdf')
+    @action(detail=False, methods=['get'], url_path='export/pdf', permission_classes=[FinanceOrAdminOnWebsite])
     def export_pdf(self, request):
         """
         GET /api/v1/profit-loss/export/pdf/?year=2026&month=1&billing_entity=bmasia_th&currency=THB
@@ -13092,7 +13050,7 @@ class ProfitLossViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='export/excel')
+    @action(detail=False, methods=['get'], url_path='export/excel', permission_classes=[FinanceOrAdminOnWebsite])
     def export_excel(self, request):
         """
         GET /api/v1/profit-loss/export/excel/?year=2026&month=1&billing_entity=bmasia_th&currency=THB
@@ -13158,7 +13116,8 @@ class CashFlowViewSet(viewsets.ViewSet):
     - GET /api/v1/cash-flow/ytd/?year=2026&through_month=6 - Year-to-date Cash Flow
     - GET /api/v1/cash-flow/trend/?year=2026 - Monthly trend data
     """
-    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
+    # Reads: the finance role. Writes: the finance role and a person signed in to the website.
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin, WritesOnWebsite]
 
     @action(detail=False, methods=['get'], url_path='monthly')
     def monthly(self, request):
@@ -13290,7 +13249,7 @@ class CashFlowViewSet(viewsets.ViewSet):
                 'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='export/pdf')
+    @action(detail=False, methods=['get'], url_path='export/pdf', permission_classes=[FinanceOrAdminOnWebsite])
     def export_pdf(self, request):
         """
         GET /api/v1/cash-flow/export/pdf/?year=2026&month=1&billing_entity=bmasia_th&currency=THB
@@ -13342,7 +13301,7 @@ class CashFlowViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='export/excel')
+    @action(detail=False, methods=['get'], url_path='export/excel', permission_classes=[FinanceOrAdminOnWebsite])
     def export_excel(self, request):
         """
         GET /api/v1/cash-flow/export/excel/?year=2026&month=1&billing_entity=bmasia_th&currency=THB
@@ -13407,7 +13366,8 @@ class BalanceSheetViewSet(viewsets.ViewSet):
     - GET /api/v1/balance-sheet/quarterly/?year=2026&quarter=1 - Quarterly Balance Sheet
     - GET /api/v1/balance-sheet/trend/?year=2026 - Quarterly trend data
     """
-    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
+    # Reads: the finance role. Writes: the finance role and a person signed in to the website.
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin, WritesOnWebsite]
 
     @action(detail=False, methods=['get'], url_path='quarterly')
     def quarterly(self, request):
@@ -13493,7 +13453,7 @@ class BalanceSheetViewSet(viewsets.ViewSet):
                 'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='export/pdf')
+    @action(detail=False, methods=['get'], url_path='export/pdf', permission_classes=[FinanceOrAdminOnWebsite])
     def export_pdf(self, request):
         """
         GET /api/v1/balance-sheet/export/pdf/?year=2026&quarter=1&billing_entity=bmasia_th&currency=THB
@@ -13538,7 +13498,7 @@ class BalanceSheetViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='export/excel')
+    @action(detail=False, methods=['get'], url_path='export/excel', permission_classes=[FinanceOrAdminOnWebsite])
     def export_excel(self, request):
         """
         GET /api/v1/balance-sheet/export/excel/?year=2026&quarter=1&billing_entity=bmasia_th&currency=THB
@@ -13603,7 +13563,8 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
     - GET  /api/v1/revenue-recognition/deferred-revenue/ - Balance for B/S
     - GET  /api/v1/revenue-recognition/export/excel/   - Export in Pom's format
     """
-    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
+    # Reads: the finance role. Writes: the finance role and a person signed in to the website.
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin, WritesOnWebsite]
 
     @action(detail=False, methods=['get'], url_path='summary')
     def summary(self, request):
@@ -13701,7 +13662,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
         }
         return Response(data)
 
-    @action(detail=False, methods=['post'], url_path='import')
+    @action(detail=False, methods=['post'], url_path='import', permission_classes=[FinanceOrAdminOnWebsite])
     def import_excel(self, request):
         """POST upload Pom's Excel file to create schedules + entries."""
         from crm_app.services.revenue_recognition_service import RevenueRecognitionService
@@ -13739,7 +13700,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             logger.exception("Revenue recognition import error")
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['post'], url_path='generate')
+    @action(detail=False, methods=['post'], url_path='generate', permission_classes=[FinanceOrAdminOnWebsite])
     def generate(self, request):
         """POST auto-generate schedules from CRM invoices."""
         from crm_app.services.revenue_recognition_service import RevenueRecognitionService
@@ -13779,7 +13740,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             logger.exception("Revenue recognition generate error")
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['post'], url_path='regenerate')
+    @action(detail=False, methods=['post'], url_path='regenerate', permission_classes=[FinanceOrAdminOnWebsite])
     def regenerate(self, request):
         """POST recalculate all entries for a year + entity."""
         from crm_app.services.revenue_recognition_service import RevenueRecognitionService
@@ -13798,7 +13759,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             logger.exception("Revenue recognition regenerate error")
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['patch'], url_path=r'schedules/(?P<pk>\d+)/update')
+    @action(detail=False, methods=['patch'], url_path=r'schedules/(?P<pk>\d+)/update', permission_classes=[FinanceOrAdminOnWebsite])
     def update_schedule(self, request, pk=None):
         """PATCH modify a schedule and recalculate entries."""
         from crm_app.services.revenue_recognition_service import RevenueRecognitionService
@@ -13825,7 +13786,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             logger.exception("Revenue recognition update error")
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['post'], url_path=r'schedules/(?P<pk>\d+)/cancel')
+    @action(detail=False, methods=['post'], url_path=r'schedules/(?P<pk>\d+)/cancel', permission_classes=[FinanceOrAdminOnWebsite])
     def cancel_schedule(self, request, pk=None):
         """POST cancel a schedule and remove future entries."""
         from crm_app.services.revenue_recognition_service import RevenueRecognitionService
@@ -13871,7 +13832,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             logger.exception("Deferred revenue error")
             return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=False, methods=['get'], url_path='export/excel')
+    @action(detail=False, methods=['get'], url_path='export/excel', permission_classes=[FinanceOrAdminOnWebsite])
     def export_excel(self, request):
         """GET export revenue accrual report in Pom's Excel format."""
         from crm_app.services.revenue_recognition_service import RevenueRecognitionService
