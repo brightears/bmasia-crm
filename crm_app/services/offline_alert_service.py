@@ -6,6 +6,8 @@ from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 
+from crm_app.services.exception_safety import log_exception  # noqa: E402
+
 
 class OfflineAlertService:
     """Smart offline detection with notification cooldown
@@ -175,7 +177,8 @@ class OfflineAlertService:
                     sent_count += 1
                     logger.info(f"Sent offline alert to {contact.email} for zone {alert.zone.name}")
             except Exception as e:
-                logger.error(f"Error sending alert to {contact.email}: {str(e)}")
+                # No mail server reply in the log (crm_app/services/exception_safety.py).
+                log_exception(logger, f"Error sending alert to {contact.email}", e)
 
         if sent_count > 0:
             # Update alert tracking

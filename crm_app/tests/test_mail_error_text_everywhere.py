@@ -232,11 +232,30 @@ def _misuses_in_source(source, filename='<sample>'):
         if isinstance(func, ast.Name) and func.id in ('format_exc', 'print_exc', 'format_exception', 'exc_info'):
             problems.append((node.lineno, func.id))
 
+    log_methods = {'debug', 'info', 'warning', 'warn', 'error', 'critical', 'log', 'exception'}
     for handler in (n for n in ast.walk(tree) if isinstance(n, ast.ExceptHandler)):
         if handler.type is None:
             problems.append((handler.lineno, 'bare except'))
         if not handler.name:
             continue
+        # The log call of a handler must be the helper: a logger call carrying exception_text()
+        # would quietly drop a bug's traceback again.
+        calls_helper = False
+        for node in ast.walk(handler):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if (isinstance(func, ast.Name) and func.id == ALLOWED_LOGGER and len(node.args) >= 2
+                    and isinstance(node.args[1], ast.Name) and node.args[1].id == handler.name):
+                calls_helper = True
+            if isinstance(func, ast.Attribute) and func.attr in log_methods:
+                for inner in ast.walk(node):
+                    if (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name)
+                            and inner.func.id == 'exception_text'):
+                        problems.append((node.lineno, f'logger.{func.attr} with exception_text(); use {ALLOWED_LOGGER}()'))
+                        break
+        if not calls_helper and not any(isinstance(n, ast.Raise) for n in ast.walk(handler)):
+            problems.append((handler.lineno, f'except block neither calls {ALLOWED_LOGGER}() nor re-raises'))
         for node in ast.walk(handler):
             if isinstance(node, ast.Name) and node.id == handler.name and isinstance(node.ctx, ast.Load):
                 parent = parents.get(node)
@@ -260,6 +279,10 @@ def test_no_except_block_turns_an_exception_into_text_another_way(path):
 
 
 SAMPLE_BLOCKS = [
+    ('logger.error(f"failed: {exception_text(e)}")', True),
+    ('msg = exception_text(e)', True),  # builds text but never logs through the helper
+    ('raise', False),
+    ('msg = exception_text(e); log_caught_exception("ctx", e)', False),
     ('x = str(e)', True),
     ('y = f"{e}"', True),
     ('z = repr(e)', True),
@@ -271,9 +294,8 @@ SAMPLE_BLOCKS = [
     ('t = sys.exc_info()', True),
     ('log.exception("x")', True),
     ('log_caught_exception(e, "wrong order")', True),
-    ('ok = exception_text(e)', False),
     ('log_caught_exception("context", e)', False),
-    ('log_caught_exception(f"context {x}", e, logging.WARNING)', False),
+    ('log_caught_exception(f"context {x}", e, mail_level=logging.WARNING)', False),
 ]
 
 
@@ -346,7 +368,7 @@ def test_log_caught_exception_refuses_a_traceback_for_a_mail_error(caplog):
     except TypeError as exc:
         caplog.clear()
         with caplog.at_level(logging.DEBUG):
-            log_caught_exception('Context', exc, logging.WARNING)
+            log_caught_exception('Context', exc, mail_level=logging.WARNING)
     (record,) = caplog.records
-    assert record.levelno == logging.WARNING and record.exc_info[0] is TypeError
+    assert record.levelno == logging.ERROR and record.exc_info[0] is TypeError  # a bug is always ERROR here
     assert record.getMessage() == 'Context: TypeError: a bug'

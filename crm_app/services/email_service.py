@@ -23,7 +23,8 @@ from crm_app.models import (
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution
 )
 
-from crm_app.api_errors import describe_mail_exception, mail_failure_text
+from crm_app.api_errors import mail_failure_text
+from crm_app.services.exception_safety import describe_mail_exception, log_exception, safe_exception_message
 
 logger = logging.getLogger(__name__)
 
@@ -71,28 +72,24 @@ def exception_text(exc):
     ``EmailLog.error_message``, sequence execution errors and the detail passed to
     ``mail_failure_text`` go through here. A mail error becomes its type, SMTP code and a
     fixed description (per refused recipient: the domain and the code), never the mail
-    server's raw reply, which can echo what it was sent. Any other error keeps its own message.
+    server's raw reply, which can echo what it was sent. Any other error keeps its own
+    message, unless that message repeats a chained mail error's text: then only its type.
+    See crm_app/services/exception_safety.py.
     """
-    return describe_mail_exception(exc) or str(exc)
+    return describe_mail_exception(exc) or safe_exception_message(exc)
 
 
-def log_caught_exception(context, exc, level=logging.ERROR):
+def log_caught_exception(context, exc, mail_level=logging.ERROR, bug_level=logging.ERROR):
     """Log a caught exception: the one place in this module that may log a traceback.
 
-    A mail error is logged as ``exception_text`` describes it, without a traceback: the
-    traceback of an smtplib error carries the mail server's raw reply. Any other error is a
-    bug to diagnose: it is logged with its type, its message and its traceback. The traceback
-    of a non-mail error cannot contain a mail server's reply, since no mail reply is part of
-    it. crm_app/tests/test_mail_error_text_everywhere.py checks this module's source: every
-    except block uses only ``exception_text(e)`` or this function, and nothing else here
-    logs or formats a traceback.
+    By the rule in crm_app/services/exception_safety.py: a mail error, or any error chained
+    to one, is logged without its chain (a mail traceback carries the server's raw reply);
+    any other error is a bug and is logged with its type, message and full traceback.
+    crm_app/tests/test_mail_error_text_everywhere.py checks this module's source: every
+    except block logs through this function, and nothing else here logs or formats a traceback.
     """
-    described = describe_mail_exception(exc)
-    if described is not None:
-        logger.log(level, '%s: %s', context, described)
-    else:
-        logger.log(level, '%s: %s: %s', context, type(exc).__name__, exc,
-                   exc_info=(type(exc), exc, exc.__traceback__))
+    log_exception(logger, context, exc, mail_level=mail_level, bug_level=bug_level)
+
 
 class EmailService:
     """Main email service for sending automated emails"""
@@ -200,7 +197,7 @@ class EmailService:
                 return None
 
         except Exception as e:
-            log_caught_exception(f"Error getting SMTP connection for {clean_email}", e, logging.WARNING)
+            log_caught_exception(f"Error getting SMTP connection for {clean_email}", e, mail_level=logging.WARNING)
             return None
 
     def _inject_tracking_pixel(self, body_html: str, tracking_token: str) -> str:
@@ -291,7 +288,7 @@ class EmailService:
                         msg.attach_file(attachment.file.path)
                         logger.info(f"Attached file: {attachment.name}")
                     except Exception as e:
-                        log_caught_exception(f"Failed to attach file {attachment.name}", e, logging.WARNING)
+                        log_caught_exception(f"Failed to attach file {attachment.name}", e, mail_level=logging.WARNING)
             
             # Send email with a Message-ID fixed beforehand, so the stored id
             # is the one that went out (used for reply matching).
