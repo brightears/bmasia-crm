@@ -33,6 +33,8 @@ def run(mailbox, client, **kwargs):
 
 
 def _confirm(rule):
+    if rule.kind == 'label':
+        purge.store_label_preview(rule)     # a label rule covers what its preview showed
     return purge.confirm_rule(rule, expected_fingerprint=rule.fingerprint())
 
 
@@ -353,7 +355,7 @@ class TestLabelsAndDeletion:
         client.add_message(gmail_message('g2', 'pat@lagoon.test', [SALES], date=recent(),
                                          labels=('INBOX', 'Label_5'), message_id='<new@mail.example.org>'))
         assert run(mb, client).counts['skipped_by_rule'] == 1   # but new capture is blocked at once
-        purge.confirm_rule(rule, expected_fingerprint=rule.fingerprint())
+        _confirm(rule)
         run(mb, client)
         assert _nothing_left()
 
@@ -376,7 +378,7 @@ class TestLabelsAndDeletion:
         rule = CaptureRule.objects.create(kind=kind, value='nothing-here.test' if kind == 'domain' else
                                           ('nobody@nothing-here.test' if kind == 'address' else 'Other'),
                                           action='skip')
-        purge.confirm_rule(rule, expected_fingerprint=rule.fingerprint())
+        _confirm(rule)
         run(mb, client)
         CaptureRule.objects.filter(pk=rule.pk).update(value=value)
         run(mb, client)

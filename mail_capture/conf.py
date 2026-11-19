@@ -71,6 +71,14 @@ def attention_after_errors():
     return _days('CAPTURE_ATTENTION_AFTER_ERRORS', DEFAULT_ATTENTION_AFTER_ERRORS)
 
 
+DEFAULT_TRANSIENT_ATTENTION_HOURS = 24
+
+
+def transient_attention_hours():
+    """Hours of nothing but temporary failures after which a mailbox needs a person."""
+    return _days('CAPTURE_TRANSIENT_ATTENTION_HOURS', DEFAULT_TRANSIENT_ATTENTION_HOURS)
+
+
 def domains_state():
     """Our own domains must be known, and none may be a public suffix or a
     freemail domain (that would make every customer there look internal)."""

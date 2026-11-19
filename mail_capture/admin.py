@@ -20,7 +20,9 @@ Configuration (mailboxes, rules, company domains) is editable by superusers.
   capped per call; later runs continue). The page carries the previewed
   rule's fingerprint and count; if the rule changed since the preview the
   confirmation is refused ("the rule changed since the preview: preview
-  again") and nothing is purged.
+  again") and nothing is purged. A label rule covers exactly the copies its
+  preview showed (the preview stores them, valid for 60 minutes); copies
+  labelled later are reported and wait for a new preview and confirmation.
 * A mailbox marked "needs attention" (repeated failed runs) shows it in the
   list; the "Clear needs attention" action lets runs start again.
 """
@@ -36,7 +38,10 @@ from .models import (
     MailboxAccessLog, MailboxCopy, MailConversation, MailMatch, MailMessage, MailParticipant,
     UnmatchedSender,
 )
-from .purge import RuleChanged, confirm_rule, enforce_rules, preview_rule
+from .purge import (
+    RuleChanged, confirm_rule, enforce_rules, label_rule_pending, pending_text, preview_rule,
+    store_label_preview,
+)
 
 
 def _superuser(request):
@@ -78,13 +83,15 @@ AUDITED_MAILBOX_FIELDS = ('enabled', 'body_mode', 'visibility')
 @admin.register(CaptureMailbox)
 class CaptureMailboxAdmin(SuperuserAdmin):
     list_display = ('email', 'kind', 'enabled', 'body_mode', 'visibility', 'last_poll_at',
-                    'needs_resync', 'consecutive_errors', 'needs_attention', 'attention_reason')
+                    'needs_resync', 'consecutive_errors', 'needs_attention', 'attention_reason',
+                    'retry_not_before', 'auth_problem')
     list_filter = ('enabled', 'kind', 'body_mode', 'needs_resync', 'needs_attention')
     search_fields = ('email',)
     readonly_fields = (
         'history_id', 'newest_internal_date', 'last_poll_at', 'last_full_sync_at',
         'needs_resync', 'last_error', 'consecutive_errors', 'needs_attention', 'attention_reason',
-        'attention_code_version', 'enforced_label_ids',
+        'attention_code_version', 'attention_errors', 'transient_errors', 'transient_since',
+        'retry_not_before', 'auth_problem', 'enforced_label_ids',
         'lease_token', 'lease_expires_at', 'created_at', 'updated_at',
     )
     actions = ('clear_needs_attention',)
@@ -127,10 +134,18 @@ class CaptureMailboxAdmin(SuperuserAdmin):
 
 @admin.register(CaptureRule)
 class CaptureRuleAdmin(SuperuserAdmin):
-    list_display = ('kind', 'value', 'action', 'scope', 'mailbox', 'purge_state', 'created_at')
+    list_display = ('kind', 'value', 'action', 'scope', 'mailbox', 'purge_state', 'waiting_for_preview',
+                    'created_at')
     list_filter = ('kind', 'action', 'scope', 'purge_state')
     readonly_fields = ('purge_state', 'confirmed_by', 'confirmed_at', 'purge_done_at',
                        'created_by', 'created_at', 'updated_at')
+    exclude = ('confirmed_fingerprint', 'preview_snapshot', 'purge_copy_ids')
+
+    @admin.display(description='Labelled after the preview')
+    def waiting_for_preview(self, obj):
+        if obj.kind != 'label' or not obj.is_confirmed:
+            return ''
+        return label_rule_pending(obj) or ''
 
     def get_urls(self):
         return [
@@ -168,6 +183,14 @@ class CaptureRuleAdmin(SuperuserAdmin):
                 return HttpResponseRedirect(reverse('admin:mail_capture_capturerule_confirm', args=[rule.pk]))
             counts = enforce_rules(rules=[rule], actor=f'user:{request.user.pk}')
             previewed = str(request.POST.get('previewed', ''))[:12]
+            rule.refresh_from_db()
+            if rule.kind == 'label':
+                messages.info(request, 'Label rule confirmed for the {n} stored copies the preview showed; they '
+                              'are removed on each mailbox\'s next run.'.format(n=len(rule.purge_copy_ids)))
+                later = label_rule_pending(rule)
+                if later:
+                    messages.warning(request, pending_text(later))
+                return HttpResponseRedirect(reverse('admin:mail_capture_capturerule_changelist'))
             messages.info(
                 request,
                 'Purge confirmed (preview showed {previewed} messages): {messages} messages, {copies} '
@@ -175,12 +198,25 @@ class CaptureRuleAdmin(SuperuserAdmin):
                 'runs.'.format(previewed=previewed if previewed.isdigit() else 'no count', **counts),
             )
             return HttpResponseRedirect(reverse('admin:mail_capture_capturerule_changelist'))
+        if rule.kind == 'label':
+            # The preview remembers exactly which copies it showed; confirming
+            # covers those only.
+            preview = store_label_preview(rule)
+            rule.refresh_from_db()
+            can_confirm = rule.purge_state == 'awaiting_confirmation' or (
+                rule.is_confirmed and bool(preview.get('copies') or preview.get('bodies')))
+            if rule.is_confirmed and can_confirm:
+                messages.warning(request, pending_text(preview.get('copies') or preview.get('bodies') or 0))
+        else:
+            preview = preview_rule(rule)
+            can_confirm = rule.purge_state == 'awaiting_confirmation'
         context = dict(
             self.admin_site.each_context(request),
             title='Confirm purge of stored mail',
             rule=rule,
             fingerprint=rule.fingerprint(),
-            preview=preview_rule(rule),
+            preview=preview,
+            can_confirm=can_confirm,
             opts=self.model._meta,
         )
         return TemplateResponse(request, 'admin/mail_capture/confirm_purge.html', context)

@@ -199,8 +199,14 @@ def test_a_rate_limit_that_persists_keeps_the_progress_and_ends_rate_limited(lag
     assert MailMessage.objects.count() == 3                  # m0..m2 kept
     mb.refresh_from_db()
     assert int(mb.history_id) == start + 3                   # stopped before m3, never past it
+    assert mb.retry_not_before > timezone.now() and not mb.needs_attention
+    calls = len(client.calls)
+    assert run(mb, client).outcome == 'deferred' and len(client.calls) == calls   # backs off, no Gmail call
     client._item_errors.clear()
+    CaptureMailbox.objects.filter(pk=mb.pk).update(retry_not_before=timezone.now() - timedelta(seconds=1))
     assert run(mb, client).outcome == 'ok' and MailMessage.objects.count() == 5
+    mb.refresh_from_db()
+    assert mb.retry_not_before is None and mb.transient_errors == 0
 
 
 def test_every_item_5xx_is_an_outage_and_moves_nothing(lagoon):
@@ -210,9 +216,9 @@ def test_every_item_5xx_is_an_outage_and_moves_nothing(lagoon):
     for i in range(3):
         client.fail_item(f'm{i}', 503, times=99)
     result = run(mb, client)
-    assert result.outcome == 'error' and CaptureFailure.objects.count() == 0
+    assert result.outcome == 'unavailable' and CaptureFailure.objects.count() == 0
     mb.refresh_from_db()
-    assert mb.history_id == start
+    assert mb.history_id == start and mb.transient_errors == 1 and mb.attention_errors == 0
 
 
 def test_single_get_failures_are_per_message_too(lagoon):
@@ -361,7 +367,7 @@ def test_skip_once_records_who_when_why_and_moves_on(lagoon, monkeypatch):
     out = StringIO()
     call_command('gmail_sync', '--skip-once', 'bad', '--mailbox', SALES, '--by', 'Test Operator',
                  '--reason', 'synthetic code bug', stdout=out)
-    assert 'skipped once' in out.getvalue()
+    assert 'skipped for good' in out.getvalue()
     skip = CaptureSkip.objects.get()
     assert (skip.gmail_id, skip.actor, skip.reason, skip.used_at) == (
         'bad', 'person:Test Operator', 'synthetic code bug', None)
@@ -644,6 +650,10 @@ def switched_on(capture_on):
 
 
 def gmail_sync(*args):
+    """The command; a reading form without --mailbox gets --all-mailboxes (the
+    guard has tests of its own)."""
+    if set(args) & {'--check', '--incremental', '--backfill'} and not set(args) & {'--mailbox', '--all-mailboxes'}:
+        args = args + ('--all-mailboxes',)
     out, err = StringIO(), StringIO()
     try:
         call_command('gmail_sync', *args, stdout=out, stderr=err)
@@ -704,7 +714,10 @@ def test_exit_codes_follow_the_outcome(switched_on, monkeypatch, lagoon):
     monkeypatch.setattr(sync.time, 'sleep', lambda s: None)
     code, text = gmail_sync('--incremental')
     assert code == 4 and 'rate_limited' in text
+    code, text = gmail_sync('--incremental')
+    assert code == 4 and 'deferred' in text and 'backing off' in text
     client._errors.clear()
+    CaptureMailbox.objects.filter(pk=mb.pk).update(retry_not_before=None)
     client.fail('list_labels', 403, times=99, reason='insufficientPermissions')
     code, text = gmail_sync('--incremental')
     assert code == 3 and 'auth_error' in text and 'permission denied' in text
@@ -753,8 +766,8 @@ def test_the_help_documents_the_exit_codes(capsys):
     with pytest.raises(SystemExit):
         Command().run_from_argv(['manage.py', 'gmail_sync', '--help'])
     text = capsys.readouterr().out
-    for line in ('1 run error', '2 bad arguments', '3 auth error', '4 rate limited', '5 ok with failures',
-                 '6 needs attention', '7 busy', '8 not configured'):
+    for line in ('1 run error', '2 bad arguments', '3 auth error', '4 temporary problem', '5 ok with failures',
+                 '6 needs attention', '7 busy', '8 not configured', '--all-mailboxes'):
         assert line in ' '.join(text.split())
 
 

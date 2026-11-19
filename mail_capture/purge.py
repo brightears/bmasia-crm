@@ -22,6 +22,11 @@ Purge mechanics:
 * Label rules (and the built-in ``CRM private`` label) work per copy: the
   labelled copy is dropped, and the message is purged when no copy is left.
   A Gmail deletion of the last copy purges the message too.
+* A confirmed label rule removes only the stored copies its preview showed
+  (``store_label_preview`` keeps their ids; a confirmation within
+  ``PREVIEW_TTL`` covers exactly those). Copies labelled after the preview are
+  counted (``label_rule_pending``) and wait for a new preview. The built-in
+  ``CRM private`` label acts at once on any copy.
 """
 import hashlib
 from datetime import timedelta
@@ -29,6 +34,7 @@ from datetime import timedelta
 from django.db import transaction
 from django.db.models import Max, Min, Q
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from . import conf
 from .models import (
@@ -325,15 +331,15 @@ def preview_rule(rule):
     }
 
 
-def _preview_label_rule(rule):
-    """Copies carrying the rule's label, from each mailbox's last-seen label
-    ids (recorded by the sync engine), and the messages left with no copy."""
+def _label_copies(rule):
+    """{copy id: message id} of stored copies carrying the rule's label, from
+    each mailbox's last-seen label ids (recorded by the sync engine)."""
     from .models import CaptureMailbox
     name = rule.value.strip().lower()
     mailboxes = CaptureMailbox.objects.all()
     if rule.scope == 'mailbox':
         mailboxes = mailboxes.filter(pk=rule.mailbox_id)
-    copy_ids, message_ids = set(), set()
+    found = {}
     for mailbox in mailboxes:
         ids = set(((mailbox.enforced_label_ids or {}).get('rule_labels') or {}).get(name) or ())
         if not ids:
@@ -341,8 +347,50 @@ def _preview_label_rule(rule):
         for pk, message_id, labels in MailboxCopy.objects.filter(mailbox=mailbox).values_list(
                 'pk', 'message_id', 'label_ids').iterator():
             if set(labels or ()) & ids:
-                copy_ids.add(pk)
-                message_ids.add(message_id)
+                found[pk] = message_id
+    return found
+
+
+def label_rule_pending(rule):
+    """Stored copies carrying a confirmed label rule's label that its
+    confirmation did not cover (labelled after the preview)."""
+    covered = {str(x) for x in (rule.purge_copy_ids or ())}
+    return sum(1 for pk in _label_copies(rule) if str(pk) not in covered)
+
+
+def pending_text(count):
+    return (f'{count} more message{"s" if count != 1 else ""} carry this label since the preview: '
+            'preview again to purge them')
+
+
+PREVIEW_TTL = timedelta(minutes=60)
+PREVIEW_CAP = 10000
+
+
+def store_label_preview(rule):
+    """Remember which copies a label rule's preview showed (at most
+    PREVIEW_CAP), with the time and the rule's fingerprint: confirming covers
+    exactly these, within PREVIEW_TTL. Returns the preview counts."""
+    counts = preview_rule(rule)
+    copies = sorted(str(pk) for pk in _label_copies(rule))
+    if rule.is_confirmed:
+        covered = {str(x) for x in (rule.purge_copy_ids or ())}
+        copies = [pk for pk in copies if pk not in covered]
+    CaptureRule.objects.filter(pk=rule.pk).update(preview_snapshot={
+        'at': timezone.now().isoformat(), 'fingerprint': rule.fingerprint(), 'copy_ids': copies[:PREVIEW_CAP],
+        'more': max(0, len(copies) - PREVIEW_CAP),
+    })
+    return counts
+
+
+def _preview_label_rule(rule):
+    """Copies carrying the rule's label and the messages left with no copy.
+    For a confirmed rule: only the copies its confirmation does not cover."""
+    found = _label_copies(rule)
+    if rule.is_confirmed:
+        covered = {str(x) for x in (rule.purge_copy_ids or ())}
+        found = {pk: m for pk, m in found.items() if str(pk) not in covered}
+    copy_ids, message_ids = set(found), set(found.values())
     if rule.action == ACTION_HEADERS_ONLY:
         bodies = MailMessage.objects.filter(pk__in=message_ids, body_text__isnull=False).count()
         return {'messages': 0, 'bodies': bodies, 'copies': 0, 'conversations': 0, 'queue_rows': 0}
@@ -376,7 +424,20 @@ def confirm_rule(rule, user=None, *, expected_fingerprint):
         current = CaptureRule.objects.select_for_update().filter(pk=rule.pk).first()
         if current is None or not expected_fingerprint or current.fingerprint() != expected_fingerprint:
             raise RuleChanged(RULE_CHANGED)
-        if current.is_confirmed:
+        extra = {}
+        if current.kind == 'label':
+            # A label rule covers exactly the copies its preview showed.
+            snap = current.preview_snapshot or {}
+            at = parse_datetime(str(snap.get('at') or ''))
+            if snap.get('fingerprint') != expected_fingerprint or at is None:
+                raise RuleChanged(RULE_CHANGED)
+            if timezone.now() - at > PREVIEW_TTL:
+                raise RuleChanged('the preview is more than 60 minutes old: preview again')
+            covered = [str(x) for x in snap.get('copy_ids') or ()]
+            if current.is_confirmed:
+                covered = sorted(set(covered) | {str(x) for x in (current.purge_copy_ids or ())})
+            extra = {'purge_copy_ids': covered, 'preview_snapshot': {}}
+        elif current.is_confirmed:
             raise RuleChanged('this rule is already confirmed as it stands')
         current.purge_state = 'confirmed'
         current.confirmed_by = user if (user is not None and getattr(user, 'is_authenticated', False)) else None
@@ -385,7 +446,7 @@ def confirm_rule(rule, user=None, *, expected_fingerprint):
         CaptureRule.objects.filter(pk=current.pk).update(
             purge_state=current.purge_state, confirmed_by=current.confirmed_by,
             confirmed_at=current.confirmed_at, confirmed_fingerprint=current.confirmed_fingerprint,
-            purge_done_at=None,
+            purge_done_at=None, **extra,
         )
     rule.refresh_from_db()
     return rule
@@ -399,7 +460,7 @@ def demote_changed_rules():
     if changed:
         CaptureRule.objects.filter(pk__in=changed).update(
             purge_state='awaiting_confirmation', confirmed_fingerprint='', confirmed_at=None,
-            confirmed_by=None, purge_done_at=None,
+            confirmed_by=None, purge_done_at=None, purge_copy_ids=[], preview_snapshot={},
         )
     return len(changed)
 
@@ -457,22 +518,43 @@ def enforce_rules(rules=None, cap=PURGE_CAP, actor='job'):
     return total
 
 
-def enforce_label_rules(mailbox, private_ids, headers_only_ids, actor='job'):
-    """Drop this mailbox's copies that carry a private label; clear bodies of
-    messages whose copy carries a headers-only label. Scans the mailbox's
-    copies, so the sync engine calls it only when the label set changed."""
+def copy_purge_action(copy_pk, labels, builtin, drop_map, strip_map):
+    """'drop', 'strip', 'pending' (carries a confirmed rule's label but was not
+    in its previewed set) or None, for one stored copy."""
+    labels = set(labels or ())
+    key = str(copy_pk)
+    if labels & builtin:
+        return 'drop'
+    hits = [label for label in labels if label in drop_map]
+    if any(key in drop_map[label] for label in hits):
+        return 'drop'
+    strip_hits = [label for label in labels if label in strip_map]
+    if any(key in strip_map[label] for label in strip_hits):
+        return 'strip'
+    return 'pending' if hits or strip_hits else None
+
+
+def enforce_label_rules(mailbox, builtin, drop_map, strip_map, actor='job'):
+    """Drop this mailbox's copies that carry the built-in private label, or a
+    confirmed label rule's label when the copy was in that rule's previewed
+    set; clear bodies likewise for headers-only label rules. Copies labelled
+    after the preview are only counted (``pending``). Scans the mailbox's
+    copies, so the sync engine calls it only when the label state changed."""
     counts = _empty_counts()
-    if not private_ids and not headers_only_ids:
+    counts['pending'] = 0
+    if not builtin and not drop_map and not strip_map:
         return counts
     drop, clear = set(), set()
     for pk, message_id, labels in MailboxCopy.objects.filter(mailbox=mailbox).values_list(
         'pk', 'message_id', 'label_ids',
     ).iterator():
-        labels = set(labels or ())
-        if labels & private_ids:
+        action = copy_purge_action(pk, labels, builtin, drop_map, strip_map)
+        if action == 'drop':
             drop.add(pk)
-        elif labels & headers_only_ids:
+        elif action == 'strip':
             clear.add(message_id)
+        elif action == 'pending':
+            counts['pending'] += 1
     with transaction.atomic():
         _add(counts, drop_copies(drop, 'label'))
         if clear:

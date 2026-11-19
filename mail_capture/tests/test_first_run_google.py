@@ -88,13 +88,16 @@ def test_a_refused_token_is_an_auth_error_tried_once(on, key_file, code, caplog)
 
 @pytest.mark.parametrize('exc', [httplib2.ServerNotFoundError('synthetic'), socket.timeout('synthetic'),
                                  ConnectionRefusedError('synthetic')])
-def test_an_unreachable_token_endpoint_is_an_auth_error_not_a_503(on, exc):
+def test_an_unreachable_token_endpoint_is_temporary_not_a_503(on, exc):
     mb = make_mailbox()
     CaptureMailbox.objects.filter(pk=mb.pk).update(history_id='100')
     client, http = authed(mb, [(path_is('/token', 'POST'), raising(exc))])
     result = sync_mailbox(mb.pk, lambda m: client, sleep=lambda s: None)
-    assert result.outcome == 'auth_error' and 'token_endpoint_unreachable' in result.reason
+    # Not a refusal: a temporary failure, ended at once, retried on a later run.
+    assert result.outcome == 'unavailable' and 'token_endpoint_unreachable' in result.reason
     assert 'gmail 503' not in result.reason and token_requests(http) == 1
+    mb.refresh_from_db()
+    assert mb.auth_problem == '' and mb.transient_errors == 1 and mb.retry_not_before is not None
 
 
 def test_a_refused_signblob_is_an_auth_error_naming_token_creator():

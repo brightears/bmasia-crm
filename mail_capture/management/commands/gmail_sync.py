@@ -1,10 +1,15 @@
 """Read enabled capture mailboxes through the Gmail API.
 
-    manage.py gmail_sync --check [--mailbox ADDRESS]
-    manage.py gmail_sync --incremental [--mailbox ADDRESS] [--dry-run] [--max-messages N]
+    manage.py gmail_sync --check (--mailbox ADDRESS | --all-mailboxes)
+    manage.py gmail_sync --incremental (--mailbox ADDRESS | --all-mailboxes) [--dry-run] [--max-messages N]
     manage.py gmail_sync --backfill --since YYYY-MM-DD --mailbox ADDRESS [--dry-run] [--max-messages N]
-    manage.py gmail_sync --skip-once GMAIL_ID --mailbox ADDRESS --by NAME --reason TEXT
+    manage.py gmail_sync --skip-once GMAIL_ID --mailbox ADDRESS --by NAME --reason TEXT [--force]
     manage.py gmail_sync --clear-attention --mailbox ADDRESS --by NAME --reason TEXT
+
+A reading form needs ``--mailbox`` (one mailbox) or, deliberately,
+``--all-mailboxes``: a run never fans out to every enabled mailbox by
+omission. ``--check`` first prints ``enabled mailboxes: ...`` from the table
+(no Gmail call), so an operator can see that only the intended mailbox is on.
 
 Every reading form prints "capture disabled" and stops, before any credential
 or client is made, while ``GOOGLE_CAPTURE_ENABLED`` is off, while
@@ -16,7 +21,10 @@ on production needs a go-ahead.
 
 ``--skip-once`` and ``--clear-attention`` write to the database only (no
 Gmail call): who, when and why are recorded, and the mailbox's "needs
-attention" flag is cleared so the next run starts again.
+attention" flag (and any backoff) is cleared so the next run starts again.
+``--skip-once`` skips that message for good. It refuses an id that is neither
+named on the mailbox's last failed run nor has a recorded failure, unless
+``--force`` is given (recorded on the skip).
 
 Exit codes (the most severe wins when several mailboxes run):
 
@@ -27,7 +35,9 @@ Exit codes (the most severe wins when several mailboxes run):
     2  bad arguments: wrong or missing options, or a --mailbox that is
        unknown, not enabled, or on GOOGLE_CAPTURE_NEVER_MAILBOXES
     3  auth error: authentication or permission refused (see the hint)
-    4  rate limited: Gmail kept answering 429; the next run continues
+    4  temporary problem: rate limited, Gmail or the token endpoint
+       unavailable, or backing off after one of these (deferred); a later run
+       continues
     5  ok with failures: some messages failed or were parked
     6  needs attention: a mailbox stopped after repeated failed runs
     7  busy: another run holds the mailbox
@@ -67,6 +77,8 @@ OUTCOME_EXIT = {
     'resync_needed': EXIT_OK,
     'ok_with_failures': EXIT_OK_WITH_FAILURES,
     'rate_limited': EXIT_RATE_LIMITED,
+    'unavailable': EXIT_RATE_LIMITED,
+    'deferred': EXIT_RATE_LIMITED,
     'auth_error': EXIT_AUTH,
     'needs_attention': EXIT_NEEDS_ATTENTION,
     'busy': EXIT_BUSY,
@@ -77,9 +89,10 @@ OUTCOME_EXIT = {
 GMAIL_ID = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
 
 EXIT_HELP = """exit codes: 0 ok (also 'capture disabled' while GOOGLE_CAPTURE_ENABLED is off);
-1 run error; 2 bad arguments (including an unknown, disabled or never-listed --mailbox);
-3 auth error; 4 rate limited; 5 ok with failures; 6 needs attention; 7 busy;
-8 not configured. With several mailboxes the most severe wins."""
+1 run error; 2 bad arguments (including an unknown, disabled or never-listed --mailbox,
+or neither --mailbox nor --all-mailboxes); 3 auth error; 4 temporary problem (rate limited,
+unavailable, or backing off); 5 ok with failures; 6 needs attention; 7 busy (another run
+holds the mailbox); 8 not configured. With several mailboxes the most severe wins."""
 
 
 def worst(codes):
@@ -104,7 +117,11 @@ class Command(BaseCommand):
                           help='Record a deliberate skip of one message (needs --mailbox, --by, --reason)')
         what.add_argument('--clear-attention', action='store_true',
                           help='Let a mailbox marked "needs attention" run again (needs --mailbox, --by, --reason)')
-        parser.add_argument('--mailbox', help='One mailbox address (default: every enabled mailbox)')
+        parser.add_argument('--mailbox', help='One mailbox address')
+        parser.add_argument('--all-mailboxes', action='store_true',
+                            help='Every enabled mailbox (must be asked for explicitly)')
+        parser.add_argument('--force', action='store_true',
+                            help='--skip-once of an id with no recorded failure (recorded on the skip)')
         parser.add_argument('--since', help='Backfill start date, YYYY-MM-DD')
         parser.add_argument('--dry-run', action='store_true', help='Read and count; store nothing')
         parser.add_argument('--max-messages', type=int, help='Stop after this many messages')
@@ -135,6 +152,10 @@ class Command(BaseCommand):
             return self._usage('choose one of --check, --incremental or --backfill')
         if options['max_messages'] is not None and options['max_messages'] < 1:
             return self._usage('--max-messages must be 1 or more')
+        if options['mailbox'] and options['all_mailboxes']:
+            return self._usage('give either --mailbox or --all-mailboxes, not both')
+        if not options['mailbox'] and not options['all_mailboxes']:
+            return self._usage('name one mailbox with --mailbox (or, deliberately, --all-mailboxes)')
         kind = 'incremental' if options['incremental'] else 'backfill'
         since = None
         if options['backfill']:
@@ -209,9 +230,11 @@ class Command(BaseCommand):
     def _check(self, mailboxes):
         from mail_capture import google_client
         from mail_capture.credentials import CredentialsMisconfigured, CredentialsRefused
-        from mail_capture.gmail_client import GmailAuthError, GmailRateLimited
+        from mail_capture.gmail_client import GmailAuthError, GmailRateLimited, GmailServerError
         from mail_capture.sync import is_credential_error
         codes = []
+        enabled = list(CaptureMailbox.objects.filter(enabled=True).order_by('email').values_list('email', flat=True))
+        self.stdout.write(f"enabled mailboxes: {', '.join(enabled) or 'none'}")
         for mailbox in mailboxes:
             log = MailboxAccessLog.objects.create(
                 mailbox=mailbox, at=timezone.now(), purpose='check', actor='job:gmail_sync --check')
@@ -220,8 +243,13 @@ class Command(BaseCommand):
                 profile = client.get_profile()
             except Exception as exc:
                 MailboxAccessLog.objects.filter(pk=log.pk).update(finished_at=timezone.now())
-                if isinstance(exc, GmailAuthError):
+                if isinstance(exc, GmailAuthError) and exc.transient:
+                    self.stdout.write(f'{mailbox.email}: unavailable {exc.code}: {exc.hint}')
+                    codes.append(EXIT_RATE_LIMITED)
+                elif isinstance(exc, GmailAuthError):
                     self.stdout.write(f'{mailbox.email}: auth_error {exc.code}: {exc.hint}')
+                    CaptureMailbox.objects.filter(pk=mailbox.pk).update(
+                        auth_problem=f'auth {exc.code}: {exc.hint}'[:200])
                     codes.append(EXIT_AUTH)
                 elif isinstance(exc, CredentialsMisconfigured) or is_credential_error(exc):
                     detail = str(exc) if isinstance(exc, CredentialsMisconfigured) else type(exc).__name__
@@ -230,8 +258,8 @@ class Command(BaseCommand):
                 elif isinstance(exc, CredentialsRefused):
                     self.stdout.write(f'{mailbox.email}: not configured: {exc}')
                     codes.append(EXIT_NOT_CONFIGURED)
-                elif isinstance(exc, GmailRateLimited):
-                    self.stdout.write(f'{mailbox.email}: rate_limited ({exc.status})')
+                elif isinstance(exc, (GmailRateLimited, GmailServerError)):
+                    self.stdout.write(f'{mailbox.email}: unavailable (gmail {exc.status})')
                     codes.append(EXIT_RATE_LIMITED)
                 else:
                     self.stdout.write(f'{mailbox.email}: error ({type(exc).__name__})')
@@ -240,6 +268,8 @@ class Command(BaseCommand):
             MailboxAccessLog.objects.filter(pk=log.pk).update(finished_at=timezone.now(), api_calls=1)
             self.stdout.write(f"{mailbox.email}: messages {profile.get('messagesTotal')}, "
                               f"history id {profile.get('historyId')}")
+            # A token was made and accepted: a recorded auth problem is over.
+            CaptureMailbox.objects.filter(pk=mailbox.pk).exclude(auth_problem='').update(auth_problem='')
             fresh = CaptureMailbox.objects.get(pk=mailbox.pk)
             if fresh.needs_attention:
                 self.stdout.write(f'{mailbox.email}: needs attention: {fresh.attention_reason} '
@@ -248,6 +278,9 @@ class Command(BaseCommand):
             elif fresh.last_error:
                 self.stdout.write(f'{mailbox.email}: last error: {fresh.last_error} '
                                   f'({fresh.consecutive_errors} in a row)')
+            if fresh.retry_not_before and fresh.retry_not_before > timezone.now():
+                self.stdout.write(f'{mailbox.email}: runs back off until '
+                                  f'{fresh.retry_not_before:%Y-%m-%d %H:%M:%S} UTC')
             codes.append(EXIT_OK)
         return worst(codes)
 
@@ -271,7 +304,16 @@ class Command(BaseCommand):
         gmail_id = options['skip_once'].strip()
         if not GMAIL_ID.match(gmail_id):
             return self._usage('--skip-once takes a Gmail message id (letters, digits, - and _)')
-        CaptureSkip.objects.create(mailbox=mailbox, gmail_id=gmail_id, actor=actor, reason=why[:200])
-        clear_attention(mailbox, actor, f'skip once {gmail_id}: {why}')
-        return self._exit(EXIT_OK, f'{email}: gmail id {gmail_id} will be skipped once; '
-                                   'needs attention cleared')
+        from mail_capture.models import CaptureFailure, CaptureRun
+        last_failed = (CaptureRun.objects.filter(mailbox=mailbox).exclude(error_gmail_id='')
+                       .order_by('-started_at').values_list('error_gmail_id', flat=True).first())
+        known = gmail_id == last_failed or CaptureFailure.objects.filter(mailbox=mailbox, gmail_id=gmail_id).exists()
+        if not known and not options['force']:
+            named = f' (the last failed run names {last_failed})' if last_failed else ''
+            return self._usage(f'gmail id {gmail_id} has no recorded failure on {email}{named}: nothing was '
+                               'skipped. A skip drops the message for good; add --force to skip it anyway.')
+        CaptureSkip.objects.create(mailbox=mailbox, gmail_id=gmail_id, actor=actor, reason=why[:200],
+                                   forced=not known)
+        clear_attention(mailbox, actor, f'skip once {gmail_id}{" (forced)" if not known else ""}: {why}')
+        return self._exit(EXIT_OK, f'{email}: gmail id {gmail_id} will be skipped for good on the next run'
+                                   f'{" (forced)" if not known else ""}; needs attention cleared')

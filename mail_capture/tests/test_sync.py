@@ -186,7 +186,7 @@ class TestCursor:
         result = run(mb, client, page_size=2)
         # Page 2's two messages fail on their own (cursor moves); the third 5xx
         # in a row is taken as an outage and stops the run there.
-        assert result.outcome == 'error'
+        assert result.outcome == 'unavailable'
         mb.refresh_from_db()
         assert MailMessage.objects.count() == 2
         assert sorted(CaptureFailure.objects.values_list('gmail_id', flat=True)) == ['g2', 'g3']

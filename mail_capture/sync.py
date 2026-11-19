@@ -50,10 +50,22 @@ Guarantees (research/11 B.7 "Idempotency and ordering", plus the PR-A review):
   setup step (``gmail_client.AUTH_HINTS``). No token, assertion or key path
   is ever part of it.
 * A run that fails on one message records its Gmail id and the exception
-  class on the run row. After ``CAPTURE_ATTENTION_AFTER_ERRORS`` (default 3)
-  failed runs in a row the mailbox is marked ``needs_attention`` (logged at
-  ERROR) and is not run again until a person clears it (admin action, or
-  ``gmail_sync --skip-once``) or the code version changes.
+  class on the run row. Failures are of three kinds:
+
+  - **message or code errors** (outcome ``error``): after
+    ``CAPTURE_ATTENTION_AFTER_ERRORS`` (default 3) such runs in a row the
+    mailbox is marked ``needs_attention`` (logged at ERROR) and is not run
+    again until a person clears it (admin action, ``gmail_sync --skip-once``
+    or ``--clear-attention``) or the code version changes;
+  - **temporary failures** (``rate_limited``; ``unavailable``: Gmail 5xx on
+    everything, or the token endpoint unreachable): the mailbox backs off
+    (``retry_not_before``, 1 minute doubling to 60, or Gmail's Retry-After;
+    runs before then end ``deferred`` without a Gmail call) and needs
+    attention only after ``CAPTURE_TRANSIENT_ATTENTION_HOURS`` (default 24)
+    of nothing but temporary failures;
+  - **refused authentication** (``auth_error``): shown at once
+    (``auth_problem``, ``gmail_sync --check``), never a reason to stop the
+    mailbox; the next successful token clears it.
 * Pacing: before every call the engine asks the client's token buckets
   (``QuotaPacer``) for the call's quota units, so a backfill stays under
   Gmail's per-mailbox per-minute quota instead of hitting 429. A real 429
@@ -94,6 +106,7 @@ from .parse import (
     METADATA_HEADERS, attachment_metadata, clean, extract_body_text, internal_date,
     is_internal, parse_gmail_message,
 )
+from .purge import copy_purge_action as capture_rules_copy_action
 from .purge import (
     drop_copies, enforce_label_rules, enforce_rules, message_key, purge_expired_unmatched,
     purged_token, refresh_conversations, scrub_queue,
@@ -121,6 +134,10 @@ OUTAGE_AFTER = 3
 # the minute the per-user quota is counted over.
 RATE_BACKOFF = (15.0, 30.0, 60.0)
 MAX_RETRY_AFTER = 300.0
+# Between runs after a temporary failure: 1, 2, 4 ... minutes, at most 60.
+TRANSIENT_BACKOFF_MINUTES = (1, 2, 4, 8, 16, 32, 60)
+
+CODE, TRANSIENT, AUTH, RESYNC = 'code', 'transient', 'auth', 'resync'
 
 KINDS = ('incremental', 'backfill', 'resync')
 _ACCESS_PURPOSE = {'incremental': 'poll', 'backfill': 'backfill', 'resync': 'resync'}
@@ -239,31 +256,72 @@ def _record_setup_failure(mailbox, kind, dry_run, exc, outcome='error', summary=
         outcome=outcome, errors=1, error_summary=summary, error_class=type(exc).__name__[:80],
     )
     if not dry_run:
-        CaptureMailbox.objects.filter(pk=mailbox.pk).update(
-            last_error=summary, consecutive_errors=F('consecutive_errors') + 1,
-        )
-        mark_attention_if_due(mailbox.pk, summary)
+        record_health(mailbox.pk, AUTH if outcome == 'auth_error' else CODE, summary)
     return run
 
 
-def mark_attention_if_due(mailbox_pk, reason):
-    """After CAPTURE_ATTENTION_AFTER_ERRORS failed runs in a row, the mailbox
-    needs a person: runs stop until it is cleared. Logged at ERROR (no alert
-    e-mail). ``reason`` holds an error class and a Gmail id at most."""
-    threshold = conf.attention_after_errors()
-    marked = CaptureMailbox.objects.filter(
-        pk=mailbox_pk, consecutive_errors__gte=threshold, needs_attention=False,
-    ).update(needs_attention=True, attention_reason=reason[:200], attention_code_version=code_version())
+def record_health(mailbox_pk, kind=None, error='', needs_resync=None, retry_after=None, reason=None):
+    """The mailbox's health after a run. ``kind`` None is a success: every
+    counter, the backoff and the auth problem are cleared. Otherwise ``kind``
+    is CODE (a message or code error: counts towards needs-attention),
+    TRANSIENT (backs off; needs attention only after hours of nothing else),
+    AUTH (shown in ``auth_problem``; never stops the mailbox) or RESYNC."""
+    now = timezone.now()
+    updates = {}
+    if needs_resync is not None:
+        updates['needs_resync'] = needs_resync
+    if kind is None:
+        updates.update(last_error='', consecutive_errors=0, attention_errors=0, transient_errors=0,
+                       transient_since=None, retry_not_before=None, auth_problem='')
+        CaptureMailbox.objects.filter(pk=mailbox_pk).update(**updates)
+        return
+    updates.update(last_error=error[:200], consecutive_errors=F('consecutive_errors') + 1)
+    if kind == CODE:
+        updates['attention_errors'] = F('attention_errors') + 1
+    elif kind == AUTH:
+        updates['auth_problem'] = error[:200]
+    elif kind == TRANSIENT:
+        updates.update(transient_errors=F('transient_errors') + 1,
+                       transient_since=Coalesce(F('transient_since'), Value(now)))
+    CaptureMailbox.objects.filter(pk=mailbox_pk).update(**updates)
+    if kind == CODE:
+        mark_attention_if_due(mailbox_pk, reason or error)
+    elif kind == TRANSIENT:
+        row = CaptureMailbox.objects.filter(pk=mailbox_pk).values('transient_errors', 'transient_since').first()
+        step = TRANSIENT_BACKOFF_MINUTES[min(row['transient_errors'], len(TRANSIENT_BACKOFF_MINUTES)) - 1]
+        wait = max(step * 60.0, float(retry_after or 0))
+        CaptureMailbox.objects.filter(pk=mailbox_pk).update(retry_not_before=now + timedelta(seconds=wait))
+        hours = conf.transient_attention_hours()
+        if row['transient_since'] and now - row['transient_since'] >= timedelta(hours=hours):
+            mark_attention(mailbox_pk, f'only temporary failures for {hours} hours (last: {error})'[:200],
+                           f'{hours} hours of temporary failures')
+
+
+def mark_attention(mailbox_pk, reason, why):
+    marked = CaptureMailbox.objects.filter(pk=mailbox_pk, needs_attention=False).update(
+        needs_attention=True, attention_reason=reason[:200], attention_code_version=code_version())
     if marked:
-        logger.error('mail capture mailbox=%s needs attention after %d failed runs: %s',
-                     mailbox_pk, threshold, reason[:200])
+        logger.error('mail capture mailbox=%s needs attention after %s: %s', mailbox_pk, why, reason[:200])
     return bool(marked)
 
 
+def mark_attention_if_due(mailbox_pk, reason):
+    """After CAPTURE_ATTENTION_AFTER_ERRORS runs in a row that failed on a
+    message or a code error, the mailbox needs a person: runs stop until it is
+    cleared. Logged at ERROR (no alert e-mail). ``reason`` holds an error
+    class and a Gmail id at most."""
+    threshold = conf.attention_after_errors()
+    if not CaptureMailbox.objects.filter(pk=mailbox_pk, attention_errors__gte=threshold).exists():
+        return False
+    return mark_attention(mailbox_pk, reason, f'{threshold} failed runs')
+
+
 def clear_attention(mailbox, actor, why):
-    """A person cleared the flag: runs may start again. On the access log."""
+    """A person cleared the flag (and any backoff): runs may start again. On
+    the access log."""
     CaptureMailbox.objects.filter(pk=mailbox.pk).update(
         needs_attention=False, attention_reason='', attention_code_version='', consecutive_errors=0,
+        attention_errors=0, transient_errors=0, transient_since=None, retry_not_before=None,
     )
     MailboxAccessLog.objects.create(
         mailbox=mailbox, at=timezone.now(), finished_at=timezone.now(), purpose='config',
@@ -303,11 +361,16 @@ def sync_mailbox(mailbox_id, client_factory, kind='incremental', dry_run=False, 
         if mailbox.attention_code_version and mailbox.attention_code_version != code_version():
             # New code since the flag was set (a deploy with a fix): try again.
             CaptureMailbox.objects.filter(pk=mailbox.pk).update(
-                needs_attention=False, attention_code_version='', consecutive_errors=0)
+                needs_attention=False, attention_code_version='', consecutive_errors=0, attention_errors=0)
             logger.info('mail capture mailbox=%s attention cleared by a new code version', mailbox.pk)
         else:
             return SyncResult(outcome='needs_attention', reason=mailbox.attention_reason,
                               mailbox_id=str(mailbox.pk), kind=kind, dry_run=dry_run)
+    if mailbox.retry_not_before and mailbox.retry_not_before > timezone.now():
+        return SyncResult(
+            outcome='deferred', mailbox_id=str(mailbox.pk), kind=kind, dry_run=dry_run,
+            reason=f'backing off after a temporary failure ({mailbox.last_error}) until '
+                   f'{mailbox.retry_not_before:%Y-%m-%d %H:%M:%S} UTC'[:200])
     try:
         client = client_factory(mailbox)
     except Exception as exc:
@@ -393,6 +456,7 @@ class _Runner:
         self.error_gid = ''
         self.error_class = ''
         self.stop_reason = ''         # 'rate_limited' when Gmail kept refusing mid-page
+        self.stop_retry_after = None
         self.skips = {}               # gmail id -> CaptureSkip pk, unused skips
         self._skipped_now = set()
         self._fetch_failed = {}       # gmail id -> GmailError, recorded with the page
@@ -406,6 +470,9 @@ class _Runner:
         # built-in label and confirmed label rules only).
         self.private_ids = frozenset()
         self.headers_only_ids = frozenset()
+        self.builtin_private_ids = frozenset()
+        self.drop_map = {}
+        self.strip_map = {}
         self.rules = ()
 
     # -- bookkeeping ---------------------------------------------------------
@@ -516,22 +583,17 @@ class _Runner:
             counts=dict(self.counts, api_calls=self.api_calls, quota_units=self.quota_units),
         )
 
-    def _health(self, error=None, needs_resync=None):
+    def _health(self, error=None, needs_resync=None, kind=CODE, retry_after=None):
         if self.dry_run:
             return
-        updates = {}
         if error is None:
-            updates.update(last_error='', consecutive_errors=0)
-        else:
-            updates.update(last_error=error[:200], consecutive_errors=F('consecutive_errors') + 1)
-        if needs_resync is not None:
-            updates['needs_resync'] = needs_resync
-        CaptureMailbox.objects.filter(pk=self.mailbox.pk).update(**updates)
-        if error is not None:
-            reason = error
-            if self.error_class:
-                reason = f'{self.error_class}' + (f' on gmail id {self.error_gid}' if self.error_gid else '')
-            mark_attention_if_due(self.mailbox.pk, reason)
+            record_health(self.mailbox.pk, None, needs_resync=needs_resync)
+            return
+        reason = error
+        if self.error_class:
+            reason = f'{self.error_class}' + (f' on gmail id {self.error_gid}' if self.error_gid else '')
+        record_health(self.mailbox.pk, kind, error, needs_resync=needs_resync, retry_after=retry_after,
+                      reason=reason)
 
     def _note_error(self, exc):
         self.error_class = type(exc).__name__
@@ -597,7 +659,7 @@ class _Runner:
                 self._list_pass(resync=False)
             if self.stop_reason == 'rate_limited':
                 self._bump('errors')
-                self._health('rate limited 429')
+                self._health('rate limited 429', kind=TRANSIENT, retry_after=self.stop_retry_after)
                 return self._finish('rate_limited', 'gmail kept rate-limiting; progress kept, continues next run')
             self._health(None)
             if self.partial:
@@ -610,27 +672,37 @@ class _Runner:
         except GmailNotFound:
             # The history cursor is too old: resync on the next run.
             self._bump('errors')
-            self._health('history 404', needs_resync=True)
+            self._health('history 404', needs_resync=True, kind=RESYNC)
             return self._finish('resync_needed', 'history id no longer valid')
         except GmailRateLimited as exc:
             self._bump('errors')
-            self._health(f'rate limited {exc.status}')
+            self._health(f'rate limited {exc.status}', kind=TRANSIENT, retry_after=exc.retry_after)
             return self._finish('rate_limited', f'gmail {exc.status}')
         except _BudgetSpent:
             if self.stop_reason == 'rate_limited':
                 self._bump('errors')
-                self._health('rate limited 429')
+                self._health('rate limited 429', kind=TRANSIENT, retry_after=self.stop_retry_after)
                 return self._finish('rate_limited', 'gmail kept rate-limiting; continues next run')
             self._health(None)
             return self._finish('partial', 'quota budget spent; continues next run')
         except GmailAuthError as exc:
-            # Never retried: the setup is wrong, and retrying cannot fix it.
+            # Never retried within the run.
             self._bump('errors')
-            self._health(f'auth {exc.code}')
             self.error_class = type(exc).__name__
+            summary = f'auth {exc.code}: {exc.hint}'
+            if exc.transient:
+                self._health(summary, kind=TRANSIENT)
+                return self._finish('unavailable', summary)
+            self._health(summary, kind=AUTH)
             logger.error('mail capture run=%s mailbox=%s authentication refused: %s',
                          getattr(self.run_row, 'pk', None), self.mailbox.pk, exc.code)
-            return self._finish('auth_error', f'auth {exc.code}: {exc.hint}')
+            return self._finish('auth_error', summary)
+        except GmailServerError as exc:
+            # Gmail failed on everything, even after retries: an outage.
+            self._bump('errors')
+            self.error_class = type(exc).__name__
+            self._health(f'gmail {exc.status}', kind=TRANSIENT)
+            return self._finish('unavailable', f'gmail {exc.status}: Gmail unavailable; retried later')
         except GmailError as exc:
             self._bump('errors')
             self._note_error(exc)
@@ -672,14 +744,25 @@ class _Runner:
             name: sorted(i for i, label in by_id.items() if label.strip().lower() == name)
             for name in sorted(rule_names)
         }
-        state = {'private': sorted(self.private_ids), 'headers_only': sorted(self.headers_only_ids)}
+        # What may remove stored copies: the built-in label at once, a label
+        # rule only for the copies its confirmed preview covered.
+        self.builtin_private_ids, self.drop_map, self.strip_map = capture_rules.label_purge_maps(
+            by_id, self.rules, mb)
+        covered = hashlib.sha256(repr(sorted(
+            (label, sorted(ids)) for table in (self.drop_map, self.strip_map) for label, ids in table.items()
+        )).encode('utf-8')).hexdigest()[:16]
+        state = {'private': sorted(self.private_ids), 'headers_only': sorted(self.headers_only_ids),
+                 'covered': covered}
         stored = dict(self.mailbox.enforced_label_ids or {})
         if self.dry_run:
             return
         if {k: stored.get(k) for k in state} != state:
-            counts = enforce_label_rules(self.mailbox, self.private_ids, self.headers_only_ids,
-                                         actor=self.actor)
+            counts = enforce_label_rules(self.mailbox, self.builtin_private_ids, self.drop_map,
+                                         self.strip_map, actor=self.actor)
             self._bump('purged', counts['messages'])
+            if counts.get('pending'):
+                logger.info('mail capture mailbox=%s label rules: %d stored copies labelled after the '
+                            'preview wait for a new preview', self.mailbox.pk, counts['pending'])
         if stored != dict(state, rule_labels=rule_labels):
             CaptureMailbox.objects.filter(pk=self.mailbox.pk).update(
                 enforced_label_ids=dict(state, rule_labels=rule_labels))
@@ -979,6 +1062,7 @@ class _Runner:
             raise _BudgetSpent()
         if isinstance(raw, GmailRateLimited):
             self.stop_reason = 'rate_limited'
+            self.stop_retry_after = raw.retry_after
             raise _BudgetSpent()
         if isinstance(raw, GmailError):
             self._fetch_failed[gid] = raw
@@ -1366,9 +1450,11 @@ class _Runner:
             labels = [x for x in labels if x not in label_ids]
         else:
             labels = list(label_ids)
-        if set(labels) & (self.private_ids | capture_rules.DROP_ON_LABEL):
-            reason = 'label' if set(labels) & self.private_ids else 'gmail_deleted'
-            self._bump('purged', drop_copies({copy.pk}, reason, self.mailbox, self.actor)['messages'])
+        if set(labels) & capture_rules.DROP_ON_LABEL:
+            self._bump('purged', drop_copies({copy.pk}, 'gmail_deleted', self.mailbox, self.actor)['messages'])
+            return
+        if self._copy_action(copy.pk, labels) == 'drop':
+            self._bump('purged', drop_copies({copy.pk}, 'label', self.mailbox, self.actor)['messages'])
             return
         if labels != copy.label_ids:
             copy.label_ids = labels
@@ -1384,8 +1470,19 @@ class _Runner:
             and not plan.headers_only
         )
 
+    def _copy_action(self, copy_pk, labels):
+        """A stored copy whose labels changed: dropped for the built-in private
+        label, or for a confirmed label rule that covered this copy; a copy
+        labelled after the rule's preview only waits (counted, logged)."""
+        action = capture_rules_copy_action(copy_pk, labels, self.builtin_private_ids, self.drop_map,
+                                           self.strip_map)
+        if action == 'pending':
+            logger.info('mail capture mailbox=%s a stored copy was labelled after its label rule\'s '
+                        'preview: it waits for a new preview', self.mailbox.pk)
+        return action
+
     def _apply_labels(self, copy_pk, label_ids):
-        if set(label_ids) & (self.private_ids | capture_rules.DROP_ON_LABEL):
+        if set(label_ids) & capture_rules.DROP_ON_LABEL or self._copy_action(copy_pk, label_ids) == 'drop':
             self._bump('purged', drop_copies({copy_pk}, 'label', self.mailbox, self.actor)['messages'])
             return
         MailboxCopy.objects.filter(pk=copy_pk).update(label_ids=list(label_ids), updated_at=timezone.now())

@@ -363,6 +363,9 @@ GOOGLE_CAPTURE_NEVER_MAILBOXES = config('GOOGLE_CAPTURE_NEVER_MAILBOXES', defaul
 # Failed runs in a row after which a mailbox is marked "needs attention" and
 # stops until a person clears it (gmail_sync --skip-once / --clear-attention).
 CAPTURE_ATTENTION_AFTER_ERRORS = config('CAPTURE_ATTENTION_AFTER_ERRORS', default=3, cast=int)
+# Temporary failures (rate limits, Gmail outages, token endpoint unreachable)
+# back off instead, and need attention only after this many hours of nothing else.
+CAPTURE_TRANSIENT_ATTENTION_HOURS = config('CAPTURE_TRANSIENT_ATTENTION_HOURS', default=24, cast=int)
 # Gmail quota pacing (units per minute; Gmail's limits are 6,000 per mailbox and
 # 1,200,000 per project). Lower values only; higher ones are capped at Gmail's.
 CAPTURE_GMAIL_USER_UNITS_PER_MINUTE = config('CAPTURE_GMAIL_USER_UNITS_PER_MINUTE', default=6000, cast=int)

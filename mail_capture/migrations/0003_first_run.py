@@ -26,13 +26,48 @@ class Migration(migrations.Migration):
         ),
         migrations.AddField(
             model_name='capturemailbox',
+            name='attention_errors',
+            field=models.PositiveIntegerField(default=0, help_text='Runs in a row that failed on a message or a code error'),
+        ),
+        migrations.AddField(
+            model_name='capturemailbox',
             name='attention_reason',
             field=models.CharField(blank=True, default='', help_text='Error class and Gmail id of the last failure; never mail content', max_length=200),
         ),
         migrations.AddField(
             model_name='capturemailbox',
+            name='auth_problem',
+            field=models.CharField(blank=True, default='', help_text='Authentication refused at the last attempt (OAuth code and hint); cleared by the next successful token', max_length=200),
+        ),
+        migrations.AddField(
+            model_name='capturemailbox',
             name='needs_attention',
-            field=models.BooleanField(default=False, help_text='Set after CAPTURE_ATTENTION_AFTER_ERRORS failed runs in a row; runs stop until a person clears it (admin action, gmail_sync --skip-once, or a new code version)'),
+            field=models.BooleanField(default=False, help_text='Set after CAPTURE_ATTENTION_AFTER_ERRORS runs in a row failed on a message or a code error (or after CAPTURE_TRANSIENT_ATTENTION_HOURS of nothing but temporary failures); runs stop until a person clears it (admin action, gmail_sync --skip-once or --clear-attention, or a new code version)'),
+        ),
+        migrations.AddField(
+            model_name='capturemailbox',
+            name='retry_not_before',
+            field=models.DateTimeField(blank=True, help_text='After a temporary failure, runs wait until this time', null=True),
+        ),
+        migrations.AddField(
+            model_name='capturemailbox',
+            name='transient_errors',
+            field=models.PositiveIntegerField(default=0, help_text='Runs in a row that failed for a temporary reason (rate limit, Gmail outage, token endpoint unreachable)'),
+        ),
+        migrations.AddField(
+            model_name='capturemailbox',
+            name='transient_since',
+            field=models.DateTimeField(blank=True, null=True),
+        ),
+        migrations.AddField(
+            model_name='capturerule',
+            name='preview_snapshot',
+            field=models.JSONField(blank=True, default=dict),
+        ),
+        migrations.AddField(
+            model_name='capturerule',
+            name='purge_copy_ids',
+            field=models.JSONField(blank=True, default=list),
         ),
         migrations.AddField(
             model_name='capturerun',
@@ -57,7 +92,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='capturerun',
             name='outcome',
-            field=models.CharField(choices=[('running', 'Running'), ('ok', 'OK'), ('partial', 'Partial; continues next run'), ('ok_with_failures', 'Finished; some messages failed or were parked'), ('auth_error', 'Authentication or permission refused'), ('needs_attention', 'Mailbox needs attention; not run'), ('disabled', 'Capture disabled'), ('busy', 'Another runner holds the mailbox'), ('resync_needed', 'Resync needed'), ('rate_limited', 'Rate limited'), ('error', 'Error')], default='running', max_length=16),
+            field=models.CharField(choices=[('running', 'Running'), ('ok', 'OK'), ('partial', 'Partial; continues next run'), ('ok_with_failures', 'Finished; some messages failed or were parked'), ('auth_error', 'Authentication or permission refused'), ('unavailable', 'Gmail or the token endpoint was unavailable; retried later'), ('deferred', 'Backing off after a temporary failure; not run'), ('needs_attention', 'Mailbox needs attention; not run'), ('disabled', 'Capture disabled'), ('busy', 'Another runner holds the mailbox'), ('resync_needed', 'Resync needed'), ('rate_limited', 'Rate limited'), ('error', 'Error')], default='running', max_length=16),
         ),
         migrations.CreateModel(
             name='CaptureSkip',
@@ -66,6 +101,7 @@ class Migration(migrations.Migration):
                 ('gmail_id', models.CharField(max_length=64)),
                 ('actor', models.CharField(max_length=80)),
                 ('reason', models.CharField(max_length=200)),
+                ('forced', models.BooleanField(default=False, help_text='Recorded with --force: the id had no recorded failure')),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('used_at', models.DateTimeField(blank=True, null=True)),
                 ('mailbox', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='skips', to='mail_capture.capturemailbox')),

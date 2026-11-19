@@ -132,6 +132,8 @@ class Rule:
     mailbox_id: object = None   # None for organisation-wide rules
     pk: object = None
     confirmed: bool = False     # may purge stored mail (blocking new capture needs no confirmation)
+    # Label rules: the stored copies (ids as text) the confirmation covers.
+    purge_copy_ids: frozenset = frozenset()
 
     def applies_to_mailbox(self, mailbox_id):
         return self.mailbox_id is None or str(self.mailbox_id) == str(mailbox_id)
@@ -219,6 +221,8 @@ def rule_from_row(row):
         mailbox_id=row.mailbox_id if row.scope == 'mailbox' else None,
         pk=row.pk,
         confirmed=row.is_confirmed,
+        purge_copy_ids=frozenset(str(x) for x in (row.purge_copy_ids or ()))
+        if row.kind == 'label' else frozenset(),
     )
 
 
@@ -275,6 +279,32 @@ def headers_only_label_ids(labels_by_id, rules, mailbox_id, confirmed_only=False
         label_id for label_id, name in (labels_by_id or {}).items()
         if str(name).strip().lower() in names
     )
+
+
+def label_purge_maps(labels_by_id, rules, mailbox_id):
+    """What may remove or strip copies already stored in this mailbox:
+
+    * ``builtin``: ids of the built-in ``CRM private`` label (any copy carrying
+      it goes, at once);
+    * ``drop``: ``{label id: copy ids}`` for confirmed label rules with a drop
+      action. Only the copies the confirmation covered (the previewed set) may
+      go; others carrying the label wait for a new preview;
+    * ``strip``: the same for confirmed headers-only label rules (bodies).
+    """
+    names = {}
+    for label_id, name in (labels_by_id or {}).items():
+        names.setdefault(str(name).strip().lower(), set()).add(label_id)
+    builtin = frozenset(names.get(PRIVATE_LABEL_NAME, ()))
+    drop, strip = {}, {}
+    for rule in rules:
+        if rule.kind != 'label' or not rule.confirmed or not rule.applies_to_mailbox(mailbox_id):
+            continue
+        target = drop if rule.action in DROP_ACTIONS else strip if rule.action == ACTION_HEADERS_ONLY else None
+        if target is None:
+            continue
+        for label_id in names.get(rule.value.strip().lower(), ()):
+            target[label_id] = frozenset(target.get(label_id, frozenset()) | rule.purge_copy_ids)
+    return builtin, drop, strip
 
 
 COPY_KEEP = 'keep'

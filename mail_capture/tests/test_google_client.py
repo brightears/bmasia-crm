@@ -339,7 +339,7 @@ def test_gmail_sync_check_reports_counts_and_logs_the_read(switched_on, monkeypa
     fake = FakeGmailClient(mb.email, messages=[gmail_message('g1', 'pat@lagoon.test', [SALES], date=recent())])
     monkeypatch.setattr('mail_capture.google_client.client_for', lambda m: fake)
     out = StringIO()
-    call_command('gmail_sync', '--check', stdout=out)
+    call_command('gmail_sync', '--check', '--mailbox', SALES, stdout=out)
     assert f'{SALES}: messages 1, history id {fake.history_id}' in out.getvalue()
     assert MailboxAccessLog.objects.get().purpose == 'check'
 

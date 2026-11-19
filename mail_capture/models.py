@@ -68,9 +68,23 @@ class CaptureMailbox(models.Model):
     consecutive_errors = models.PositiveIntegerField(default=0)
     needs_attention = models.BooleanField(
         default=False,
-        help_text='Set after CAPTURE_ATTENTION_AFTER_ERRORS failed runs in a row; runs stop until a '
-                  'person clears it (admin action, gmail_sync --skip-once, or a new code version)',
+        help_text='Set after CAPTURE_ATTENTION_AFTER_ERRORS runs in a row failed on a message or a code '
+                  'error (or after CAPTURE_TRANSIENT_ATTENTION_HOURS of nothing but temporary failures); '
+                  'runs stop until a person clears it (admin action, gmail_sync --skip-once or '
+                  '--clear-attention, or a new code version)',
     )
+    attention_errors = models.PositiveIntegerField(
+        default=0, help_text='Runs in a row that failed on a message or a code error')
+    transient_errors = models.PositiveIntegerField(
+        default=0, help_text='Runs in a row that failed for a temporary reason (rate limit, Gmail outage, '
+                             'token endpoint unreachable)')
+    transient_since = models.DateTimeField(null=True, blank=True)
+    retry_not_before = models.DateTimeField(
+        null=True, blank=True, help_text='After a temporary failure, runs wait until this time')
+    auth_problem = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Authentication refused at the last attempt (OAuth code and hint); cleared by the next '
+                  'successful token')
     attention_reason = models.CharField(
         max_length=200, blank=True, default='',
         help_text='Error class and Gmail id of the last failure; never mail content',
@@ -548,6 +562,11 @@ class CaptureRule(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='+',
     )
+    # Label rules only: the stored copies the last preview showed (ids, its time
+    # and the rule's fingerprint), and the copies a confirmation covers. A label
+    # rule purges only covered copies; copies labelled later wait for a new preview.
+    preview_snapshot = models.JSONField(default=dict, blank=True)
+    purge_copy_ids = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -606,6 +625,8 @@ class CaptureRule(models.Model):
                 self.confirmed_at = None
                 self.purge_done_at = None
                 self.confirmed_fingerprint = ''
+                self.preview_snapshot = {}
+                self.purge_copy_ids = []
         super().save(*args, **kwargs)
 
 
@@ -666,6 +687,8 @@ class CaptureSkip(models.Model):
     gmail_id = models.CharField(max_length=64)
     actor = models.CharField(max_length=80)
     reason = models.CharField(max_length=200)
+    forced = models.BooleanField(
+        default=False, help_text='Recorded with --force: the id had no recorded failure')
     created_at = models.DateTimeField(auto_now_add=True)
     used_at = models.DateTimeField(null=True, blank=True)
 
@@ -720,6 +743,8 @@ class CaptureRun(models.Model):
         ('running', 'Running'), ('ok', 'OK'), ('partial', 'Partial; continues next run'),
         ('ok_with_failures', 'Finished; some messages failed or were parked'),
         ('auth_error', 'Authentication or permission refused'),
+        ('unavailable', 'Gmail or the token endpoint was unavailable; retried later'),
+        ('deferred', 'Backing off after a temporary failure; not run'),
         ('needs_attention', 'Mailbox needs attention; not run'),
         ('disabled', 'Capture disabled'), ('busy', 'Another runner holds the mailbox'),
         ('resync_needed', 'Resync needed'), ('rate_limited', 'Rate limited'), ('error', 'Error'),

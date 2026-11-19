@@ -204,16 +204,27 @@ AUTH_HINTS = {
 }
 
 
+# Token problems that are not a refusal: the endpoint could not be reached.
+# The run ends at once all the same, but as a temporary failure (outcome
+# ``unavailable``, retried later), not as ``auth_error``.
+TRANSIENT_AUTH_CODES = frozenset({'token_endpoint_unreachable'})
+
+
 class GmailAuthError(GmailError):
-    """Authentication or permission refused. Never retried: the run ends at
-    once with outcome ``auth_error``. ``code`` is a short safe code;
-    ``hint`` names the setup step that is the likely cause."""
+    """Authentication or permission refused. Never retried within the run:
+    it ends at once with outcome ``auth_error`` (or ``unavailable`` when the
+    token endpoint could not be reached, ``transient``). ``code`` is a short
+    safe code; ``hint`` names the setup step that is the likely cause."""
 
     def __init__(self, code, status=401):
         code = code if code in AUTH_HINTS else 'permission_denied'
         super().__init__(status, code)
         self.code = code
         self.hint = AUTH_HINTS[code]
+
+    @property
+    def transient(self):
+        return self.code in TRANSIENT_AUTH_CODES
 
 
 _RATE_REASONS = ('ratelimitexceeded', 'userratelimitexceeded', 'quotaexceeded', 'dailylimitexceeded')
