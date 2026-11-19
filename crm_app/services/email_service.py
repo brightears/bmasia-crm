@@ -153,16 +153,18 @@ class EmailService:
         try:
             # Find user with this SMTP email configured
             user = User.objects.filter(smtp_email=clean_email).first()
+            # None when no password is stored or it cannot be read (get_smtp_config logs that).
+            config = user.get_smtp_config() if user else None
 
-            if user and user.smtp_password:
+            if config:
                 logger.info(f"Using SMTP credentials for {clean_email}")
                 return get_connection(
                     backend='django.core.mail.backends.smtp.EmailBackend',
-                    host='smtp.gmail.com',
-                    port=587,
-                    username=user.smtp_email,
-                    password=user.smtp_password,
-                    use_tls=True,
+                    host=config['host'],
+                    port=config['port'],
+                    username=config['email'],
+                    password=config['password'],
+                    use_tls=config['use_tls'],
                     fail_silently=False
                 )
             else:

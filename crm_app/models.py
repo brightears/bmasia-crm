@@ -1,5 +1,5 @@
 from django.db import models
-from crm_app.fields import EncryptedSecretField
+from crm_app.fields import EncryptedSecretField, UnreadableSecret
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import EmailValidator, RegexValidator
@@ -9,6 +9,8 @@ from crm_app.dates import business_today
 from django.contrib.postgres.search import SearchVectorField, SearchVector
 from django.db.models import signals
 import uuid
+import logging
+_models_logger = logging.getLogger('crm_app.models')
 
 
 class TimestampedModel(models.Model):
@@ -133,8 +135,29 @@ class User(AbstractUser):
             return company.opportunities.filter(owner=self).exists()
         return False
 
+    @property
+    def smtp_password_state(self):
+        """'not_set', 'set', or 'unreadable' (stored encrypted under a key that is not configured)."""
+        if isinstance(self.smtp_password, UnreadableSecret):
+            return 'unreadable'
+        return 'set' if self.smtp_password else 'not_set'
+
+    @property
+    def smtp_password_label(self):
+        return SMTP_PASSWORD_STATE_LABELS[self.smtp_password_state]
+
     def get_smtp_config(self):
-        """Return user's SMTP configuration or None if not configured"""
+        """Return user's SMTP configuration or None if not configured.
+
+        A stored password that cannot be decrypted gives None (sends fall back to the
+        default sender) and one warning naming the user id, never the value.
+        """
+        if self.smtp_password_state == 'unreadable':
+            _models_logger.warning(
+                'SMTP app password for user %s cannot be read with the configured '
+                'FIELD_ENCRYPTION_KEY; ask them to enter it again', self.pk,
+            )
+            return None
         if self.smtp_email and self.smtp_password:
             return {
                 'email': self.smtp_email,
@@ -144,6 +167,14 @@ class User(AbstractUser):
                 'use_tls': True,
             }
         return None
+
+
+SMTP_PASSWORD_STATE_LABELS = {
+    'not_set': 'Not set',
+    'set': 'Set',
+    'unreadable': 'Set (unreadable: needs re-entry)',
+}
+SMTP_PASSWORD_UNREADABLE_MESSAGE = "This user's mail password cannot be read: ask them to enter it again."
 
 
 class Company(TimestampedModel):

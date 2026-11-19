@@ -31,6 +31,7 @@ class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False, min_length=8)
     smtp_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
     smtp_configured = serializers.SerializerMethodField()
+    smtp_status = serializers.SerializerMethodField()
     full_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -38,7 +39,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
             'role', 'phone', 'department', 'is_active',
-            'smtp_email', 'smtp_password', 'smtp_configured',
+            'smtp_email', 'smtp_password', 'smtp_configured', 'smtp_status',
             'avatar_url', 'last_login', 'date_joined', 'password'
         ]
         read_only_fields = ['id', 'last_login', 'date_joined']
@@ -48,8 +49,12 @@ class UserSerializer(serializers.ModelSerializer):
         }
 
     def get_smtp_configured(self, obj):
-        """Check if user has SMTP configured"""
-        return bool(obj.smtp_email and obj.smtp_password)
+        """True when an address is set and the stored password can be used."""
+        return bool(obj.smtp_email) and obj.smtp_password_state == 'set'
+
+    def get_smtp_status(self, obj):
+        """'Not set', 'Set', or 'Set (unreadable: needs re-entry)'; never the value."""
+        return obj.smtp_password_label
 
     def get_full_name(self, obj):
         """Return full name or username as fallback"""

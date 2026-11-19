@@ -68,6 +68,7 @@ def _unicode_base_fonts(styles):
             s.fontName = _map[s.fontName]
     return styles
 
+from .models import SMTP_PASSWORD_UNREADABLE_MESSAGE
 from .models import (
     User, Company, Contact, Note, Task, AuditLog, start_of_local_day,
     Opportunity, OpportunityActivity, Contract, Invoice, InvoiceLineItem, ContractZone,
@@ -588,13 +589,17 @@ class UserViewSet(BaseModelViewSet):
         return Response({
             'message': 'SMTP settings updated',
             'smtp_email': user.smtp_email,
-            'smtp_configured': bool(user.smtp_email and user.smtp_password)
+            'smtp_configured': bool(user.smtp_email) and user.smtp_password_state == 'set',
+            'smtp_status': user.smtp_password_label,
         })
 
     @action(detail=False, methods=['post'])
     def test_smtp(self, request):
         """Test current user's SMTP configuration by sending a test email"""
         user = request.user
+        if user.smtp_password_state == 'unreadable':
+            user.get_smtp_config()  # logs the warning (user id only)
+            return Response({'error': SMTP_PASSWORD_UNREADABLE_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
         if not user.smtp_email or not user.smtp_password:
             return Response(
                 {'error': 'SMTP not configured'},
@@ -629,6 +634,9 @@ class UserViewSet(BaseModelViewSet):
         user = self.get_object()
         to_email = request.data.get('to_email', request.user.email)
 
+        if user.smtp_password_state == 'unreadable':
+            user.get_smtp_config()  # logs the warning (user id only)
+            return Response({'error': SMTP_PASSWORD_UNREADABLE_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
         if not user.smtp_email or not user.smtp_password:
             return Response({'error': f'{user.username} SMTP not configured'}, status=status.HTTP_400_BAD_REQUEST)
 

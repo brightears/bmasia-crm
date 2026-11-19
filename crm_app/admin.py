@@ -101,7 +101,7 @@ class UserAdmin(BaseUserAdmin):
     def smtp_password_status(self, obj):
         if obj is None or obj.pk is None:
             return 'Not set'
-        return 'Set' if obj.smtp_password else 'Not set'
+        return obj.smtp_password_label
 
 
 class ContactInline(admin.TabularInline):
