@@ -517,6 +517,10 @@ export const writeQuery = (query: ReviewQuery): URLSearchParams => {
   return out;
 };
 
+/** Contact and conflict look-ups on the Review page: at most this many at a time, and this many per page visit. */
+export const LOOKUP_CONCURRENCY = 4;
+export const LOOKUP_CAP = 300;
+
 /** The API refuses a bulk reject of more than this many (BULK_REJECT_MAX). */
 export const BULK_REJECT_MAX = 200;
 

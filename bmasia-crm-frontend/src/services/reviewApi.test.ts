@@ -98,6 +98,21 @@ describe('reads and errors', () => {
     expect(http.post).toHaveBeenCalledTimes(2);
   });
 
+  it('shows the shared handler’s message and reference for an unexpected server error', async () => {
+    http.post.mockRejectedValueOnce({
+      response: {
+        status: 500,
+        data: { error: 'Something went wrong on the server. Reference: abc12345', request_id: 'abc12345' },
+      },
+    });
+    const failed = await reviewApi.accept('p-1', 'v1').catch((e) => e);
+    expect([failed.status, failed.code, failed.detail]).toEqual([
+      500,
+      undefined,
+      'Something went wrong on the server. Reference: abc12345',
+    ]);
+  });
+
   it('escapes the contact id in the path', async () => {
     http.get.mockResolvedValueOnce({ data: {} });
     await reviewApi.getContact('../users/1');

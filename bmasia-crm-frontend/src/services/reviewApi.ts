@@ -168,10 +168,14 @@ const toError = (error: any): ReviewApiError => {
     return new ReviewApiError(undefined, 'no_answer', 'No answer from the server.');
   }
   const data = response.data && typeof response.data === 'object' && !Array.isArray(response.data) ? response.data : {};
+  // The proposals API answers refusals with {detail, code}. An unexpected server error answers with the
+  // shared handler's {error: "Something went wrong on the server. Reference: …"}; show that, reference included.
   const detail =
     typeof data.detail === 'string' && data.detail
       ? data.detail
-      : `The server refused the request (${response.status}).`;
+      : typeof data.error === 'string' && data.error
+        ? data.error
+        : `The server refused the request (${response.status}).`;
   return new ReviewApiError(response.status, typeof data.code === 'string' ? data.code : undefined, detail, data);
 };
 

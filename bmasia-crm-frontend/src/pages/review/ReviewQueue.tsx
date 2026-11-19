@@ -65,6 +65,8 @@ import {
   sortProposals,
   writeQuery,
   friendlyRefusal,
+  LOOKUP_CAP,
+  LOOKUP_CONCURRENCY,
 } from './reviewModel';
 import { acceptedText, closedResult, fieldErrorsOf, outcomeOf, rejectedText } from './decisionText';
 import { announceReviewChange } from './useReviewStatus';
@@ -80,8 +82,6 @@ const DECIDED_PAGE = 25;
 /** Cards rendered at once; more appear on request, so the page stays quick with a long queue. */
 const RENDER_STEP = 50;
 /** Contact and conflict look-ups: at most this many at a time, and this many per page visit. */
-const LOOKUP_CONCURRENCY = 4;
-const LOOKUP_CAP = 300;
 const BULK_LIST_MAX = 8;
 const SHORTCUTS_KEY = 'bmasia.review.shortcuts';
 
@@ -191,6 +191,8 @@ const ReviewQueue: React.FC = () => {
   const [contactChecks, setContactChecks] = useState<Record<string, string>>({});
   const [partnerFailed, setPartnerFailed] = useState<Record<string, boolean>>({});
   const [expiringSoon, setExpiringSoon] = useState<{ count: number; atLeast: boolean } | null>(null);
+  /** Bumped after every decision and on Refresh, so the expiry count is read again. */
+  const [expiryTick, setExpiryTick] = useState(0);
   const armed = useRef<Record<string, boolean>>({});
   const [dialog, setDialog] = useState<DialogState>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
@@ -322,7 +324,7 @@ const ReviewQueue: React.FC = () => {
     return () => {
       alive = false;
     };
-  }, [needExpiryCount]);
+  }, [needExpiryCount, expiryTick]);
 
   // ------------------------------------------------------------------ row bookkeeping
 
@@ -534,6 +536,7 @@ const ReviewQueue: React.FC = () => {
         return next;
       });
       announceReviewChange();
+      setExpiryTick((t) => t + 1);
       focusNextAfter(p.id);
     } catch (e) {
       await handleError(p, e);
@@ -558,6 +561,7 @@ const ReviewQueue: React.FC = () => {
         return next;
       });
       announceReviewChange();
+      setExpiryTick((t) => t + 1);
       setDialog(null);
       if (then) then();
       else focusNextAfter(p.id);
@@ -580,6 +584,7 @@ const ReviewQueue: React.FC = () => {
       updateRow(updated);
       setResult(p.id, { tone: 'success', text: 'Reopened. It is waiting in the Open tab again.' });
       announceReviewChange();
+      setExpiryTick((t) => t + 1);
       setDialog(null);
       focusCard(p.id);
     } catch (e) {
@@ -641,6 +646,7 @@ const ReviewQueue: React.FC = () => {
         `${rejected.size} rejected${(answer.skipped || []).length ? `, ${answer.skipped.length} not rejected (see the cards)` : ''}.`,
       );
       announceReviewChange();
+      setExpiryTick((t) => t + 1);
       setDialog(null);
     } catch (e) {
       setDialog(null);
@@ -879,6 +885,9 @@ const ReviewQueue: React.FC = () => {
         current && document.activeElement instanceof HTMLElement
           ? document.activeElement.closest('[data-proposal-id]')?.getAttribute('data-proposal-id') === current.id
           : false;
+      // a, e, r and x act on a card, and only on the card that really has focus: one check for all four.
+      const cardKey = ['a', 'e', 'r', 'x'].includes(event.key);
+      if (cardKey && (!current || !focusInCard)) return;
       switch (event.key) {
         case 'j': {
           if (index + 1 >= ids.length && s.order.length > s.renderLimit) setRenderLimit((n: number) => n + RENDER_STEP);
@@ -890,22 +899,19 @@ const ReviewQueue: React.FC = () => {
           if (ids.length) focusCard(ids[Math.max(0, index - 1)]);
           break;
         case 'e':
-          if (current && focusInCard && f.actionsFor(current).edit.ok) setEditingId(current.id);
-          else if (current && focusInCard) setSnack(f.actionsFor(current).edit.reason || 'Not possible now.');
+          if (f.actionsFor(current).edit.ok) setEditingId(current!.id);
+          else setSnack(f.actionsFor(current).edit.reason || 'Not possible now.');
           break;
         case 'r':
-          if (current && focusInCard && f.actionsFor(current).reject.ok)
-            setDialog({ type: 'reject', proposal: current });
+          if (f.actionsFor(current).reject.ok) setDialog({ type: 'reject', proposal: current! });
           break;
         case 'x':
-          if (current && focusInCard && f.actionsFor(current).select.ok)
-            f.toggleSelect(current.id, !selectedRef.current.has(current.id));
+          if (f.actionsFor(current).select.ok) f.toggleSelect(current!.id, !selectedRef.current.has(current!.id));
           break;
         case 'a': {
-          if (!current || !focusInCard) break;
           const allowed = f.actionsFor(current).accept;
           if (!allowed.ok) setSnack(allowed.reason || 'Not possible now.');
-          else if (!armed.current[current.id])
+          else if (!armed.current[current!.id])
             setSnack('Read the card first: the A key accepts once the card has been in focus for a moment.');
           else f.accept(current);
           break;
@@ -1059,6 +1065,7 @@ const ReviewQueue: React.FC = () => {
           setEditingId(null);
           resetView();
           loadOpen(query.sort);
+          setExpiryTick((t) => t + 1);
           if (query.tab === 'decided') loadDecided(1);
         }}
         disabled={busy.size > 0}
@@ -1198,7 +1205,7 @@ const ReviewQueue: React.FC = () => {
             ? `${expiringSoon.count.toLocaleString('en-US')} or more`
             : expiringSoon.count.toLocaleString('en-US')}{' '}
           open {expiringSoon.count === 1 && !expiringSoon.atLeast ? 'suggestion expires' : 'suggestions expire'} within
-          7 days. Not all of them are in this list.
+          7 days. Some of them may not be in this list.
         </Alert>
       )}
 

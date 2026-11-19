@@ -791,3 +791,101 @@ describe('plain refusals', () => {
     );
   });
 });
+
+// ------------------------------------------------------------------ final check
+
+describe('final check: pinned behaviour', () => {
+  it('the contact tick resets after a 409', async () => {
+    const p = makeProposal({
+      seen_version: 'v1',
+      target_collection: 'contact',
+      target_id: 'k-1',
+      patch: { title: 'Owner' },
+      current_values: { title: 'GM' },
+    });
+    withOpen([p]);
+    api.getContact.mockRejectedValue(new ReviewApiError(500, undefined, 'down'));
+    api.accept.mockRejectedValueOnce(
+      new ReviewApiError(409, 'stale_view', 'stale', {
+        code: 'stale_view',
+        proposal: {
+          id: p.id,
+          seen_version: 'v2',
+          status: 'proposed',
+          patch: p.patch,
+          current_values: p.current_values,
+          expected_version: 'z',
+          target_changed_at: null,
+        },
+      }),
+    );
+    api.get.mockResolvedValue({ ...p, seen_version: 'v2' });
+    renderPage();
+    const card = await findCard(p);
+    fireEvent.click(await card.findByLabelText('I have checked this contact myself'));
+    fireEvent.click(card.getByRole('button', { name: 'Accept' }));
+    await waitFor(() => expect(api.get).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(within(cardEl(p)).getByLabelText('I have checked this contact myself')).not.toBeChecked(),
+    );
+    await waitFor(() => expect(within(cardEl(p)).getByRole('button', { name: 'Accept' })).toBeDisabled());
+    expect(api.accept).toHaveBeenCalledTimes(1);
+  });
+
+  it('Retry does not take a different suggestion for the conflict partner', async () => {
+    const other = makeProposal({
+      proposer_username: 'other-bot',
+      patch: { phone: '+66 2 999 9999' },
+      evidence_quote: 'the other number',
+    });
+    const stranger = makeProposal({ evidence_quote: 'an unrelated suggestion' });
+    const p = makeProposal({
+      conflicts_with: [
+        {
+          id: other.id,
+          proposer_username: 'other-bot',
+          patch: other.patch,
+          evidence_occurred_at: null,
+          created_at: '',
+        },
+      ],
+    });
+    withOpen([p]);
+    api.get.mockRejectedValueOnce(new ReviewApiError(500, undefined, 'down')).mockResolvedValueOnce(stranger);
+    renderPage('/review?tab=look');
+    const card = await findCard(p);
+    fireEvent.click(await card.findByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+    expect(await card.findByText('Could not load the other suggestion’s evidence.')).toBeInTheDocument();
+    expect(card.queryByText('an unrelated suggestion')).not.toBeInTheDocument();
+    expect(card.getByTestId('accept-blocked-reason')).toHaveTextContent(
+      'Could not load the other suggestion’s evidence',
+    );
+  });
+
+  it('says "200 or more" when the whole soonest-expiring page expires within 7 days, and reads it again after a decision', async () => {
+    const soon = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+    const p = makeProposal({ seen_version: 'v-x' });
+    api.getSettings.mockResolvedValue(settingsOn);
+    api.listOpen.mockImplementation(async (_page, sort) =>
+      sort === 'expiring'
+        ? page(
+            Array.from({ length: 200 }, () => makeProposal({ expires_at: soon })),
+            500,
+          )
+        : page([p], 500),
+    );
+    api.accept.mockResolvedValue({ ...p, status: 'accepted', applied_patch: p.patch });
+    renderPage();
+    const line = await screen.findByTestId('expiring-soon');
+    expect(line).toHaveTextContent(
+      '200 or more open suggestions expire within 7 days. Some of them may not be in this list.',
+    );
+    const reads = () => api.listOpen.mock.calls.filter(([, sort]) => sort === 'expiring').length;
+    expect(reads()).toBe(1);
+    fireEvent.click((await findCard(p)).getByRole('button', { name: 'Accept' }));
+    await waitFor(() => expect(reads()).toBe(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(reads()).toBe(3));
+  });
+});
