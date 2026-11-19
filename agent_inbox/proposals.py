@@ -44,7 +44,7 @@ from agent_inbox.models import (
     SOURCE_URL_MAX, Activity, ChangeProposal, ProposalRefusal,
 )
 from agent_inbox.validation import (
-    ServiceError, bad, batch_field, choice, has_control, optional_uuid, past_datetime, payload_sha256,
+    ServiceError, bad, batch_field, checked_url, choice, has_control, optional_uuid, past_datetime, payload_sha256,
     quote_occurs_in, source_ref_field, strict_object, text_field, unprocessable, url_field, uuid_value,
 )
 
@@ -475,7 +475,11 @@ def _evidence(body, user, proposer_kind, company):
                 source_ref_field(body, 'evidence_source_ref', activity.source_system, SOURCE_REF_MAX),
                 activity.source_ref,
             ),
-            'evidence_source_url': (body.get('evidence_source_url'), activity.source_url),
+            # Links are compared in their checked form (host case, a default port).
+            'evidence_source_url': (
+                url_field(body, 'evidence_source_url', SOURCE_URL_MAX, activity.source_system),
+                checked_url(activity.source_url, activity.source_system)[0] or activity.source_url,
+            ),
         }
         for key, (value, actual) in given.items():
             if value not in (None, '') and value != actual:

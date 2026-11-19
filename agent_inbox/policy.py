@@ -144,15 +144,17 @@ PERSON_SOURCE_SYSTEMS = frozenset({'manual', 'crm'})
 NOT_CONFIGURED_DETAIL = ('Reviewing is not configured on this server: no reviewer is listed in '
                          'CHANGE_PROPOSAL_REVIEWER_USERNAMES.')
 NOT_LISTED_DETAIL = 'Your account is not on the reviewer list (CHANGE_PROPOSAL_REVIEWER_USERNAMES).'
-# What a caller who is not staff is told instead of NOT_CONFIGURED_DETAIL (no setting names).
+# What a caller who is not staff is told instead (no setting names).
 NOT_SET_UP_DETAIL = 'Reviewing is not set up yet.'
+NOT_ON_LIST_DETAIL = 'Your account is not on the list of reviewers.'
+_PLAIN_REFUSALS = {NOT_CONFIGURED_DETAIL: NOT_SET_UP_DETAIL, NOT_LISTED_DETAIL: NOT_ON_LIST_DETAIL}
 
 
 def refusal_text(request, refusal):
-    """The refusal as shown to this caller: the setting's name only for staff."""
+    """The refusal as shown to this caller: setting names only for staff."""
     user = getattr(request, 'user', None)
-    if refusal == NOT_CONFIGURED_DETAIL and not getattr(user, 'is_staff', False):
-        return NOT_SET_UP_DETAIL
+    if refusal in _PLAIN_REFUSALS and not getattr(user, 'is_staff', False):
+        return _PLAIN_REFUSALS[refusal]
     return refusal
 
 
