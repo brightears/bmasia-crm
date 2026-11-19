@@ -225,9 +225,15 @@ LOOKALIKE_NAMES = {
 # An explicit list: a pattern such as google.com.<cc> would also match names that a third party
 # can hold under a private second-level registry (com.de, com.se, co.no). Extend it by hand.
 GOOGLE_COUNTRY_DOMAINS = frozenset({
+    # East and South-East Asia, Australia and New Zealand, the UK.
     'google.co.th', 'google.com.hk', 'google.com.vn', 'google.com.sg', 'google.com.my', 'google.co.id',
     'google.com.ph', 'google.com.kh', 'google.la', 'google.com.mm', 'google.co.jp', 'google.co.kr',
     'google.com.tw', 'google.cn', 'google.co.in', 'google.com.au', 'google.co.nz', 'google.co.uk',
+    'google.com.bn',
+    # South Asia and the Indian Ocean (the Maldives and Sri Lanka are served).
+    'google.mv', 'google.lk', 'google.com.np', 'google.com.bd',
+    # The Gulf (the UAE is served).
+    'google.ae', 'google.com.sa', 'google.com.qa', 'google.com.kw', 'google.com.bh', 'google.com.om',
 })
 # Second-level labels under which a country domain registers names (co.th, com.au, or.jp ...).
 _COUNTRY_SECOND_LEVELS = frozenset({'co', 'com', 'net', 'org', 'or', 'ac', 'go', 'gov', 'edu', 'in', 'ne'})
