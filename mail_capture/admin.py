@@ -21,8 +21,11 @@ Configuration (mailboxes, rules, company domains) is editable by superusers.
   rule's fingerprint and count; if the rule changed since the preview the
   confirmation is refused ("the rule changed since the preview: preview
   again") and nothing is purged. A label rule covers exactly the copies its
-  preview showed (the preview stores them, valid for 60 minutes); copies
-  labelled later are reported and wait for a new preview and confirmation.
+  preview showed: each preview stores them with its own random token, who
+  made it and an expiry (60 minutes). The form carries the token; a page whose
+  preview was replaced by a later one is refused ("preview again"). Copies
+  labelled later are reported and wait for a new preview. Each confirmation
+  is in the rule's admin history: which preview (who, when, how many), by whom.
 * A mailbox marked "needs attention" (repeated failed runs) shows it in the
   list; the "Clear needs attention" action lets runs start again.
 """
@@ -176,17 +179,21 @@ class CaptureRuleAdmin(SuperuserAdmin):
         rule = get_object_or_404(CaptureRule.objects.select_related('mailbox'), pk=rule_id)
         if request.method == 'POST' and request.POST.get('confirm') == 'yes':
             try:
-                confirm_rule(rule, request.user,
-                             expected_fingerprint=str(request.POST.get('fingerprint', ''))[:64])
+                confirmed = confirm_rule(rule, request.user,
+                                         expected_fingerprint=str(request.POST.get('fingerprint', ''))[:64],
+                                         preview_token=str(request.POST.get('preview_token', ''))[:64] or None)
             except RuleChanged as exc:
                 messages.error(request, str(exc))
                 return HttpResponseRedirect(reverse('admin:mail_capture_capturerule_confirm', args=[rule.pk]))
             counts = enforce_rules(rules=[rule], actor=f'user:{request.user.pk}')
             previewed = str(request.POST.get('previewed', ''))[:12]
+            record = getattr(confirmed, 'confirmed_preview', None)
+            self.log_change(request, rule, _confirm_log(rule, record, previewed))
             rule.refresh_from_db()
             if rule.kind == 'label':
-                messages.info(request, 'Label rule confirmed for the {n} stored copies the preview showed; they '
-                              'are removed on each mailbox\'s next run.'.format(n=len(rule.purge_copy_ids)))
+                messages.info(request, 'Label rule confirmed for the {n} stored copies of the preview made by {by} '
+                              'at {at}; they are removed on each mailbox\'s next run.'.format(
+                                  n=record['count'], by=record['previewed_by'], at=record['previewed_at']))
                 later = label_rule_pending(rule)
                 if later:
                     messages.warning(request, pending_text(later))
@@ -201,25 +208,35 @@ class CaptureRuleAdmin(SuperuserAdmin):
         if rule.kind == 'label':
             # The preview remembers exactly which copies it showed; confirming
             # covers those only.
-            preview = store_label_preview(rule)
+            preview, preview_token = store_label_preview(rule, request.user)
             rule.refresh_from_db()
             can_confirm = rule.purge_state == 'awaiting_confirmation' or (
                 rule.is_confirmed and bool(preview.get('copies') or preview.get('bodies')))
             if rule.is_confirmed and can_confirm:
                 messages.warning(request, pending_text(preview.get('copies') or preview.get('bodies') or 0))
         else:
-            preview = preview_rule(rule)
+            preview, preview_token = preview_rule(rule), ''
             can_confirm = rule.purge_state == 'awaiting_confirmation'
         context = dict(
             self.admin_site.each_context(request),
             title='Confirm purge of stored mail',
             rule=rule,
             fingerprint=rule.fingerprint(),
+            preview_token=preview_token,
             preview=preview,
             can_confirm=can_confirm,
             opts=self.model._meta,
         )
         return TemplateResponse(request, 'admin/mail_capture/confirm_purge.html', context)
+
+
+def _confirm_log(rule, record, previewed):
+    """The admin history entry for a confirmation: which preview, by whom."""
+    if record:
+        return (f'Confirmed purge of the preview {record["token"]}… made by {record["previewed_by"]} at '
+                f'{record["previewed_at"]} ({record["count"]} stored copies), confirmed by '
+                f'{record["confirmed_by"]} at {record["confirmed_at"]}')
+    return f'Confirmed purge ({rule.kind} rule; the preview showed {previewed if previewed.isdigit() else "no"} messages)'
 
 
 @admin.register(CompanyDomain)

@@ -46,6 +46,22 @@ OPERATIONS (one per entry, ``op``)
                      the notes are not empty. Any status. Queryset update of
                      notes and updated_at only. Re-run: notes that already
                      hold ``text`` as a line are already applied.
+  set_sent_date      Records when the contract document was actually sent: sets
+                     ``sent_date`` to the file's ``sent_date`` (YYYY-MM-DD). Keys:
+                     contract_id, expected, expected_sent_date (the value the CRM
+                     holds now, normally null) and sent_date. Any status; status,
+                     numbers and every other field stay as they are. Queryset
+                     update of sent_date and updated_at only: Contract.save() is
+                     not called, so it neither stamps today's date (save() does that
+                     for a Sent contract without one) nor runs a post_save handler
+                     (no zone, task or email change). Refused when the contract's
+                     sent_date is neither expected_sent_date nor the new date
+                     (sent_date_changed), when the date is after today's Bangkok
+                     date (sent_date_in_future), after the contract's signed_date
+                     (sent_date_after_signed), or more than
+                     SENT_DATE_MAX_DAYS_BEFORE_START (400) days before its
+                     start_date (sent_date_too_early: a typo). Re-run: a contract
+                     whose sent_date is the file's date is already applied.
   set_renewed_from   Sets the missing ``renewed_from`` link of an existing
                      contract to an earlier contract of the same company
                      (``renewed_from_id``, whose state the entry states in
@@ -103,6 +119,17 @@ OPERATIONS (one per entry, ``op``)
                      (the company row is locked instead). See CREATE and
                      OVERLAP ALLOWED below.
 
+ONE CONTRACT, SEVERAL ENTRIES
+  A contract may carry, in one group, one entry of any operation except
+  create_successor, create_contract, hand_over_zone_links and
+  redate_zone_link_end, plus at most one set_sent_date and at most one
+  add_note. Every entry for the contract states the same ``expected`` (the
+  state read when the file was made; otherwise expected_differs). They are
+  written in this order: set_sent_date, the other operation, add_note. Each
+  writes its own audit row and journal op; --revert undoes them in the reverse
+  order, judging "changed since" on the contract's updated_at after the last of
+  them. Any other repetition of a contract is duplicate_contract_id.
+
 GROUPS
   Entries sharing a ``group`` are applied together or not at all, in one
   transaction, after every check of every entry passed. Contracts are locked
@@ -156,7 +183,10 @@ REFUSALS (named reasons; nothing in the group is written)
   no link, or a link to another contract than the file's renewed_from_id),
   successor_link_cleared (an entry of the group uses as successor_id a
   contract whose link a clear_renewed_from in the same group removes),
-  missing_company (create_contract: company_id does not exist).
+  missing_company (create_contract: company_id does not exist),
+  expected_differs (entries for one contract state different expected states),
+  sent_date_changed, sent_date_in_future, sent_date_after_signed,
+  sent_date_too_early (set_sent_date).
   create_contract also refuses missing_twin_company, overlapping_contract,
   service_location_pricing_mismatch, billing_entity_unresolved,
   number_reservation_failed and planned_terms_overlap.
@@ -288,6 +318,9 @@ REVERT
     add_note         restores the notes from before the run, only while the
                      notes and updated_at still equal the after values;
                      otherwise changed_since_apply.
+    set_sent_date    restores the sent_date from before the run, the same way
+                     (queryset update), only while sent_date and updated_at still
+                     equal the after values; otherwise changed_since_apply.
     create_contract  DELETES the created contract (and its service-location
                      rows) under the same conditions as create_successor:
                      same updated_at and status, still no renewed_from, same
@@ -345,7 +378,13 @@ FILE_FORMAT_V2 = 'contract-corrections/v2'
 JOURNAL_FORMAT_V2 = 'contract-corrections-journal/v2'
 OPS = ('mark_cancelled', 'mark_renewed', 'set_renewed_from', 'create_successor',
        'hand_over_zone_links', 'redate_zone_link_end', 'mark_expired', 'add_note', 'create_contract',
-       'clear_renewed_from')
+       'clear_renewed_from', 'set_sent_date')
+# May share a contract with one other entry of the same group (ONE CONTRACT, SEVERAL ENTRIES).
+COMPANION_OPS = ('set_sent_date', 'add_note')
+# Write order for the entries of one contract: set_sent_date, the other operation, add_note.
+_WRITE_RANK = {'set_sent_date': 0, 'add_note': 2}
+# set_sent_date: a sent date this long before the term starts is taken for a typo.
+SENT_DATE_MAX_DAYS_BEFORE_START = 400
 LINK_OPS = ('hand_over_zone_links', 'redate_zone_link_end')
 CREATE_OPS = ('create_successor', 'create_contract')
 CANCELLABLE = {'Draft', 'Sent', 'Active'}
@@ -368,6 +407,7 @@ _OP_KEYS = {
     'redate_zone_link_end': ({'contract_id', 'expected', 'closed_on'}, set()),
     'mark_expired': ({'contract_id', 'expected'}, set()),
     'add_note': ({'contract_id', 'expected', 'text'}, set()),
+    'set_sent_date': ({'contract_id', 'expected', 'expected_sent_date', 'sent_date'}, set()),
     'create_contract': ({'company_id', 'new'}, {'twin_company_ids', 'overlap_allowed'}),
 }
 _EXPECTED_KEYS = {'status', 'start_date', 'end_date', 'updated_at'}
@@ -437,6 +477,8 @@ class EntryV2:
     closed_on: Optional[date] = None
     company_id: Optional[str] = None     # create_contract only
     text: Optional[str] = None           # add_note only
+    sent_date: Optional[date] = None     # set_sent_date only: the date to record
+    expected_sent_date: Optional[date] = None  # set_sent_date only: the value the CRM holds now
     # clear_renewed_from only: the link the contract holds now. Deliberately not a
     # referenced id: the former predecessor is neither locked nor checked.
     clearing_renewed_from_id: Optional[str] = None
@@ -692,6 +734,12 @@ def parse_v2(data):
                 entry.closed_on = _date(raw['closed_on'], f'{where} closed_on')
             elif op == 'add_note':
                 entry.text = _text(raw['text'], f'{where} text', _NOTE_LINE_MAX)
+            elif op == 'set_sent_date':
+                entry.sent_date = _date(raw['sent_date'], f'{where} sent_date')
+                entry.expected_sent_date = _date(raw['expected_sent_date'], f'{where} expected_sent_date',
+                                                 nullable=True)
+                if entry.expected_sent_date == entry.sent_date:
+                    raise _malformed(f'{where}: sent_date equals expected_sent_date; nothing to set')
             elif op == 'set_renewed_from':
                 entry.renewed_from_id = _uuid(raw['renewed_from_id'], f'{where} renewed_from_id')
                 entry.renewed_from_expected = _expected(raw['renewed_from_expected'], f'{where} renewed_from_expected')
@@ -710,13 +758,33 @@ def parse_v2(data):
     return entries, file_conflicts(entries)
 
 
+def _shares_allowed(same):
+    """True when these entries for one contract may go together (ONE CONTRACT, SEVERAL ENTRIES)."""
+    if len({e.group for e in same}) != 1:
+        return False
+    ops = Counter(e.op for e in same)
+    main = [e for e in same if e.op not in COMPANION_OPS]
+    if len(main) > 1 or any(ops[op] > 1 for op in COMPANION_OPS):
+        return False
+    return not any(e.op in CREATE_OPS or e.op in LINK_OPS for e in main)
+
+
 def file_conflicts(entries):
     """{group: reason} for groups refused because of another entry in the file."""
     refused = {}
-    changed = Counter(e.contract_id for e in entries if e.contract_id)
+    by_contract = {}
     for e in entries:
-        if e.contract_id and changed[e.contract_id] > 1:
-            refused[e.group] = 'duplicate_contract_id'
+        if e.contract_id:
+            by_contract.setdefault(e.contract_id, []).append(e)
+    for same in by_contract.values():
+        if len(same) < 2:
+            continue
+        if not _shares_allowed(same):
+            for e in same:
+                refused[e.group] = 'duplicate_contract_id'
+        elif len({(e.expected.status, e.expected.start, e.expected.end, e.expected.updated_at)
+                  for e in same}) > 1:
+            refused.setdefault(same[0].group, 'expected_differs')
     seen = {}
     for e in entries:
         for cid in (e.contract_id, *e.referenced_ids):
@@ -1006,12 +1074,13 @@ class V2Runner:
                 details = {i: p['detail'] for i, p in plans.items()}
                 if not self.cmd.execute_mode:
                     return 'would_apply', rows(details)
-                journal_ops = []
-                for e in members:
-                    journal_ops.append(self._write(group, e, locked, plans[e.index]))
+                journal_ops, written = [], {}
+                for e in sorted(members, key=lambda m: (_WRITE_RANK.get(m.op, 1), m.index)):
+                    written[e.index] = self._write(group, e, locked, plans[e.index])
+                    journal_ops.append(written[e.index])
                 for e in members:
                     if e.op in CREATE_OPS:
-                        created = journal_ops[members.index(e)]['created']
+                        created = written[e.index]['created']
                         details[e.index] = f'created {created["contract_id"]} {created["contract_number"]}; ' + details[e.index]
                 # Journal before commit: a crash after this point leaves either
                 # nothing applied (revert then finds the before state) or the
@@ -1281,6 +1350,29 @@ class V2Runner:
             plan['detail'] = (f'appends a {len(e.text)}-character line to notes '
                               f'({"after " + str(len(c.notes.splitlines())) + " line(s)" if c.notes else "notes were empty"}); '
                               f'status stays {c.status}')
+        return plan
+
+    def _check_set_sent_date(self, e, c, locked, members):
+        def in_target(x):
+            return x.sent_date == e.sent_date
+
+        state = _check_expected(c, e.expected, in_target)
+        if state == 'expected' and in_target(c):
+            state = 'target'  # the date is there already; nothing to write
+        plan = {'state': state, 'detail': ''}
+        if state != 'expected':
+            return plan
+        if c.sent_date != e.expected_sent_date:
+            raise Refused('sent_date_changed')
+        from crm_app.dates import business_today
+        if e.sent_date > business_today():
+            raise Refused('sent_date_in_future')
+        if c.signed_date and e.sent_date > c.signed_date:
+            raise Refused('sent_date_after_signed')
+        if (c.start_date - e.sent_date).days > SENT_DATE_MAX_DAYS_BEFORE_START:
+            raise Refused('sent_date_too_early')
+        plan['detail'] = (f'sent_date {c.sent_date.isoformat() if c.sent_date else "empty"} -> '
+                          f'{e.sent_date.isoformat()}; status stays {c.status}')
         return plan
 
     def _check_create_contract(self, e, c, locked, members):
@@ -1563,6 +1655,18 @@ class V2Runner:
         return {'op': e.op, 'class': e.cls, 'evidence': e.evidence, 'contract_id': e.contract_id,
                 'before': before, 'after': after}
 
+    def _write_set_sent_date(self, group, e, c, locked, plan):
+        old = c.sent_date
+        before = {**contract_state(c), 'sent_date': _iso(old)}
+        # Queryset update, not save(): no "today" stamp, no numbering, no post_save handler.
+        Contract.objects.filter(pk=c.pk).update(sent_date=e.sent_date, updated_at=timezone.now())
+        c.refresh_from_db()
+        after = {**contract_state(c), 'sent_date': _iso(c.sent_date)}
+        self._audit('UPDATE', c.pk, {'sent_date': {'old': _iso(old), 'new': _iso(c.sent_date)}}, group, e,
+                    {'action': 'Correction: sent date recorded'})
+        return {'op': e.op, 'class': e.cls, 'evidence': e.evidence, 'contract_id': e.contract_id,
+                'before': before, 'after': after}
+
     def _write_create_contract(self, group, e, _none, locked, plan):
         from crm_app.services.rene_phase2 import RenePhase2Error, _reserve_final_contract_number
         new = e.new
@@ -1757,10 +1861,13 @@ class V2Runner:
         c = locked.get(op['contract_id'])
         if c is None:
             return 'changed'
-        if op['op'] == 'add_note':
-            if c.notes == op['after']['notes'] and self._contract_matches(c, {'updated_at': op['after']['updated_at']}):
+        if op['op'] in COMPANION_OPS:
+            field_name = 'notes' if op['op'] == 'add_note' else 'sent_date'
+            current = c.notes if field_name == 'notes' else _iso(c.sent_date)
+            stamp = {k: v for k, v in op['after'].items() if k == 'updated_at'}
+            if current == op['after'][field_name] and self._contract_matches(c, stamp):
                 return 'after'
-            if c.notes == op['before']['notes']:
+            if current == op['before'][field_name]:
                 return 'before'
             return 'changed'
         restorable = {k: v for k, v in op['before'].items() if k != 'updated_at'}
@@ -1841,7 +1948,13 @@ class V2Runner:
                              {op['created']['contract_id'] for op in ops if op.get('created')})
                 locked = {str(c.pk): c for c in
                           Contract.objects.select_for_update().filter(pk__in=ids).order_by('pk')}
-                states = [self._op_state(op, locked) for op in ops]
+                # Several ops on one contract (ONE CONTRACT, SEVERAL ENTRIES): only the last one
+                # written left its updated_at; the earlier ones are judged on their own fields.
+                last = {op['contract_id']: n for n, op in enumerate(ops)}
+                states = [self._op_state(op if last[op['contract_id']] == n else
+                                         {**op, 'after': {k: v for k, v in op['after'].items() if k != 'updated_at'}},
+                                         locked)
+                          for n, op in enumerate(ops)]
                 if 'handed_over_since' in states:
                     for op, state in zip(ops, states):
                         if state == 'handed_over_since':
@@ -1885,6 +1998,18 @@ class V2Runner:
             )
             created.delete()  # cascades to its service-location rows
             return 'final number not reused'
+        if op['op'] == 'set_sent_date':
+            c = locked[op['contract_id']]
+            old = op['before']['sent_date']
+            Contract.objects.filter(pk=c.pk).update(sent_date=date.fromisoformat(old) if old else None,
+                                                    updated_at=timezone.now())
+            AuditLog.objects.create(
+                user=self.cmd.actor, action='UPDATE', model_name='Contract', record_id=str(c.pk),
+                changes={'sent_date': {'old': op['after']['sent_date'], 'new': old}},
+                additional_data=self._revert_meta(group, cls, op, reverted_batch,
+                                                  'Correction reverted: sent date restored'),
+            )
+            return 'sent date restored'
         if op['op'] == 'add_note':
             c = locked[op['contract_id']]
             Contract.objects.filter(pk=c.pk).update(notes=op['before']['notes'], updated_at=timezone.now())
