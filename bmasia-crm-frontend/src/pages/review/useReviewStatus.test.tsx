@@ -8,6 +8,10 @@ import CompanyReviewLink from './CompanyReviewLink';
 import { settingsOn } from './testFixtures';
 
 jest.mock('../../services/authService', () => ({ __esModule: true, default: {}, authApi: {} }));
+let mockRole = 'Sales';
+jest.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ user: { username: 'someone', role: mockRole, is_active: true } }),
+}));
 jest.mock('../../services/reviewApi', () => {
   const actual = jest.requireActual('../../services/reviewApi');
   return { __esModule: true, ...actual, default: { getSettings: jest.fn(), openCount: jest.fn() } };
@@ -151,6 +155,41 @@ describe('people who may not review', () => {
     await act(async () => {
       jest.advanceTimersByTime(5 * 60_000);
     });
+    expect(api.openCount).not.toHaveBeenCalled();
+  });
+});
+
+describe('the company chip follows the role table', () => {
+  afterEach(() => {
+    mockRole = 'Sales';
+  });
+
+  it.each(['Admin', 'Sales', 'Finance', 'Tech', 'Music'])('shows for %s when switched on', async (role) => {
+    mockRole = role;
+    api.getSettings.mockResolvedValue(settingsOn);
+    api.openCount.mockResolvedValue(2);
+    render(
+      <MemoryRouter>
+        <CompanyReviewLink companyId="c-9" />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByTestId('company-review-link')).toHaveTextContent('2 suggestions to review');
+  });
+
+  it('shows nothing, and asks nothing, for an account without a role', async () => {
+    mockRole = '';
+    api.getSettings.mockResolvedValue(settingsOn);
+    api.openCount.mockResolvedValue(2);
+    render(
+      <MemoryRouter>
+        <CompanyReviewLink companyId="c-9" />
+      </MemoryRouter>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByTestId('company-review-link')).not.toBeInTheDocument();
+    expect(api.getSettings).not.toHaveBeenCalled();
     expect(api.openCount).not.toHaveBeenCalled();
   });
 });

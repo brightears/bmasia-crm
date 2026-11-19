@@ -44,6 +44,9 @@ export const MODULE_ROLES = {
   'contract-templates': SALES,
   'seasonal-dates': ADMIN,
   users: ADMIN,
+  // The Review page: every real role may open it; the server's reviewer list decides who can act
+  // (everyone else sees it read-only, with no count).
+  review: EVERY_ROLE,
 };
 
 export type PageModule = keyof typeof MODULE_ROLES;
@@ -62,6 +65,7 @@ export type PageAction = keyof typeof ACTION_ROLES;
 /** The module behind each side-menu entry (and so behind each page offered in search). */
 export const MENU_PATH_MODULE: Record<string, PageModule> = {
   '/today': 'today',
+  '/review': 'review',
   '/dashboard': 'dashboard',
   '/companies': 'companies',
   '/contacts': 'contacts',

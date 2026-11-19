@@ -320,7 +320,14 @@ function App() {
         {/* New navigation routes */}
         <Route path="/today" element={<ActionCenter />} />
         <Route path="/needs-fixing/:key?" element={<NeedsFixing />} />
-        <Route path="/review" element={<ReviewQueue />} />
+        <Route
+          path="/review"
+          element={
+            <ProtectedRoute requiredModule="review">
+              <ReviewQueue />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/quick-actions" element={<Navigate to="/today" replace />} />
         <Route
           path="/contacts"

@@ -19,7 +19,7 @@ const JS = ['java', 'script:'].join('');
 jest.mock('../../services/authService', () => ({ __esModule: true, default: {}, authApi: {} }));
 
 jest.mock('../../contexts/AuthContext', () => ({
-  useAuth: () => ({ user: { username: 'reviewer.one' } }),
+  useAuth: () => ({ user: { username: 'reviewer.one', role: 'Admin', is_active: true } }),
 }));
 
 jest.mock('../../services/reviewApi', () => {

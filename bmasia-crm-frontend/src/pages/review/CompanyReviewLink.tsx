@@ -3,6 +3,8 @@ import { Link as RouterLink } from 'react-router-dom';
 import { Chip } from '@mui/material';
 import { FactCheckOutlined } from '@mui/icons-material';
 import reviewApi from '../../services/reviewApi';
+import { useAuth } from '../../contexts/AuthContext';
+import { canOpenModule } from '../../utils/access';
 import { loadReviewSettings, proposalsOn, REVIEW_CHANGED_EVENT } from './useReviewStatus';
 
 /**
@@ -11,8 +13,15 @@ import { loadReviewSettings, proposalsOn, REVIEW_CHANGED_EVENT } from './useRevi
  */
 const CompanyReviewLink: React.FC<{ companyId: string }> = ({ companyId }) => {
   const [count, setCount] = useState(0);
+  const { user } = useAuth();
+  // The chip follows the Review page's place in the role table (src/utils/access.ts).
+  const allowed = canOpenModule(user, 'review');
 
   useEffect(() => {
+    if (!allowed) {
+      setCount(0);
+      return;
+    }
     let alive = true;
     const refresh = async () => {
       const settings = await loadReviewSettings();
@@ -33,9 +42,9 @@ const CompanyReviewLink: React.FC<{ companyId: string }> = ({ companyId }) => {
       alive = false;
       window.removeEventListener(REVIEW_CHANGED_EVENT, refresh);
     };
-  }, [companyId]);
+  }, [companyId, allowed]);
 
-  if (count <= 0) return null;
+  if (!allowed || count <= 0) return null;
   return (
     <Chip
       component={RouterLink}
