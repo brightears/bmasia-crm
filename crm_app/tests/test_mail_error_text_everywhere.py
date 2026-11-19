@@ -191,33 +191,67 @@ def test_exception_text_rules():
     assert exception_text(ValueError('a plain message')) == 'a plain message'
 
 
-def _handler_misuses(path):
-    """(line, what) for every use of a caught exception other than exception_text(<name>)."""
-    tree = ast.parse(path.read_text(), filename=str(path))
+ALLOWED_LOGGER = 'log_caught_exception'
+
+
+def _misuses_in_source(source, filename='<sample>'):
+    """(line, what) for every way this module could turn an exception into text or a traceback
+    other than exception_text(<name>) or log_caught_exception(<context>, <name>[, level]).
+
+    Anywhere outside the body of log_caught_exception (the one allowed logging site):
+    exc_info= or stack_info= keywords, logger.exception(), any call on the traceback module,
+    sys.exc_info(). In every except block: a bare except, and any use of the caught name other
+    than as the argument of exception_text() or the exception argument of log_caught_exception().
+    """
+    tree = ast.parse(source, filename=filename)
     parents = {}
     for node in ast.walk(tree):
         for child in ast.iter_child_nodes(node):
             parents[child] = node
+
+    allowed_nodes = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == ALLOWED_LOGGER:
+            allowed_nodes.update(ast.walk(node))
+
     problems = []
+    for node in ast.walk(tree):
+        if node in allowed_nodes or not isinstance(node, ast.Call):
+            continue
+        for kw in node.keywords:
+            if kw.arg in ('exc_info', 'stack_info'):
+                problems.append((node.lineno, kw.arg))
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            if func.attr == 'exception':
+                problems.append((node.lineno, 'logger.exception'))
+            if isinstance(func.value, ast.Name) and func.value.id == 'traceback':
+                problems.append((node.lineno, f'traceback.{func.attr}'))
+            if isinstance(func.value, ast.Name) and func.value.id == 'sys' and func.attr == 'exc_info':
+                problems.append((node.lineno, 'sys.exc_info'))
+        if isinstance(func, ast.Name) and func.id in ('format_exc', 'print_exc', 'format_exception', 'exc_info'):
+            problems.append((node.lineno, func.id))
+
     for handler in (n for n in ast.walk(tree) if isinstance(n, ast.ExceptHandler)):
-        for node in ast.walk(handler):
-            if isinstance(node, ast.Call):
-                for kw in node.keywords:
-                    if kw.arg == 'exc_info':
-                        problems.append((node.lineno, 'exc_info'))
-                func = node.func
-                if isinstance(func, ast.Attribute) and func.attr == 'exception':
-                    problems.append((node.lineno, 'logger.exception'))
+        if handler.type is None:
+            problems.append((handler.lineno, 'bare except'))
         if not handler.name:
             continue
         for node in ast.walk(handler):
             if isinstance(node, ast.Name) and node.id == handler.name and isinstance(node.ctx, ast.Load):
                 parent = parents.get(node)
-                ok = (isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name)
-                      and parent.func.id == 'exception_text' and parent.args == [node])
-                if not ok:
-                    problems.append((node.lineno, f'{handler.name} used outside exception_text()'))
+                in_text = (isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name)
+                           and parent.func.id == 'exception_text' and parent.args == [node])
+                in_logger = (isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name)
+                             and parent.func.id == ALLOWED_LOGGER and len(parent.args) >= 2
+                             and parent.args[1] is node)
+                if not (in_text or in_logger):
+                    problems.append((node.lineno, f'{handler.name} used outside exception_text()/{ALLOWED_LOGGER}()'))
     return problems
+
+
+def _handler_misuses(path):
+    return _misuses_in_source(path.read_text(), str(path))
 
 
 @pytest.mark.parametrize('path', CHECKED_MODULES, ids=lambda p: p.name)
@@ -225,17 +259,94 @@ def test_no_except_block_turns_an_exception_into_text_another_way(path):
     assert _handler_misuses(path) == []
 
 
-def test_the_source_check_catches_the_patterns_it_must():
-    sample = REPO / 'crm_app' / 'tests' / '_tmp_mail_error_sample.py'
-    sample.write_text(
-        'try:\n    pass\nexcept Exception as e:\n    x = str(e)\n'
-        'try:\n    pass\nexcept Exception as e:\n    y = f"{e}"\n'
-        'try:\n    pass\nexcept Exception as e:\n    z = repr(e)\n'
-        'try:\n    pass\nexcept Exception as e:\n    log.error("%s", e, exc_info=True)\n'
-        'try:\n    pass\nexcept Exception as e:\n    ok = exception_text(e)\n'
-    )
+SAMPLE_BLOCKS = [
+    ('x = str(e)', True),
+    ('y = f"{e}"', True),
+    ('z = repr(e)', True),
+    ('log.error("%s", e, exc_info=True)', True),
+    ('log.error("x", stack_info=True)', True),
+    ('t = traceback.format_exc()', True),
+    ('traceback.print_exc()', True),
+    ('t = traceback.format_exception(e)', True),
+    ('t = sys.exc_info()', True),
+    ('log.exception("x")', True),
+    ('log_caught_exception(e, "wrong order")', True),
+    ('ok = exception_text(e)', False),
+    ('log_caught_exception("context", e)', False),
+    ('log_caught_exception(f"context {x}", e, logging.WARNING)', False),
+]
+
+
+@pytest.mark.parametrize('body,flagged', SAMPLE_BLOCKS)
+def test_the_source_check_catches_the_patterns_it_must(body, flagged):
+    source = f'try:\n    pass\nexcept Exception as e:\n    {body}\n'
+    assert bool(_misuses_in_source(source)) is flagged
+
+
+def test_the_source_check_refuses_a_bare_except_and_allows_the_helper_body():
+    assert _misuses_in_source('try:\n    pass\nexcept:\n    pass\n') == [(3, 'bare except')]
+    helper = ('def log_caught_exception(context, exc, level=0):\n'
+              '    logger.log(level, "%s", context, exc_info=(type(exc), exc, exc.__traceback__))\n')
+    assert _misuses_in_source(helper) == []
+    assert _misuses_in_source(helper.replace('log_caught_exception', 'some_other_helper')) == [(2, 'exc_info')]
+
+
+# --- bug evidence: non-mail errors keep type and traceback, mail errors never ---------------
+
+@pytest.mark.parametrize('name', SENDERS)
+def test_a_mail_error_is_logged_without_any_traceback(name, echo_server, records, caplog):
+    with caplog.at_level(logging.DEBUG):
+        _senders(records)[name]()
+    mail_records = [r for r in caplog.records if 'SMTPAuthenticationError' in r.getMessage()]
+    assert mail_records
+    assert all(r.exc_info is None and not r.stack_info for r in caplog.records if r.name.startswith('crm_app'))
+    assert MARKER not in _logged(caplog)
+
+
+@pytest.mark.parametrize('name,viewset,attr', [
+    ('quote', 'QuoteViewSet', 'pdf'),
+    ('contract', 'ContractViewSet', 'pdf'),
+    ('invoice', 'InvoiceViewSet', 'pdf'),
+    ('receipt', 'InvoiceViewSet', 'receipt_pdf'),
+])
+def test_a_bug_in_the_pdf_step_is_logged_with_type_message_and_traceback(name, viewset, attr, echo_server, records,
+                                                                        caplog):
+    from crm_app import views
+
+    def broken(self, request, pk=None):
+        return 1 + 'one'  # a TypeError, the kind of bug that needs its traceback
+
+    echo_server.setattr(getattr(views, viewset), attr, broken)
+    with caplog.at_level(logging.DEBUG):
+        ok, message = _senders(records)[name]()
+    assert ok is False
+    assert message.startswith('Failed to generate the ')  # the reply is unchanged: summary and reference
+    assert 'Reference: ' in message and 'TypeError' not in message
+    bug = [r for r in caplog.records if r.exc_info and r.exc_info[0] is TypeError]
+    assert len(bug) == 1
+    text = bug[0].getMessage()
+    assert 'TypeError: unsupported operand type(s)' in text
+    formatted = ''.join(traceback.format_exception(*bug[0].exc_info))
+    assert 'in broken' in formatted and "1 + 'one'" in formatted
+    assert MARKER not in _logged(caplog)
+
+
+def test_log_caught_exception_refuses_a_traceback_for_a_mail_error(caplog):
+    from crm_app.services.email_service import log_caught_exception
     try:
-        lines = sorted({line for line, _ in _handler_misuses(sample)})
-    finally:
-        sample.unlink()
-    assert lines == [4, 8, 12, 16]
+        _echo()
+    except smtplib.SMTPException as exc:
+        with caplog.at_level(logging.DEBUG):
+            log_caught_exception('Context', exc)
+    (record,) = caplog.records
+    assert record.exc_info is None
+    assert record.getMessage() == 'Context: SMTPAuthenticationError (SMTP code 535): the mail server did not accept the login'
+    try:
+        raise TypeError('a bug')
+    except TypeError as exc:
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG):
+            log_caught_exception('Context', exc, logging.WARNING)
+    (record,) = caplog.records
+    assert record.levelno == logging.WARNING and record.exc_info[0] is TypeError
+    assert record.getMessage() == 'Context: TypeError: a bug'
