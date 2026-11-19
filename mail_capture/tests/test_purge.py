@@ -32,11 +32,24 @@ def run(mailbox, client, **kwargs):
     return sync_mailbox(mailbox.pk, factory_for(client), sleep=lambda s: None, **kwargs)
 
 
+def _confirm(rule):
+    if rule.kind == 'label':
+        purge.store_label_preview(rule)     # a label rule covers what its preview showed
+    return purge.confirm_rule(rule, expected_fingerprint=rule.fingerprint())
+
+
 def confirmed_rule(**kwargs):
     rule = CaptureRule.objects.create(**kwargs)
-    purge.confirm_rule(rule)
+    _confirm(rule)
     rule.refresh_from_db()
     return rule
+
+
+def preview_form(page):
+    """The hidden fields of the confirmation page, as the browser posts them."""
+    import re
+    fields = dict(re.findall(r'<input type="hidden" name="(fingerprint|previewed)" value="([^"]*)"', page))
+    return dict(fields, confirm='yes')
 
 
 @pytest.fixture
@@ -193,7 +206,7 @@ class TestCompleteness:
                 purge.enforce_rules()
                 # Not confirmed yet: passing it explicitly still does nothing.
                 purge.enforce_rules(rules=[CaptureRule.objects.get(value='pat@unknown-co.test')])
-                purge.confirm_rule(CaptureRule.objects.get(value='pat@unknown-co.test'))
+                _confirm(CaptureRule.objects.get(value='pat@unknown-co.test'))
                 purge.enforce_rules()
         finally:
             mail_purged.disconnect(dispatch_uid='test-purge-refs')
@@ -342,7 +355,7 @@ class TestLabelsAndDeletion:
         client.add_message(gmail_message('g2', 'pat@lagoon.test', [SALES], date=recent(),
                                          labels=('INBOX', 'Label_5'), message_id='<new@mail.example.org>'))
         assert run(mb, client).counts['skipped_by_rule'] == 1   # but new capture is blocked at once
-        purge.confirm_rule(rule)
+        _confirm(rule)
         run(mb, client)
         assert _nothing_left()
 
@@ -365,7 +378,7 @@ class TestLabelsAndDeletion:
         rule = CaptureRule.objects.create(kind=kind, value='nothing-here.test' if kind == 'domain' else
                                           ('nobody@nothing-here.test' if kind == 'address' else 'Other'),
                                           action='skip')
-        purge.confirm_rule(rule)
+        _confirm(rule)
         run(mb, client)
         CaptureRule.objects.filter(pk=rule.pk).update(value=value)
         run(mb, client)
@@ -443,7 +456,7 @@ class TestAdmin:
         page = admin_client.get(response['Location']).content.decode()
         assert 'Messages purged: <strong>1</strong>' in page
         assert 'Unmatched-sender rows removed: <strong>1</strong>' in page
-        response = admin_client.post(response['Location'], {'confirm': 'yes'})
+        response = admin_client.post(response['Location'], preview_form(page))
         assert response.status_code == 302
         assert _nothing_left() and UnmatchedSender.objects.count() == 0
         assert CaptureRule.objects.get().purge_state == 'done'

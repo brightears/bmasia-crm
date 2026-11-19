@@ -28,6 +28,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import ApiService from '../services/api';
 import AudienceSelector from '../components/AudienceSelector';
 import { EmailTemplate } from '../types';
+import { logApiError } from '../utils/logApiError';
 
 const steps = ['Campaign Basics', 'Email Content', 'Select Audience', 'Schedule', 'Review & Send'];
 
@@ -60,7 +61,7 @@ const CampaignCreate: React.FC = () => {
         const response = await ApiService.getEmailTemplates({ is_active: true });
         setTemplates(response.results || []);
       } catch (error) {
-        console.error('Failed to load templates:', error);
+        logApiError('Failed to load templates:', error);
       } finally {
         setTemplatesLoading(false);
       }
@@ -120,9 +121,7 @@ const CampaignCreate: React.FC = () => {
         contact_ids: selectedContactIds,
       };
 
-      console.log('Creating campaign:', campaignData);
       const createdCampaign = await ApiService.createCampaign(campaignData);
-      console.log('Campaign created:', createdCampaign);
 
       setSuccessMessage('Campaign created successfully!');
 
@@ -131,7 +130,8 @@ const CampaignCreate: React.FC = () => {
         navigate(`/campaigns/${createdCampaign.id}`);
       }, 1500);
     } catch (err: any) {
-      console.error('Campaign creation error:', err);
+      // Not the error object itself: it carries the request body (recipients and email text).
+      console.error('Campaign creation failed:', err.response?.status ?? err.message);
       setError(`Failed to create campaign: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);

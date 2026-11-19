@@ -77,6 +77,30 @@ def test_nobody_set_to_receive_it_is_a_422_with_a_code(company, client, kind):
     assert mail.outbox == []
 
 
+def test_a_draft_that_finds_nobody_stays_a_draft(company, client):
+    """The no-recipient refusal comes before anything is recorded: the invoice is not marked as sent."""
+    _contact(company, 'kim@lotusbay.example.com', contact_type='Billing', **OFF)
+    invoice = _invoice(company)
+    response = client.post(f'/api/v1/invoices/{invoice.pk}/send/', {}, format='json')
+    assert (response.status_code, response.json()['code']) == (422, 'no_recipient')
+    invoice.refresh_from_db()
+    assert invoice.status == 'Draft'
+    assert mail.outbox == []
+
+
+@pytest.mark.parametrize('status', ['Cancelled', 'Refunded'])
+def test_an_invoice_that_may_not_be_sent_is_refused_before_the_recipients(company, client, status):
+    """A Cancelled or Refunded invoice gets 409 not_sendable even when nobody is set to receive it."""
+    _contact(company, 'kim@lotusbay.example.com', contact_type='Billing', **OFF)
+    invoice = _invoice(company)
+    Invoice.objects.filter(pk=invoice.pk).update(status=status)
+    response = client.post(f'/api/v1/invoices/{invoice.pk}/send/', {}, format='json')
+    assert (response.status_code, response.json()['code']) == (409, 'not_sendable')
+    invoice.refresh_from_db()
+    assert invoice.status == status
+    assert mail.outbox == []
+
+
 def test_mark_paid_carries_the_refusal_code(company, client):
     _contact(company, 'kim@lotusbay.example.com', contact_type='Billing', **OFF)
     invoice = _invoice(company)

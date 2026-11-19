@@ -51,6 +51,7 @@ import {
 import { Company, ClientTechDetail, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import ClientTechDetailForm from '../components/ClientTechDetailForm';
+import { logApiError } from '../utils/logApiError';
 
 const ClientTechDetails: React.FC = () => {
   // Data state
@@ -115,7 +116,7 @@ const ClientTechDetails: React.FC = () => {
       setStats(statsData);
     } catch (err: any) {
       setError('Failed to load tech details');
-      console.error('ClientTechDetails error:', err);
+      logApiError('ClientTechDetails error:', err);
     } finally {
       setLoading(false);
     }
@@ -131,7 +132,7 @@ const ClientTechDetails: React.FC = () => {
         const companiesData = await ApiService.getCompaniesSimple();
         setCompanies(companiesData as any[]);
       } catch (err) {
-        console.error('Failed to load companies:', err);
+        logApiError('Failed to load companies:', err);
       }
     };
     loadCompanies();

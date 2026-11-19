@@ -46,6 +46,8 @@ import RecipientFallback, { noRecipientMessage } from './RecipientFallback';
 import EmailSendDialog, { EmailSendData } from './EmailSendDialog';
 import MarkPaidDialog, { describeMarkPaidResult } from './MarkPaidDialog';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { useAuth } from '../contexts/AuthContext';
+import { canDo } from '../utils/access';
 
 interface InvoiceDetailProps {
   open: boolean;
@@ -72,6 +74,8 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
 
   // Record payment ("Mark as Paid"): the dialog asks whether to email the receipt.
   const [markPaidOpen, setMarkPaidOpen] = useState(false);
+  // Recording payments is for Finance and Admin (role table in utils/access.ts).
+  const canRecordPayment = canDo(useAuth().user, 'invoice-money');
 
   useEffect(() => {
     if (open && invoice) {
@@ -125,8 +129,10 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
       await ApiService.updateInvoice(invoice.id, { status: 'Sent' });
       setSuccess('Invoice marked as sent');
       onInvoiceUpdate();
-    } catch (err) {
-      setError('Failed to update invoice status');
+    } catch (err: any) {
+      const data = err?.response?.data;
+      const reason = Array.isArray(data?.status) ? data.status.join(' ') : data?.status || data?.error;
+      setError(typeof reason === 'string' && reason ? reason : 'Failed to update invoice status');
     } finally {
       setLoading(false);
     }
@@ -593,7 +599,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
             Mark as Sent
           </Button>
         )}
-        {invoice && (invoice.status === 'Sent' || invoice.status === 'Overdue') && (
+        {canRecordPayment && invoice && (invoice.status === 'Sent' || invoice.status === 'Overdue') && (
           <Button
             onClick={() => setMarkPaidOpen(true)}
             variant="contained"
@@ -604,7 +610,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
             Mark as Paid
           </Button>
         )}
-        {invoice && invoice.status === 'Paid' && !invoice.receipt_number && (
+        {canRecordPayment && invoice && invoice.status === 'Paid' && !invoice.receipt_number && (
           <Button
             onClick={() => setMarkPaidOpen(true)}
             variant="contained"

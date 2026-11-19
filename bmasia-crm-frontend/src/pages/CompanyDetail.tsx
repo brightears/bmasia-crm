@@ -48,10 +48,12 @@ import ContactForm from '../components/ContactForm';
 import ContactDetail from '../components/ContactDetail';
 import OpportunityForm from '../components/OpportunityForm';
 import CompanyCareCard from '../components/CompanyCareCard';
+import CompanyReviewLink from './review/CompanyReviewLink';
 import CompanyTimeline from '../components/timeline/CompanyTimeline';
 import { PageHeader, SectionCard, EmptyState, DetailField, ProductChip } from '../components/ui';
 import { statusTone, humanize, formatDate, formatMoney, initialsOf, totalsByCurrency, visuallyHidden } from '../theme';
 import { currencyForEntity } from '../constants/entities';
+import { logApiError } from '../utils/logApiError';
 
 const tabLabel = (label: string, count: number) => (
   <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
@@ -161,7 +163,7 @@ const CompanyDetail: React.FC = () => {
       setZones(zonesResponse);
       setTickets(ticketsResponse.results || []);
     } catch (err: any) {
-      console.error('Company detail error:', err);
+      logApiError('Company detail error:', err);
       setError('Failed to load company details');
     } finally {
       setLoading(false);
@@ -340,6 +342,7 @@ const CompanyDetail: React.FC = () => {
             {location && (
               <Chip label={location} variant="outlined" size="small" icon={<Public />} />
             )}
+            <CompanyReviewLink companyId={company.id} />
           </>
         }
         actions={

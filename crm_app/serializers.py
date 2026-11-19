@@ -326,12 +326,14 @@ class CompanySerializer(serializers.ModelSerializer):
 
     def get_primary_contact(self, obj):
         try:
-            # The company list prefetches the same filter in the same order (list_querysets.py).
+            # The company list prefetches the same filter in the same order (list_querysets.py):
+            # by name, then id, so two primaries with the same name never swap between requests.
             prefetched = getattr(obj, '_prefetched_primary_contacts', None)
             if prefetched is not None:
                 primary = prefetched[0] if prefetched else None
             else:
-                primary = obj.contacts.filter(is_primary=True, is_active=True).first()
+                primary = obj.contacts.filter(is_primary=True, is_active=True).order_by(
+                    'name', 'pk').first()
             if primary:
                 return ContactSerializer(primary).data
             return None
@@ -577,8 +579,10 @@ class InvoiceSerializer(serializers.ModelSerializer):
         current = self.instance.status if self.instance is not None else None
         if value == 'Paid' and current != 'Paid':
             raise serializers.ValidationError(
-                'Use "Mark as paid" (POST /api/v1/invoices/{id}/mark_paid/) to mark an invoice paid: '
-                'it records the payment date and issues the receipt number.'
+                'An invoice is marked paid only with "Mark as paid", which records the payment date and '
+                'issues the receipt number. Payments are recorded by a person in the CRM (Invoices → '
+                'Mark as paid; API: POST /api/v1/invoices/{id}/mark_paid/). An agent cannot set Paid: '
+                'tell the person which invoice was paid and the payment date.'
             )
         return value
 
@@ -611,26 +615,15 @@ class InvoiceSerializer(serializers.ModelSerializer):
         return attrs
 
     def _refuse_backward_status(self, value):
-        """A plain update never moves an invoice backwards.
+        """A plain update follows crm_app/services/invoice_status.py, the rule every writer uses.
 
-        Draft cannot be re-entered once left, and Paid is left only for Refunded; undoing a
-        payment is the admin's "Mark selected invoices as unpaid". Saving the current status is
-        always allowed. (Paid itself is reached only through mark_paid, see validate_status.)
+        (Paid itself is reached only through mark_paid, see validate_status.)
         """
+        from crm_app.services.invoice_status import plain_update_refusal
         current = self.instance.status if self.instance is not None else None
-        if value is None or current is None or value == current:
-            return
-        if current == 'Paid' and value != 'Refunded':
-            raise serializers.ValidationError({'status': (
-                f'A paid invoice cannot be set to {value} by an edit. Paid can change only to Refunded; '
-                'to undo a payment recorded by mistake, use the admin action "Mark selected invoices as '
-                'unpaid" (it keeps the receipt number).'
-            )})
-        if value == 'Draft':
-            raise serializers.ValidationError({'status': (
-                f'An invoice that is {current} cannot go back to Draft. Use Cancelled for one that '
-                'should not stand.'
-            )})
+        reason = plain_update_refusal(current, value)
+        if reason:
+            raise serializers.ValidationError({'status': reason})
 
     def create(self, validated_data):
         """Create invoice with nested line items"""

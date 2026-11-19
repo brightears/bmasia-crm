@@ -4,6 +4,7 @@ import { Box, CircularProgress, Alert } from '@mui/material';
 import { Zone } from '../types';
 import ApiService from '../services/api';
 import ZoneForm from '../components/ZoneForm';
+import { logApiError } from '../utils/logApiError';
 
 const ZoneEdit: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -25,7 +26,7 @@ const ZoneEdit: React.FC = () => {
       const data = await ApiService.getZone(id);
       setZone(data);
     } catch (err: any) {
-      console.error('Zone load error:', err);
+      logApiError('Zone load error:', err);
       setError('Failed to load zone');
     } finally {
       setLoading(false);

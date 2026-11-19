@@ -143,8 +143,10 @@ def test_rest_patch_activation_rolls_back_closure_if_request_fails(monkeypatch):
         raise ValueError('synthetic audit failure')
 
     monkeypatch.setattr(ContractViewSet, 'log_action', fail_audit)
-    with pytest.raises(ValueError, match='synthetic audit failure'):
-        _rest_patch(successor, {'status': 'Active'})
+    # The API answers with a generic 500 (crm_app/api_errors.py); the write is still rolled back.
+    response = _rest_patch(successor, {'status': 'Active'})
+    assert response.status_code == 500
+    assert 'synthetic' not in str(response.data)
 
     predecessor.refresh_from_db()
     successor.refresh_from_db()
@@ -385,8 +387,10 @@ def test_duplicate_for_renewal_rolls_back_fully_on_failure(monkeypatch):
         raise RuntimeError('synthetic failure after copy')
 
     monkeypatch.setattr(ContractViewSet, 'log_action', fail_audit)
-    with pytest.raises(RuntimeError, match='synthetic failure after copy'):
-        _duplicate(original)
+    # The API answers with a generic 500 (crm_app/api_errors.py); the copy is still rolled back.
+    response = _duplicate(original)
+    assert response.status_code == 500
+    assert 'synthetic' not in str(response.data)
 
     assert Contract.objects.count() == contracts_before
     assert ContractZone.objects.count() == links_before

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { logApiError } from '../utils/logApiError';
 import {
   RequiredCounts,
   ServiceLocationEntry,
@@ -302,7 +303,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
       const companies = await ApiService.getCompaniesSimple();
       setCompanies(companies as any[]);
     } catch (err) {
-      console.error('Failed to load companies:', err);
+      logApiError('Failed to load companies:', err);
     }
   };
 
@@ -311,7 +312,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
       const contracts = await ApiService.getMasterAgreements();
       setMasterContracts(contracts);
     } catch (err) {
-      console.error('Failed to load master contracts:', err);
+      logApiError('Failed to load master contracts:', err);
     }
   };
 
@@ -321,7 +322,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
       const response = await ApiService.getContractTemplates({});
       setContractTemplates(response.results || []);
     } catch (err) {
-      console.error('Failed to load contract templates:', err);
+      logApiError('Failed to load contract templates:', err);
     }
   };
 
@@ -520,7 +521,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
         });
         setQuotes(response.results || []);
       } catch (err) {
-        console.error('Failed to load quotes:', err);
+        logApiError('Failed to load quotes:', err);
         setQuotes([]);
       }
     } else {
@@ -828,7 +829,7 @@ const ContractForm: React.FC<ContractFormProps> = ({
             formDataUpload.append('is_signed', 'false');
             await ApiService.uploadContractDocument(savedContract.id, formDataUpload);
           } catch (uploadErr) {
-            console.error('Failed to upload document:', uploadErr);
+            logApiError('Failed to upload document:', uploadErr);
           }
         }
       }

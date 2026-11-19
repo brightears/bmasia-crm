@@ -19,6 +19,7 @@ import {
 } from '@mui/material';
 import { Contact, SequenceEnrollment } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface EnrollContactDialogProps {
   open: boolean;
@@ -60,7 +61,7 @@ const EnrollContactDialog: React.FC<EnrollContactDialogProps> = ({
       const response = await ApiService.getContacts(params);
       setContacts(response.results || []);
     } catch (error) {
-      console.error('Failed to fetch contacts:', error);
+      logApiError('Failed to fetch contacts:', error);
     } finally {
       setLoadingContacts(false);
     }
@@ -97,7 +98,7 @@ const EnrollContactDialog: React.FC<EnrollContactDialogProps> = ({
         handleClose();
       }, 1000);
     } catch (err: any) {
-      console.error('Failed to enroll contact:', err);
+      logApiError('Failed to enroll contact:', err);
       const errorMessage = err.response?.data?.detail
         || err.response?.data?.non_field_errors?.[0]
         || err.response?.data?.error

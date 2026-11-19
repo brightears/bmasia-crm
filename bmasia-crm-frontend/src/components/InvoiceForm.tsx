@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { logApiError } from '../utils/logApiError';
 import {
   Dialog,
   DialogTitle,
@@ -58,6 +59,9 @@ interface InvoiceFormProps {
   initialCompanyId?: string;
   initialContractId?: string;
 }
+
+// Statuses an invoice can be emailed in (crm_app/services/invoice_status.py).
+const SENDABLE_STATUSES = ['Draft', 'Sent', 'Overdue', 'Paid'];
 
 const paymentTermsOptions = [
   { value: 'Net 15', label: 'Net 15 days' },
@@ -297,7 +301,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
       setInvoiceNumber(number);
     } catch (err) {
       // Fallback to client-generated number if API fails
-      console.error('Failed to get next invoice number:', err);
+      logApiError('Failed to get next invoice number:', err);
       const prefix = entity?.includes('Thailand') ? 'INV-TH' : 'INV-HK';
       const year = new Date().getFullYear();
       const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
@@ -595,14 +599,15 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
             setSendFallback({ invoice: savedInvoice, message: noRecipient });
             return;
           }
-          console.error('Failed to send invoice email:', emailError);
+          logApiError('Failed to send invoice email:', emailError);
+          // Don't fail the entire operation if email fails
         }
       }
 
       onSave(savedInvoice);
       onClose();
     } catch (err: any) {
-      console.error('Invoice save error:', err.response?.data || err.message);
+      logApiError('Invoice save error:', err);
       // Parse DRF field-level errors (e.g. {"company": ["This field is required."]})
       setError(documentValidationMessage(err.response?.data, 'Failed to save invoice'));
     } finally {
@@ -1072,17 +1077,22 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                     placeholder="Additional notes..."
                   />
                 </Grid>
-                <Grid item xs={12}>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={sendEmail}
-                        onChange={(e) => setSendEmail(e.target.checked)}
-                      />
-                    }
-                    label="Send invoice via email after saving"
-                  />
-                </Grid>
+                {/* Cancelled and refunded invoices are not sent; a sent one can be resent (its status stays). */}
+                {(mode === 'create' || SENDABLE_STATUSES.includes(invoice?.status || '')) && (
+                  <Grid item xs={12}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={sendEmail}
+                          onChange={(e) => setSendEmail(e.target.checked)}
+                        />
+                      }
+                      label={mode === 'edit' && invoice?.status !== 'Draft'
+                        ? 'Resend invoice by email after saving'
+                        : 'Send invoice via email after saving'}
+                    />
+                  </Grid>
+                )}
               </Grid>
             </Paper>
           </Box>

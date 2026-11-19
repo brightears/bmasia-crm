@@ -50,6 +50,7 @@ import SequenceForm from '../components/SequenceForm';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 import { useListState } from '../hooks/useListState';
 import { useListSearchBox } from '../hooks/useListSearchBox';
+import { logApiError } from '../utils/logApiError';
 
 const EmailAutomations: React.FC = () => {
   const navigate = useNavigate();
@@ -111,7 +112,7 @@ const EmailAutomations: React.FC = () => {
       setSequences(response.results || []);
       setTotalCount(response.count || 0);
     } catch (err: any) {
-      console.error('Email automations error:', err);
+      logApiError('Email automations error:', err);
       setError(`Failed to load email automations: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
       setSequences([]);
       setTotalCount(0);
@@ -175,7 +176,7 @@ const EmailAutomations: React.FC = () => {
       setSuccess('Automation duplicated successfully');
       loadSequences();
     } catch (err: any) {
-      console.error('Duplicate automation error:', err);
+      logApiError('Duplicate automation error:', err);
       setError(`Failed to duplicate automation: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     }
     handleMenuClose();
@@ -200,7 +201,7 @@ const EmailAutomations: React.FC = () => {
       setSuccess('Automation archived successfully');
       loadSequences();
     } catch (err: any) {
-      console.error('Archive automation error:', err);
+      logApiError('Archive automation error:', err);
       setError(`Failed to archive automation: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     }
     handleMenuClose();
@@ -223,7 +224,7 @@ const EmailAutomations: React.FC = () => {
       setDeleteDialogOpen(false);
       setDeletingSequence(null);
     } catch (err: any) {
-      console.error('Delete automation error:', err);
+      logApiError('Delete automation error:', err);
       setError(`Failed to delete automation: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     }
   };

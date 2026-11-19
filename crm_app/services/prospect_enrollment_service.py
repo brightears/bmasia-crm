@@ -21,6 +21,22 @@ from crm_app.models import (
 logger = logging.getLogger(__name__)
 
 
+def enrolment_contact(company, named=None):
+    """The contact a prospect sequence is enrolled with; only a contact still taking automated email.
+
+    That is an active contact with an email address, its master email switch on
+    and not unsubscribed (crm_app.services.recipients.prospect_contact). The named
+    contact (a quote's own) if it qualifies, else the primary contact, else the
+    first other contact by name.
+    """
+    from crm_app.services.recipients import eligible_contacts, prospect_contact
+
+    contacts = Contact.objects.filter(company=company)
+    if named is not None and eligible_contacts(contacts, 'prospect').filter(pk=named.pk).exists():
+        return named
+    return prospect_contact(contacts)
+
+
 class ProspectEnrollmentService:
     """Service for auto-enrolling contacts into prospect sequences"""
 
@@ -35,9 +51,7 @@ class ProspectEnrollmentService:
         if not opportunity.company:
             return
 
-        # The primary contact, else another contact, of those still taking automated email
-        from crm_app.services.recipients import prospect_contact
-        contact = prospect_contact(Contact.objects.filter(company=opportunity.company))
+        contact = enrolment_contact(opportunity.company)
 
         if not contact or not contact.email:
             logger.info(
@@ -173,9 +187,7 @@ class ProspectEnrollmentService:
                 if already_enrolled:
                     continue
 
-                # The primary contact, else another contact, of those still taking automated email
-                from crm_app.services.recipients import prospect_contact
-                contact = prospect_contact(Contact.objects.filter(company=opp.company))
+                contact = enrolment_contact(opp.company)
 
                 if not contact or not contact.email:
                     continue
@@ -215,11 +227,9 @@ class ProspectEnrollmentService:
         if not quote.company:
             return 0
 
-        # Use the quote's contact if set, otherwise primary contact
-        contact = quote.contact if hasattr(quote, 'contact') and quote.contact else None
-        if not contact:
-            from crm_app.services.recipients import prospect_contact
-            contact = prospect_contact(Contact.objects.filter(company=quote.company))
+        # The quote's own contact if it is active, otherwise as for any enrolment
+        named = quote.contact if hasattr(quote, 'contact') and quote.contact else None
+        contact = enrolment_contact(quote.company, named)
 
         if not contact or not contact.email:
             return 0

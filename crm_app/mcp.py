@@ -68,7 +68,7 @@ contracttemplate.
 Use these 3 generic tools for all write operations:
 - `create_record(collection, data)` — create a new record (data is a JSON string)
 - `update_record(collection, id, data)` — partial update (only include changed fields)
-- `delete_record(collection, id)` — delete a record
+- `delete_record(collection, id)` — permanently delete a line item or other minor record; refused for company, contact, contract, quote and invoice (the refusal names the update_record to use instead)
 
 Supported collections: company, contact, contract, invoice, quote, opportunity,
 task, zone, clienttechdetail, device, ticket, kbarticle, quotelineitem,
@@ -112,7 +112,9 @@ to recover the raw PDF. On failure returns `{"error": "..."}`.
   terms in notes (internal only). Preserve approved legal text and request a
   clarification for missing issuer, pricing, tax or contractual authority.
 - **Contract status**: Draft → Sent → Active → Renewed/Expired/Cancelled
-- **Invoice status**: Draft → Sent → Paid/Overdue/Void
+- **Invoice status**: Draft → Sent → Overdue, Cancelled or Refunded. Paid is set only by a
+  person in the CRM (Invoices → Mark as paid), which records the payment date and issues the
+  receipt; agents cannot set it. Tell the person which invoice was paid and the payment date.
 - **Quote status**: Draft → Sent → Accepted/Rejected/Expired
 - **Service locations** on contracts are separate from line items — they control
   what appears in the PDF "Locations for Provision of Services" table.
@@ -348,7 +350,7 @@ class InvoiceQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     ]
     search_fields = ['invoice_number', 'notes']
     extra_instructions = (
-        "Status: Draft, Sent, Paid, Overdue, Void, Cancelled. issue_date is the invoice date. "
+        "Status: Draft, Sent, Paid, Overdue, Cancelled, Refunded. issue_date is the invoice date. "
         "There is no stored PDF link: generate_invoice_pdf(id) returns the PDF as base64, and "
         "get_commercial_document_context('invoice', id) returns the full record with no side effects."
     )
@@ -646,7 +648,7 @@ _GUARDED_DOCUMENT_NUMBER_FIELDS = frozenset({'contract_number', 'quote_number', 
 _GUARDED_TERMINAL_STATUSES = {
     'contract': frozenset({'Renewed', 'Expired', 'Cancelled'}),
     'quote': frozenset({'Accepted', 'Rejected', 'Expired'}),
-    'invoice': frozenset({'Paid', 'Cancelled', 'Refunded'}),
+    'invoice': frozenset({'Cancelled', 'Refunded'}),  # Paid: only Mark as paid in the CRM
 }
 # Price and issuer fields of a contract the customer has already received.
 _GUARDED_CONTRACT_PRICING_FIELDS = frozenset({
@@ -1275,7 +1277,7 @@ def update_record(
               - kind=explicit_user_instruction (requested_by norbert, nikki,
                 lyra or theo; source_reference) for a final status (contract
                 Renewed/Expired/Cancelled, quote Accepted/Rejected/Expired,
-                invoice Paid/Cancelled/Refunded) and for price or issuer fields
+                invoice Cancelled/Refunded; Paid cannot be set) and for price or issuer fields
                 on a Sent or Active contract. It also satisfies opportunity
                 value/probability and Won/Lost, which otherwise use
                 kind=explicit_user_commercial with source_thread_id.
@@ -2057,7 +2059,19 @@ def get_commercial_document_context(collection: str, id: str) -> str:
 
 @mcp_server.tool()
 def delete_record(collection: str, id: str) -> str:
-    """Delete a record from a CRM collection.
+    """Delete a record from a CRM collection. The delete is permanent.
+
+    Refused for company, contact, contract, quote and invoice: deleting them erases
+    customer history (a company takes its contacts, contracts, quotes and invoices with
+    it). Instead use update_record:
+      company  -> {"is_active": false}
+      contact  -> {"is_active": false}
+      contract -> {"status": "Cancelled"}
+      quote    -> {"status": "Rejected"} (declined) or {"status": "Expired"}
+      invoice  -> {"status": "Cancelled"}
+    Contract templates and service locations have their own workflows (see the error).
+    Line items (quotelineitem, contractlineitem, invoicelineitem) and the other
+    collections can still be deleted.
 
     Args:
         collection: Collection name (same options as create_record)
@@ -2065,9 +2079,14 @@ def delete_record(collection: str, id: str) -> str:
 
     Returns: Confirmation message or error.
     """
+    from crm_app.services.delete_guards import mcp_delete_refusal
+
     if collection not in _COLLECTION_MAP:
         return f"Error: Unknown collection '{collection}'. Valid: {', '.join(sorted(_COLLECTION_MAP))}"
     _agent_gate.observe(tool='delete_record', verb='delete', collection=collection, record_id=id)
+    refusal = mcp_delete_refusal(collection)
+    if refusal:
+        return refusal
     if collection == 'contracttemplate':
         return (
             "Error: Generic contract-template deletion is blocked. "

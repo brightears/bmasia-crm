@@ -43,6 +43,8 @@ import MobileBottomNav from './MobileBottomNav';
 import GlobalSearch from './GlobalSearch';
 import { buildNavGroups, filterNavForRole, findNavLocation, isActivePath, NavGroup } from './navigation';
 import { layout } from '../theme';
+import { useReviewNavStatus } from '../pages/review/useReviewStatus';
+import { logApiError } from '../utils/logApiError';
 
 const drawerWidth = layout.sidebarWidth;
 const miniDrawerWidth = layout.sidebarCollapsedWidth;
@@ -243,13 +245,14 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       // Update user in auth context by reloading
       window.location.reload();
     } catch (err) {
-      console.error('Avatar upload failed:', err);
+      logApiError('Avatar upload failed:', err);
       alert('Failed to upload avatar. Please try again.');
     }
   };
 
   // The menu shows what the user's role needs (display only; permissions are unchanged).
-  const navGroups = filterNavForRole(buildNavGroups(aiDraftsPendingCount), user?.role);
+  const reviewNav = useReviewNavStatus();
+  const navGroups = filterNavForRole(buildNavGroups(aiDraftsPendingCount, reviewNav), user?.role);
   const { group: currentGroup, item: currentItem } = findNavLocation(navGroups, location.pathname);
 
   // Make sure the group of the page being shown is open.

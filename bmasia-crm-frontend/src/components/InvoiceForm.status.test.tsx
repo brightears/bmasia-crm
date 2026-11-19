@@ -59,3 +59,24 @@ test('saving an edit sends no status, so a paid invoice stays paid', async () =>
   expect(id).toBe('inv-1');
   expect(payload).not.toHaveProperty('status');
 });
+
+test.each([
+  ['Draft', 'Send invoice via email after saving'],
+  ['Sent', 'Resend invoice by email after saving'],
+  ['Paid', 'Resend invoice by email after saving'],
+])('a %s invoice offers "%s"', async (status, label) => {
+  render(
+    <InvoiceForm open mode="edit" invoice={{ ...paidInvoice, status }} companies={[company]} contracts={[]}
+      onClose={jest.fn()} onSave={jest.fn()} />,
+  );
+  expect(await screen.findByLabelText(label)).toBeInTheDocument();
+});
+
+test.each(['Cancelled', 'Refunded'])('a %s invoice offers no send switch', async (status) => {
+  render(
+    <InvoiceForm open mode="edit" invoice={{ ...paidInvoice, status }} companies={[company]} contracts={[]}
+      onClose={jest.fn()} onSave={jest.fn()} />,
+  );
+  await screen.findByRole('button', { name: 'Update Invoice' });
+  expect(screen.queryByLabelText(/invoice (via|by) email after saving/)).not.toBeInTheDocument();
+});

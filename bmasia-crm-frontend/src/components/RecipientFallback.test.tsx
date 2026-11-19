@@ -6,6 +6,10 @@ import InvoiceDetail from './InvoiceDetail';
 import QuoteDetail from './QuoteDetail';
 import ApiService from '../services/api';
 
+// A Sales user: sending is open to every role, recording payments is not (utils/access.ts).
+let mockRole = 'Sales';
+jest.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u-1', role: mockRole, is_active: true } }) }));
+
 jest.mock('../services/api', () => {
   const calls: Record<string, any> = {
     getEmailLogs: () => Promise.resolve([]),
@@ -123,6 +127,19 @@ test('an invoice send that finds nobody opens the notice instead of a generic fa
   fireEvent.click(screen.getByRole('button', { name: /Send via Email/i }));
   expect(await screen.findByText(MESSAGE)).toBeInTheDocument();
   expect(screen.queryByText('Failed to send invoice')).not.toBeInTheDocument();
+});
+
+test('the notice adds no money action: Mark as Paid stays for Finance and Admin only', () => {
+  // The notice above already works for a Sales user (sending is open to every role).
+  mockRole = 'Sales';
+  const { unmount } = render(<InvoiceDetail open invoice={{ ...invoice, status: 'Sent' }} onClose={jest.fn()}
+                                            onInvoiceUpdate={jest.fn()} />);
+  expect(screen.queryByRole('button', { name: /Mark as Paid/i })).not.toBeInTheDocument();
+  unmount();
+  mockRole = 'Admin';
+  render(<InvoiceDetail open invoice={{ ...invoice, status: 'Sent' }} onClose={jest.fn()} onInvoiceUpdate={jest.fn()} />);
+  expect(screen.getByRole('button', { name: /Mark as Paid/i })).toBeInTheDocument();
+  mockRole = 'Sales';
 });
 
 test('any other failed invoice send shows the fixed message, not the server text', async () => {

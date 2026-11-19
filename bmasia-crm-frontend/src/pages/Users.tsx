@@ -42,6 +42,7 @@ import { User, UserRole, USER_ROLE_LABELS, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import UserForm from '../components/UserForm';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { logApiError } from '../utils/logApiError';
 
 const Users: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -88,7 +89,7 @@ const Users: React.FC = () => {
       setUsers(response.results || []);
       setTotalCount(response.count || 0);
     } catch (err: any) {
-      console.error('Users error:', err);
+      logApiError('Users error:', err);
       setError(`Failed to load users: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
       setUsers([]);
       setTotalCount(0);
@@ -169,7 +170,7 @@ const Users: React.FC = () => {
       setUserToDelete(null);
       showSnackbar('User deleted successfully', 'success');
     } catch (err: any) {
-      console.error('Delete user error:', err);
+      logApiError('Delete user error:', err);
       const errorMsg = err.response?.data?.detail || err.message || 'Unknown error';
       setError(`Failed to delete user: ${errorMsg}`);
       showSnackbar(`Failed to delete user: ${errorMsg}`, 'error');
@@ -189,7 +190,7 @@ const Users: React.FC = () => {
       }
       loadUsers();
     } catch (err: any) {
-      console.error('Toggle active error:', err);
+      logApiError('Toggle active error:', err);
       const errorMsg = err.response?.data?.detail || err.message || 'Unknown error';
       showSnackbar(`Failed to update user status: ${errorMsg}`, 'error');
     }

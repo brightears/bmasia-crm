@@ -40,6 +40,7 @@ import TaskListView from '../components/TaskListView';
 import TaskForm from '../components/TaskForm';
 import TaskDetail from '../components/TaskDetail';
 import LoadingSkeleton from '../components/LoadingSkeleton';
+import { logApiError } from '../utils/logApiError';
 
 interface TaskFilters {
   assignee?: string;
@@ -102,7 +103,7 @@ const Tasks: React.FC = () => {
       setTasks(response.results);
       setFilteredTasks(response.results);
     } catch (error: any) {
-      console.error('Error fetching tasks:', error);
+      logApiError('Error fetching tasks:', error);
       setError('Failed to load tasks');
       showNotification('Failed to load tasks', 'error');
     } finally {
@@ -126,7 +127,7 @@ const Tasks: React.FC = () => {
       setContracts(contractsRes.results);
       setContacts(contactsRes.results);
     } catch (error: any) {
-      console.error('Error fetching supporting data:', error);
+      logApiError('Error fetching supporting data:', error);
     }
   }, []);
 
@@ -298,7 +299,7 @@ const Tasks: React.FC = () => {
       }
       setTaskFormOpen(false);
     } catch (error: any) {
-      console.error('Error saving task:', error);
+      logApiError('Error saving task:', error);
       showNotification('Failed to save task', 'error');
     }
   };
@@ -309,7 +310,7 @@ const Tasks: React.FC = () => {
       setTasks(prev => prev.filter(t => t.id !== taskId));
       showNotification('Task deleted successfully');
     } catch (error: any) {
-      console.error('Error deleting task:', error);
+      logApiError('Error deleting task:', error);
       showNotification('Failed to delete task', 'error');
     }
   };
@@ -320,7 +321,7 @@ const Tasks: React.FC = () => {
       setTasks(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t));
       showNotification('Task status updated');
     } catch (error: any) {
-      console.error('Error updating task status:', error);
+      logApiError('Error updating task status:', error);
       showNotification('Failed to update task status', 'error');
     }
   };

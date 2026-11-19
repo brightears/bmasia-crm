@@ -41,6 +41,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Zone, ContractZone, Ticket } from '../types';
 import ApiService from '../services/api';
 import { format, formatDistanceToNow } from 'date-fns';
+import { logApiError } from '../utils/logApiError';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -99,7 +100,7 @@ const ZoneDetail: React.FC = () => {
       setContracts(contractsData);
       setTickets(ticketsData.results || []);
     } catch (err: any) {
-      console.error('Zone load error:', err);
+      logApiError('Zone load error:', err);
       setError('Failed to load zone details');
     } finally {
       setLoading(false);
@@ -114,7 +115,7 @@ const ZoneDetail: React.FC = () => {
       await ApiService.deleteZone(id);
       navigate('/zones');
     } catch (err: any) {
-      console.error('Delete error:', err);
+      logApiError('Delete error:', err);
       setError('Failed to delete zone. Please try again.');
       setDeleteDialogOpen(false);
     } finally {

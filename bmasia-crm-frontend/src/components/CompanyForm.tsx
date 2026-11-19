@@ -24,6 +24,7 @@ import {
 import { Save, Cancel } from '@mui/icons-material';
 import { Company } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface CompanyFormProps {
   open: boolean;
@@ -233,7 +234,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
       });
       setCorporateParents(response.results);
     } catch (err) {
-      console.error('Failed to load corporate parents:', err);
+      logApiError('Failed to load corporate parents:', err);
     }
   };
 
@@ -313,7 +314,7 @@ const CompanyForm: React.FC<CompanyFormProps> = ({
       // Call onSave callback after successful save (this will close the form and refresh the list)
       onSave();
     } catch (err: any) {
-      console.error('Company save error:', err);
+      logApiError('Company save error:', err);
       const responseData = err?.response?.data;
       if (responseData && typeof responseData === 'object' && !Array.isArray(responseData)) {
         const { detail, error: apiError, message, non_field_errors, ...fieldData } = responseData;

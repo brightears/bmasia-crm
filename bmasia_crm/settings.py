@@ -236,7 +236,9 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'anon': '100/hour',
         'user': '1000/hour'
-    }
+    },
+    # Unexpected errors are logged with a request id; callers get a generic message and the id.
+    'EXCEPTION_HANDLER': 'crm_app.api_errors.api_exception_handler',
 }
 
 # JWT Settings
@@ -348,6 +350,29 @@ CAPTURE_EXTRA_FREEMAIL_DOMAINS = config('CAPTURE_EXTRA_FREEMAIL_DOMAINS', defaul
 # How long capture keeps its run rows and its mailbox access log (days).
 CAPTURE_RUN_RETENTION_DAYS = config('CAPTURE_RUN_RETENTION_DAYS', default=90, cast=int)
 CAPTURE_ACCESS_LOG_RETENTION_DAYS = config('CAPTURE_ACCESS_LOG_RETENTION_DAYS', default=365, cast=int)
+# Gmail credentials for capture (mail_capture/credentials.py). Mode off (the
+# default) makes no credential. keyless: workload identity federation signs as
+# GOOGLE_CAPTURE_SERVICE_ACCOUNT (no key stored). key_file: a service-account
+# key at GOOGLE_CAPTURE_KEY_FILE (a Render secret file path; never the key
+# itself in an environment variable). GOOGLE_CAPTURE_SCOPE is metadata
+# (headers only) or readonly (bodies). GOOGLE_CAPTURE_NEVER_MAILBOXES is a hard
+# deny-list that overrides the mailbox table.
+GOOGLE_CAPTURE_CREDENTIALS_MODE = config('GOOGLE_CAPTURE_CREDENTIALS_MODE', default='off')
+GOOGLE_CAPTURE_SERVICE_ACCOUNT = config('GOOGLE_CAPTURE_SERVICE_ACCOUNT', default='')
+GOOGLE_CAPTURE_KEY_FILE = config('GOOGLE_CAPTURE_KEY_FILE', default='')
+GOOGLE_CAPTURE_SCOPE = config('GOOGLE_CAPTURE_SCOPE', default='metadata')
+GOOGLE_CAPTURE_NEVER_MAILBOXES = config('GOOGLE_CAPTURE_NEVER_MAILBOXES', default='', cast=Csv())
+# Failed runs in a row after which a mailbox is marked "needs attention" and
+# stops until a person clears it (gmail_sync --skip-once / --clear-attention).
+CAPTURE_ATTENTION_AFTER_ERRORS = config('CAPTURE_ATTENTION_AFTER_ERRORS', default=3, cast=int)
+# Temporary failures (rate limits, Gmail outages, token endpoint unreachable)
+# back off instead, and need attention only after this many hours of nothing else.
+CAPTURE_TRANSIENT_ATTENTION_HOURS = config('CAPTURE_TRANSIENT_ATTENTION_HOURS', default=24, cast=int)
+# Gmail quota pacing (units per minute; Gmail's limits are 6,000 per mailbox and
+# 1,200,000 per project). Lower values only; higher ones are capped at Gmail's.
+CAPTURE_GMAIL_USER_UNITS_PER_MINUTE = config('CAPTURE_GMAIL_USER_UNITS_PER_MINUTE', default=6000, cast=int)
+CAPTURE_GMAIL_PROJECT_UNITS_PER_MINUTE = config('CAPTURE_GMAIL_PROJECT_UNITS_PER_MINUTE', default=1200000,
+                                                cast=int)
 # Activity log and change-proposal review queue (agent_inbox). Both write
 # surfaces are off by default; while off they answer "not enabled" and the
 # read endpoints still work. Accepting a proposal is always a person's click.
@@ -466,6 +491,17 @@ LOGGING = {
             'handlers': ['console'],
             'level': 'INFO',
             'propagate': False,
+        },
+        # Google client libraries (mail capture): pinned to INFO whatever the
+        # root level. At DEBUG, google-auth logs request and response bodies,
+        # which for the keyless signBlob call amount to a usable credential.
+        'google': {
+            'level': 'INFO',
+            'propagate': True,
+        },
+        'googleapiclient': {
+            'level': 'INFO',
+            'propagate': True,
         },
     },
 }

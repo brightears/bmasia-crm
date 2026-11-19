@@ -49,6 +49,7 @@ import { PageHeader, EmptyState } from '../components/ui';
 import { initialsOf, visuallyHidden } from '../theme';
 import { useListState, optionValues, idFromList } from '../hooks/useListState';
 import { useListSearchBox } from '../hooks/useListSearchBox';
+import { apiErrorMessage, logApiError } from '../utils/logApiError';
 
 const sortOptions = [
   { value: 'name', label: 'Name A-Z' },
@@ -131,7 +132,7 @@ const Contacts: React.FC = () => {
       setTotalCount(response.count);
     } catch (err: any) {
       setError('Failed to load contacts');
-      console.error('Contacts error:', err);
+      logApiError('Contacts error:', err);
     } finally {
       setLoading(false);
     }
@@ -142,7 +143,7 @@ const Contacts: React.FC = () => {
       const companiesData = await ApiService.getCompaniesSimple({ ordering: 'name' });
       setCompanies(companiesData as any[]);
     } catch (err: any) {
-      console.error('Failed to load companies:', err);
+      logApiError('Failed to load companies:', err);
     }
   };
 
@@ -198,7 +199,7 @@ const Contacts: React.FC = () => {
         loadContacts();
         setMenuAnchor(null);
       } catch (err: any) {
-        setError('Failed to delete contact');
+        setError(apiErrorMessage(err, 'Failed to delete contact'));
       }
     }
   };

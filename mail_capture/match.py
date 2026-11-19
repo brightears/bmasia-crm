@@ -424,7 +424,9 @@ def match_message(parsed, snapshot, mailbox_id=None, conversation_key=None, body
             item.domain for item in externals if item.address in result.contacts
         }
         candidates = []
-        for item in externals:
+        # Listed recipients only: an address found past the recipient cap is
+        # used for matching and never-log rules, never queued or proposed.
+        for item in listed:
             if item.address in result.contacts or not item.valid:
                 continue
             if capture_rules.is_freemail(item.domain, snapshot.extra_freemail):

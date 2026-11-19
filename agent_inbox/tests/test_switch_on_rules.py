@@ -83,7 +83,7 @@ def test_with_no_reviewer_list_nobody_reviews(agent, person, company):
         response = decide(session_client(person), proposal.pk, 'accept')
         status = session_client(person).get(f'{PROPOSALS}allowlist/').json()
     assert response.status_code == 403 and response.json()['code'] == 'review_not_configured'
-    assert 'not configured' in response.json()['detail']
+    assert response.json()['detail'] == 'Reviewing is not set up yet.'  # no setting name for non-staff
     assert status['you_can_review'] is False and status['reviewing_configured'] is False
 
 
@@ -190,7 +190,7 @@ def test_a_view_loaded_before_a_rejection_cannot_accept_after_a_reopen(agent, pe
 
 
 @pytest.mark.parametrize('change', ['current_values', 'target_changed_at', 'status', 'history', 'patch',
-                                    'expected_version'])
+                                    'target_state'])
 def test_each_part_of_the_snapshot_changes_the_seen_version(agent, company, change):
     from django.utils import timezone
     proposal, _ = create_proposal(agent, phone(company), via='rest')
@@ -206,8 +206,15 @@ def test_each_part_of_the_snapshot_changes_the_seen_version(agent, company, chan
     elif change == 'patch':
         proposal.patch = {'phone': 'other'}
     else:
-        proposal.expected_version = '2000-01-01T00:00:00Z'
+        proposal.target_state = 'missing'
     assert seen_version(proposal) != before
+
+
+def test_the_record_version_alone_does_not_change_the_seen_version(agent, company):
+    proposal, _ = create_proposal(agent, phone(company), via='rest')
+    before = seen_version(proposal)
+    proposal.expected_version = '2000-01-01T00:00:00Z'
+    assert seen_version(proposal) == before
 
 
 def test_reopen_when_the_same_change_is_open_again_is_a_clean_409(agent, person, other_person, company):

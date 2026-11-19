@@ -144,6 +144,18 @@ PERSON_SOURCE_SYSTEMS = frozenset({'manual', 'crm'})
 NOT_CONFIGURED_DETAIL = ('Reviewing is not configured on this server: no reviewer is listed in '
                          'CHANGE_PROPOSAL_REVIEWER_USERNAMES.')
 NOT_LISTED_DETAIL = 'Your account is not on the reviewer list (CHANGE_PROPOSAL_REVIEWER_USERNAMES).'
+# What a caller who is not staff is told instead (no setting names).
+NOT_SET_UP_DETAIL = 'Reviewing is not set up yet.'
+NOT_ON_LIST_DETAIL = 'Your account is not on the list of reviewers.'
+_PLAIN_REFUSALS = {NOT_CONFIGURED_DETAIL: NOT_SET_UP_DETAIL, NOT_LISTED_DETAIL: NOT_ON_LIST_DETAIL}
+
+
+def refusal_text(request, refusal):
+    """The refusal as shown to this caller: setting names only for staff."""
+    user = getattr(request, 'user', None)
+    if refusal in _PLAIN_REFUSALS and not getattr(user, 'is_staff', False):
+        return _PLAIN_REFUSALS[refusal]
+    return refusal
 
 
 def _name(value) -> str:
@@ -199,6 +211,25 @@ def is_agent_account(user) -> bool:
     if is_agent_by_name(user):
         return True
     return holds_api_token(user) and not is_listed_reviewer(user)
+
+
+def is_agent_accounts(users) -> dict:
+    """``{user.pk: is_agent_account(user)}`` for any number of accounts, in at most one query.
+
+    The same answer as is_agent_account for each account; only the token lookup
+    goes to the database, once for all the accounts that need it.
+    """
+    from rest_framework.authtoken.models import Token
+
+    accounts = [user for user in users if user is not None]
+    signed_in = [user for user in accounts if getattr(user, 'is_authenticated', False)]
+    need_token = [user.pk for user in signed_in if not is_agent_by_name(user) and not is_listed_reviewer(user)]
+    with_token = (set(Token.objects.filter(user_id__in=need_token).values_list('user_id', flat=True))
+                  if need_token else set())
+    answers = {user.pk: False for user in accounts}
+    for user in signed_in:
+        answers[user.pk] = is_agent_by_name(user) or user.pk in with_token
+    return answers
 
 
 def agent_account_ids(user_ids) -> set:
@@ -282,7 +313,7 @@ def account_status(request) -> dict:
         reason = 'agent name' if is_agent_by_name(user) else 'holds an API token and is not a listed reviewer'
     return {
         'you_can_review': refusal is None,
-        'review_refusal': refusal,
+        'review_refusal': refusal_text(request, refusal),
         'treated_as_agent': agent,
         'treated_as_agent_because': reason,
         'reviewing_configured': bool(listed_reviewer_names()),

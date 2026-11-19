@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { apiErrorMessage, logApiError } from '../utils/logApiError';
 import { useSearchParams } from 'react-router-dom';
 import {
   Box,
@@ -62,6 +63,8 @@ import { formatDate as formatDisplayDate, formatMoney, statusTone, visuallyHidde
 import { PageHeader, EmptyState } from '../components/ui';
 import { useListState, optionValues, idFromList } from '../hooks/useListState';
 import { useListSearchBox } from '../hooks/useListSearchBox';
+import { useAuth } from '../contexts/AuthContext';
+import { canDo } from '../utils/access';
 
 const statusOptions = [
   { value: '', label: 'All Status' },
@@ -148,6 +151,8 @@ const Invoices: React.FC = () => {
 
   // QuickBooks export dialog
   const [qbExportOpen, setQbExportOpen] = useState(false);
+  // Payments and the QuickBooks export are for Finance and Admin (role table in utils/access.ts).
+  const canMoney = canDo(useAuth().user, 'invoice-money');
   const [qbExporting, setQbExporting] = useState(false);
   const [qbEntity, setQbEntity] = useState('');
   const [qbStatus, setQbStatus] = useState('Sent');
@@ -178,7 +183,7 @@ const Invoices: React.FC = () => {
       setTotalCount(response.count);
     } catch (err: any) {
       setError('Failed to load invoices');
-      console.error('Invoices error:', err);
+      logApiError('Invoices error:', err);
     } finally {
       setLoading(false);
     }
@@ -189,7 +194,7 @@ const Invoices: React.FC = () => {
       const companies = await ApiService.getCompaniesSimple();
       setCompanies(companies as any[]);
     } catch (err) {
-      console.error('Failed to load companies:', err);
+      logApiError('Failed to load companies:', err);
     }
   };
 
@@ -198,7 +203,7 @@ const Invoices: React.FC = () => {
       const response = await ApiService.getContracts({ page_size: 100 });
       setContracts(response.results);
     } catch (err) {
-      console.error('Failed to load contracts:', err);
+      logApiError('Failed to load contracts:', err);
     }
   };
 
@@ -287,7 +292,7 @@ const Invoices: React.FC = () => {
         setSuccess('Invoice deleted successfully');
         loadInvoices();
       } catch (err) {
-        setError('Failed to delete invoice');
+        setError(apiErrorMessage(err, 'Failed to delete invoice'));
       }
     }
     setActionMenuAnchor(null);
@@ -318,8 +323,10 @@ const Invoices: React.FC = () => {
       await ApiService.updateInvoice(invoice.id, { status: 'Sent' });
       setSuccess('Invoice marked as sent');
       loadInvoices();
-    } catch (err) {
-      setError('Failed to update invoice status');
+    } catch (err: any) {
+      const data = err?.response?.data;
+      const reason = Array.isArray(data?.status) ? data.status.join(' ') : data?.status || data?.error;
+      setError(typeof reason === 'string' && reason ? reason : 'Failed to update invoice status');
     }
     setActionMenuAnchor(null);
   };
@@ -481,9 +488,11 @@ const Invoices: React.FC = () => {
         subtitle="Bills sent to customers, their payment status and receipts. Invoice numbers come from QuickBooks."
         actions={
           <>
-            <Button variant="outlined" startIcon={<GetApp />} onClick={() => setQbExportOpen(true)}>
-              Export to QuickBooks
-            </Button>
+            {canMoney && (
+              <Button variant="outlined" startIcon={<GetApp />} onClick={() => setQbExportOpen(true)}>
+                Export to QuickBooks
+              </Button>
+            )}
             <Button variant="contained" startIcon={<Add />} onClick={handleCreateInvoice}>
               New Invoice
             </Button>
@@ -727,7 +736,7 @@ const Invoices: React.FC = () => {
             <ListItemText>Mark as Sent</ListItemText>
           </MenuItem>
         )}
-        {(actionMenuInvoice?.status === 'Sent' || actionMenuInvoice?.status === 'Overdue') && (
+        {canMoney && (actionMenuInvoice?.status === 'Sent' || actionMenuInvoice?.status === 'Overdue') && (
           <MenuItem onClick={() => handleMarkAsPaid(actionMenuInvoice!)}>
             <ListItemIcon>
               <Payment fontSize="small" />
@@ -735,7 +744,7 @@ const Invoices: React.FC = () => {
             <ListItemText>Mark as Paid</ListItemText>
           </MenuItem>
         )}
-        {actionMenuInvoice?.status === 'Paid' && !actionMenuInvoice?.receipt_number && (
+        {canMoney && actionMenuInvoice?.status === 'Paid' && !actionMenuInvoice?.receipt_number && (
           <MenuItem onClick={() => handleMarkAsPaid(actionMenuInvoice!)}>
             <ListItemIcon>
               <Receipt fontSize="small" />

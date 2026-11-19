@@ -2,8 +2,6 @@
 // New role types for User Management system
 export type UserRole = 'Sales' | 'Finance' | 'Tech' | 'Music' | 'Admin';
 
-// Legacy role types (still used in some parts of the app)
-export type LegacyUserRole = 'Sales' | 'Marketing' | 'Tech Support' | 'Admin';
 
 export interface User {
   id: string;
@@ -12,7 +10,7 @@ export interface User {
   first_name: string;
   last_name: string;
   full_name?: string;
-  role: UserRole | LegacyUserRole; // Support both for backward compatibility
+  role: UserRole | ''; // the server's roles; blank when an account has no role yet
   phone?: string; // Optional for backward compatibility
   department?: string; // Optional for backward compatibility
   is_active: boolean;

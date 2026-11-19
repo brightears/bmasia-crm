@@ -204,11 +204,132 @@ def source_ref_field(body, key, source_system, max_length):
     return token_field(body, key, max_length)
 
 
-def url_field(body, key, max_length):
+GMAIL_HOST = 'mail.google.com'
+# A host whose last label is a number in any base is read by browsers as an IPv4 address
+# (WHATWG URL "ends in a number"): 0x7f.0x0.0x0.0x1 and 1.2.3.0x4 both open an IP.
+_NUMERIC_LABEL_RE = re.compile(r'(0[xX][0-9a-fA-F]*|[0-9]+)\Z')
+# Well-known names a link may imitate, with the registrable domains that really are them.
+LOOKALIKE_NAMES = {
+    'google': frozenset({'google.com'}),
+    'gmail': frozenset({'gmail.com', 'google.com'}),
+    'microsoft': frozenset({'microsoft.com'}),
+    'outlook': frozenset({'outlook.com', 'office.com', 'microsoft.com'}),
+    'office': frozenset({'office.com', 'microsoft.com'}),
+    'bmasia': frozenset({'bmasiamusic.com', 'bmasia-crm.onrender.com', 'bmasia-crm-frontend.onrender.com'}),
+}
+# Suffixes under which each name is its own registrable domain (a small, explicit list).
+_MULTI_LABEL_SUFFIXES = frozenset({
+    'onrender.com', 'co.uk', 'com.au', 'co.th', 'in.th', 'or.th', 'ac.th', 'go.th', 'com.sg', 'com.hk',
+    'co.jp', 'com.vn', 'co.id', 'com.my', 'com.ph', 'co.nz', 'github.io', 'herokuapp.com',
+})
+
+
+def registrable_domain(host):
+    """The host's registrable domain: its last two labels, or three under a listed multi-label suffix."""
+    labels = host.split('.')
+    if len(labels) >= 3 and '.'.join(labels[-2:]) in _MULTI_LABEL_SUFFIXES:
+        return '.'.join(labels[-3:])
+    return '.'.join(labels[-2:])
+
+
+def lookalike_name(host):
+    """A well-known name the host carries outside its own domain (mail.google.com.other.example), or None."""
+    domain = registrable_domain(host)
+    words = {word for label in host.split('.') for word in label.split('-')}
+    for name, domains in LOOKALIKE_NAMES.items():
+        if name in words and domain not in domains:
+            return name
+    return None
+_DEFAULT_PORTS = {'http': 80, 'https': 443}
+_HOST_LABEL_RE = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z')
+
+
+def checked_url(value, source_system=''):
+    """``(url, None)`` with the URL rebuilt from its checked parts, or ``(None, reason)``.
+
+    Accepted: scheme exactly http or https; no user name or password (no @ in
+    the host part); a host name that is an ASCII domain after IDNA, with at
+    least two labels, not an IP address and not localhost; no port other than
+    the scheme's default (dropped when given). For a gmail source the host must
+    be exactly mail.google.com. What is stored is the rebuilt URL, so what a
+    reviewer sees is what was checked.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+    import ipaddress
+
+    scheme, sep, _rest = value.partition(':')
+    if not sep or scheme not in _DEFAULT_PORTS or not value.startswith(scheme + '://'):
+        return None, 'must be an http or https URL'
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except ValueError:
+        return None, 'is not a valid URL'
+    netloc = parts.netloc
+    if '@' in netloc or parts.username is not None or parts.password is not None:
+        return None, 'must not contain a user name or password'
+    if '[' in netloc or ']' in netloc:
+        return None, 'must name a host, not an IP address'
+    host = parts.hostname or ''
+    if netloc.count(':') > 1 or (':' in netloc and port is None):
+        return None, 'has an invalid port'
+    if port is not None and port != _DEFAULT_PORTS[scheme]:
+        return None, 'must use the default port'
+    try:
+        ascii_host = host.encode('idna').decode('ascii') if not host.isascii() else host
+    except UnicodeError:
+        return None, 'has a host name that is not a valid domain'
+    ascii_host = ascii_host.lower()
+    try:
+        ipaddress.ip_address(ascii_host)
+        return None, 'must name a host, not an IP address'
+    except ValueError:
+        pass
+    labels = ascii_host.split('.')
+    if len(ascii_host) > 253 or len(labels) < 2 or not all(_HOST_LABEL_RE.match(label) for label in labels):
+        return None, 'has a host name that is not a valid domain'
+    if _NUMERIC_LABEL_RE.match(labels[-1]):
+        return None, 'must name a host, not an IP address'
+    if labels[-1] == 'localhost':
+        return None, 'must not point at localhost'
+    if source_system == 'gmail' and ascii_host != GMAIL_HOST:
+        return None, f'must be a {GMAIL_HOST} link for a gmail source'
+    return urlunsplit((scheme, ascii_host, parts.path, parts.query, parts.fragment)), None
+
+
+def url_field(body, key, max_length, source_system=''):
     value = token_field(body, key, max_length)
-    if value and not re.match(r'https?://[^/\s]+', value):
-        raise bad(f'{key} must be an http or https URL')
-    return value
+    if not value:
+        return value
+    url, reason = checked_url(value, source_system)
+    if reason:
+        raise bad(f'{key} {reason}')
+    if len(url) > max_length:
+        raise bad(f'{key} must be at most {max_length} characters')
+    return url
+
+
+def url_warnings(field, value, source_system=''):
+    """Reviewer warnings for a stored link: a punycode host, or a link that would now be refused."""
+    if not value:
+        return []
+    url, reason = checked_url(value, source_system)
+    if reason:
+        return [{'field': field, 'code': 'url_not_accepted',
+                 'detail': f'This link {reason}; it was stored before links were checked. Do not follow it.'}]
+    from urllib.parse import urlsplit
+    host = urlsplit(url).hostname or ''
+    warnings = []
+    if any(label.startswith('xn--') for label in host.split('.')):
+        warnings.append({'field': field, 'code': 'url_punycode_host',
+                         'detail': 'The link\'s host is written in punycode (xn--) and may imitate another name; '
+                                   'check where it really points'})
+    name = lookalike_name(host)
+    if name:
+        warnings.append({'field': field, 'code': 'url_lookalike_host',
+                         'detail': f'The link\'s host mentions "{name}" but belongs to {registrable_domain(host)}; '
+                                   'check where it really points'})
+    return warnings
 
 
 def choice(body, key, choices, default=None):
