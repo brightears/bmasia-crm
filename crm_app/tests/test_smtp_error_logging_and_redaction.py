@@ -61,7 +61,7 @@ def test_describe_mail_exception_never_includes_the_reply():
     text = describe_mail_exception(_echoing_failure())
     assert text == 'SMTPAuthenticationError (SMTP code 535): the mail server did not accept the login'
     assert describe_mail_exception(smtplib.SMTPRecipientsRefused({'x@example.com': (550, PASSWORD.encode())})) == \
-        'SMTPRecipientsRefused: the mail server refused the recipients'
+        'SMTPRecipientsRefused: the mail server refused 1 recipient(s) (example.com: 550)'
     assert describe_mail_exception(ConnectionRefusedError(PASSWORD)) == \
         'ConnectionRefusedError: could not connect to the mail server'
     assert describe_mail_exception(ValueError('not mail')) is None
@@ -137,3 +137,13 @@ def test_audit_secret_scan_counts_names_only_and_writes_nothing(sender):
     assert '  Company additional_data.token: 1' in text
     assert PASSWORD not in text
     assert list(AuditLog.objects.order_by('pk').values_list('changes', 'additional_data')) == before
+
+
+def test_audit_secret_scan_runs_read_only_on_postgres(sender):
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+    if connection.vendor != 'postgresql':
+        pytest.skip('READ ONLY transactions are a PostgreSQL feature')
+    with CaptureQueriesContext(connection) as queries:
+        call_command('audit_secret_scan', stdout=io.StringIO())
+    assert any(q['sql'].strip().upper() == 'SET TRANSACTION READ ONLY' for q in queries.captured_queries)

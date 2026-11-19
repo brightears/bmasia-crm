@@ -115,12 +115,27 @@ def describe_mail_exception(exc):
         (smtplib.SMTPException, 'the mail server refused the request'),
         (OSError, 'could not connect to the mail server'),
     )
+    if isinstance(exc, smtplib.SMTPRecipientsRefused):
+        return f'{type(exc).__name__}: {_refused_recipients_text(exc)}'
     for kind, text in descriptions:
         if isinstance(exc, kind):
             code = getattr(exc, 'smtp_code', None)
             code_text = f' (SMTP code {code})' if isinstance(code, int) else ''
             return f'{type(exc).__name__}{code_text}: {text}'
     return None
+
+
+def _refused_recipients_text(exc):
+    """'the mail server refused N recipient(s) (example.com: 550; ...)': domain and code only."""
+    recipients = getattr(exc, 'recipients', None) or {}
+    parts = []
+    for address, reply in sorted(recipients.items(), key=lambda item: str(item[0])):
+        address = str(address)
+        domain = address.rsplit('@', 1)[-1] if '@' in address else 'unknown domain'
+        code = reply[0] if isinstance(reply, (tuple, list)) and reply and isinstance(reply[0], int) else None
+        parts.append(f'{domain}: {code if code is not None else "no code"}')
+    detail = f" ({'; '.join(parts)})" if parts else ''
+    return f'the mail server refused {len(recipients)} recipient(s){detail}'
 
 
 def smtp_error_text(request, exc):
