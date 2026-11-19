@@ -555,6 +555,72 @@ def test_bulk_finance_sync_and_export_routes_need_a_person_on_the_website_with_t
         assert getattr(_finance_person(role), method)(path).status_code == 403, role
 
 
+# --- finance: one role rule; exports and writes also need the website --------------------------
+
+def _account(name, role='Finance', superuser=False, active=True):
+    user = User.objects.create_user(username=name, email=f'{name}@example.com', password='test-only-password',
+                                    role=role, is_active=True, is_staff=superuser, is_superuser=superuser)
+    if not active:
+        user.is_active = False
+        user.save()
+    return user
+
+
+FINANCE_ACCOUNTS = {
+    # name: (role, superuser, active, has the finance role)
+    'admin': ('Admin', False, True, True),
+    'finance': ('Finance', False, True, True),
+    'sales': ('Sales', False, True, False),
+    'tech': ('Tech', False, True, False),
+    'music': ('Music', False, True, False),
+    'superuser-with-sales-role': ('Sales', True, True, False),
+    'inactive-finance': ('Finance', False, False, False),
+}
+
+FINANCE_ROUTES = {
+    'read': ('get', '/api/v1/profit-loss/monthly/?year=2026&month=1'),
+    'export': ('get', '/api/v1/profit-loss/export/pdf/?year=2026&month=1'),
+    'export-quickbooks': ('get', '/api/v1/invoices/export-quickbooks/'),
+    'mutate-report-viewset': ('post', '/api/v1/revenue/targets/'),
+    'mutate-action': ('post', '/api/v1/expense-categories/initialize-defaults/'),
+}
+
+
+def _finance_client(account, how):
+    role, superuser, active, _ok = FINANCE_ACCOUNTS[account]
+    user = _account(f'fin-{account}-{how}', role, superuser, active)
+    if how == 'website':
+        return website_client(user)
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f'Token {Token.objects.create(user=user).key}')
+    return client
+
+
+@pytest.mark.parametrize('account', list(FINANCE_ACCOUNTS))
+@pytest.mark.parametrize('how', ['website', 'token'])
+@pytest.mark.parametrize('kind', list(FINANCE_ROUTES))
+def test_finance_permission_matrix(account, how, kind):
+    """Reads: the finance role. Exports and writes: the finance role and a website sign-in.
+    The role decides: a superuser with the Sales role is refused like any Sales user."""
+    method, path = FINANCE_ROUTES[kind]
+    has_role = FINANCE_ACCOUNTS[account][3]
+    allowed = has_role and (kind == 'read' or how == 'website')
+    response = getattr(_finance_client(account, how), method)(path, format='json')
+    if allowed:
+        assert response.status_code not in (401, 403), (account, how, kind, response.status_code)
+    else:
+        assert response.status_code in (401, 403), (account, how, kind, response.status_code)
+
+
+def test_a_superuser_without_the_role_passes_none_of_the_role_rules():
+    """No superuser exception: the role must be given."""
+    client = website_client(_account('fresh-superuser', 'Sales', superuser=True))
+    assert client.post('/api/v1/automation/test-run/', {'dry_run': False}, format='json').status_code == 403
+    assert client.get('/api/v1/opportunities/export/pdf/').status_code != 403  # Sales may export opportunities
+    assert client.post('/api/v1/revenue/initialize/').status_code == 403
+    assert client.get('/api/v1/profit-loss/monthly/?year=2026&month=1').status_code == 403
+
+
 def test_the_automation_test_run_does_not_send_unless_switched_on(settings, monkeypatch):
     import subprocess
     calls = []
