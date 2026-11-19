@@ -127,15 +127,34 @@ export const outcomeOf = (p: ChangeProposal, error: ReviewApiError): ErrorOutcom
             text: `Nothing was done: this suggestion changed since it was loaded (${snap ? whatChanged(p, snap) : 'it was updated'}). Look at it again and decide.`,
           },
         };
-      case 'record_changed':
+      case 'record_changed': {
+        // Later backends say what changed (for example that the record became inactive).
+        const reason = typeof error.body?.target_state_reason === 'string' ? error.body.target_state_reason.trim() : '';
         return {
           kind: 'notice',
           refresh: true,
           snapshot: snap,
           notice: {
             tone: 'warning',
-            text: 'Nothing was applied: the record changed after this was suggested. The current values were just re-read; compare them and decide again.',
+            text: reason
+              ? `Nothing was applied: the record changed after this was suggested. ${reason}`
+              : 'Nothing was applied: the record changed after this was suggested. The current values were just re-read; compare them and decide again.',
           },
+        };
+      }
+      case 'not_acceptable':
+        return {
+          kind: 'notice',
+          refresh: true,
+          snapshot: snap,
+          notice: { tone: 'warning', text: `Nothing was applied. ${detail}` },
+        };
+      case 'needs_acknowledgement':
+        return {
+          kind: 'notice',
+          refresh: true,
+          snapshot: snap,
+          notice: { tone: 'warning', text: `Nothing was applied. ${detail}` },
         };
       case 'not_open':
       case 'not_rejected':
@@ -161,6 +180,17 @@ export const outcomeOf = (p: ChangeProposal, error: ReviewApiError): ErrorOutcom
     }
     if (error.code === 'reviewer_is_party') return { kind: 'card_read_only', reason: detail };
     return { kind: 'notice', refresh: false, notice: { tone: 'error', text: detail } };
+  }
+  if (error.status === 400 && /acknowledge_inactive/.test(detail)) {
+    // A backend from before inactive records could be changed with an acknowledgement.
+    return {
+      kind: 'notice',
+      refresh: true,
+      notice: {
+        tone: 'warning',
+        text: 'Nothing was applied: this server does not accept changes to inactive records yet. Activate the record first.',
+      },
+    };
   }
   if (error.status === 422) {
     const isApply = error.code === 'apply_refused';

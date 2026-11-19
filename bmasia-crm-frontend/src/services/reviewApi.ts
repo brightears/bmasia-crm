@@ -85,6 +85,10 @@ export interface ChangeProposal {
   warnings?: ProposalWarning[];
   /** Later backend versions, in the answer to accepting a new contact: the contact created (inactive). */
   created_contact_id?: string;
+  /** Later backends: the target as last compared, a sentence to show as it is, and the fields compared. */
+  target_state?: 'present' | 'no_duplicate' | 'inactive' | 'moved' | 'missing' | 'duplicate' | '';
+  target_state_reason?: string;
+  watched_fields?: string[];
   apply_note?: string;
   /** Later backend versions may flag mixed scripts directly. */
   mixed_script?: boolean | string[] | Record<string, unknown>;
@@ -116,6 +120,8 @@ export interface Page<T> {
   next: string | null;
   previous: string | null;
   results: T[];
+  /** Later backends, on the proposals list: open suggestions expiring soon, whatever the filters. */
+  summary?: { open_expiring_within_days?: number; open_expiring_count?: number };
 }
 
 export interface ProposalFilters {
@@ -126,6 +132,11 @@ export interface ProposalFilters {
   page?: number;
   page_size?: number;
   ordering?: string;
+}
+
+export interface DecisionOptions {
+  note?: string;
+  acknowledgeInactive?: boolean;
 }
 
 export interface BulkRejectResult {
@@ -224,9 +235,14 @@ const reviewApi = {
 
   get: (id: string): Promise<ChangeProposal> => call(() => authApi.get<ChangeProposal>(`${BASE}${id}/`)),
 
-  accept: (id: string, seenVersion: string, note?: string): Promise<ChangeProposal> =>
+  /** `acknowledgeInactive` is sent only for an inactive target, after the reviewer's tick (later backends). */
+  accept: (id: string, seenVersion: string, options: DecisionOptions = {}): Promise<ChangeProposal> =>
     call(() =>
-      authApi.post<ChangeProposal>(`${BASE}${id}/accept/`, { seen_version: seenVersion, ...(note ? { note } : {}) }),
+      authApi.post<ChangeProposal>(`${BASE}${id}/accept/`, {
+        seen_version: seenVersion,
+        ...(options.note ? { note: options.note } : {}),
+        ...(options.acknowledgeInactive ? { acknowledge_inactive: true } : {}),
+      }),
     ),
 
   acceptWithEdits: (
@@ -234,14 +250,15 @@ const reviewApi = {
     seenVersion: string,
     edits: Record<string, PatchValue>,
     dropFields: string[],
-    note?: string,
+    options: DecisionOptions = {},
   ): Promise<ChangeProposal> =>
     call(() =>
       authApi.post<ChangeProposal>(`${BASE}${id}/accept-with-edits/`, {
         seen_version: seenVersion,
         ...(Object.keys(edits).length ? { edits } : {}),
         ...(dropFields.length ? { drop_fields: dropFields } : {}),
-        ...(note ? { note } : {}),
+        ...(options.note ? { note: options.note } : {}),
+        ...(options.acknowledgeInactive ? { acknowledge_inactive: true } : {}),
       }),
     ),
 
