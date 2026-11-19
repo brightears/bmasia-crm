@@ -44,7 +44,71 @@ QUERY_UNAVAILABLE_MESSAGE = (
 
 PIPELINE_SHAPE_MESSAGE = 'search_pipeline must be a list of objects (pipeline stages); use [] for all rows.'
 
+QUERY_TOOL = 'query_data_collections'
+
 _STATE = {'installed': False}
+
+
+class QueryInputError(ValueError):
+    """A mistake in the caller's query, refused by the checks here. The message goes back to
+    the agent unchanged; ``kind`` and ``name`` (the unknown field or collection) are for the
+    one-line log entry."""
+
+    def __init__(self, message, kind, name=None):
+        super().__init__(message)
+        self.kind = kind
+        self.name = name
+
+
+# Where the library and Django raise when the caller's pipeline is malformed or a value
+# does not fit (innermost frame of the exception). (path parts, function or None).
+_CALLER_INPUT_ORIGINS = (
+    (('mcp_server', 'query_tool.py'), None, 'invalid_pipeline'),        # the library reading the stages
+    (('django', 'db', 'models', 'fields'), None, 'invalid_value'),      # a value that does not fit the column
+    (('django', 'db', 'models', 'lookups.py'), None, 'invalid_value'),  # an operator value of the wrong shape
+    (('django', 'db', 'models', 'query.py'), '__getitem__', 'invalid_skip_or_limit'),
+)
+_CALLER_INPUT_TYPES = (ValueError, TypeError, AttributeError, KeyError)
+
+
+def caller_input_kind(exc):
+    """The kind of caller mistake an exception from the query tool is, or None for a fault.
+
+    Our own refusals are QueryInputError. Otherwise only these exception types count, and
+    only when raised where the library parses the pipeline or where Django converts a value
+    or a $skip/$limit; anything else (database errors included) is treated as a fault.
+    """
+    import traceback
+
+    from django.core.exceptions import ValidationError
+
+    if isinstance(exc, QueryInputError):
+        return exc.kind
+    if not isinstance(exc, _CALLER_INPUT_TYPES + (ValidationError,)):
+        return None
+    frames = traceback.extract_tb(exc.__traceback__)
+    if not frames:
+        return None
+    parts = tuple(re.split(r'[\\/]', frames[-1].filename))
+    for origin, function, kind in _CALLER_INPUT_ORIGINS:
+        n = len(origin)
+        if any(parts[i:i + n] == origin for i in range(len(parts) - n + 1)) and \
+                function in (None, frames[-1].name):
+            return kind
+    return None
+
+
+def _principal(request):
+    user = getattr(request, 'user', None)
+    return getattr(user, 'username', None) or '-'
+
+
+def tool_error_result(exc):
+    """The reply the MCP SDK would build from the exception (FastMCP's ToolError text)."""
+    from mcp.types import CallToolResult, TextContent
+
+    return CallToolResult(content=[TextContent(type='text', text=f'Error executing tool {QUERY_TOOL}: {exc}')],
+                          isError=True)
 
 
 # ------------------------------------------------------------------ never publish
@@ -118,6 +182,15 @@ FIELD_ALIASES = {
     ('*', 'pdf_url'): ('hint', _PDF_HINT),
     ('*', 'preamble_template_name'): ('hint', 'use preamble_template with a $lookup on contracttemplate'),
     ('*', 'customer_company_name'): ('hint', 'use company with a $lookup on company'),
+    ('company', 'currency'): ('hint', 'currency is set on each contract, quote and invoice; a company has billing_entity'),
+    ('company', 'primary_contact'): ('hint', 'query contact with this company and is_primary true'),
+    ('*', 'number_of_zones'): ('hint', 'count contractservicelocation rows by contract (one per zone) or zone rows by '
+                                       'company; company.contracted_zone_count is the contracted count'),
+    ('contract', 'contract_documents'): ('hint', _PDF_HINT),
+    ('contract', 'quote'): ('hint', "a contract's source quote is not published; query quote by company"),
+    ('contract', 'source_quote'): ('hint', "a contract's source quote is not published; query quote by company"),
+    ('quote', 'sent_date'): ('hint', 'quote send dates are not published; status shows whether it was sent'),
+    ('*', 'payment_method'): ('hint', 'payment method is not published; use status and paid_date on invoice'),
 }
 
 COLLECTION_ALIASES = {
@@ -263,7 +336,8 @@ class Boundary:
     # -------------------------------------------------------------- paths
 
     def _refuse(self, name, collection):
-        return ValueError(unknown_field_message(name, collection, self.fields[collection]))
+        return QueryInputError(unknown_field_message(name, collection, self.fields[collection]),
+                               'unknown_field', name)
 
     def check_path(self, collection, path):
         """Raise the one-line error unless a Django field path stays on published fields.
@@ -323,7 +397,8 @@ class Boundary:
 
     def _check_search(self, collection):
         if not self.search_fields_published(collection):
-            raise ValueError(f"Full text search is not available on collection '{collection}'.")
+            raise QueryInputError(f"Full text search is not available on collection '{collection}'.",
+                                  'search_unavailable')
 
     def _check_ref(self, collection, ref, aliases):
         if isinstance(ref, str) and ref.startswith('$'):
@@ -461,13 +536,14 @@ def _install():
     if getattr(original, '_crm_boundary', False):
         return
 
-    def query(self, collection: str, search_pipeline: list[dict] = []):
+    def checked_query(self, collection, search_pipeline):
         # Checked first, so the field checks never depend on the library's argument model.
         if not isinstance(search_pipeline, list) or not all(isinstance(s, dict) for s in search_pipeline):
-            raise ValueError(PIPELINE_SHAPE_MESSAGE)
+            raise QueryInputError(PIPELINE_SHAPE_MESSAGE, 'pipeline_shape')
         collections = self.query_tool_models
         if not isinstance(collection, str) or collection.lower() not in collections:
-            raise ValueError(unknown_collection_message(collection, collections.keys()))
+            raise QueryInputError(unknown_collection_message(collection, collections.keys()),
+                                  'unknown_collection', collection)
         name = collection.lower()
         boundary = boundary_for(collections)
         boundary.validate(name, search_pipeline)
@@ -475,7 +551,27 @@ def _install():
         try:
             return original(self, collection, pipeline)
         except FieldError as exc:
-            raise ValueError(field_error_message(boundary, name, exc)) from exc
+            keyword = re.search(r"Cannot resolve keyword '([^']+)' into field", str(exc))
+            raise QueryInputError(field_error_message(boundary, name, exc),
+                                  'unknown_field' if keyword else 'field_error',
+                                  keyword.group(1) if keyword else None) from exc
+
+    def query(self, collection: str, search_pipeline: list[dict] = []):
+        try:
+            return checked_query(self, collection, search_pipeline)
+        except Exception as exc:
+            kind = caller_input_kind(exc)
+            # Only a call through the MCP tool carries a context. There a caller mistake is
+            # answered as the SDK would answer the exception (same text, isError), without
+            # reaching the library's handler, which logs every exception with a traceback.
+            # In-process callers keep getting the exception.
+            if self.context is None or kind is None:
+                raise
+            name = exc.name if isinstance(exc, QueryInputError) else None
+            logger.warning('%s refused a query: %s by %s on collection %r (%s)', QUERY_TOOL, kind,
+                           _principal(self.request), str(collection)[:80],
+                           str(name)[:80] if name is not None else type(exc).__name__)
+            return tool_error_result(exc)
 
     query._crm_boundary = True
     query.__wrapped__ = original
@@ -532,7 +628,7 @@ def describe_collection(name):
     key = name.lower() if isinstance(name, str) else name
     cls = collections.get(key)
     if cls is None:
-        raise ValueError(unknown_collection_message(name, collections.keys()))
+        raise QueryInputError(unknown_collection_message(name, collections.keys()), 'unknown_collection', name)
     published = boundary_for(collections).fields[key]
     properties = collection_schema(cls)['$jsonSchema']['properties']
     fields = []

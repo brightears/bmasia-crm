@@ -354,10 +354,12 @@ def test_published_paths_still_work(data):
 
 
 def test_refusal_reaches_the_client_as_one_line(data):
-    with pytest.raises(ToolError) as caught:
-        async_to_sync(mcp_server.call_tool)('query_data_collections', {
-            'collection': 'task', 'search_pipeline': [{'$project': {'x': '$assigned_to__password'}}]})
-    text = str(caught.value)
+    # A caller mistake comes back as an error result with the SDK's text (no exception, so
+    # the library logs no traceback); see test_mcp_query_caller_mistakes.py.
+    result = async_to_sync(mcp_server.call_tool)('query_data_collections', {
+        'collection': 'task', 'search_pipeline': [{'$project': {'x': '$assigned_to__password'}}]})
+    assert result.isError is True
+    text = result.content[0].text
     assert '\n' not in text
     assert text.startswith("Error executing tool query_data_collections: Unknown field 'assigned_to' on collection "
                            "'task'.")
