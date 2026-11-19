@@ -144,6 +144,18 @@ PERSON_SOURCE_SYSTEMS = frozenset({'manual', 'crm'})
 NOT_CONFIGURED_DETAIL = ('Reviewing is not configured on this server: no reviewer is listed in '
                          'CHANGE_PROPOSAL_REVIEWER_USERNAMES.')
 NOT_LISTED_DETAIL = 'Your account is not on the reviewer list (CHANGE_PROPOSAL_REVIEWER_USERNAMES).'
+# What a caller who is not staff is told instead (no setting names).
+NOT_SET_UP_DETAIL = 'Reviewing is not set up yet.'
+NOT_ON_LIST_DETAIL = 'Your account is not on the list of reviewers.'
+_PLAIN_REFUSALS = {NOT_CONFIGURED_DETAIL: NOT_SET_UP_DETAIL, NOT_LISTED_DETAIL: NOT_ON_LIST_DETAIL}
+
+
+def refusal_text(request, refusal):
+    """The refusal as shown to this caller: setting names only for staff."""
+    user = getattr(request, 'user', None)
+    if refusal in _PLAIN_REFUSALS and not getattr(user, 'is_staff', False):
+        return _PLAIN_REFUSALS[refusal]
+    return refusal
 
 
 def _name(value) -> str:
@@ -301,7 +313,7 @@ def account_status(request) -> dict:
         reason = 'agent name' if is_agent_by_name(user) else 'holds an API token and is not a listed reviewer'
     return {
         'you_can_review': refusal is None,
-        'review_refusal': refusal,
+        'review_refusal': refusal_text(request, refusal),
         'treated_as_agent': agent,
         'treated_as_agent_because': reason,
         'reviewing_configured': bool(listed_reviewer_names()),

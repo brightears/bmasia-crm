@@ -92,6 +92,19 @@ PROPOSAL_STATUS_CHOICES = [
     ('superseded', 'Superseded'),
     ('failed', 'Failed'),
 ]
+# The target as last compared with the suggestion. For an update: the record is
+# there, was made inactive (is_active false), moved to another company (a contact)
+# or was deleted. For a new contact:
+# whether a contact with the proposed email or name exists at the company.
+TARGET_STATE_CHOICES = [
+    ('', 'As when suggested'),
+    ('present', 'Present'),
+    ('inactive', 'Made inactive'),
+    ('moved', 'Moved to another company'),
+    ('missing', 'Deleted'),
+    ('no_duplicate', 'No contact with that email or name'),
+    ('duplicate', 'A contact with that email or name exists'),
+]
 # Only one open proposal per fingerprint (enforced by a partial unique index).
 # An agent may not raise again a fingerprint that was decided; a person may.
 OPEN_STATUS = 'proposed'
@@ -247,7 +260,13 @@ class ChangeProposal(models.Model):
     decision_note = models.CharField(max_length=DECISION_NOTE_MAX, blank=True, default='')
     target_changed_at = models.DateTimeField(
         null=True, blank=True,
-        help_text='Set when an accept found the record changed; current_values were re-read then',
+        help_text='Set when a watched value or the target state changed since the suggestion; '
+                  'current_values were re-read then',
+    )
+    target_state = models.CharField(
+        max_length=12, choices=TARGET_STATE_CHOICES, blank=True, default='',
+        help_text='The target as last compared. Empty on rows from before this was kept: read as present '
+                  '(an update) or no_duplicate (a new contact)',
     )
     last_apply_error = models.CharField(max_length=APPLY_ERROR_MAX, blank=True, default='')
     applied_record_id = models.CharField(max_length=64, blank=True, default='')

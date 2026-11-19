@@ -90,9 +90,15 @@ class ChangeProposalSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def to_representation(self, instance):
-        from agent_inbox.proposals import effective_status
+        from agent_inbox.proposals import effective_status, stored_state, target_state_reason, watched_fields
         data = super().to_representation(instance)
         data['status'] = effective_status(instance)
+        # present | inactive | moved | missing for an update; duplicate | no_duplicate for a new contact.
+        data['target_state'] = stored_state(instance)
+        data['target_state_reason'] = target_state_reason(instance)
+        # The fields whose "Now" values are kept current; other values shown are context
+        # that may have changed since (a note's current notes).
+        data['watched_fields'] = watched_fields(instance)
         return data
 
     def get_seen_version(self, proposal):

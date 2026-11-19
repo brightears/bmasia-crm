@@ -205,6 +205,53 @@ def source_ref_field(body, key, source_system, max_length):
 
 
 GMAIL_HOST = 'mail.google.com'
+# A host whose last label is a number in any base is read by browsers as an IPv4 address
+# (WHATWG URL "ends in a number"): 0x7f.0x0.0x0.0x1 and 1.2.3.0x4 both open an IP.
+_NUMERIC_LABEL_RE = re.compile(r'(0[xX][0-9a-fA-F]*|[0-9]+)\Z')
+# Well-known names a link may imitate, with the registrable domains that really are them.
+_MICROSOFT_DOMAINS = frozenset({
+    'microsoft.com', 'microsoftonline.com', 'office.com', 'office365.com', 'outlook.com', 'live.com', 'hotmail.com',
+})
+LOOKALIKE_NAMES = {
+    'google': frozenset({'google.com'}),
+    'gmail': frozenset({'gmail.com', 'google.com'}),
+    'microsoft': _MICROSOFT_DOMAINS,
+    'outlook': _MICROSOFT_DOMAINS,
+    'office': _MICROSOFT_DOMAINS,
+    'office365': _MICROSOFT_DOMAINS,
+    'bmasia': frozenset({'bmasiamusic.com', 'bmasia-crm.onrender.com', 'bmasia-crm-frontend.onrender.com'}),
+}
+# Google's country domains: google.<cc>, google.co.<cc>, google.com.<cc>.
+_GOOGLE_COUNTRY_RE = re.compile(r'google\.(?:co\.|com\.)?[a-z]{2}\Z')
+# Second-level labels under which a country domain registers names (co.th, com.au, or.jp ...).
+_COUNTRY_SECOND_LEVELS = frozenset({'co', 'com', 'net', 'org', 'or', 'ac', 'go', 'gov', 'edu', 'in', 'ne'})
+# Suffixes under which each name is its own registrable domain (a small, explicit list).
+_MULTI_LABEL_SUFFIXES = frozenset({
+    'onrender.com', 'co.uk', 'com.au', 'co.th', 'in.th', 'or.th', 'ac.th', 'go.th', 'com.sg', 'com.hk',
+    'co.jp', 'com.vn', 'co.id', 'com.my', 'com.ph', 'co.nz', 'github.io', 'herokuapp.com',
+})
+
+
+def registrable_domain(host):
+    """The host's registrable domain: its last two labels, or three under a listed multi-label suffix."""
+    labels = host.split('.')
+    if len(labels) >= 3 and ('.'.join(labels[-2:]) in _MULTI_LABEL_SUFFIXES
+                             or (labels[-2] in _COUNTRY_SECOND_LEVELS and len(labels[-1]) == 2)):
+        return '.'.join(labels[-3:])
+    return '.'.join(labels[-2:])
+
+
+def lookalike_name(host):
+    """A well-known name the host carries outside its own domain (mail.google.com.other.example), or None."""
+    domain = registrable_domain(host)
+    words = {word for label in host.split('.') for word in label.split('-')}
+    for name, domains in LOOKALIKE_NAMES.items():
+        if name not in words or domain in domains:
+            continue
+        if name in ('google', 'gmail') and _GOOGLE_COUNTRY_RE.match(domain):
+            continue
+        return name
+    return None
 _DEFAULT_PORTS = {'http': 80, 'https': 443}
 _HOST_LABEL_RE = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z')
 
@@ -253,7 +300,7 @@ def checked_url(value, source_system=''):
     labels = ascii_host.split('.')
     if len(ascii_host) > 253 or len(labels) < 2 or not all(_HOST_LABEL_RE.match(label) for label in labels):
         return None, 'has a host name that is not a valid domain'
-    if labels[-1].isdigit():
+    if _NUMERIC_LABEL_RE.match(labels[-1]):
         return None, 'must name a host, not an IP address'
     if labels[-1] == 'localhost':
         return None, 'must not point at localhost'
@@ -283,11 +330,18 @@ def url_warnings(field, value, source_system=''):
         return [{'field': field, 'code': 'url_not_accepted',
                  'detail': f'This link {reason}; it was stored before links were checked. Do not follow it.'}]
     from urllib.parse import urlsplit
-    if any(label.startswith('xn--') for label in (urlsplit(url).hostname or '').split('.')):
-        return [{'field': field, 'code': 'url_punycode_host',
-                 'detail': 'The link\'s host is written in punycode (xn--) and may imitate another name; '
-                           'check where it really points'}]
-    return []
+    host = urlsplit(url).hostname or ''
+    warnings = []
+    if any(label.startswith('xn--') for label in host.split('.')):
+        warnings.append({'field': field, 'code': 'url_punycode_host',
+                         'detail': 'The link\'s host is written in punycode (xn--) and may imitate another name; '
+                                   'check where it really points'})
+    name = lookalike_name(host)
+    if name:
+        warnings.append({'field': field, 'code': 'url_lookalike_host',
+                         'detail': f'The link\'s host mentions "{name}" but belongs to {registrable_domain(host)}; '
+                                   'check where it really points'})
+    return warnings
 
 
 def choice(body, key, choices, default=None):
