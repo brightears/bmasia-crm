@@ -58,6 +58,14 @@ class UserAdminChangeForm(UserChangeForm):
         model = User
         exclude = ('smtp_password',)
 
+    def clean_new_smtp_password(self):
+        from crm_app.fields import secret_input_error
+        value = self.cleaned_data.get('new_smtp_password')
+        problem = secret_input_error(value)
+        if problem:
+            raise forms.ValidationError(problem)
+        return value
+
     def clean(self):
         cleaned = super().clean()
         if cleaned.get('new_smtp_password') and cleaned.get('clear_smtp_password'):
@@ -101,7 +109,7 @@ class UserAdmin(BaseUserAdmin):
     def smtp_password_status(self, obj):
         if obj is None or obj.pk is None:
             return 'Not set'
-        return 'Set' if obj.smtp_password else 'Not set'
+        return obj.smtp_password_label
 
 
 class ContactInline(admin.TabularInline):

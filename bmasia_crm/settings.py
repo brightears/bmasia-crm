@@ -568,3 +568,27 @@ EMAIL_SENDERS = {
 
 # Site URL for email links and redirects
 SITE_URL = config('SITE_URL', default='https://bmasia-crm.onrender.com')
+
+# Key rotation for encrypted fields. While FIELD_ENCRYPTION_KEY_PREVIOUS is set, values
+# encrypted with the previous key still read; every save uses FIELD_ENCRYPTION_KEY.
+# Procedure: crm_app/management/commands/encrypt_smtp_passwords.py.
+FIELD_ENCRYPTION_KEY_PREVIOUS = config('FIELD_ENCRYPTION_KEY_PREVIOUS', default='')
+
+
+def _previous_key_is_usable(value):
+    """In production a malformed previous key stops startup; in development it is ignored with a warning."""
+    try:
+        from cryptography.fernet import Fernet
+        Fernet(value)
+        return True
+    except Exception:
+        pass
+    if os.environ.get('RENDER'):
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured('FIELD_ENCRYPTION_KEY_PREVIOUS is set but is not in the expected format.')
+    _startup_logger.warning('FIELD_ENCRYPTION_KEY_PREVIOUS is set but is not in the expected format; it is ignored')
+    return False
+
+
+if FIELD_ENCRYPTION_KEY_PREVIOUS and _previous_key_is_usable(FIELD_ENCRYPTION_KEY_PREVIOUS):
+    FIELD_ENCRYPTION_KEY = [FIELD_ENCRYPTION_KEY, FIELD_ENCRYPTION_KEY_PREVIOUS]

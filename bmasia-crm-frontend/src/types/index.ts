@@ -16,6 +16,7 @@ export interface User {
   is_active: boolean;
   smtp_email?: string | null; // Optional for backward compatibility
   smtp_configured?: boolean; // Optional for backward compatibility
+  smtp_status?: string; // 'Not set', 'Set', or 'Set (unreadable: needs re-entry)'
   avatar_url?: string | null; // Profile image (base64 data URL or external URL)
   last_login?: string | null; // Optional for backward compatibility
   date_joined: string;

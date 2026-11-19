@@ -68,6 +68,7 @@ def _unicode_base_fonts(styles):
             s.fontName = _map[s.fontName]
     return styles
 
+from .models import SMTP_FALLBACK_NOTICE, SMTP_PASSWORD_UNREADABLE_MESSAGE
 from .models import (
     User, Company, Contact, Note, Task, AuditLog, start_of_local_day,
     Opportunity, OpportunityActivity, Contract, Invoice, InvoiceLineItem, ContractZone,
@@ -134,6 +135,14 @@ def serialize_audit_changes(obj):
 
 
 REDACTED_AUDIT_VALUE = '[redacted]'
+
+
+def sender_notice(request):
+    """{'notice': ...} when the sender's own mail password is unreadable and the send used the shared address."""
+    user = getattr(request, 'user', None)
+    if getattr(user, 'is_authenticated', False) and getattr(user, 'smtp_password_state', None) == 'unreadable':
+        return {'notice': SMTP_FALLBACK_NOTICE}
+    return {}
 
 
 def redact_secret_changes(changes):
@@ -574,6 +583,11 @@ class UserViewSet(BaseModelViewSet):
                 'smtp_configured': False
             })
 
+        if smtp_password:
+            from crm_app.fields import secret_input_error
+            problem = secret_input_error(smtp_password)
+            if problem:
+                return Response({'error': problem}, status=status.HTTP_400_BAD_REQUEST)
         if smtp_email:
             user.smtp_email = smtp_email
         if smtp_password:
@@ -583,13 +597,17 @@ class UserViewSet(BaseModelViewSet):
         return Response({
             'message': 'SMTP settings updated',
             'smtp_email': user.smtp_email,
-            'smtp_configured': bool(user.smtp_email and user.smtp_password)
+            'smtp_configured': bool(user.smtp_email) and user.smtp_password_state == 'set',
+            'smtp_status': user.smtp_password_label,
         })
 
     @action(detail=False, methods=['post'])
     def test_smtp(self, request):
         """Test current user's SMTP configuration by sending a test email"""
         user = request.user
+        if user.smtp_password_state == 'unreadable':
+            user.get_smtp_config()  # logs the warning (user id only)
+            return Response({'error': SMTP_PASSWORD_UNREADABLE_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
         if not user.smtp_email or not user.smtp_password:
             return Response(
                 {'error': 'SMTP not configured'},
@@ -624,6 +642,9 @@ class UserViewSet(BaseModelViewSet):
         user = self.get_object()
         to_email = request.data.get('to_email', request.user.email)
 
+        if user.smtp_password_state == 'unreadable':
+            user.get_smtp_config()  # logs the warning (user id only)
+            return Response({'error': SMTP_PASSWORD_UNREADABLE_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
         if not user.smtp_email or not user.smtp_password:
             return Response({'error': f'{user.username} SMTP not configured'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1430,6 +1451,7 @@ class ContractViewSet(BaseModelViewSet):
 
         return Response({
             'message': message,
+            **sender_notice(request),
             'status': contract.status
         })
 
@@ -6337,6 +6359,7 @@ class InvoiceViewSet(BaseModelViewSet):
 
         return Response({
             'message': message,
+            **sender_notice(request),
             'status': invoice.status,
             'email_details': [{
                 'to_email': log.to_email,
@@ -6468,6 +6491,7 @@ class InvoiceViewSet(BaseModelViewSet):
 
         return Response({
             'message': message,
+            **sender_notice(request),
             'receipt_number': invoice.receipt_number,
         })
 
@@ -7338,6 +7362,7 @@ class QuoteViewSet(BaseModelViewSet):
 
         return Response({
             'message': message,
+            **sender_notice(request),
             'status': quote.status,
             'sent_date': str(quote.sent_date) if quote.sent_date else None,
             'email_details': [{

@@ -37,6 +37,10 @@ import { GridLegacy as Grid } from '@mui/material';
 import { User, UserRole, USER_ROLE_LABELS, USER_ROLE_COLORS, PasswordChangeData, SmtpSettingsData } from '../types';
 import ApiService from '../services/api';
 import { logApiError } from '../utils/logApiError';
+
+// The server's smtp_status when the stored mail password cannot be decrypted.
+const SMTP_UNREADABLE_STATUS = 'Set (unreadable: needs re-entry)';
+
 const MyProfile: React.FC = () => {
 
   // Profile state
@@ -527,7 +531,15 @@ const MyProfile: React.FC = () => {
               <Typography variant="h6" component="h2">
                 SMTP Email Configuration
               </Typography>
-              {user.smtp_configured ? (
+              {user.smtp_status === SMTP_UNREADABLE_STATUS ? (
+                <Chip
+                  icon={<Warning />}
+                  label="Needs re-entry: your saved password cannot be read"
+                  color="error"
+                  size="small"
+                  sx={{ ml: 2 }}
+                />
+              ) : user.smtp_configured ? (
                 <Chip
                   icon={<CheckCircle />}
                   label="Configured"
