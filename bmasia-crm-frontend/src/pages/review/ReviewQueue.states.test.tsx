@@ -8,7 +8,7 @@ import ChangePreview from './ChangePreview';
 import reviewApi, { ChangeProposal, ReviewApiError } from '../../services/reviewApi';
 import { makeProposal, settingsOn } from './testFixtures';
 import { resetReviewSettingsCache } from './useReviewStatus';
-import { INACTIVE_TICK_LABEL } from './reviewModel';
+import { INACTIVE_TICK_LABEL, INACTIVE_UNSUPPORTED } from './reviewModel';
 
 jest.mock('../../services/authService', () => ({ __esModule: true, default: {}, authApi: {} }));
 jest.mock('../../contexts/AuthContext', () => ({ useAuth: () => ({ user: { username: 'reviewer.one' } }) }));
@@ -326,9 +326,10 @@ describe('refusals carry the server’s reason', () => {
     expect(await screen.findByTestId('card-notice')).toHaveTextContent(`Nothing was applied. ${REASONS.moved}`);
   });
 
-  it('an older server that does not know acknowledge_inactive gets a plain explanation', async () => {
+  it('an older server that refuses acknowledge_inactive: said once, then inactive records are blocked', async () => {
     const p = withState('inactive');
-    show([p]);
+    const q = withState('inactive', { seen_version: 'v-inactive-2', patch: { city: 'Trat' } });
+    show([p, q]);
     api.accept.mockRejectedValueOnce(new ReviewApiError(400, 'invalid', 'Unknown keys: acknowledge_inactive'));
     api.get.mockResolvedValue(p);
     renderPage('/review?tab=look');
@@ -336,8 +337,53 @@ describe('refusals carry the server’s reason', () => {
     fireEvent.click(card.getByLabelText(INACTIVE_TICK_LABEL));
     fireEvent.click(card.getByRole('button', { name: 'Accept' }));
     expect(await screen.findByTestId('card-notice')).toHaveTextContent(
-      'does not accept changes to inactive records yet',
+      'Nothing was applied: this server cannot apply changes to inactive records yet.',
     );
+    for (const row of [p, q]) {
+      const c = within(cardEl(row));
+      await waitFor(() => expect(c.getByRole('button', { name: 'Accept' })).toBeDisabled());
+      expect(c.queryByLabelText(INACTIVE_TICK_LABEL)).not.toBeInTheDocument();
+      expect(c.getByTestId('inactive-unsupported')).toHaveTextContent(INACTIVE_UNSUPPORTED);
+      expect(c.getByTestId('accept-blocked-reason')).toHaveTextContent(INACTIVE_UNSUPPORTED);
+    }
+    expect(screen.getAllByTestId('card-notice')).toHaveLength(1);
+    expect(api.accept).toHaveBeenCalledTimes(1);
+  });
+
+  it('a 400 about the flag that is not "unknown key" is not taken for an older server', async () => {
+    const p = withState('inactive');
+    show([p]);
+    api.accept.mockRejectedValueOnce(new ReviewApiError(400, 'invalid', 'acknowledge_inactive must be true or false'));
+    api.get.mockResolvedValue(p);
+    renderPage('/review?tab=look');
+    const card = await findCard(p);
+    fireEvent.click(card.getByLabelText(INACTIVE_TICK_LABEL));
+    fireEvent.click(card.getByRole('button', { name: 'Accept' }));
+    expect(await screen.findByTestId('card-notice')).toHaveTextContent('acknowledge_inactive must be true or false');
+    expect(card.queryByTestId('inactive-unsupported')).not.toBeInTheDocument();
+  });
+
+  it('needs_acknowledgement is told in the page’s own words', async () => {
+    const p = withState('inactive');
+    show([p]);
+    api.accept.mockRejectedValueOnce(
+      new ReviewApiError(
+        409,
+        'needs_acknowledgement',
+        'This contact is inactive. To apply it, accept again with acknowledge_inactive: true.',
+        {
+          code: 'needs_acknowledgement',
+        },
+      ),
+    );
+    api.get.mockResolvedValue(p);
+    renderPage('/review?tab=look');
+    const card = await findCard(p);
+    fireEvent.click(card.getByLabelText(INACTIVE_TICK_LABEL));
+    fireEvent.click(card.getByRole('button', { name: 'Accept' }));
+    const notice = await screen.findByTestId('card-notice');
+    expect(notice).toHaveTextContent('Nothing was applied. Tick the box to apply the change to this inactive record.');
+    expect(notice).not.toHaveTextContent('acknowledge_inactive');
   });
 });
 
@@ -397,5 +443,150 @@ describe('expiry line', () => {
       '12 open suggestions expire within 7 days. Some of them may not be in this list.',
     );
     expect(api.listOpen).not.toHaveBeenCalledWith(1, 'expiring');
+  });
+});
+
+// ------------------------------------------------------------------ review of PR 84
+
+describe('an inactive record that also changed', () => {
+  it('needs both ticks, for Accept, Accept with edits and the a key', async () => {
+    const p = withState('inactive', { target_changed_at: '2026-11-19T08:00:00Z' });
+    show([p]);
+    api.accept.mockResolvedValue({ ...p, status: 'accepted', applied_patch: p.patch });
+    renderPage('/review?tab=look');
+    const card = await findCard(p);
+    expect(card.getByTestId('target-state')).toBeInTheDocument();
+    expect(card.getByTestId('record-changed')).toBeInTheDocument();
+    expect(card.getByTestId('inactive-and-changed')).toBeInTheDocument();
+    // The inactive tick alone is not enough.
+    fireEvent.click(card.getByLabelText(INACTIVE_TICK_LABEL));
+    expect(card.getByRole('button', { name: 'Accept' })).toBeDisabled();
+    expect(card.getByTestId('accept-blocked-reason')).toHaveTextContent('I have compared the current values');
+    await focusAndArm(p);
+    key('a');
+    expect(api.accept).not.toHaveBeenCalled();
+    // The compare tick alone is not enough either.
+    fireEvent.click(card.getByLabelText(INACTIVE_TICK_LABEL));
+    fireEvent.click(card.getByLabelText('I have compared the current values'));
+    expect(card.getByRole('button', { name: 'Accept' })).toBeDisabled();
+    fireEvent.click(card.getByRole('button', { name: 'Edit' }));
+    expect(card.getByRole('button', { name: 'Accept with edits' })).toBeDisabled();
+    fireEvent.click(card.getByRole('button', { name: 'Cancel' }));
+    // Both: Accept sends the acknowledgement.
+    fireEvent.click(card.getByLabelText(INACTIVE_TICK_LABEL));
+    fireEvent.click(card.getByRole('button', { name: 'Accept' }));
+    await waitFor(() => expect(api.accept).toHaveBeenCalledWith(p.id, 'v-inactive', { acknowledgeInactive: true }));
+  });
+
+  it('an inactive record that did not change needs only the inactive tick', async () => {
+    const p = withState('inactive');
+    show([p]);
+    renderPage('/review?tab=look');
+    const card = await findCard(p);
+    expect(card.queryByTestId('record-changed')).not.toBeInTheDocument();
+    fireEvent.click(card.getByLabelText(INACTIVE_TICK_LABEL));
+    expect(card.getByRole('button', { name: 'Accept' })).toBeEnabled();
+  });
+});
+
+describe('gaps from the mutation pass', () => {
+  it('a normal new contact (no_duplicate) is not an unusual state', async () => {
+    const p = makeProposal({
+      kind: 'new_contact',
+      target_collection: 'contact',
+      target_id: '',
+      evidence: 'verified_captured',
+      patch: { name: 'Lee Example', email: 'lee@example.com' },
+      current_values: {},
+      target_state: 'no_duplicate',
+      target_state_reason: '',
+      watched_fields: ['email', 'name'],
+    });
+    show([p]);
+    renderPage();
+    const card = await findCard(p);
+    expect(card.queryByTestId('target-state')).not.toBeInTheDocument();
+    expect(card.queryByText('The record no longer exists')).not.toBeInTheDocument();
+    expect(card.getByRole('button', { name: 'Accept' })).toBeEnabled();
+  });
+
+  it('the inactive tick shows as checked, unticking clears it, and it is disabled while a decision is in flight', async () => {
+    const p = withState('inactive');
+    show([p]);
+    api.accept.mockReturnValue(new Promise(() => undefined));
+    renderPage('/review?tab=look');
+    const card = await findCard(p);
+    const tick = () => card.getByLabelText(INACTIVE_TICK_LABEL);
+    fireEvent.click(tick());
+    expect(tick()).toBeChecked();
+    expect(card.getByRole('button', { name: 'Accept' })).toBeEnabled();
+    fireEvent.click(tick());
+    expect(tick()).not.toBeChecked();
+    expect(card.getByRole('button', { name: 'Accept' })).toBeDisabled();
+    fireEvent.click(tick());
+    fireEvent.click(card.getByRole('button', { name: 'Accept' }));
+    await waitFor(() => expect(tick()).toBeDisabled());
+  });
+
+  it('uses the summary’s day count in the expiry line', async () => {
+    api.listOpen.mockResolvedValue(page([makeProposal()], 900));
+    api.list.mockResolvedValue(page([], 900, { open_expiring_within_days: 3, open_expiring_count: 250 }));
+    renderPage();
+    expect(await screen.findByTestId('expiring-soon')).toHaveTextContent('250 open suggestions expire within 3 days.');
+  });
+
+  it('an apply error equal to the state reason is shown once', async () => {
+    const p = withState('moved', { last_apply_error: REASONS.moved });
+    show([p]);
+    renderPage('/review?tab=look');
+    const card = await findCard(p);
+    expect(card.queryByTestId('apply-error')).not.toBeInTheDocument();
+    expect(card.getAllByText(REASONS.moved).length).toBeGreaterThan(0);
+    expect(card.getByTestId('target-state')).toHaveTextContent(REASONS.moved);
+  });
+
+  it('a missing record says to reject it', async () => {
+    const p = withState('missing');
+    show([p]);
+    renderPage('/review?tab=look');
+    expect((await findCard(p)).getByTestId('target-state')).toHaveTextContent(
+      'This suggestion can no longer be applied. Reject it.',
+    );
+  });
+});
+
+describe('unknown future states fail closed', () => {
+  it('gets a neutral title, the server’s reason, and no accepting route', async () => {
+    const p = withState('present', {
+      target_state: 'archived' as any,
+      target_state_reason: 'This record is archived.',
+    });
+    show([p]);
+    renderPage('/review?tab=look');
+    const card = await findCard(p);
+    expect(card.getByTestId('target-state')).toHaveTextContent('This record needs a look');
+    expect(card.getByTestId('target-state')).toHaveTextContent('This record is archived.');
+    expect(card.getByTestId('target-state')).not.toHaveTextContent('no longer exists');
+    expect(card.getByRole('button', { name: 'Accept' })).toBeDisabled();
+    expect(card.getByRole('button', { name: 'Edit' })).toBeDisabled();
+    expect(card.getByRole('button', { name: 'Reject' })).toBeEnabled();
+  });
+});
+
+describe('server reasons go through the text-safety component everywhere', () => {
+  it('marks invisible characters and isolates direction in the blocked line and the key message', async () => {
+    const reason = 'This contact now belongs to another company.\u202E';
+    const p = withState('moved', { target_state_reason: reason });
+    show([p]);
+    renderPage('/review?tab=look');
+    const card = await findCard(p);
+    const blocked = card.getByTestId('accept-blocked-reason');
+    expect(blocked.querySelector('bdi')).not.toBeNull();
+    expect(blocked.querySelector('[data-hidden-char="U+202E"]')).not.toBeNull();
+    await focusAndArm(p);
+    key('a');
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-hidden-char="U+202E"]').length).toBeGreaterThanOrEqual(3),
+    );
   });
 });
