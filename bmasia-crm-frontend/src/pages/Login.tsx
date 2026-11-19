@@ -16,6 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getDailyQuote } from '../constants/quotes';
 import { brand } from '../theme';
 import { safeReturnPath } from '../utils/returnPath';
+import { logApiError } from '../utils/logApiError';
 
 const HOME = '/today';
 
@@ -56,7 +57,7 @@ const Login: React.FC = () => {
       // Nothing else to do: once signed in, this page re-renders and the redirect above
       // sends the user on (single place for post-sign-in routing).
     } catch (err: any) {
-      console.error('Login component error:', err);
+      logApiError('Login component error:', err);
       // Get error message from the thrown Error object
       setError(err.message || 'Login failed. Please check your credentials.');
     }

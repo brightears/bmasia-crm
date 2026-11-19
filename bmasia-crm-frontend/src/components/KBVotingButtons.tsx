@@ -8,6 +8,7 @@ import {
   Snackbar,
 } from '@mui/material';
 import { ThumbUp, ThumbDown } from '@mui/icons-material';
+import { logApiError } from '../utils/logApiError';
 
 interface KBVotingButtonsProps {
   articleId: string;
@@ -40,7 +41,7 @@ const KBVotingButtons: React.FC<KBVotingButtonsProps> = ({
       setUserVote(isHelpful);
       setShowSuccess(true);
     } catch (err: any) {
-      console.error('Failed to submit vote:', err);
+      logApiError('Failed to submit vote:', err);
       setError(`Failed to submit vote: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     } finally {
       setVoting(false);

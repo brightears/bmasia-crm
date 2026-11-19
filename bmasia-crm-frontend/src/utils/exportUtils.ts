@@ -2,6 +2,7 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import * as XLSX from 'xlsx';
 import { SalesTarget } from '../types';
+import { logApiError } from './logApiError';
 
 export interface ExportOptions {
   filename?: string;
@@ -32,7 +33,7 @@ export const exportTargetsReport = async (
         throw new Error(`Unsupported export format: ${format}`);
     }
   } catch (error) {
-    console.error('Export failed:', error);
+    logApiError('Export failed:', error);
     throw error;
   }
 };
@@ -160,7 +161,7 @@ const exportToPDF = async (
         }
       }
     } catch (error) {
-      console.warn('Could not capture charts for PDF export:', error);
+      logApiError('Could not capture charts for PDF export:', error);
     }
   }
 

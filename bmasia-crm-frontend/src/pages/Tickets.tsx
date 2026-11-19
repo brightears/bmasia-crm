@@ -43,6 +43,7 @@ import ApiService from '../services/api';
 import { formatDistanceToNow } from 'date-fns';
 import { useListState } from '../hooks/useListState';
 import { useListSearchBox } from '../hooks/useListSearchBox';
+import { logApiError } from '../utils/logApiError';
 
 const Tickets: React.FC = () => {
   const navigate = useNavigate();
@@ -104,7 +105,7 @@ const Tickets: React.FC = () => {
       setTickets(response.results || []);
       setTotalCount(response.count || 0);
     } catch (err: any) {
-      console.error('Failed to load tickets:', err);
+      logApiError('Failed to load tickets:', err);
       setError(`Failed to load tickets: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
       setTickets([]);
     } finally {
@@ -163,7 +164,7 @@ const Tickets: React.FC = () => {
       setDeleteDialogOpen(false);
       setTicketToDelete(null);
     } catch (err: any) {
-      console.error('Failed to delete ticket:', err);
+      logApiError('Failed to delete ticket:', err);
       setError(`Failed to delete ticket: ${err.response?.data?.detail || err.message}`);
     } finally {
       setDeleteLoading(false);

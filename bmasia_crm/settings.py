@@ -236,7 +236,9 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'anon': '100/hour',
         'user': '1000/hour'
-    }
+    },
+    # Unexpected errors are logged with a request id; callers get a generic message and the id.
+    'EXCEPTION_HANDLER': 'crm_app.api_errors.api_exception_handler',
 }
 
 # JWT Settings

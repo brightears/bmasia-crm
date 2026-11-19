@@ -36,6 +36,7 @@ import {
   Contract,
   Contact,
 } from '../types';
+import { logApiError } from '../utils/logApiError';
 
 interface TaskFormProps {
   open: boolean;
@@ -166,7 +167,7 @@ const TaskForm: React.FC<TaskFormProps> = ({
       await onSave(taskData);
       onClose();
     } catch (error: any) {
-      console.error('Error saving task:', error);
+      logApiError('Error saving task:', error);
       setError(error.message || 'Failed to save task');
     } finally {
       setLoading(false);

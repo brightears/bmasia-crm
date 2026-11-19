@@ -577,8 +577,10 @@ class InvoiceSerializer(serializers.ModelSerializer):
         current = self.instance.status if self.instance is not None else None
         if value == 'Paid' and current != 'Paid':
             raise serializers.ValidationError(
-                'Use "Mark as paid" (POST /api/v1/invoices/{id}/mark_paid/) to mark an invoice paid: '
-                'it records the payment date and issues the receipt number.'
+                'An invoice is marked paid only with "Mark as paid", which records the payment date and '
+                'issues the receipt number. Payments are recorded by a person in the CRM (Invoices → '
+                'Mark as paid; API: POST /api/v1/invoices/{id}/mark_paid/). An agent cannot set Paid: '
+                'tell the person which invoice was paid and the payment date.'
             )
         return value
 

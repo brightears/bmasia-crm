@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { apiErrorMessage, logApiError } from '../utils/logApiError';
 import { useSearchParams } from 'react-router-dom';
 import {
   Box,
@@ -180,7 +181,7 @@ const Invoices: React.FC = () => {
       setTotalCount(response.count);
     } catch (err: any) {
       setError('Failed to load invoices');
-      console.error('Invoices error:', err);
+      logApiError('Invoices error:', err);
     } finally {
       setLoading(false);
     }
@@ -191,7 +192,7 @@ const Invoices: React.FC = () => {
       const companies = await ApiService.getCompaniesSimple();
       setCompanies(companies as any[]);
     } catch (err) {
-      console.error('Failed to load companies:', err);
+      logApiError('Failed to load companies:', err);
     }
   };
 
@@ -200,7 +201,7 @@ const Invoices: React.FC = () => {
       const response = await ApiService.getContracts({ page_size: 100 });
       setContracts(response.results);
     } catch (err) {
-      console.error('Failed to load contracts:', err);
+      logApiError('Failed to load contracts:', err);
     }
   };
 
@@ -289,7 +290,7 @@ const Invoices: React.FC = () => {
         setSuccess('Invoice deleted successfully');
         loadInvoices();
       } catch (err) {
-        setError('Failed to delete invoice');
+        setError(apiErrorMessage(err, 'Failed to delete invoice'));
       }
     }
     setActionMenuAnchor(null);

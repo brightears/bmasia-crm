@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { logApiError } from '../utils/logApiError';
 import {
   Box,
   Typography,
@@ -538,7 +539,7 @@ const CashFlow: React.FC = () => {
         setTrendData(trend);
       }
     } catch (err: any) {
-      console.error('Error loading cash flow data:', err);
+      logApiError('Error loading cash flow data:', err);
       setError(err.message || 'Failed to load cash flow report');
     } finally {
       setLoading(false);
@@ -579,7 +580,7 @@ const CashFlow: React.FC = () => {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (err) {
-      console.error('Export error:', err);
+      logApiError('Export error:', err);
       setError('Failed to export PDF');
     } finally {
       setExporting(null);
@@ -620,7 +621,7 @@ const CashFlow: React.FC = () => {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (err) {
-      console.error('Export error:', err);
+      logApiError('Export error:', err);
       setError('Failed to export Excel');
     } finally {
       setExporting(null);

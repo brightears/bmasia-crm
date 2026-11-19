@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { logApiError } from '../utils/logApiError';
 import {
   Box,
   Typography,
@@ -296,7 +297,7 @@ const AccountsPayable: React.FC = () => {
       );
       setReport(data);
     } catch (err: any) {
-      console.error('Error loading AP aging report:', err);
+      logApiError('Error loading AP aging report:', err);
       setError(err.message || 'Failed to load AP aging report');
     } finally {
       setLoading(false);

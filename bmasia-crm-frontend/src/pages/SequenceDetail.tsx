@@ -53,6 +53,7 @@ import ApiService from '../services/api';
 import SequenceForm from '../components/SequenceForm';
 import SequenceStepForm from '../components/SequenceStepForm';
 import EnrollContactDialog from '../components/EnrollContactDialog';
+import { logApiError } from '../utils/logApiError';
 
 const SequenceDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -103,7 +104,7 @@ const SequenceDetail: React.FC = () => {
       const data = await ApiService.getEmailSequence(id);
       setSequence(data);
     } catch (err: any) {
-      console.error('Load sequence error:', err);
+      logApiError('Load sequence error:', err);
       setError(`Failed to load sequence: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
@@ -118,7 +119,7 @@ const SequenceDetail: React.FC = () => {
       const response = await ApiService.getSequenceSteps({ sequence: id, ordering: 'step_number' });
       setSteps(response.results || []);
     } catch (error) {
-      console.error('Failed to fetch steps:', error);
+      logApiError('Failed to fetch steps:', error);
       setSnackbar({ open: true, message: 'Failed to load steps', severity: 'error' });
     } finally {
       setLoadingSteps(false);
@@ -139,7 +140,7 @@ const SequenceDetail: React.FC = () => {
       const response = await ApiService.getSequenceEnrollments(params);
       setEnrollments(response.results || []);
     } catch (error) {
-      console.error('Failed to fetch enrollments:', error);
+      logApiError('Failed to fetch enrollments:', error);
       setSnackbar({ open: true, message: 'Failed to load enrollments', severity: 'error' });
     } finally {
       setLoadingEnrollments(false);
@@ -165,7 +166,7 @@ const SequenceDetail: React.FC = () => {
       });
       setExpandedEnrollment(enrollmentId);
     } catch (error) {
-      console.error('Failed to fetch executions:', error);
+      logApiError('Failed to fetch executions:', error);
       setSnackbar({
         open: true,
         message: 'Failed to load execution history',
@@ -234,7 +235,7 @@ const SequenceDetail: React.FC = () => {
       fetchSteps();
       loadSequence(); // Refresh sequence to update total_steps count
     } catch (error) {
-      console.error('Failed to delete step:', error);
+      logApiError('Failed to delete step:', error);
       setSnackbar({ open: true, message: 'Failed to delete step', severity: 'error' });
     } finally {
       setDeleteStepDialogOpen(false);
@@ -267,7 +268,7 @@ const SequenceDetail: React.FC = () => {
       fetchEnrollments();
       loadSequence();
     } catch (error) {
-      console.error('Failed to pause enrollment:', error);
+      logApiError('Failed to pause enrollment:', error);
       setSnackbar({ open: true, message: 'Failed to pause enrollment', severity: 'error' });
     }
   };
@@ -279,7 +280,7 @@ const SequenceDetail: React.FC = () => {
       fetchEnrollments();
       loadSequence();
     } catch (error) {
-      console.error('Failed to resume enrollment:', error);
+      logApiError('Failed to resume enrollment:', error);
       setSnackbar({ open: true, message: 'Failed to resume enrollment', severity: 'error' });
     }
   };
@@ -298,7 +299,7 @@ const SequenceDetail: React.FC = () => {
       fetchEnrollments();
       loadSequence();
     } catch (error) {
-      console.error('Failed to unenroll:', error);
+      logApiError('Failed to unenroll:', error);
       setSnackbar({ open: true, message: 'Failed to unenroll contact', severity: 'error' });
     } finally {
       setDeleteEnrollmentDialogOpen(false);

@@ -53,6 +53,7 @@ import CompanyTimeline from '../components/timeline/CompanyTimeline';
 import { PageHeader, SectionCard, EmptyState, DetailField, ProductChip } from '../components/ui';
 import { statusTone, humanize, formatDate, formatMoney, initialsOf, totalsByCurrency, visuallyHidden } from '../theme';
 import { currencyForEntity } from '../constants/entities';
+import { logApiError } from '../utils/logApiError';
 
 const tabLabel = (label: string, count: number) => (
   <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.75 }}>
@@ -162,7 +163,7 @@ const CompanyDetail: React.FC = () => {
       setZones(zonesResponse);
       setTickets(ticketsResponse.results || []);
     } catch (err: any) {
-      console.error('Company detail error:', err);
+      logApiError('Company detail error:', err);
       setError('Failed to load company details');
     } finally {
       setLoading(false);

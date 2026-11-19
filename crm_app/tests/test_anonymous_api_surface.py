@@ -41,6 +41,7 @@ EXPECTED_NON_DRF_PUBLIC_PREFIXES = (
     "admin/",  # Django admin: its own staff login
     "api-auth/",  # DRF browsable-API session login/logout pages
     "t/<str:token>/",  # e-mail open tracking pixel, called by mail clients
+    "healthz",  # process-up check (healthz/ and healthz); GET/HEAD only, no database
     "",  # root redirect to /admin/
 )
 

@@ -23,6 +23,8 @@ from crm_app.models import (
     EmailSequence, SequenceStep, SequenceEnrollment, SequenceStepExecution
 )
 
+from crm_app.api_errors import mail_failure_text
+
 logger = logging.getLogger(__name__)
 
 
@@ -276,7 +278,7 @@ class EmailService:
             error_msg = str(e)
             email_log.mark_as_failed(error_msg)
             logger.error(f"Failed to send email to {to_email}: {error_msg}")
-            return False, f"Failed to send email: {error_msg}"
+            return False, mail_failure_text(None, 'Failed to send email', error_msg)
     
     def send_template_email(
         self,
@@ -832,6 +834,7 @@ class EmailService:
         Returns:
             Tuple of (success: bool, message: str)
         """
+        caller_request = request  # 'request' is replaced below by the PDF's own request
         from crm_app.models import Quote
         from django.conf import settings
         from django.core.mail import get_connection
@@ -944,7 +947,7 @@ class EmailService:
             pdf_filename = f"Quote_{quote.quote_number}.pdf"
         except Exception as e:
             logger.error(f"Failed to generate PDF for quote {quote.quote_number}: {e}")
-            return False, f"Failed to generate PDF: {str(e)}"
+            return False, mail_failure_text(caller_request, 'Failed to generate the PDF', e)
 
         # Send to each recipient
         success_count = 0
@@ -1026,7 +1029,7 @@ class EmailService:
             return True, f"Quote sent successfully to {success_count} recipient(s)"
         else:
             detailed_errors = '; '.join(error_messages) if error_messages else 'Unknown error'
-            return False, f"Failed to send quote to any recipients. Errors: {detailed_errors}"
+            return False, mail_failure_text(caller_request, 'Failed to send the quote to any recipient', detailed_errors)
 
     def send_contract_email(
         self,
@@ -1169,7 +1172,7 @@ class EmailService:
             pdf_filename = f"Contract_{contract.contract_number}.pdf"
         except Exception as e:
             logger.error(f"Failed to generate PDF for contract {contract.contract_number}: {e}")
-            return False, f"Failed to generate PDF: {str(e)}"
+            return False, mail_failure_text(request, 'Failed to generate the PDF', e)
 
         # Send to each recipient
         success_count = 0
@@ -1249,7 +1252,7 @@ class EmailService:
             return True, f"Contract sent successfully to {success_count} recipient(s)"
         else:
             detailed_errors = '; '.join(error_messages) if error_messages else 'Unknown error'
-            return False, f"Failed to send contract to any recipients. Errors: {detailed_errors}"
+            return False, mail_failure_text(request, 'Failed to send the contract to any recipient', detailed_errors)
 
     def send_invoice_email(
         self,
@@ -1275,6 +1278,7 @@ class EmailService:
         Returns:
             Tuple of (success: bool, message: str)
         """
+        caller_request = request  # 'request' is replaced below by the PDF's own request
         from django.conf import settings
         from django.core.mail import get_connection
 
@@ -1397,7 +1401,7 @@ class EmailService:
             pdf_filename = f"Invoice_{invoice.invoice_number}.pdf"
         except Exception as e:
             logger.error(f"Failed to generate PDF for invoice {invoice.invoice_number}: {e}")
-            return False, f"Failed to generate PDF: {str(e)}"
+            return False, mail_failure_text(caller_request, 'Failed to generate the PDF', e)
 
         # Send to each recipient
         success_count = 0
@@ -1477,7 +1481,7 @@ class EmailService:
             return True, f"Invoice sent successfully to {success_count} recipient(s)"
         else:
             detailed_errors = '; '.join(error_messages) if error_messages else 'Unknown error'
-            return False, f"Failed to send invoice to any recipients. Errors: {detailed_errors}"
+            return False, mail_failure_text(caller_request, 'Failed to send the invoice to any recipient', detailed_errors)
 
     def send_receipt_email(
         self,
@@ -1592,7 +1596,7 @@ class EmailService:
             pdf_filename = f"Receipt_Tax_Invoice_{invoice.receipt_number}.pdf"
         except Exception as e:
             logger.error(f"Failed to generate receipt PDF for {invoice.receipt_number}: {e}")
-            return False, f"Failed to generate receipt PDF: {str(e)}"
+            return False, mail_failure_text(request, 'Failed to generate the receipt PDF', e)
 
         # Send to each recipient
         success_count = 0
@@ -1655,7 +1659,7 @@ class EmailService:
             return True, f"Receipt sent successfully to {success_count} recipient(s)"
         else:
             detailed_errors = '; '.join(error_messages) if error_messages else 'Unknown error'
-            return False, f"Failed to send receipt to any recipients. Errors: {detailed_errors}"
+            return False, mail_failure_text(request, 'Failed to send the receipt to any recipient', detailed_errors)
 
     def send_manual_renewal_reminder(
         self,

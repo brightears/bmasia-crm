@@ -32,6 +32,7 @@ import { EmailCampaign, ApiResponse } from '../types';
 import ApiService from '../services/api';
 import { useListState } from '../hooks/useListState';
 import { useListSearchBox } from '../hooks/useListSearchBox';
+import { logApiError } from '../utils/logApiError';
 
 const getStatusColor = (
   status: string
@@ -98,7 +99,7 @@ const Campaigns: React.FC = () => {
       setCampaigns(response.results || []);
       setTotalCount(response.count || 0);
     } catch (err: any) {
-      console.error('Campaigns error:', err);
+      logApiError('Campaigns error:', err);
       setError(`Failed to load campaigns: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
       setCampaigns([]);
       setTotalCount(0);

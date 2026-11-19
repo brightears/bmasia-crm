@@ -20,6 +20,7 @@ import {
 } from '@mui/icons-material';
 import { SequenceStep, EmailTemplate } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface SequenceStepFormProps {
   open: boolean;
@@ -104,7 +105,7 @@ const SequenceStepForm: React.FC<SequenceStepFormProps> = ({
       const response = await ApiService.getEmailTemplates({ is_active: true });
       setEmailTemplates(response.results || []);
     } catch (err: any) {
-      console.error('Failed to load email templates:', err);
+      logApiError('Failed to load email templates:', err);
       setError('Failed to load email templates');
     } finally {
       setLoadingTemplates(false);
@@ -166,7 +167,7 @@ const SequenceStepForm: React.FC<SequenceStepFormProps> = ({
 
       onSuccess();
     } catch (err: any) {
-      console.error('Step save error:', err);
+      logApiError('Step save error:', err);
       if (err.response?.data) {
         if (typeof err.response.data === 'object') {
           const fieldErrors: Record<string, string> = {};

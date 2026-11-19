@@ -43,6 +43,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { ContractDocument } from '../types';
 import ApiService from '../services/api';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { logApiError } from '../utils/logApiError';
 
 interface ContractDocumentsProps {
   contractId: string;
@@ -94,7 +95,7 @@ const ContractDocuments: React.FC<ContractDocumentsProps> = ({ contractId }) => 
       setDocuments(docs.filter(d => d.contract === contractId));
     } catch (err: any) {
       setError('Failed to load documents');
-      console.error('Failed to load contract documents:', err);
+      logApiError('Failed to load contract documents:', err);
     } finally {
       setLoading(false);
     }
@@ -152,7 +153,7 @@ const ContractDocuments: React.FC<ContractDocumentsProps> = ({ contractId }) => 
       await loadDocuments();
     } catch (err: any) {
       setUploadError(err.response?.data?.detail || 'Failed to upload document');
-      console.error('Upload error:', err);
+      logApiError('Upload error:', err);
     } finally {
       setUploading(false);
     }
@@ -172,7 +173,7 @@ const ContractDocuments: React.FC<ContractDocumentsProps> = ({ contractId }) => 
       setDocumentToDelete(null);
       await loadDocuments();
     } catch (err: any) {
-      console.error('Delete error:', err);
+      logApiError('Delete error:', err);
       setError('Failed to delete document');
     }
   };

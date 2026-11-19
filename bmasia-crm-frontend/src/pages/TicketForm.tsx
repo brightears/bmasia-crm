@@ -25,6 +25,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Company, Contact, User, Ticket } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 // Priority options with color coding
 const priorityOptions = [
@@ -132,7 +133,7 @@ const TicketForm: React.FC = () => {
         }
       }
     } catch (err: any) {
-      console.error('Failed to load companies:', err);
+      logApiError('Failed to load companies:', err);
       setError('Failed to load companies');
     }
   };
@@ -142,7 +143,7 @@ const TicketForm: React.FC = () => {
       const response = await ApiService.getUsers();
       setUsers(response.results);
     } catch (err: any) {
-      console.error('Failed to load users:', err);
+      logApiError('Failed to load users:', err);
       setError('Failed to load users');
     }
   };
@@ -152,7 +153,7 @@ const TicketForm: React.FC = () => {
       const response = await ApiService.getContacts({ company: companyId });
       setContacts(response.results);
     } catch (err: any) {
-      console.error('Failed to load contacts:', err);
+      logApiError('Failed to load contacts:', err);
     }
   };
 
@@ -170,7 +171,7 @@ const TicketForm: React.FC = () => {
         }
       }
     } catch (err: any) {
-      console.error('Failed to load zones:', err);
+      logApiError('Failed to load zones:', err);
     }
   };
 
@@ -197,7 +198,7 @@ const TicketForm: React.FC = () => {
         setSelectedCompany(companyObj);
       }
     } catch (err: any) {
-      console.error('Failed to load ticket:', err);
+      logApiError('Failed to load ticket:', err);
       setError(`Failed to load ticket: ${err.response?.data?.detail || err.message}`);
       // Navigate back after showing error
       setTimeout(() => navigate('/tickets'), 3000);
@@ -271,7 +272,7 @@ const TicketForm: React.FC = () => {
         setTimeout(() => navigate(`/tickets/${response.id}`), 1500);
       }
     } catch (err: any) {
-      console.error('Failed to save ticket:', err);
+      logApiError('Failed to save ticket:', err);
       setError(err.response?.data?.detail || 'Failed to save ticket');
     } finally {
       setLoading(false);

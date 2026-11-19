@@ -28,6 +28,7 @@ import {
 } from '@mui/icons-material';
 import { Zone, PreviewZone } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface ZoneOverlap {
   zone_id: string;
@@ -230,7 +231,7 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
 
       setNewSoundtrackName('');
     } catch (err) {
-      console.error('Failed to create Soundtrack zone:', err);
+      logApiError('Failed to create Soundtrack zone:', err);
     } finally {
       setAddingSoundtrackZone(false);
     }
@@ -270,7 +271,7 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
 
       setImportComplete(true);
     } catch (err) {
-      console.error('Failed to import zones from API:', err);
+      logApiError('Failed to import zones from API:', err);
     } finally {
       setImportingFromApi(false);
     }
@@ -297,7 +298,7 @@ const EnhancedZonePicker: React.FC<EnhancedZonePickerProps> = ({
 
       setNewBeatbreezeName('');
     } catch (err) {
-      console.error('Failed to create Beat Breeze zone:', err);
+      logApiError('Failed to create Beat Breeze zone:', err);
     } finally {
       setAddingZone(false);
     }

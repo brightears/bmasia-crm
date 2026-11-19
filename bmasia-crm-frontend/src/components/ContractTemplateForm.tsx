@@ -29,6 +29,7 @@ import {
 } from '@mui/icons-material';
 import { ContractTemplate } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface ContractTemplateFormProps {
   open: boolean;
@@ -172,7 +173,7 @@ const ContractTemplateForm: React.FC<ContractTemplateFormProps> = ({
       onSave();
       onClose();
     } catch (err: any) {
-      console.error('Failed to save template:', err);
+      logApiError('Failed to save template:', err);
       setError(err.response?.data?.detail || 'Failed to save template');
     } finally {
       setLoading(false);

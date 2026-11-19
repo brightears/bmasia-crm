@@ -131,6 +131,20 @@ it('a row opens the invoice detail', async () => {
   expect(await screen.findByRole('dialog', { name: 'invoice detail' })).toHaveTextContent('INV-TEST-1');
 });
 
+it('a refused delete shows the server\'s reason', async () => {
+  const reason = 'INV-TEST-1 cannot be deleted: it is Sent; only a Draft can be deleted.';
+  api.deleteInvoice = jest.fn(() => Promise.reject({ response: { status: 409, data: { error: reason } } }));
+  jest.spyOn(window, 'confirm').mockReturnValue(true);
+  jest.spyOn(console, 'error').mockImplementation(() => {});
+  api.getInvoices.mockResolvedValue({ results: [invoice({ status: 'Sent' })], count: 1 });
+  renderAt('/invoices');
+  fireEvent.click(await screen.findByRole('button', { name: /more actions for invoice INV-TEST-1/i }));
+  fireEvent.click(within(await screen.findByRole('menu')).getByText('Delete'));
+  expect(await screen.findByText(reason)).toBeInTheDocument();
+  delete api.deleteInvoice;
+  jest.restoreAllMocks();
+});
+
 it('?new=true from a contract opens the form pre-filled and keeps the list view', async () => {
   renderAt(`/invoices?status=Sent&new=true&company=${CO}&contract=k-1`);
   expect(await screen.findByRole('dialog', { name: 'invoice form' })).toHaveTextContent(`company=${CO} contract=k-1`);
