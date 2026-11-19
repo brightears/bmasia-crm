@@ -150,7 +150,8 @@ def test_asking_for_documents_on_contract_points_to_the_collection(data, name):
     assert error and f"Unknown field '{name}' on collection 'contract'. Hint: {DOCUMENTS_HINT}." in text
 
 
-@pytest.mark.parametrize('name', ['contract_documents', 'contractdocuments', 'documents', 'ContractDocuments'])
+@pytest.mark.parametrize('name', ['contract_documents', 'contractdocuments', 'documents', 'document',
+                                  'ContractDocuments'])
 def test_asking_for_a_documents_collection_suggests_contractdocument(data, name):
     error, text = query(_token('theo'), [], collection=name)
     assert error and f"Unknown collection '{name}'. Did you mean 'contractdocument'?" in text
@@ -165,3 +166,12 @@ def test_the_query_tool_lists_the_collection_and_its_instructions():
     section = description.split("### 'contractdocument' collection", 1)[1].split('###', 1)[0]
     for name in NEVER:
         assert f'"{name}"' not in section
+
+
+def test_the_document_alias_wins_over_a_closer_spelling():
+    """The alias, not a lucky close match, sends 'document(s)' to contractdocument."""
+    from crm_app.mcp_query_help import COLLECTION_ALIASES, suggest_collection
+
+    assert COLLECTION_ALIASES['document'] == 'contractdocument'
+    for name in ('document', 'documents', 'Documents'):
+        assert suggest_collection(name, ['documentz', 'contractdocument']) == 'contractdocument', name

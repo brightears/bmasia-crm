@@ -523,10 +523,11 @@ class ContractDocumentQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     search_fields = ['title']
     extra_instructions = (
         "Metadata of documents attached to contracts; filter by contract (the contract's id). "
-        "Read-only, and never the file. is_signed and signed_date are set by the person who "
-        "uploads the document (nothing reads the file): treat a row with is_signed true or a "
-        "signed_date as the CRM's record of a signed copy. is_official marks the version meant "
-        "for signing; document_type 'generated' is a PDF the CRM produced, usually unsigned."
+        "Read-only, and never the file. is_signed and signed_date are set at upload and can be "
+        "changed later by any signed-in user through the API (and by staff in the admin); nothing "
+        "reads the file. Treat a row with is_signed true or a signed_date as the CRM's record of a "
+        "signed copy. is_official marks the version meant for signing; document_type 'generated' "
+        "is a PDF the CRM produced, usually unsigned. $sort by id for a stable order when paging."
     )
 
     def get_queryset(self):
