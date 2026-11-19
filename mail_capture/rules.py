@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from django.conf import settings
 
 from .parse import domain_in
+from .public_suffixes import SECOND_LEVELS as _PSL_SECOND_LEVELS, WILDCARD_COUNTRY_CODES
 
 
 # The built-in Gmail label any user can apply to keep a thread out of the CRM.
@@ -55,10 +56,18 @@ FREEMAIL_DOMAINS = frozenset({
 # Public suffixes, embedded (not the full Public Suffix List; no dependency).
 # A domain is refused for rules, company domains and internal domains unless
 # it has more labels than its public suffix, i.e. it is at least a registrable
-# domain ("hotel.co.th", never "co.th" or "th").
+# domain ("hotel.co.th", never "co.th" or "th"), and unless every label is
+# non-empty ("co..th" is refused).
 #
-# Second-level registration zones of the countries the company sells in,
-# plus a few generic ones:
+# Covered: the generic second levels of every country code in the Public
+# Suffix List (``public_suffixes.py``: source, version and filter stated
+# there; e.g. co.za, com.br, co.uk, com.au), the wildcard country codes
+# (every second level of .ck, .er, .fk, .jm, .mm, .np, .pg), and the
+# hand-written zones below for the countries the company sells in (which add
+# non-generic ones such as in.th, mi.th, my.id). Not covered: deeper or
+# city-level rules (for example the Japanese prefecture zones or *.kawasaki.jp)
+# and the PSL's private section beyond SHARED_PLATFORM_SUFFIXES. Confirmation
+# is still required before any rule purges.
 _COUNTRY_SECOND_LEVELS = {
     'th': 'co ac go in or net mi',
     'hk': 'com org net edu gov idv',
@@ -84,7 +93,9 @@ _COUNTRY_SECOND_LEVELS = {
     'nz': 'co org net ac govt school',
 }
 MULTI_PART_SUFFIXES = frozenset(
-    f'{second}.{tld}' for tld, seconds in _COUNTRY_SECOND_LEVELS.items() for second in seconds.split()
+    f'{second}.{tld}'
+    for table in (_COUNTRY_SECOND_LEVELS, _PSL_SECOND_LEVELS)
+    for tld, seconds in table.items() for second in seconds.split()
 )
 # Shared hosting and tenant domains: every customer of the platform sits under them.
 SHARED_PLATFORM_SUFFIXES = frozenset({
@@ -102,6 +113,8 @@ def public_suffix_of(domain):
     for size in (3, 2):
         if len(labels) >= size and '.'.join(labels[-size:]) in PUBLIC_SUFFIXES:
             return '.'.join(labels[-size:])
+    if len(labels) >= 2 and labels[-1] in WILDCARD_COUNTRY_CODES:
+        return '.'.join(labels[-2:])
     return labels[-1] if labels else ''
 
 
@@ -119,6 +132,8 @@ class Rule:
     mailbox_id: object = None   # None for organisation-wide rules
     pk: object = None
     confirmed: bool = False     # may purge stored mail (blocking new capture needs no confirmation)
+    # Label rules: the stored copies (ids as text) the confirmation covers.
+    purge_copy_ids: frozenset = frozenset()
 
     def applies_to_mailbox(self, mailbox_id):
         return self.mailbox_id is None or str(self.mailbox_id) == str(mailbox_id)
@@ -144,6 +159,8 @@ def is_public_suffix(domain):
     domain = (domain or '').lower().strip('.')
     if not domain or '.' not in domain:
         return True
+    if any(not label for label in domain.split('.')):
+        return True    # an empty label ("co..th") is never a registrable domain
     suffix = public_suffix_of(domain)
     return len(domain.split('.')) <= len(suffix.split('.'))
 
@@ -204,6 +221,8 @@ def rule_from_row(row):
         mailbox_id=row.mailbox_id if row.scope == 'mailbox' else None,
         pk=row.pk,
         confirmed=row.is_confirmed,
+        purge_copy_ids=frozenset(str(x) for x in (row.purge_copy_ids or ()))
+        if row.kind == 'label' else frozenset(),
     )
 
 
@@ -260,6 +279,32 @@ def headers_only_label_ids(labels_by_id, rules, mailbox_id, confirmed_only=False
         label_id for label_id, name in (labels_by_id or {}).items()
         if str(name).strip().lower() in names
     )
+
+
+def label_purge_maps(labels_by_id, rules, mailbox_id):
+    """What may remove or strip copies already stored in this mailbox:
+
+    * ``builtin``: ids of the built-in ``CRM private`` label (any copy carrying
+      it goes, at once);
+    * ``drop``: ``{label id: copy ids}`` for confirmed label rules with a drop
+      action. Only the copies the confirmation covered (the previewed set) may
+      go; others carrying the label wait for a new preview;
+    * ``strip``: the same for confirmed headers-only label rules (bodies).
+    """
+    names = {}
+    for label_id, name in (labels_by_id or {}).items():
+        names.setdefault(str(name).strip().lower(), set()).add(label_id)
+    builtin = frozenset(names.get(PRIVATE_LABEL_NAME, ()))
+    drop, strip = {}, {}
+    for rule in rules:
+        if rule.kind != 'label' or not rule.confirmed or not rule.applies_to_mailbox(mailbox_id):
+            continue
+        target = drop if rule.action in DROP_ACTIONS else strip if rule.action == ACTION_HEADERS_ONLY else None
+        if target is None:
+            continue
+        for label_id in names.get(rule.value.strip().lower(), ()):
+            target[label_id] = frozenset(target.get(label_id, frozenset()) | rule.purge_copy_ids)
+    return builtin, drop, strip
 
 
 COPY_KEEP = 'keep'

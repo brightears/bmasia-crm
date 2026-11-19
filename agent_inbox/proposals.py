@@ -177,16 +177,26 @@ def with_effective_status(queryset, statuses):
 # which are also the fields of its stored snapshot (current_values). It is
 # "changed since the suggestion" only when one of those values differs from the
 # snapshot (compared as below), or when the target's state changed:
-# - an update proposal's record was deleted ('missing') or made inactive
-#   ('inactive', is_active false on the company or contact), or came back;
+# - an update proposal's record was deleted ('missing'), moved to another company
+#   ('moved': a contact whose company is no longer the proposal's), or made
+#   inactive ('inactive': is_active false on the company or contact), or came back;
 # - a new-contact proposal's duplicate check changed: a contact with the proposed
 #   email or name now exists at the company ('duplicate'), or no longer does.
+# A note only appends, to the notes as they are when it is accepted, so it watches
+# the target's state and not the notes text (shown as context that may have moved).
 # An edit to any other field of the record moves its updated_at but changes
 # nothing here. updated_at is only the cheap signal to re-read the values.
 
+# States in which a suggestion can never be accepted, whatever the reviewer saw:
+# the record is gone, it now belongs to another company, it is inactive (activate
+# it first), or the contact to be created already exists at the company.
+NEVER_ACCEPTABLE_STATES = frozenset({'missing', 'moved', 'inactive', 'duplicate'})
+
 
 def watched_fields(proposal):
-    """The fields whose values a reviewer compares for this proposal."""
+    """The fields whose values a reviewer compares for this proposal (none for an append-only note)."""
+    if proposal.kind == 'note':
+        return []
     return sorted(set(proposal.patch or {}) | set(proposal.current_values or {}))
 
 
@@ -224,8 +234,31 @@ def stored_state(proposal):
     return 'no_duplicate' if proposal.kind == 'new_contact' else 'present'
 
 
-def _state_of(instance):
-    return 'inactive' if getattr(instance, 'is_active', True) is False else 'present'
+def _state_from(is_active, company_id, proposal_company_id):
+    """present | moved | inactive for a target that exists (moved wins over inactive)."""
+    if company_id is not None and proposal_company_id is not None and str(company_id) != str(proposal_company_id):
+        return 'moved'
+    return 'inactive' if is_active is False else 'present'
+
+
+def _parent_company_id(instance):
+    from crm_app.models import Company
+    return None if isinstance(instance, Company) else getattr(instance, 'company_id', None)
+
+
+def _state_of(instance, proposal_company_id=None):
+    return _state_from(getattr(instance, 'is_active', True), _parent_company_id(instance), proposal_company_id)
+
+
+def target_state_reason(proposal):
+    """A short sentence the review page can show as it is, or '' when there is nothing to say."""
+    noun = {'contact': 'contact', 'company': 'company'}.get(proposal.target_collection, 'record')
+    return {
+        'inactive': f'This {noun} is inactive. Activate it first to accept this suggestion.',
+        'missing': 'This record no longer exists.',
+        'moved': f'This {noun} now belongs to another company.',
+        'duplicate': 'A contact with this email or name already exists at the company.',
+    }.get(stored_state(proposal), '')
 
 
 def _contact_keys(company_ids):
@@ -611,7 +644,7 @@ def _create(user, body, via):
     _, serializer_class = _collection(collection)
     current_values, expected_version = {}, ''
     if instance is not None:
-        target_state = _state_of(instance)
+        target_state = _state_of(instance, company.pk)
     elif kind == 'new_contact':
         target_state = _duplicate_answer(_contact_keys([company.pk]), company.pk, patch)
     else:
@@ -712,38 +745,65 @@ def refresh_snapshots(proposals):
         if proposal.kind in policy.UPDATE_KINDS and proposal.target_id:
             by_collection.setdefault(proposal.target_collection, []).append(proposal)
     for collection, group in by_collection.items():
-        model, serializer_class = _collection(collection)
-        has_active = any(field.name == 'is_active' for field in model._meta.concrete_fields)
-        columns = ('pk', 'updated_at', 'is_active') if has_active else ('pk', 'updated_at')
-        found = {row[0]: row for row in model.objects.filter(
-            pk__in={_uuid_or_none(p.target_id) for p in group}).values_list(*columns)}
-        reread = []
-        for proposal in group:
-            row = found.get(_uuid_or_none(proposal.target_id))
-            if row is None:
-                if stored_state(proposal) != 'missing':
-                    _mark_changed(proposal, 'missing')
-                continue
-            state = 'inactive' if has_active and row[2] is False else 'present'
-            if state != stored_state(proposal) or not _same_version(row[1].isoformat(), proposal.expected_version):
-                reread.append((proposal, state))
-        if not reread:
-            continue
-        instances = model.objects.in_bulk([_uuid_or_none(p.target_id) for p, _ in reread])
-        for proposal, state in reread:
-            instance = instances.get(_uuid_or_none(proposal.target_id))
-            if instance is None:
-                continue
-            current = _plain(serializer_class(instance).data)
-            if state != stored_state(proposal) or _values_differ(serializer_class, proposal, current):
-                _mark_changed(proposal, state, values={key: current.get(key) for key in watched_fields(proposal)},
-                              version=str(current.get('updated_at') or ''))
+        _refresh_collection(collection, group)
     creates = [p for p in rows if p.kind == 'new_contact']
     if creates:
         states = _duplicate_states(creates)
         for proposal in creates:
             if states[proposal.pk] != stored_state(proposal):
                 _mark_changed(proposal, states[proposal.pk])
+
+
+def _refresh_collection(collection, group):
+    """Compare one collection's proposals with their targets in at most two reads, never the serializer.
+
+    Read 1: version, active flag and parent company of every target. Read 2, only
+    for targets whose version or state moved: exactly the watched fields. Where a
+    watched value or the state changed the proposal is marked changed. Where the
+    version moved but nothing watched did, the stored version is advanced so the
+    next read is cheap again: one conditional UPDATE per such target, once, that
+    leaves seen_version, target_changed_at and updated_at as they are.
+    """
+    model, serializer_class = _collection(collection)
+    names = {field.name for field in model._meta.concrete_fields}
+    has_company = 'company' in names and collection != 'company'
+    columns = ['pk', 'updated_at'] + (['is_active'] if 'is_active' in names else []) + (
+        ['company_id'] if has_company else [])
+    found = {row['pk']: row for row in model.objects.filter(
+        pk__in={_uuid_or_none(p.target_id) for p in group}).values(*columns)}
+    moved = []
+    for proposal in group:
+        row = found.get(_uuid_or_none(proposal.target_id))
+        if row is None:
+            if stored_state(proposal) != 'missing':
+                _mark_changed(proposal, 'missing')
+            continue
+        state = _state_from(row.get('is_active', True), row.get('company_id'), proposal.company_id)
+        version = row['updated_at'].isoformat()
+        if state != stored_state(proposal) or not _same_version(version, proposal.expected_version):
+            moved.append((proposal, state, version))
+    if not moved:
+        return
+    fields = sorted({key for proposal, _, _ in moved for key in watched_fields(proposal)} & names)
+    current_rows = {}
+    if fields:
+        current_rows = {row['pk']: row for row in model.objects.filter(
+            pk__in={_uuid_or_none(p.target_id) for p, _, _ in moved}).values('pk', *fields)}
+    unchanged = {}
+    for proposal, state, version in moved:
+        current = current_rows.get(_uuid_or_none(proposal.target_id), {})
+        if state != stored_state(proposal) or _values_differ(serializer_class, proposal, current):
+            values = {**(proposal.current_values or {}),
+                      **{key: current.get(key) for key in watched_fields(proposal)}}
+            _mark_changed(proposal, state, values=values, version=version)
+        else:
+            unchanged.setdefault((proposal.target_id, proposal.expected_version, version), []).append(proposal)
+    for (target_id, old_version, new_version), same in unchanged.items():
+        ChangeProposal.objects.filter(
+            pk__in=[p.pk for p in same], status=OPEN_STATUS, expected_version=old_version,
+        ).update(expected_version=new_version)
+        for proposal in same:
+            proposal.expected_version = new_version
 
 
 def _mark_changed(proposal, state, values=None, version=None):
@@ -913,7 +973,8 @@ def _tag_audit(model_name, record_id, before_ids, proposal, request):
 
 
 def _record_changed(proposal, serializer_class, current, state='present'):
-    proposal.current_values = {key: current.get(key) for key in watched_fields(proposal)}
+    proposal.current_values = {**(proposal.current_values or {}),
+                               **{key: current.get(key) for key in watched_fields(proposal)}}
     proposal.expected_version = str(current.get('updated_at') or '')
     proposal.target_state = state
     proposal.target_changed_at = timezone.now()
@@ -924,7 +985,19 @@ def _record_changed(proposal, serializer_class, current, state='present'):
         proposal.status = 'superseded'
         proposal.last_apply_error = 'The record already has the proposed values.'
     proposal.save()
-    return ServiceError(409, 'record_changed', RECORD_CHANGED_DETAIL, proposal=_plain(snapshot(proposal)))
+    reason = target_state_reason(proposal)
+    return ServiceError(409, 'record_changed', f'{RECORD_CHANGED_DETAIL} {reason}'.strip(),
+                        target_state=stored_state(proposal), target_state_reason=reason,
+                        proposal=_plain(snapshot(proposal)))
+
+
+def _not_acceptable(proposal):
+    """A state in which the suggestion can never be accepted, even by a reviewer who has seen it."""
+    reason = target_state_reason(proposal)
+    proposal.last_apply_error = reason[:APPLY_ERROR_MAX]
+    proposal.save()
+    return ServiceError(409, 'not_acceptable', reason, target_state=stored_state(proposal),
+                        target_state_reason=reason, proposal=_plain(snapshot(proposal)))
 
 
 def _keep_error(proposal, error):
@@ -969,9 +1042,11 @@ def _apply(request, proposal, applied):
         current = _plain(serializer_class(instance).data)
         # Under the row lock: the values the reviewer saw must still be the record's.
         # An edit to a field the proposal does not watch does not block the accept.
-        state = _state_of(instance)
+        state = _state_of(instance, proposal.company_id)
         if state != stored_state(proposal) or _values_differ(serializer_class, proposal, current):
             raise _Refusal(_record_changed(proposal, serializer_class, current, state))
+        if state in NEVER_ACCEPTABLE_STATES:
+            raise _Refusal(_not_acceptable(proposal))
         if proposal.target_collection == 'contact':
             try:
                 _check_billing_email(instance, applied)
@@ -998,15 +1073,26 @@ def _apply(request, proposal, applied):
                 raise _keep_error(proposal, error) from None
         before = set()
         if proposal.kind == 'new_contact':
-            # The duplicate check must give the answer the reviewer saw.
-            state = _duplicate_states([proposal])[proposal.pk]
+            # One new-contact accept per company at a time: the duplicate check runs
+            # under the company's row lock, so two accepts cannot both pass it.
+            from crm_app.models import Company
+            Company.objects.select_for_update().filter(pk=proposal.company_id).first()
+            existing = _contact_keys([proposal.company_id])
+            # The duplicate check must give the answer the reviewer saw...
+            state = _duplicate_answer(existing, proposal.company_id, proposal.patch)
             if state != stored_state(proposal):
                 proposal.target_state = state
                 proposal.target_changed_at = timezone.now()
                 proposal.last_apply_error = RECORD_CHANGED_DETAIL[:APPLY_ERROR_MAX]
                 proposal.save()
-                raise _Refusal(ServiceError(409, 'record_changed', RECORD_CHANGED_DETAIL,
+                reason = target_state_reason(proposal)
+                raise _Refusal(ServiceError(409, 'record_changed', f'{RECORD_CHANGED_DETAIL} {reason}'.strip(),
+                                            target_state=state, target_state_reason=reason,
                                             proposal=_plain(snapshot(proposal))))
+            # ...and the contact as it will be created (after any edits) must not exist yet.
+            if _duplicate_answer(existing, proposal.company_id, applied) == 'duplicate':
+                proposal.target_state = 'duplicate'
+                raise _Refusal(_not_acceptable(proposal))
             data = _new_contact_data(proposal.company_id, applied)
         else:
             data = {'company': str(proposal.company_id), **applied}

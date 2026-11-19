@@ -182,12 +182,15 @@ class TestCursor:
         client = primed(mb)
         for i in range(5):
             client.add_message(inbound(f'g{i}', message_id=f'<p{i}@mail.example.org>'))
-        client.fail('get_message', 500, times=99, after=3)   # page 2 fails for good
+        client.fail('get_message', 500, times=99, after=2)   # Gmail goes down after page 1
         result = run(mb, client, page_size=2)
-        assert result.outcome == 'error'
+        # Page 2's two messages fail on their own (cursor moves); the third 5xx
+        # in a row is taken as an outage and stops the run there.
+        assert result.outcome == 'unavailable'
         mb.refresh_from_db()
         assert MailMessage.objects.count() == 2
-        assert int(mb.history_id) == int(primed_start(client)) + 2
+        assert sorted(CaptureFailure.objects.values_list('gmail_id', flat=True)) == ['g2', 'g3']
+        assert int(mb.history_id) == int(primed_start(client)) + 4
 
     def test_history_404_sets_resync_then_resync_runs(self, lagoon):
         mb = make_mailbox()
