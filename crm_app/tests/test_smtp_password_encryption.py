@@ -45,7 +45,8 @@ def _raw(user):
 
 def _store_plain(user, value):
     """Write the column directly, as values were stored before this change."""
-    User.objects.filter(pk=user.pk).update(smtp_password=Value(value, output_field=TextField()))
+    from crm_app.management.commands.encrypt_smtp_passwords import _write_raw
+    _write_raw(User, user.pk, value)
 
 
 def _user(name='sender', password=None, **extra):
@@ -91,8 +92,10 @@ def test_migration_only_changes_the_column_type():
     import importlib
     migration = importlib.import_module('crm_app.migrations.0106_user_smtp_password_encrypted_field').Migration
     from django.db import migrations
-    assert [type(op) for op in migration.operations] == [migrations.AlterField]
+    # The column change, then a reverse-only guard (a no-op forward).
+    assert [type(op) for op in migration.operations] == [migrations.AlterField, migrations.RunPython]
     assert migration.operations[0].field.get_internal_type() == 'TextField'
+    assert migration.operations[1].code is migrations.RunPython.noop
 
 
 def test_none_stays_none(key):
