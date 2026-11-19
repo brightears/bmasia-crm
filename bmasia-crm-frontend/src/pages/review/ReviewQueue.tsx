@@ -65,6 +65,7 @@ import {
   sortProposals,
   writeQuery,
   friendlyRefusal,
+  targetStateOf,
   LOOKUP_CAP,
   LOOKUP_CONCURRENCY,
 } from './reviewModel';
@@ -189,8 +190,9 @@ const ReviewQueue: React.FC = () => {
   const [choices, setChoices] = useState<Record<string, { choice: ConflictChoice; seen: string }>>({});
   const [sourceChecks, setSourceChecks] = useState<Record<string, string>>({});
   const [contactChecks, setContactChecks] = useState<Record<string, string>>({});
+  const [inactiveChecks, setInactiveChecks] = useState<Record<string, string>>({});
   const [partnerFailed, setPartnerFailed] = useState<Record<string, boolean>>({});
-  const [expiringSoon, setExpiringSoon] = useState<{ count: number; atLeast: boolean } | null>(null);
+  const [expiringSoon, setExpiringSoon] = useState<{ count: number; atLeast: boolean; days: number } | null>(null);
   /** Bumped after every decision and on Refresh, so the expiry count is read again. */
   const [expiryTick, setExpiryTick] = useState(0);
   const armed = useRef<Record<string, boolean>>({});
@@ -303,8 +305,9 @@ const ReviewQueue: React.FC = () => {
     if (enabled && query.tab === 'decided') loadDecided(1);
   }, [enabled, query.tab, loadDecided]);
 
-  // When not everything is loaded, count what expires within 7 days: one read of the soonest-expiring page
-  // (exact up to 200, "200 or more" beyond).
+  // When not everything is loaded, count what expires soon. Later backends send the exact count with any list
+  // read (`summary.open_expiring_count`); otherwise one read of the soonest-expiring page counts it (exact up to
+  // 200, "200 or more" beyond).
   const needExpiryCount = enabled && openLoad === 'ready' && openTotal > openRows.length && query.sort === 'newest';
   useEffect(() => {
     if (!needExpiryCount) {
@@ -312,15 +315,24 @@ const ReviewQueue: React.FC = () => {
       return;
     }
     let alive = true;
-    reviewApi
-      .listOpen(1, 'expiring')
-      .then((data) => {
+    (async () => {
+      try {
+        const head = await reviewApi.list({ status: ['proposed'], page_size: 1 });
+        const exact = head?.summary?.open_expiring_count;
+        if (typeof exact === 'number') {
+          const days = head.summary?.open_expiring_within_days;
+          if (alive) setExpiringSoon({ count: exact, atLeast: false, days: typeof days === 'number' ? days : 7 });
+          return;
+        }
+        const data = await reviewApi.listOpen(1, 'expiring');
         if (!alive) return;
         const limit = Date.now() + 7 * 24 * 3600 * 1000;
         const count = data.results.filter((r) => Date.parse(r.expires_at) <= limit).length;
-        setExpiringSoon({ count, atLeast: count === data.results.length && data.count > data.results.length });
-      })
-      .catch(() => alive && setExpiringSoon(null));
+        setExpiringSoon({ count, atLeast: count === data.results.length && data.count > data.results.length, days: 7 });
+      } catch {
+        if (alive) setExpiringSoon(null);
+      }
+    })();
     return () => {
       alive = false;
     };
@@ -406,6 +418,7 @@ const ReviewQueue: React.FC = () => {
       contactCheck: contactCheckFor(p),
       contactChecked: contactChecks[p.id] === p.seen_version,
       partnersFailed: (p.conflicts_with || []).some((c) => partnerFailed[c.id]),
+      inactiveAcknowledged: inactiveChecks[p.id] === p.seen_version,
     };
   };
   const actionsFor = (p: ChangeProposal) => cardActions(p, stateFor(p));
@@ -511,13 +524,19 @@ const ReviewQueue: React.FC = () => {
     const allowed = edits ? actionsFor(p).acceptEdits : actionsFor(p).accept;
     if (!allowed.ok) return;
     const keepThis = (p.conflicts_with || []).length > 0 && stateFor(p).conflictChoice === 'this';
+    // Sent only for an inactive target and only after its tick (the shared rule above has already required it).
+    const acknowledgeInactive = targetStateOf(p) === 'inactive' && Boolean(stateFor(p).inactiveAcknowledged);
     if (!startBusy([p.id])) return;
     stick(p.id);
     setNotice(p.id, undefined);
     try {
       const updated = edits
-        ? await reviewApi.acceptWithEdits(p.id, p.seen_version, edits.edits, edits.drop)
-        : await reviewApi.accept(p.id, p.seen_version);
+        ? acknowledgeInactive
+          ? await reviewApi.acceptWithEdits(p.id, p.seen_version, edits.edits, edits.drop, { acknowledgeInactive })
+          : await reviewApi.acceptWithEdits(p.id, p.seen_version, edits.edits, edits.drop)
+        : acknowledgeInactive
+          ? await reviewApi.accept(p.id, p.seen_version, { acknowledgeInactive })
+          : await reviewApi.accept(p.id, p.seen_version);
       updateRow(updated);
       setEditingId((id) => (id === p.id ? null : id));
       setServerErrors((s) => ({ ...s, [p.id]: {} }));
@@ -736,6 +755,7 @@ const ReviewQueue: React.FC = () => {
       onSourceCheck: (p, value) => setSourceChecks((s) => ({ ...s, [p.id]: value ? p.seen_version : '' })),
       onContactCheck: (p, value) => setContactChecks((s) => ({ ...s, [p.id]: value ? p.seen_version : '' })),
       onRetryPartner: (id) => live.current.retryPartner(id),
+      onInactiveCheck: (p, value) => setInactiveChecks((s) => ({ ...s, [p.id]: value ? p.seen_version : '' })),
     }),
     [onArm],
   );
@@ -1111,6 +1131,7 @@ const ReviewQueue: React.FC = () => {
         contactCheck={s.contactCheck}
         contactChecked={Boolean(s.contactChecked)}
         partnersFailed={Boolean(s.partnersFailed)}
+        inactiveAcknowledged={Boolean(s.inactiveAcknowledged)}
         handlers={handlers}
       />
     );
@@ -1204,8 +1225,8 @@ const ReviewQueue: React.FC = () => {
           {expiringSoon.atLeast
             ? `${expiringSoon.count.toLocaleString('en-US')} or more`
             : expiringSoon.count.toLocaleString('en-US')}{' '}
-          open {expiringSoon.count === 1 && !expiringSoon.atLeast ? 'suggestion expires' : 'suggestions expire'} within
-          7 days. Some of them may not be in this list.
+          open {expiringSoon.count === 1 && !expiringSoon.atLeast ? 'suggestion expires' : 'suggestions expire'} within{' '}
+          {expiringSoon.days} {expiringSoon.days === 1 ? 'day' : 'days'}. Some of them may not be in this list.
         </Alert>
       )}
 
