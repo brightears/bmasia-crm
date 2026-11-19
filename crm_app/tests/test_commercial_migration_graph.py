@@ -9,5 +9,5 @@ def test_commercial_release_has_one_migration_head():
         loader = MigrationLoader(None, ignore_no_migrations=True)
     assert loader.detect_conflicts() == {}
     assert loader.graph.leaf_nodes('crm_app') == [
-        ('crm_app', '0105_care_touch')
+        ('crm_app', '0106_user_smtp_password_encrypted_field')
     ]
