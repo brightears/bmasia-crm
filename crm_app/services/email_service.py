@@ -481,8 +481,9 @@ class EmailService:
                 results['skipped'] += 1
                 continue
             
-            # Update invoice status
-            if invoice.status != 'Overdue':
+            # Update invoice status (the same rule as every other writer)
+            from crm_app.services.invoice_status import plain_update_refusal
+            if invoice.status != 'Overdue' and not plain_update_refusal(invoice.status, 'Overdue'):
                 invoice.status = 'Overdue'
             invoice.save()
             
@@ -1288,6 +1289,11 @@ class EmailService:
         except Invoice.DoesNotExist:
             return False, f"Invoice with ID {invoice_id} not found"
 
+        from crm_app.services.invoice_status import send_refusal
+        refusal = send_refusal(invoice.status)
+        if refusal:
+            return False, refusal
+
         company = invoice.company
 
         # Get recipients - prioritize billing contacts
@@ -1473,10 +1479,13 @@ class EmailService:
                 if 'email_log' in locals() and email_log and email_log.status == 'pending':
                     email_log.mark_as_failed(error_msg)
 
-        # Update invoice status
+        # Draft becomes Sent; a resend leaves the status alone (crm_app/services/invoice_status.py).
         if success_count > 0:
-            invoice.status = 'Sent'
-            invoice.save()
+            from crm_app.services.invoice_status import status_after_send
+            new_status = status_after_send(invoice.status)
+            if new_status != invoice.status:
+                invoice.status = new_status
+                invoice.save(update_fields=['status', 'updated_at'])
 
             return True, f"Invoice sent successfully to {success_count} recipient(s)"
         else:

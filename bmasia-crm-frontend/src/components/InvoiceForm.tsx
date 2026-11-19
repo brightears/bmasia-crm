@@ -59,6 +59,9 @@ interface InvoiceFormProps {
   initialContractId?: string;
 }
 
+// Statuses an invoice can be emailed in (crm_app/services/invoice_status.py).
+const SENDABLE_STATUSES = ['Draft', 'Sent', 'Overdue', 'Paid'];
+
 const paymentTermsOptions = [
   { value: 'Net 15', label: 'Net 15 days' },
   { value: 'Net 30', label: 'Net 30 days' },
@@ -1064,17 +1067,22 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
                     placeholder="Additional notes..."
                   />
                 </Grid>
-                <Grid item xs={12}>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={sendEmail}
-                        onChange={(e) => setSendEmail(e.target.checked)}
-                      />
-                    }
-                    label="Send invoice via email after saving"
-                  />
-                </Grid>
+                {/* Cancelled and refunded invoices are not sent; a sent one can be resent (its status stays). */}
+                {(mode === 'create' || SENDABLE_STATUSES.includes(invoice?.status || '')) && (
+                  <Grid item xs={12}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={sendEmail}
+                          onChange={(e) => setSendEmail(e.target.checked)}
+                        />
+                      }
+                      label={mode === 'edit' && invoice?.status !== 'Draft'
+                        ? 'Resend invoice by email after saving'
+                        : 'Send invoice via email after saving'}
+                    />
+                  </Grid>
+                )}
               </Grid>
             </Paper>
           </Box>

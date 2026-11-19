@@ -6292,6 +6292,12 @@ class InvoiceViewSet(BaseModelViewSet):
 
         invoice = self.get_object()
         email_service = EmailService()
+        from crm_app.services.invoice_status import send_refusal
+        refusal = send_refusal(invoice.status)
+        if refusal:
+            return Response({'error': refusal, 'code': 'not_sendable', 'status': invoice.status},
+                            status=status.HTTP_409_CONFLICT)
+        status_before = invoice.status
 
         # Extract email parameters from request
         recipients = request.data.get('recipients', [])
@@ -6320,8 +6326,8 @@ class InvoiceViewSet(BaseModelViewSet):
         invoice.refresh_from_db()
 
         self.log_action('UPDATE', invoice, {
-            'status': {'old': invoice.status, 'new': 'Sent'},
-            'action': 'Email sent',
+            'status': {'old': status_before, 'new': invoice.status},
+            'action': 'Email sent' if status_before == 'Draft' else 'Email resent',
             'recipients': recipients
         })
 
