@@ -1,0 +1,9 @@
+From: Unknown Sender <someone@unknown-sender.test>
+To: sales@ourco.example
+Subject: Hello
+Date: Mon, 05 Jan 2099 09:10:00 +0700
+Message-ID: <sc-03@unknown-sender.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Synthetic self-check message.

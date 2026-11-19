@@ -88,6 +88,7 @@ INSTALLED_APPS = [
 
     # Local apps
     'crm_app',
+    'mail_capture',  # Google Workspace mail capture; off unless GOOGLE_CAPTURE_ENABLED
     'agent_inbox',  # activity log and change-proposal review queue
 ]
 
@@ -333,6 +334,20 @@ CARA_QUARTERLY_OWNER = config('CARA_QUARTERLY_OWNER', default='legacy')
 # Off by default; reads are unaffected by this switch.
 CARA_CARE_WRITES_ENABLED = config('CARA_CARE_WRITES_ENABLED', default=False, cast=bool)
 
+# Google Workspace mail capture (mail_capture app). Master switch, off by
+# default: while it is off every capture entry point returns "capture disabled"
+# without creating a Gmail client. CAPTURE_INTERNAL_DOMAINS lists the
+# company's own mail domains (comma-separated); CAPTURE_INTERNAL_ADDRESSES adds
+# single internal sending addresses on other domains. Capture also refuses to
+# run while CAPTURE_INTERNAL_DOMAINS is empty.
+GOOGLE_CAPTURE_ENABLED = config('GOOGLE_CAPTURE_ENABLED', default=False, cast=bool)
+CAPTURE_INTERNAL_DOMAINS = config('CAPTURE_INTERNAL_DOMAINS', default='', cast=Csv())
+CAPTURE_INTERNAL_ADDRESSES = config('CAPTURE_INTERNAL_ADDRESSES', default='', cast=Csv())
+# More public mail providers to treat as freemail (comma-separated).
+CAPTURE_EXTRA_FREEMAIL_DOMAINS = config('CAPTURE_EXTRA_FREEMAIL_DOMAINS', default='', cast=Csv())
+# How long capture keeps its run rows and its mailbox access log (days).
+CAPTURE_RUN_RETENTION_DAYS = config('CAPTURE_RUN_RETENTION_DAYS', default=90, cast=int)
+CAPTURE_ACCESS_LOG_RETENTION_DAYS = config('CAPTURE_ACCESS_LOG_RETENTION_DAYS', default=365, cast=int)
 # Activity log and change-proposal review queue (agent_inbox). Both write
 # surfaces are off by default; while off they answer "not enabled" and the
 # read endpoints still work. Accepting a proposal is always a person's click.
@@ -346,6 +361,9 @@ AGENT_ACTIVITY_DAILY_CAP = config('AGENT_ACTIVITY_DAILY_CAP', default='2000')
 # Extra CRM usernames treated as agent accounts (comma list), on top of the
 # principals in crm_app/agent_policy.py. Agent accounts cannot decide proposals.
 AGENT_INBOX_AGENT_USERNAMES = config('AGENT_INBOX_AGENT_USERNAMES', default='', cast=Csv())
+# The people who may accept or reject change proposals (comma list of CRM
+# usernames). Empty means nobody can review yet. Agent names are ignored.
+CHANGE_PROPOSAL_REVIEWER_USERNAMES = config('CHANGE_PROPOSAL_REVIEWER_USERNAMES', default='', cast=Csv())
 # Dotted path of the mail-capture app's "message purged" signal. When it exists,
 # activities and proposals citing a purged message are redacted
 # (agent_inbox/redaction.py); when it does not, nothing is connected.

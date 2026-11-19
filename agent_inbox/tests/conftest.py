@@ -15,6 +15,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 ACTIVITIES = '/api/v1/activities/'
 PROPOSALS = '/api/v1/change-proposals/'
+REVIEWERS = ['reviewer-person', 'second-person', 'third-person']
 
 
 @pytest.fixture(autouse=True)
@@ -24,7 +25,9 @@ def enable_db_access_for_all_tests(db):
 
 @pytest.fixture(autouse=True)
 def inbox_switches_on():
-    with override_settings(AGENT_ACTIVITY_WRITES_ENABLED=True, CHANGE_PROPOSALS_ENABLED=True):
+    # The test people may review; agents and anyone else may not.
+    with override_settings(AGENT_ACTIVITY_WRITES_ENABLED=True, CHANGE_PROPOSALS_ENABLED=True,
+                           CHANGE_PROPOSAL_REVIEWER_USERNAMES=REVIEWERS):
         yield
 
 

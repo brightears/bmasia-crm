@@ -175,14 +175,13 @@ def propose_change(**arguments):
 def list_proposals(status='', batch_key='', since='', limit=50):
     try:
         user = _caller()
-        proposal_service.expire_due()
         rows = ChangeProposal.objects.filter(proposer=user)
         if status:
             statuses = [value.strip() for value in status.split(',') if value.strip()]
             valid = {value for value, _ in PROPOSAL_STATUS_CHOICES}
             if not statuses or set(statuses) - valid:
                 raise ServiceError(400, 'invalid', 'status must be a comma list of: ' + ', '.join(sorted(valid)))
-            rows = rows.filter(status__in=statuses)
+            rows = proposal_service.with_effective_status(rows, statuses)
         if batch_key:
             rows = rows.filter(batch_key=batch_field({'batch_key': batch_key}))
         if since:
@@ -196,5 +195,7 @@ def list_proposals(status='', batch_key='', since='', limit=50):
         return _refusal(exc)
     items = []
     for row in rows:
-        items.append({name: getattr(row, name) for name in OWN_PROPOSAL_FIELDS})
+        item = {name: getattr(row, name) for name in OWN_PROPOSAL_FIELDS}
+        item['status'] = proposal_service.effective_status(row)
+        items.append(item)
     return _reply({'ok': True, 'count': len(items), 'proposals': items})

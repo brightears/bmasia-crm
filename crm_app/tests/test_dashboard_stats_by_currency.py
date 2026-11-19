@@ -4,6 +4,8 @@ The existing totals add contract values and invoice amounts of every currency to
 they are. The new *_by_currency fields keep each document's own currency apart.
 """
 from datetime import date, timedelta
+
+from django.utils import timezone
 from decimal import Decimal
 
 import pytest
@@ -31,7 +33,7 @@ def admin():
 def thailand_book():
     """A Thailand-entity customer with THB and USD documents side by side."""
     company = CompanyFactory(billing_entity=THAILAND)
-    today = date.today()
+    today = timezone.localdate()
     # Two new contracts starting this month, one per currency, both ending within 60 days.
     thb = ContractFactory(
         company=company, currency='THB', value=Decimal('108000.00'), lifecycle_type='new',
@@ -101,7 +103,7 @@ def test_trend_months_carry_per_currency_series(admin, thailand_book):
 
 @pytest.mark.django_db
 def test_churn_is_subtracted_within_its_own_currency(admin, thailand_book):
-    today = date.today()
+    today = timezone.localdate()
     ContractFactory(
         company=thailand_book, currency='USD', value=Decimal('500.00'), status='Expired', is_active=False,
         start_date=today - timedelta(days=365), end_date=today.replace(day=1),

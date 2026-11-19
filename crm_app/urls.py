@@ -9,6 +9,8 @@ from .login_throttle import ThrottledTokenObtainPairView, throttled_obtain_auth_
 from .rene_views import ReneTokenCapabilitiesView
 from .cara_api import CaraCapabilitiesView, CaraCustomerCareView
 from .cara_care_writes import CaraCareSummaryView, CaraTouchCreateView
+from .timeline_views import CompanyTimelineView
+from .renewals_views import RenewalsView
 from .data_quality_views import DataQualityCheckView, DataQualitySummaryView
 
 # Create a router and register our viewsets
@@ -119,6 +121,14 @@ urlpatterns = [
         ReneTokenCapabilitiesView.as_view(),
         name='rene-token-capabilities',
     ),
+    # Read-only company timeline (crm_app/timeline.py).
+    path(
+        'v1/companies/<uuid:company_id>/timeline/',
+        CompanyTimelineView.as_view(),
+        name='company-timeline',
+    ),
+    # Renewals page (read-only); see renewals_views.py.
+    path('v1/renewals/', RenewalsView.as_view(), name='renewals'),
     # Read-only data-quality checks (Today's "Needs fixing" card and page).
     path('v1/data-quality/', DataQualitySummaryView.as_view(), name='data-quality'),
     path('v1/data-quality/<slug:key>/', DataQualityCheckView.as_view(), name='data-quality-check'),

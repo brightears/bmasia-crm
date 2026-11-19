@@ -4,6 +4,8 @@ Tests ContractZone model and integration with Contract and Zone models.
 """
 import pytest
 from datetime import date, timedelta
+
+from django.utils import timezone
 from django.db import IntegrityError
 from django.db.models.deletion import ProtectedError
 
@@ -56,7 +58,7 @@ class TestContractZoneModel:
         assert contract_zone.end_date is None
 
         # Can also set end_date
-        end_date = date.today() + timedelta(days=30)
+        end_date = timezone.localdate() + timedelta(days=30)
         contract_zone.end_date = end_date
         contract_zone.save()
         assert contract_zone.end_date == end_date
@@ -92,7 +94,7 @@ class TestContractZoneModel:
             contract=contract,
             zone=zone,
             is_active=False,
-            end_date=date.today()
+            end_date=timezone.localdate()
         )
 
         expected = "Pool Area on CTR-002 (ended)"
@@ -102,7 +104,7 @@ class TestContractZoneModel:
         """Test unique_together constraint (contract + zone + start_date)"""
         contract = ContractFactory()
         zone = ZoneFactory(company=contract.company)
-        start_date = date.today()
+        start_date = timezone.localdate()
 
         # Create first link
         ContractZone.objects.create(
@@ -128,14 +130,14 @@ class TestContractZoneModel:
         link1 = ContractZone.objects.create(
             contract=contract,
             zone=zone,
-            start_date=date.today()
+            start_date=timezone.localdate()
         )
 
         # Create second link with different start_date - should succeed
         link2 = ContractZone.objects.create(
             contract=contract,
             zone=zone,
-            start_date=date.today() + timedelta(days=365)
+            start_date=timezone.localdate() + timedelta(days=365)
         )
 
         assert link1.id != link2.id

@@ -28,6 +28,7 @@ import uuid
 from decimal import Decimal
 from crm_app.services.document_context import customer_legal_entity_name, effective_billing_entity
 from crm_app.services.document_entity_filters import filter_document_entity
+from crm_app.dates import business_today
 from crm_app.contract_pdf_v2 import (
     clause_addition_markup, fill_template_values, literal_hyphens, optional_clause_paragraph, paragraph_text,
     split_clause_placements, stored_markup,
@@ -110,7 +111,7 @@ from .serializers import (
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
     TaskAssigneePermission, ReadOnlyForNonOwner,
-    CommercialDocumentPreviewPermission,
+    CommercialDocumentPreviewPermission, PersonSignedInToWebsite,
 )
 from .rene_auth import (
     IsReneRenewalReaderOrAuthenticatedUser,
@@ -470,11 +471,25 @@ class UserViewSet(BaseModelViewSet):
     ordering_fields = ['username', 'email', 'role', 'date_joined', 'last_login']
     ordering = ['-date_joined']
 
+    # Reads, and the actions that act only on the caller's own account. Every
+    # other action, inherited ones included, changes who may sign in, with which
+    # password or role: staff and a person signed in to the website only.
+    # crm_app/tests/test_user_admin_routes.py fails when an action is added
+    # without being listed here or guarded.
+    OPEN_READ_ACTIONS = frozenset({'list', 'retrieve'})
+    SELF_SERVICE_ACTIONS = frozenset({'me', 'change_password', 'update_smtp', 'test_smtp', 'upload_avatar'})
+
     def get_permissions(self):
-        """Admin required for create/update/delete, authenticated for list/retrieve"""
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminUser()]
-        return [IsAuthenticated()]
+        if self.action in self.OPEN_READ_ACTIONS or self.action in self.SELF_SERVICE_ACTIONS:
+            return [IsAuthenticated()]
+        return [IsAdminUser(), PersonSignedInToWebsite()]
+
+    @action(detail=False, methods=['post'])
+    def bulk_operations(self, request):
+        """Not available for users: accounts are changed one at a time."""
+        return Response({'error': 'Users are changed one at a time on the Users page; '
+                                  'bulk changes to users are not available.'},
+                        status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     @action(detail=False, methods=['get', 'patch'])
     def me(self, request):
@@ -493,7 +508,9 @@ class UserViewSet(BaseModelViewSet):
                             status=status.HTTP_400_BAD_REQUEST)
         data.pop('username', None)
         # A new password needs the current one, as in change_password.
-        current_password = data.pop('current_password', None)
+        # .get, not .pop: on a multipart body QueryDict.pop returns a list.
+        current_password = request.data.get('current_password')
+        data.pop('current_password', None)
         if data.get('password') and not (
                 current_password and request.user.check_password(current_password)):
             return Response({'current_password': ['Enter your current password to set a new one.']},
@@ -1173,8 +1190,7 @@ class OpportunityViewSet(BaseModelViewSet):
             opportunities, filters_applied, summary
         )
 
-        from datetime import datetime as dt
-        today = dt.now().strftime('%Y-%m-%d')
+        today = business_today().strftime('%Y-%m-%d')
         filename = f"Opportunities_{today}.pdf"
 
         response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
@@ -1189,10 +1205,9 @@ class OpportunityViewSet(BaseModelViewSet):
         Export sales performance summary as PDF.
         """
         from crm_app.services.sales_export_service import SalesExportService
-        from datetime import datetime as dt
         from collections import defaultdict
 
-        year = int(request.query_params.get('year', dt.now().year))
+        year = int(request.query_params.get('year', business_today().year))
         entity_filter = request.query_params.get('entity', '')
         period_type = request.query_params.get('period_type', 'monthly')
         service_type_filter = request.query_params.get('service_type', '')
@@ -1433,7 +1448,7 @@ class ContractViewSet(BaseModelViewSet):
         """Mark renewal notice as sent"""
         contract = self.get_object()
         contract.renewal_notice_sent = True
-        contract.renewal_notice_date = timezone.now().date()
+        contract.renewal_notice_date = business_today()
         contract.save()
 
         self.log_action('UPDATE', contract, {
@@ -2683,7 +2698,7 @@ class ContractViewSet(BaseModelViewSet):
         # Get signatory info
         bmasia_signatory = contract.bmasia_signatory_name or 'Chris Andrews'
         bmasia_title = contract.bmasia_signatory_title or 'Director'
-        bmasia_date = datetime.now().strftime('%d %B %Y')
+        bmasia_date = business_today().strftime('%d %B %Y')
         default_customer_entity = customer_legal_entity_name(company)
 
         def clean_text(value, fallback=''):
@@ -3890,8 +3905,7 @@ and<br/><br/>
         stamp_img = None
 
         # Auto-fill date for BMAsia side (already signed)
-        from datetime import datetime
-        bmasia_date = datetime.now().strftime('%d %B %Y')
+        bmasia_date = business_today().strftime('%d %B %Y')
 
         # Text styles
         sig_line_style = ParagraphStyle('SigLine', alignment=TA_CENTER, fontSize=10)
@@ -6119,7 +6133,7 @@ and<br/><br/>
             )
 
         # Close the relationship
-        contract_zone.end_date = timezone.now().date()
+        contract_zone.end_date = business_today()
         contract_zone.is_active = False
         contract_zone.save()
 
@@ -6173,7 +6187,7 @@ and<br/><br/>
                 is_active=True
             ).update(
                 is_active=False,
-                end_date=timezone.now().date()
+                end_date=business_today()
             )
 
             # Create or reactivate zone links for provided zone IDs
@@ -6188,7 +6202,7 @@ and<br/><br/>
                         defaults={
                             'is_active': True,
                             'end_date': None,
-                            'start_date': contract.start_date or timezone.now().date()
+                            'start_date': contract.start_date or business_today()
                         }
                     )
                 except Zone.DoesNotExist:
@@ -6262,10 +6276,9 @@ class InvoiceViewSet(BaseModelViewSet):
         """Generate next sequential invoice number based on billing entity.
         Format: INV-TH-2026-0001 (Thailand) or INV-HK-2026-0001 (HK/International)
         """
-        from datetime import datetime
         entity = request.query_params.get('entity', '')
         prefix = 'INV-TH' if 'Thailand' in entity else 'INV-HK'
-        year = datetime.now().year
+        year = business_today().year
         pattern = f'{prefix}-{year}-'
         last = Invoice.objects.filter(
             invoice_number__startswith=pattern
@@ -6529,7 +6542,7 @@ class InvoiceViewSet(BaseModelViewSet):
         iif_buffer = service.generate_iif(queryset, ar_accounts, income_accounts, tax_account)
 
         entity_abbr = 'BMAT' if 'Thailand' in billing_entity else 'BMAL'
-        filename = f'invoices-{entity_abbr}-{timezone.now().strftime("%Y%m%d")}.iif'
+        filename = f'invoices-{entity_abbr}-{business_today().strftime("%Y%m%d")}.iif'
 
         response = HttpResponse(iif_buffer.getvalue(), content_type='text/plain; charset=utf-8')
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
@@ -7230,7 +7243,7 @@ class QuoteViewSet(BaseModelViewSet):
     @action(detail=False, methods=['get'])
     def expiring_soon(self, request):
         """Get quotes expiring within 7 days"""
-        today = timezone.now().date()
+        today = business_today()
         expiring = self.get_queryset().filter(
             valid_until__lte=today + timedelta(days=7),
             valid_until__gte=today,
@@ -7345,7 +7358,7 @@ class QuoteViewSet(BaseModelViewSet):
         """Mark quote as accepted"""
         quote = self.get_object()
         quote.status = 'Accepted'
-        quote.accepted_date = timezone.now().date()
+        quote.accepted_date = business_today()
         quote.save()
 
         # Create activity
@@ -7363,7 +7376,7 @@ class QuoteViewSet(BaseModelViewSet):
         """Mark quote as rejected"""
         quote = self.get_object()
         quote.status = 'Rejected'
-        quote.rejected_date = timezone.now().date()
+        quote.rejected_date = business_today()
         quote.save()
 
         # Create activity
@@ -7472,7 +7485,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['user__username', 'model_name', 'action']
     ordering_fields = ['timestamp', 'action', 'model_name']
     ordering = ['-timestamp']
-    filterset_fields = ['user', 'action', 'model_name']
+    filterset_fields = ['user', 'action', 'model_name', 'record_id']
 
 
 def _sum_by_currency(items, amount):
@@ -7574,7 +7587,9 @@ class DashboardViewSet(viewsets.ViewSet):
         elif user.role == 'Finance':
             pass  # Finance sees all financial data
         elif user.role in ['Tech', 'Music']:
-            tasks = tasks.filter(Q(assigned_to=user) | Q(department=user.role))
+            # Their own tasks and their team's. Task.department was removed as unused
+            # (2026-02-10); a task's team is now the role of the person it is assigned to.
+            tasks = tasks.filter(Q(assigned_to=user) | Q(assigned_to__role=user.role))
             companies = companies.filter(tasks__in=tasks).distinct()
 
         # The rows the per-item figures below read, with only the fields they read
@@ -7603,8 +7618,8 @@ class DashboardViewSet(viewsets.ViewSet):
             'lost_count': opportunities.filter(stage='Lost').count(),
         })
 
-        # Monthly stats
-        now = timezone.now()
+        # Monthly stats (Bangkok month)
+        now = timezone.localtime()
         current_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         monthly_contracts = contracts.filter(start_date__gte=current_month)
         monthly_opportunities = opportunities.filter(created_at__gte=current_month)
@@ -11611,7 +11626,7 @@ class RevenueViewSet(viewsets.ViewSet):
             ]
         }
         """
-        year = request.query_params.get('year', timezone.now().year)
+        year = request.query_params.get('year', business_today().year)
         currency = request.query_params.get('currency', 'USD')
         billing_entity = request.query_params.get('billing_entity', 'bmasia_hk')
 
@@ -11760,8 +11775,8 @@ class RevenueViewSet(viewsets.ViewSet):
             ]
         }
         """
-        year = request.query_params.get('year', timezone.now().year)
-        compare_year = request.query_params.get('compare_year', int(year) - 1 if year else timezone.now().year - 1)
+        year = request.query_params.get('year', business_today().year)
+        compare_year = request.query_params.get('compare_year', int(year) - 1 if year else business_today().year - 1)
         currency = request.query_params.get('currency', 'USD')
         billing_entity = request.query_params.get('billing_entity', 'bmasia_hk')
 
@@ -12567,7 +12582,7 @@ class ExpenseEntryViewSet(BaseModelViewSet):
                     'error': 'Invalid payment_date format. Use YYYY-MM-DD'
                 }, status=status.HTTP_400_BAD_REQUEST)
         else:
-            payment_date = date.today()
+            payment_date = business_today()
 
         expense.status = 'paid'
         expense.payment_date = payment_date

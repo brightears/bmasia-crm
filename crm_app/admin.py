@@ -10,6 +10,7 @@ from django.contrib import messages
 from django.db.models import Count, Sum, Q
 from django.utils import timezone
 import csv
+from crm_app.dates import business_today
 import re
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -2447,7 +2448,7 @@ class QuoteAdmin(admin.ModelAdmin):
         for quote in queryset:
             if quote.status == 'Draft':
                 quote.status = 'Sent'
-                quote.sent_date = timezone.now().date()
+                quote.sent_date = business_today()
                 quote.save()
 
                 # Create activity
@@ -2468,7 +2469,7 @@ class QuoteAdmin(admin.ModelAdmin):
         for quote in queryset:
             if quote.status in ['Draft', 'Sent']:
                 quote.status = 'Accepted'
-                quote.accepted_date = timezone.now().date()
+                quote.accepted_date = business_today()
                 quote.save()
 
                 # Create activity
@@ -2489,7 +2490,7 @@ class QuoteAdmin(admin.ModelAdmin):
         for quote in queryset:
             if quote.status in ['Draft', 'Sent']:
                 quote.status = 'Rejected'
-                quote.rejected_date = timezone.now().date()
+                quote.rejected_date = business_today()
                 quote.save()
 
                 # Create activity

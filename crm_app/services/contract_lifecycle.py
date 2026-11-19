@@ -32,6 +32,8 @@ from typing import Optional
 from django.db import transaction
 from django.utils import timezone
 
+from crm_app.dates import business_today
+
 # Outcomes reported by close_renewed_predecessor().
 CLOSED = 'closed'
 CLOSABLE = ('Active', 'Expired')
@@ -69,7 +71,7 @@ def handover_end_date(link_start, successor_start, predecessor_end=None):
     starts and the predecessor's own end date (a term that ended before a gap does
     not cover the gap), never before the link's own start."""
     if successor_start is None:
-        end = timezone.now().date()
+        end = business_today()
     else:
         end = successor_start - timedelta(days=1)
     if predecessor_end is not None and predecessor_end < end:

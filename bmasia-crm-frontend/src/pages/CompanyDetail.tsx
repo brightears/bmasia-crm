@@ -48,6 +48,7 @@ import ContactForm from '../components/ContactForm';
 import ContactDetail from '../components/ContactDetail';
 import OpportunityForm from '../components/OpportunityForm';
 import CompanyCareCard from '../components/CompanyCareCard';
+import CompanyTimeline from '../components/timeline/CompanyTimeline';
 import { PageHeader, SectionCard, EmptyState, DetailField, ProductChip } from '../components/ui';
 import { statusTone, humanize, formatDate, formatMoney, initialsOf, totalsByCurrency, visuallyHidden } from '../theme';
 import { currencyForEntity } from '../constants/entities';
@@ -239,11 +240,11 @@ const CompanyDetail: React.FC = () => {
   const opportunityCurrency = currencyForEntity(company.billing_entity);
 
   const facts = [
-    { label: 'Contacts', value: contacts.length, tab: 0 },
-    { label: 'Opportunities', value: opportunities.length, tab: 1 },
-    { label: 'Contracts', value: contracts.length, tab: 2 },
-    { label: 'Music zones', value: zones.length, tab: 3 },
-    { label: 'Open tickets', value: openTickets.length, tab: 4 },
+    { label: 'Contacts', value: contacts.length, tab: 1 },
+    { label: 'Opportunities', value: opportunities.length, tab: 2 },
+    { label: 'Contracts', value: contracts.length, tab: 3 },
+    { label: 'Music zones', value: zones.length, tab: 4 },
+    { label: 'Open tickets', value: openTickets.length, tab: 5 },
     {
       label: 'Active contract value',
       value:
@@ -458,15 +459,30 @@ const CompanyDetail: React.FC = () => {
               scrollButtons="auto"
               sx={{ px: 1 }}
             >
-              <Tab label={tabLabel('Contacts', contacts.length)} {...a11yProps(0)} />
-              <Tab label={tabLabel('Opportunities', opportunities.length)} {...a11yProps(1)} />
-              <Tab label={tabLabel('Contracts', contracts.length)} {...a11yProps(2)} />
-              <Tab label={tabLabel('Zones', zones.length)} {...a11yProps(3)} />
-              <Tab label={tabLabel('Support', openTickets.length)} {...a11yProps(4)} />
-              <Tab label="Plans" {...a11yProps(5)} />
+              <Tab label="Timeline" {...a11yProps(0)} />
+              <Tab label={tabLabel('Contacts', contacts.length)} {...a11yProps(1)} />
+              <Tab label={tabLabel('Opportunities', opportunities.length)} {...a11yProps(2)} />
+              <Tab label={tabLabel('Contracts', contracts.length)} {...a11yProps(3)} />
+              <Tab label={tabLabel('Zones', zones.length)} {...a11yProps(4)} />
+              <Tab label={tabLabel('Support', openTickets.length)} {...a11yProps(5)} />
+              <Tab label="Plans" {...a11yProps(6)} />
             </Tabs>
 
             <TabPanel value={tabValue} index={0}>
+              <Box sx={{ p: { xs: 2, sm: 2.5 } }}>
+                <CompanyTimeline
+                  companyId={company.id}
+                  label={`Activity for ${company.name}`}
+                  urlState
+                  onOpenContact={(contactId) => {
+                    const match = contacts.find((c) => c.id === contactId);
+                    if (match) setViewContact(match);
+                  }}
+                />
+              </Box>
+            </TabPanel>
+
+            <TabPanel value={tabValue} index={1}>
               {contacts.length > 0 ? (
                 <TableContainer>
                   <Table>
@@ -554,7 +570,7 @@ const CompanyDetail: React.FC = () => {
               )}
             </TabPanel>
 
-            <TabPanel value={tabValue} index={1}>
+            <TabPanel value={tabValue} index={2}>
               {opportunities.length > 0 ? (
                 <TableContainer>
                   <Table>
@@ -619,7 +635,7 @@ const CompanyDetail: React.FC = () => {
               )}
             </TabPanel>
 
-            <TabPanel value={tabValue} index={2}>
+            <TabPanel value={tabValue} index={3}>
               {contracts.length > 0 ? (
                 <TableContainer>
                   <Table>
@@ -680,7 +696,7 @@ const CompanyDetail: React.FC = () => {
               )}
             </TabPanel>
 
-            <TabPanel value={tabValue} index={3}>
+            <TabPanel value={tabValue} index={4}>
               {zones.length > 0 ? (
                 <Box sx={{ p: 2.5 }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -737,7 +753,7 @@ const CompanyDetail: React.FC = () => {
               )}
             </TabPanel>
 
-            <TabPanel value={tabValue} index={4}>
+            <TabPanel value={tabValue} index={5}>
               {tickets.length > 0 ? (
                 <>
                   <Box sx={{ display: 'flex', justifyContent: 'flex-end', px: 2.5, pt: 2 }}>
@@ -807,7 +823,7 @@ const CompanyDetail: React.FC = () => {
               )}
             </TabPanel>
 
-            <TabPanel value={tabValue} index={5}>
+            <TabPanel value={tabValue} index={6}>
               {company.subscription_plans && company.subscription_plans.length > 0 ? (
                 <Grid container spacing={2} sx={{ p: 2.5 }}>
                   {company.subscription_plans.map((plan) => (
