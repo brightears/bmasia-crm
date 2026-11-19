@@ -31,6 +31,7 @@ import {
   ManageAccountsOutlined,
   ArticleOutlined,
   CalendarMonthOutlined,
+  FactCheckOutlined,
   AutorenewOutlined,
 } from '@mui/icons-material';
 
@@ -53,11 +54,18 @@ export interface NavGroup {
  * Menu structure in plain business words. Only labels and grouping change; every item
  * still opens the same page as before.
  */
-export const buildNavGroups = (aiDraftsPendingCount: number): NavGroup[] => [
+export const buildNavGroups = (
+  aiDraftsPendingCount: number,
+  /** The Review entry appears only while suggestions are switched on. */
+  review?: { enabled: boolean; openCount: number }
+): NavGroup[] => [
   {
     id: 'home',
     items: [
       { text: 'Today', icon: <TodayOutlined />, path: '/today' },
+      ...(review?.enabled
+        ? [{ text: 'Review', icon: <FactCheckOutlined />, path: '/review', badge: review.openCount > 0 ? review.openCount : undefined }]
+        : []),
       { text: 'Dashboard', icon: <SpaceDashboardOutlined />, path: '/dashboard' },
     ],
   },
