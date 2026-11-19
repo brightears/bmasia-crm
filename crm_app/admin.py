@@ -1270,6 +1270,11 @@ class InvoiceAdminForm(forms.ModelForm):
                 'Use the "Mark selected invoices as paid" action (or Mark as paid in the CRM): '
                 'it records the payment date and issues the receipt number.'
             )
+        # The same rule as every other writer (crm_app/services/invoice_status.py).
+        from crm_app.services.invoice_status import plain_update_refusal
+        reason = plain_update_refusal(current, value)
+        if reason:
+            raise forms.ValidationError(reason)
         return value
 
 
@@ -1282,7 +1287,8 @@ class InvoiceAdmin(admin.ModelAdmin):
     search_fields = ['invoice_number', 'contract__company__name', 'contract__contract_number']
     readonly_fields = ['created_at', 'updated_at', 'total_amount', 'days_overdue']
     inlines = [InvoiceLineItemInline]
-    actions = ['bulk_mark_paid', 'bulk_mark_unpaid', 'export_invoices_csv', 'export_invoices_excel']
+    actions = ['bulk_mark_paid', 'bulk_mark_unpaid', 'bulk_reopen_cancelled', 'export_invoices_csv',
+               'export_invoices_excel']
     
     def days_overdue(self, obj):
         return obj.days_overdue if obj.is_overdue else 0
@@ -1333,10 +1339,24 @@ class InvoiceAdmin(admin.ModelAdmin):
     bulk_mark_paid.short_description = 'Mark selected invoices as paid'
 
     def bulk_mark_unpaid(self, request, queryset):
-        """Mark selected invoices as unpaid"""
-        updated_count = queryset.exclude(status='Sent').update(status='Sent', paid_date=None)
-        self.message_user(request, f'Successfully marked {updated_count} invoices as unpaid')
+        """Undo payments recorded by mistake: Paid invoices only, back to Sent (receipt numbers kept)."""
+        skipped = queryset.exclude(status='Paid').count()
+        updated_count = queryset.filter(status='Paid').update(status='Sent', paid_date=None)
+        self.message_user(request, f'Marked {updated_count} paid invoice(s) as unpaid; receipt numbers are kept.')
+        if skipped:
+            self.message_user(request, f'{skipped} selected invoice(s) were not Paid and were left as they are.',
+                              level='WARNING')
     bulk_mark_unpaid.short_description = 'Mark selected invoices as unpaid'
+
+    def bulk_reopen_cancelled(self, request, queryset):
+        """Reopen invoices cancelled by mistake: Cancelled invoices only, back to Sent."""
+        skipped = queryset.exclude(status='Cancelled').count()
+        updated_count = queryset.filter(status='Cancelled').update(status='Sent')
+        self.message_user(request, f'Reopened {updated_count} cancelled invoice(s) as Sent.')
+        if skipped:
+            self.message_user(request, f'{skipped} selected invoice(s) were not Cancelled and were left as they are.',
+                              level='WARNING')
+    bulk_reopen_cancelled.short_description = 'Reopen selected cancelled invoices'
 
     def export_invoices_csv(self, request, queryset):
         """Export selected invoices to CSV"""

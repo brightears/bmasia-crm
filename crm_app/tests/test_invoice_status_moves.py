@@ -2,7 +2,7 @@
 
 - Paid is reached only by "Mark as paid" (crm_app/services/invoice_payments.py) and left only for
   Refunded; undoing a payment is the admin's "Mark selected invoices as unpaid".
-- Nothing goes back to Draft once it has left Draft.
+- Nothing goes back to Draft once it has left Draft; Cancelled and Refunded are final for edits.
 Every other move a single update could make before is still allowed.
 """
 import json
@@ -21,8 +21,10 @@ ALLOWED = {
     'Sent': {'Sent', 'Overdue', 'Cancelled', 'Refunded'},
     'Overdue': {'Overdue', 'Sent', 'Cancelled', 'Refunded'},
     'Paid': {'Paid', 'Refunded'},
-    'Cancelled': {'Cancelled', 'Sent', 'Overdue', 'Refunded'},
-    'Refunded': {'Refunded', 'Sent', 'Overdue', 'Cancelled'},
+    # Cancelled and Refunded are final for edits; the admin's "Reopen selected cancelled invoices"
+    # covers a mistaken cancel (test_invoice_status_writers.py).
+    'Cancelled': {'Cancelled'},
+    'Refunded': {'Refunded'},
 }
 
 
