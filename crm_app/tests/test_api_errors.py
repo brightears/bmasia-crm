@@ -215,7 +215,10 @@ def test_a_mail_server_reply_does_not_reach_the_caller(api, caplog):
     assert response.status_code == 500
     assert response.data['error'] == 'Failed to send the invoice to any recipient. Reference: mail-ref-12345'
     assert 'relay.internal' not in str(response.data)
-    assert any('mail-ref-12345' in r.getMessage() and 'relay.internal' in r.getMessage() for r in caplog.records)
+    # The log keeps the reference, the error type and the SMTP code, never the server's own text.
+    assert any('mail-ref-12345' in r.getMessage() and 'SMTPDataError (SMTP code 554)' in r.getMessage()
+               for r in caplog.records)
+    assert not any('relay.internal' in r.getMessage() for r in caplog.records)
 
 
 def test_a_pdf_failure_in_the_mail_layer_is_generic():
