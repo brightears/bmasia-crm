@@ -1481,11 +1481,8 @@ class EmailService:
 
         # Draft becomes Sent; a resend leaves the status alone (crm_app/services/invoice_status.py).
         if success_count > 0:
-            from crm_app.services.invoice_status import status_after_send
-            new_status = status_after_send(invoice.status)
-            if new_status != invoice.status:
-                invoice.status = new_status
-                invoice.save(update_fields=['status', 'updated_at'])
+            from crm_app.services.invoice_status import record_send
+            record_send(invoice)
 
             return True, f"Invoice sent successfully to {success_count} recipient(s)"
         else:
