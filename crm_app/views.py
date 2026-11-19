@@ -133,6 +133,25 @@ def serialize_audit_changes(obj):
     return json.loads(json.dumps(obj, cls=DjangoJSONEncoder))
 
 
+_SECRET_AUDIT_FIELD = re.compile(r'password|passwd|secret|token|api_?key|credential', re.IGNORECASE)
+REDACTED_AUDIT_VALUE = '[redacted]'
+
+
+def redact_secret_changes(changes):
+    """Replace the old and new values of secret-like fields in an audit ``changes`` dict.
+
+    The REST serializers already leave such fields out of their output; this keeps an
+    audit row free of them if a serializer ever includes one.
+    """
+    if not isinstance(changes, dict):
+        return changes
+    return {
+        key: ({'old': REDACTED_AUDIT_VALUE, 'new': REDACTED_AUDIT_VALUE}
+              if _SECRET_AUDIT_FIELD.search(str(key)) else value)
+        for key, value in changes.items()
+    }
+
+
 def _format_duration(start_date, end_date):
     """Format duration between two dates as human-readable text."""
     if not start_date or not end_date:
@@ -371,7 +390,7 @@ class BaseModelViewSet(viewsets.ModelViewSet):
                 changes[key] = {'old': old_value, 'new': new_value}
 
         # The snapshot can contain date/Decimal values as well as UUIDs.
-        changes = serialize_audit_changes(changes)
+        changes = redact_secret_changes(serialize_audit_changes(changes))
         self.log_action('UPDATE', instance, changes)
     
     def destroy(self, request, *args, **kwargs):
