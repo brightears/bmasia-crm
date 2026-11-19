@@ -257,6 +257,7 @@ export const needsAnotherLook = (p: ChangeProposal): string[] => {
   if (p.target_changed_at) reasons.push('record_changed');
   if (p.conflicts_with && p.conflicts_with.length) reasons.push('conflict');
   if (p.last_apply_error) reasons.push('apply_error');
+  if (isUnusualState(targetStateOf(p))) reasons.push('target_state');
   return reasons;
 };
 
@@ -421,7 +422,61 @@ export interface CardState {
   contactChecked?: boolean;
   /** The other side of a conflict could not be read. */
   partnersFailed?: boolean;
+  /** The "This record is inactive. Apply the change anyway" tick, for the version shown. */
+  inactiveAcknowledged?: boolean;
+  /** This server refused the inactive acknowledgement (it predates it): inactive records cannot be changed here. */
+  inactiveUnsupported?: boolean;
 }
+
+// ------------------------------------------------------------------ the target's state (later backends)
+
+export type TargetState = 'present' | 'no_duplicate' | 'inactive' | 'moved' | 'missing' | 'duplicate';
+
+/** The target's state as the server last compared it, or null when the backend does not send one. */
+export const targetStateOf = (p: ChangeProposal): TargetState | null => {
+  const state = (p as { target_state?: unknown }).target_state;
+  return typeof state === 'string' && state ? (state as TargetState) : null;
+};
+
+/** A state other than the normal one: the card shows the server's reason at the top. */
+export const isUnusualState = (state: TargetState | null): boolean =>
+  state !== null && state !== 'present' && state !== 'no_duplicate';
+
+const KNOWN_STATES: string[] = ['present', 'no_duplicate', 'inactive', 'moved', 'missing', 'duplicate'];
+
+/** A state this page does not know (a later backend): shown neutrally and never acceptable here (fail closed). */
+export const isUnknownState = (state: TargetState | null): boolean => state !== null && !KNOWN_STATES.includes(state);
+
+export const INACTIVE_UNSUPPORTED = 'This server cannot apply changes to inactive records yet.';
+
+const DEFAULT_STATE_REASON: Record<string, string> = {
+  inactive: 'This record is inactive.',
+  moved: 'This record now belongs to another company.',
+  missing: 'This record no longer exists.',
+  duplicate: 'A contact with this email or name already exists at the company.',
+};
+
+/** The server's reason for the state, or a plain default when it sent none. */
+export const stateReason = (p: ChangeProposal): string => {
+  const reason = (p as { target_state_reason?: unknown }).target_state_reason;
+  const state = targetStateOf(p);
+  return typeof reason === 'string' && reason ? reason : state ? DEFAULT_STATE_REASON[state] || '' : '';
+};
+
+/** The record changed since the suggestion and what changed is its values (not its state). */
+/**
+ * Whether the reviewer must compare the current values ("I have compared the current values").
+ * True when the record changed and its state is the normal one. Also true for an inactive record that changed:
+ * inactive is the one unusual state that can be accepted, and the API does not say whether only the state changed
+ * or the values as well (it sends `target_changed_at` for both; there is no field naming what changed), so both
+ * ticks are required.
+ */
+export const valuesChanged = (p: ChangeProposal): boolean => {
+  const state = targetStateOf(p);
+  return Boolean(p.target_changed_at) && (!isUnusualState(state) || state === 'inactive');
+};
+
+export const INACTIVE_TICK_LABEL = 'This record is inactive. Apply the change anyway; it stays inactive.';
 
 export interface Allowed {
   ok: boolean;
@@ -454,21 +509,47 @@ export const cardActions = (p: ChangeProposal, s: CardState): CardActions => {
   else if (s.expired) base = no('This suggestion has expired.');
   else if (s.busy) base = no('Waiting for the answer to the last decision.');
 
-  let gate: Allowed = yes;
-  if (p.target_changed_at && !s.acknowledged) gate = no('Tick “I have compared the current values” first.');
-  else if (s.contactCheck === 'pending') gate = no('Checking whether this is the primary or billing contact…');
-  else if (s.contactCheck === 'failed' && !s.contactChecked)
-    gate = no('Tick “I have checked this contact myself” first.');
-  else if (conflicts && s.partnersFailed && !s.partnersShown)
-    gate = no('Could not load the other suggestion’s evidence. Retry first.');
-  else if (conflicts && !s.partnersShown) gate = no('Wait until the other suggestion’s evidence is shown.');
-  else if (conflicts && s.conflictChoice !== 'this') gate = no('Choose which of the two suggestions to keep first.');
-  else if (needsSourceCheck(p) && !s.sourceChecked) gate = no('Tick “I checked this against the source myself” first.');
+  // The target's state (later backends): some states can never be accepted, some only after a tick.
+  const state = p.status === 'proposed' ? targetStateOf(p) : null;
+  const blockAll =
+    state === 'missing' || state === 'moved'
+      ? no(stateReason(p))
+      : isUnknownState(state)
+        ? no(stateReason(p) || 'This record needs a look; it cannot be accepted from this page.')
+        : state === 'inactive' && s.inactiveUnsupported
+          ? no(INACTIVE_UNSUPPORTED)
+          : null;
+  const blockPlainAccept = state === 'duplicate' ? no(stateReason(p)) : null;
 
-  const accepting = !base.ok ? base : !gate.ok ? gate : yes;
+  let rest: Allowed = yes;
+  if (valuesChanged(p) && !s.acknowledged) rest = no('Tick “I have compared the current values” first.');
+  else if (s.contactCheck === 'pending') rest = no('Checking whether this is the primary or billing contact…');
+  else if (s.contactCheck === 'failed' && !s.contactChecked)
+    rest = no('Tick “I have checked this contact myself” first.');
+  else if (conflicts && s.partnersFailed && !s.partnersShown)
+    rest = no('Could not load the other suggestion’s evidence. Retry first.');
+  else if (conflicts && !s.partnersShown) rest = no('Wait until the other suggestion’s evidence is shown.');
+  else if (conflicts && s.conflictChoice !== 'this') rest = no('Choose which of the two suggestions to keep first.');
+  else if (needsSourceCheck(p) && !s.sourceChecked) rest = no('Tick “I checked this against the source myself” first.');
+
+  // An inactive target can be changed only with its own tick (sent as acknowledge_inactive); the form may open without it.
+  const gate: Allowed = !rest.ok
+    ? rest
+    : state === 'inactive' && !s.inactiveAcknowledged
+      ? no(`Tick “${INACTIVE_TICK_LABEL}” first.`)
+      : yes;
+  const accepting = !base.ok ? base : blockAll ? blockAll : !gate.ok ? gate : yes;
+  // Editing a duplicate new contact is allowed: the server checks the edited values again.
+  const editGate = !base.ok ? base : blockAll ? blockAll : !rest.ok ? rest : yes;
   return {
-    accept: !accepting.ok ? accepting : s.editing ? no('Finish or cancel the edit first.') : yes,
-    edit: !accepting.ok ? accepting : s.editing ? no('Already editing.') : yes,
+    accept: !accepting.ok
+      ? accepting
+      : blockPlainAccept
+        ? blockPlainAccept
+        : s.editing
+          ? no('Finish or cancel the edit first.')
+          : yes,
+    edit: !editGate.ok ? editGate : s.editing ? no('Already editing.') : yes,
     acceptEdits: !accepting.ok ? accepting : s.editing ? yes : no('Open the edit form first.'),
     reject: base,
     select: !base.ok ? base : s.editing ? no('Finish or cancel the edit first.') : yes,
