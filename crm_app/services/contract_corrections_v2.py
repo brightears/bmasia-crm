@@ -62,6 +62,19 @@ OPERATIONS (one per entry, ``op``)
                      SENT_DATE_MAX_DAYS_BEFORE_START (400) days before its
                      start_date (sent_date_too_early: a typo). Re-run: a contract
                      whose sent_date is the file's date is already applied.
+                     When the contract is Draft and the group carries no status
+                     operation for it, the output (dry run and real run) warns
+                     that it stays Draft with a sent date: numbered review
+                     preparation refuses such a Draft until its status is
+                     corrected. A warning, not a refusal: the status may follow
+                     in a later file.
+                     Side effects to know: the contract's updated_at moves, so a
+                     Draft leaves the "Draft untouched 60+ days" data-quality
+                     list for 60 days; a Draft with a recorded date that is later
+                     saved as Sent keeps that date (save() stamps today only
+                     when the date is empty); reverting the date on a Sent
+                     contract empties it, and the next ordinary save() then
+                     stamps today.
   set_renewed_from   Sets the missing ``renewed_from`` link of an existing
                      contract to an earlier contract of the same company
                      (``renewed_from_id``, whose state the entry states in
@@ -125,10 +138,15 @@ ONE CONTRACT, SEVERAL ENTRIES
   redate_zone_link_end, plus at most one set_sent_date and at most one
   add_note. Every entry for the contract states the same ``expected`` (the
   state read when the file was made; otherwise expected_differs). They are
-  written in this order: set_sent_date, the other operation, add_note. Each
+  written, and printed, in this order: set_sent_date, the other operation, add_note. Each
   writes its own audit row and journal op; --revert undoes them in the reverse
   order, judging "changed since" on the contract's updated_at after the last of
   them. Any other repetition of a contract is duplicate_contract_id.
+
+DATES
+  Every date in a v2 file is exactly YYYY-MM-DD. Other forms that Python would
+  read as a date (20241210, ISO week dates such as 2024-W50-2, datetimes) stop
+  the command as a malformed file.
 
 GROUPS
   Entries sharing a ``group`` are applied together or not at all, in one
@@ -385,6 +403,20 @@ COMPANION_OPS = ('set_sent_date', 'add_note')
 _WRITE_RANK = {'set_sent_date': 0, 'add_note': 2}
 # set_sent_date: a sent date this long before the term starts is taken for a typo.
 SENT_DATE_MAX_DAYS_BEFORE_START = 400
+# The status an operation moves a contract to (for the set_sent_date line of a combined group).
+_STATUS_TARGET = {'mark_cancelled': 'Cancelled', 'mark_renewed': 'Renewed', 'mark_expired': 'Expired'}
+DRAFT_SENT_DATE_WARNING = ('WARNING: This contract stays Draft with a sent date. Numbered review preparation '
+                           'refuses a Draft with a sent date until its status is corrected.')
+
+
+def _status_set_in_group(e, members):
+    """The status another entry of the group moves this entry's contract to, or None."""
+    return next((_STATUS_TARGET[m.op] for m in members
+                 if m.contract_id == e.contract_id and m.op in _STATUS_TARGET), None)
+
+
+def _in_write_order(members):
+    return sorted(members, key=lambda m: (_WRITE_RANK.get(m.op, 1), m.index))
 LINK_OPS = ('hand_over_zone_links', 'redate_zone_link_end')
 CREATE_OPS = ('create_successor', 'create_contract')
 CANCELLABLE = {'Draft', 'Sent', 'Active'}
@@ -516,10 +548,13 @@ def _uuid(value, where):
         raise _malformed(f'{where}: not a UUID')
 
 
+_DATE_RE = re.compile(r'\d{4}-\d{2}-\d{2}')
+
+
 def _date(value, where, nullable=False):
     if value is None and nullable:
         return None
-    if not isinstance(value, str):
+    if not isinstance(value, str) or not _DATE_RE.fullmatch(value):
         raise _malformed(f'{where}: want YYYY-MM-DD')
     try:
         return date.fromisoformat(value)
@@ -1040,7 +1075,8 @@ class V2Runner:
 
         def rows(details=None):
             details = details or {}
-            return [(e, numbers.get(e.contract_id), details.get(e.index, '')) for e in members]
+            # Printed in the order the entries are written (see ONE CONTRACT, SEVERAL ENTRIES).
+            return [(e, numbers.get(e.contract_id), details.get(e.index, '')) for e in _in_write_order(members)]
 
         ids = sorted({e.contract_id for e in members if e.contract_id} |
                      {i for e in members for i in e.referenced_ids})
@@ -1075,7 +1111,7 @@ class V2Runner:
                 if not self.cmd.execute_mode:
                     return 'would_apply', rows(details)
                 journal_ops, written = [], {}
-                for e in sorted(members, key=lambda m: (_WRITE_RANK.get(m.op, 1), m.index)):
+                for e in _in_write_order(members):
                     written[e.index] = self._write(group, e, locked, plans[e.index])
                     journal_ops.append(written[e.index])
                 for e in members:
@@ -1347,9 +1383,11 @@ class V2Runner:
             state = 'target'  # the line is there already; never add it twice
         plan = {'state': state, 'detail': ''}
         if state == 'expected':
+            moved_to = _status_set_in_group(e, members)
             plan['detail'] = (f'appends a {len(e.text)}-character line to notes '
                               f'({"after " + str(len(c.notes.splitlines())) + " line(s)" if c.notes else "notes were empty"}); '
-                              f'status stays {c.status}')
+                              + (f'status {c.status} -> {moved_to} in this group' if moved_to
+                                 else f'status stays {c.status}'))
         return plan
 
     def _check_set_sent_date(self, e, c, locked, members):
@@ -1371,8 +1409,12 @@ class V2Runner:
             raise Refused('sent_date_after_signed')
         if (c.start_date - e.sent_date).days > SENT_DATE_MAX_DAYS_BEFORE_START:
             raise Refused('sent_date_too_early')
-        plan['detail'] = (f'sent_date {c.sent_date.isoformat() if c.sent_date else "empty"} -> '
-                          f'{e.sent_date.isoformat()}; status stays {c.status}')
+        moved_to = _status_set_in_group(e, members)
+        status = (f'status {c.status} -> {moved_to} in this group' if moved_to else f'status stays {c.status}')
+        plan['detail'] = (f'sent date recorded: sent_date {c.sent_date.isoformat() if c.sent_date else "empty"} -> '
+                          f'{e.sent_date.isoformat()}; {status}')
+        if c.status == 'Draft' and not moved_to:
+            plan['detail'] += f'\n      {DRAFT_SENT_DATE_WARNING}'
         return plan
 
     def _check_create_contract(self, e, c, locked, members):
