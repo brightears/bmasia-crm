@@ -35,6 +35,7 @@ import 'react-quill-new/dist/quill.snow.css';
 import DOMPurify from 'dompurify';
 import { KBArticle, KBCategory, KBTag } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface KBArticleFormProps {
   articleId?: string;
@@ -137,7 +138,7 @@ const KBArticleForm: React.FC<KBArticleFormProps> = ({ articleId, onSave, onCanc
       const response = await ApiService.getKBCategories();
       setCategories(response.data?.results || response.data || []);
     } catch (err: any) {
-      console.error('Failed to load categories:', err);
+      logApiError('Failed to load categories:', err);
       setError('Failed to load categories');
     }
   };
@@ -147,7 +148,7 @@ const KBArticleForm: React.FC<KBArticleFormProps> = ({ articleId, onSave, onCanc
       const response = await ApiService.getKBTags();
       setTags(response.data?.results || response.data || []);
     } catch (err: any) {
-      console.error('Failed to load tags:', err);
+      logApiError('Failed to load tags:', err);
       setError('Failed to load tags');
     }
   };
@@ -168,7 +169,7 @@ const KBArticleForm: React.FC<KBArticleFormProps> = ({ articleId, onSave, onCanc
         featured: article.featured,
       });
     } catch (err: any) {
-      console.error('Failed to load article:', err);
+      logApiError('Failed to load article:', err);
       setError(`Failed to load article: ${err.response?.data?.detail || err.message}`);
     } finally {
       setInitialLoading(false);
@@ -221,7 +222,7 @@ const KBArticleForm: React.FC<KBArticleFormProps> = ({ articleId, onSave, onCanc
       await ApiService.updateKBArticle(articleId, submitData);
       setLastSaved(new Date());
     } catch (err: any) {
-      console.error('Auto-save failed:', err);
+      logApiError('Auto-save failed:', err);
       // Silent fail for auto-save
     } finally {
       setAutoSaving(false);
@@ -264,7 +265,7 @@ const KBArticleForm: React.FC<KBArticleFormProps> = ({ articleId, onSave, onCanc
             await ApiService.uploadKBAttachment(savedArticle.id, file);
             setUploadProgress(prev => ({ ...prev, [file.name]: 100 }));
           } catch (err) {
-            console.error(`Failed to upload ${file.name}:`, err);
+            logApiError(`Failed to upload ${file.name}:`, err);
             setError(`Failed to upload ${file.name}`);
           }
         }
@@ -272,7 +273,7 @@ const KBArticleForm: React.FC<KBArticleFormProps> = ({ articleId, onSave, onCanc
 
       onSave(savedArticle);
     } catch (err: any) {
-      console.error('Failed to save article:', err);
+      logApiError('Failed to save article:', err);
       const errorData = err.response?.data;
       if (errorData && typeof errorData === 'object' && !errorData.detail) {
         // Show field-level validation errors from DRF

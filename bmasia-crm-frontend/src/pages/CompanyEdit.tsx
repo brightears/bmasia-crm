@@ -23,6 +23,7 @@ import { Save, Cancel, ArrowBack, Business } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Company } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface CompanyFormData {
   name: string;
@@ -163,7 +164,7 @@ const CompanyEdit: React.FC = () => {
         soundtrack_account_id: companyData.soundtrack_account_id || '',
       });
     } catch (err: any) {
-      console.error('Company load error:', err);
+      logApiError('Company load error:', err);
       setError('Failed to load company details');
     } finally {
       setLoading(false);
@@ -236,7 +237,7 @@ const CompanyEdit: React.FC = () => {
       await ApiService.updateCompany(id, submitData);
       navigate(`/companies/${id}`);
     } catch (err: any) {
-      console.error('Company save error:', err);
+      logApiError('Company save error:', err);
       if (err.response?.data) {
         if (typeof err.response.data === 'object') {
           const fieldErrors: Record<string, string> = {};

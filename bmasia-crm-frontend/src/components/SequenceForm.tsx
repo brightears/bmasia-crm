@@ -21,6 +21,7 @@ import {
 } from '@mui/icons-material';
 import { EmailSequence } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface SequenceFormProps {
   open: boolean;
@@ -102,7 +103,7 @@ const SequenceForm: React.FC<SequenceFormProps> = ({
 
       onSuccess();
     } catch (err: any) {
-      console.error('Sequence save error:', err);
+      logApiError('Sequence save error:', err);
       if (err.response?.data) {
         if (typeof err.response.data === 'object') {
           const fieldErrors: Record<string, string> = {};

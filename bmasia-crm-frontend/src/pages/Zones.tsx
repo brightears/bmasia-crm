@@ -25,6 +25,7 @@ import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 import { useNavigate } from 'react-router-dom';
 import { Zone, Company, ContractZone } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 const ZonesPage: React.FC = () => {
   const navigate = useNavigate();
@@ -62,14 +63,14 @@ const ZonesPage: React.FC = () => {
             const contracts = await ApiService.getZoneContracts(zone.id);
             contractsData[zone.id] = contracts;
           } catch (err) {
-            console.error(`Failed to load contracts for zone ${zone.id}:`, err);
+            logApiError(`Failed to load contracts for zone ${zone.id}:`, err);
             contractsData[zone.id] = [];
           }
         })
       );
       setZoneContracts(contractsData);
     } catch (err: any) {
-      console.error('Zones load error:', err);
+      logApiError('Zones load error:', err);
       setError('Failed to load zones');
     } finally {
       setLoading(false);

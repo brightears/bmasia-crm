@@ -36,6 +36,7 @@ import {
 import { GridLegacy as Grid } from '@mui/material';
 import { User, UserRole, USER_ROLE_LABELS, USER_ROLE_COLORS, PasswordChangeData, SmtpSettingsData } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 const MyProfile: React.FC = () => {
 
   // Profile state
@@ -102,7 +103,7 @@ const MyProfile: React.FC = () => {
         smtp_password: '', // Never pre-fill password
       });
     } catch (err: any) {
-      console.error('Load profile error:', err);
+      logApiError('Load profile error:', err);
       setError(`Failed to load profile: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
@@ -121,7 +122,7 @@ const MyProfile: React.FC = () => {
       setUser(updatedUser);
       showSnackbar('Profile updated successfully', 'success');
     } catch (err: any) {
-      console.error('Save profile error:', err);
+      logApiError('Save profile error:', err);
       const errorMsg = err.response?.data?.detail || err.message || 'Unknown error';
       setError(`Failed to update profile: ${errorMsg}`);
       showSnackbar(`Failed to update profile: ${errorMsg}`, 'error');
@@ -219,7 +220,7 @@ const MyProfile: React.FC = () => {
         showSnackbar(response.error || response.message || 'SMTP connection failed', 'error');
       }
     } catch (err: any) {
-      console.error('Test SMTP error:', err);
+      logApiError('Test SMTP error:', err);
       const errorMsg = err.response?.data?.error || err.response?.data?.detail || err.message || 'Unknown error';
       showSnackbar(`SMTP test failed: ${errorMsg}`, 'error');
     } finally {
@@ -238,7 +239,7 @@ const MyProfile: React.FC = () => {
       // Reload profile to get updated smtp_configured status
       await loadProfile();
     } catch (err: any) {
-      console.error('Clear SMTP error:', err);
+      logApiError('Clear SMTP error:', err);
       const errorMsg = err.response?.data?.detail || err.message || 'Unknown error';
       showSnackbar(`Failed to clear SMTP settings: ${errorMsg}`, 'error');
     } finally {

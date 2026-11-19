@@ -48,6 +48,7 @@ import {
 import { Task, TaskComment, User } from '../types';
 import { format, parseISO, formatDistanceToNow } from 'date-fns';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface TaskDetailProps {
   open: boolean;
@@ -191,7 +192,7 @@ const TaskDetail: React.FC<TaskDetailProps> = ({
         onTaskUpdate();
       }
     } catch (error) {
-      console.error('Error adding comment:', error);
+      logApiError('Error adding comment:', error);
       alert('Failed to add comment. Please try again.');
     } finally {
       setSubmittingComment(false);

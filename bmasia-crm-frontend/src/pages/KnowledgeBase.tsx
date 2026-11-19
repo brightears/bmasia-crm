@@ -22,6 +22,7 @@ import KBFeaturedArticles from '../components/KBFeaturedArticles';
 import KBArticleList from '../components/KBArticleList';
 import { useListState } from '../hooks/useListState';
 import { useListSearchBox } from '../hooks/useListSearchBox';
+import { logApiError } from '../utils/logApiError';
 
 const KnowledgeBase: React.FC = () => {
   const navigate = useNavigate();
@@ -66,7 +67,7 @@ const KnowledgeBase: React.FC = () => {
       const response = await ApiService.getKBCategories();
       setCategories(response.data?.results || response.data || []);
     } catch (err: any) {
-      console.error('Failed to load categories:', err);
+      logApiError('Failed to load categories:', err);
     }
   }, []);
 
@@ -75,7 +76,7 @@ const KnowledgeBase: React.FC = () => {
       const response = await ApiService.getKBTags();
       setTags(response.data?.results || response.data || []);
     } catch (err: any) {
-      console.error('Failed to load tags:', err);
+      logApiError('Failed to load tags:', err);
     }
   }, []);
 
@@ -85,7 +86,7 @@ const KnowledgeBase: React.FC = () => {
       const response = await ApiService.getFeaturedArticles();
       setFeaturedArticles(response.data?.results || response.data || []);
     } catch (err: any) {
-      console.error('Failed to load featured articles:', err);
+      logApiError('Failed to load featured articles:', err);
     } finally {
       setFeaturedLoading(false);
     }
@@ -122,7 +123,7 @@ const KnowledgeBase: React.FC = () => {
       setArticles(response.results || []);
       setTotalCount(response.count || 0);
     } catch (err: any) {
-      console.error('Failed to load articles:', err);
+      logApiError('Failed to load articles:', err);
       setError(`Failed to load articles: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
       setArticles([]);
       setTotalCount(0);

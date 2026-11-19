@@ -31,6 +31,7 @@ import ApiService from '../services/api';
 import ActivityForm from './ActivityForm';
 import CompanyTimeline from './timeline/CompanyTimeline';
 import { formatCurrency as formatCurrencyFn } from '../constants/entities';
+import { logApiError } from '../utils/logApiError';
 
 interface OpportunityFormProps {
   open: boolean;
@@ -143,7 +144,7 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
       const companies = await ApiService.getCompaniesSimple();
       setCompanies(companies as any[]);
     } catch (err) {
-      console.error('Failed to load companies:', err);
+      logApiError('Failed to load companies:', err);
     } finally {
       setCompaniesLoading(false);
     }
@@ -155,7 +156,7 @@ const OpportunityForm: React.FC<OpportunityFormProps> = ({
       const response = await ApiService.getUsers({ page_size: 100 });
       setUsers(response.results);
     } catch (err) {
-      console.error('Failed to load users:', err);
+      logApiError('Failed to load users:', err);
     } finally {
       setUsersLoading(false);
     }

@@ -243,23 +243,26 @@ def test_identity_correction_lane_is_logged_exactly_once():
 
 
 def test_delete_is_logged_with_summary_and_cascade_counts():
+    # Companies, contacts, contracts, quotes and invoices can no longer be deleted through
+    # MCP (test_mcp_delete_guard.py); a task with comments shows the cascade bookkeeping.
+    from crm_app.models import TaskComment
     caller = _user('cira')
-    company = Company.objects.create(name='Delete Me Hotel', billing_entity='BMAsia Limited')
-    Contact.objects.create(company=company, name='Contact A', email='a@example.test')
-    Contact.objects.create(company=company, name='Contact B', email='b@example.test')
-    company_id = str(company.pk)
+    task = Task.objects.create(company=_company(), title='Delete Me Task')
+    TaskComment.objects.create(task=task, user=caller, comment='First')
+    TaskComment.objects.create(task=task, user=caller, comment='Second')
+    task_id = str(task.pk)
 
     with as_caller(caller):
-        message = delete_record('company', company_id)
+        message = delete_record('task', task_id)
 
-    assert message.startswith('Deleted company')
-    assert not Company.objects.filter(pk=company_id).exists()
-    row = AuditLog.objects.get(record_id=company_id)
-    assert (row.action, row.model_name, row.user) == ('DELETE', 'Company', caller)
-    assert row.additional_data['deleted']['id'] == company_id
-    assert row.additional_data['deleted']['name'] == 'Delete Me Hotel'
-    assert row.additional_data['cascade']['crm_app.Contact'] == 2
-    assert row.additional_data['cascade']['crm_app.Company'] == 1
+    assert message.startswith('Deleted task')
+    assert not Task.objects.filter(pk=task_id).exists()
+    row = AuditLog.objects.get(record_id=task_id)
+    assert (row.action, row.model_name, row.user) == ('DELETE', 'Task', caller)
+    assert row.additional_data['deleted']['id'] == task_id
+    assert row.additional_data['deleted']['title'] == 'Delete Me Task'
+    assert row.additional_data['cascade']['crm_app.TaskComment'] == 2
+    assert row.additional_data['cascade']['crm_app.Task'] == 1
 
 
 def test_blocked_or_missing_delete_writes_no_row():

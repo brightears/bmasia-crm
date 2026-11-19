@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { logApiError } from '../utils/logApiError';
 import {
   Box,
   Typography,
@@ -502,7 +503,7 @@ const BalanceSheet: React.FC = () => {
         setTrendData(trend);
       }
     } catch (err: any) {
-      console.error('Error loading balance sheet data:', err);
+      logApiError('Error loading balance sheet data:', err);
       setError(err.message || 'Failed to load balance sheet report');
     } finally {
       setLoading(false);
@@ -537,7 +538,7 @@ const BalanceSheet: React.FC = () => {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (err) {
-      console.error('Export error:', err);
+      logApiError('Export error:', err);
       setError('Failed to export PDF');
     } finally {
       setExporting(null);
@@ -572,7 +573,7 @@ const BalanceSheet: React.FC = () => {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (err) {
-      console.error('Export error:', err);
+      logApiError('Export error:', err);
       setError('Failed to export Excel');
     } finally {
       setExporting(null);

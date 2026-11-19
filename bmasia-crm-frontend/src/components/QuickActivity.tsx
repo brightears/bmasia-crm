@@ -39,6 +39,7 @@ import {
 import { OpportunityActivity } from '../types';
 import ApiService from '../services/api';
 import ActivityForm from './ActivityForm';
+import { logApiError } from '../utils/logApiError';
 
 interface QuickActivityProps {
   position?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
@@ -90,7 +91,7 @@ const QuickActivity: React.FC<QuickActivityProps> = ({
       });
       setRecentActivities(response.results);
     } catch (err) {
-      console.error('Failed to load recent activities:', err);
+      logApiError('Failed to load recent activities:', err);
     } finally {
       setLoading(false);
     }
