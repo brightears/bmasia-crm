@@ -171,7 +171,7 @@ class ChangeProposalViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, vi
         queryset = self.filter_queryset(self.get_queryset())
         page = self.paginate_queryset(queryset)
         rows = list(page if page is not None else queryset)
-        proposal_service.refresh_snapshots(rows)
+        self._refresh(rows)
         context = {**self.get_serializer_context(), 'conflicts': proposal_service.conflicts_for(rows)}
         data = ChangeProposalSerializer(rows, many=True, context=context).data
         # Open proposals the caller can see that expire within a week, whatever the filters (one query).
@@ -187,8 +187,13 @@ class ChangeProposalViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, vi
 
     def retrieve(self, request, *args, **kwargs):
         proposal = self.get_object()
-        proposal_service.refresh_snapshots([proposal])
+        self._refresh([proposal])
         return Response(self.get_serializer(proposal).data)
+
+    def _refresh(self, rows):
+        """A person's read re-compares the proposals with their targets; an agent's read changes nothing."""
+        if not policy.is_agent_account(getattr(self.request, 'user', None)):
+            proposal_service.refresh_snapshots(rows)
 
     def create(self, request):
         try:
