@@ -36,6 +36,7 @@ import { formatCurrency as formatCurrencyFn, getServiceLabel } from '../constant
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 import { brand, status } from '../theme';
 import { ProductChip } from './ui';
+import { logApiError } from '../utils/logApiError';
 
 interface OpportunityPipelineProps {
   opportunities: Opportunity[];
@@ -410,7 +411,7 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
       onOpportunityUpdate(updatedOpportunity);
     } catch (err: any) {
       setError('Failed to update opportunity stage');
-      console.error('Stage update error:', err);
+      logApiError('Stage update error:', err);
     } finally {
       setUpdating(false);
     }
@@ -436,7 +437,7 @@ const OpportunityPipeline: React.FC<OpportunityPipelineProps> = ({
         handleStageChange(data.id, newStage);
       }
     } catch (err) {
-      console.error('Drop error:', err);
+      logApiError('Drop error:', err);
     }
   };
 

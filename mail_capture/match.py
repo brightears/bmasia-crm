@@ -230,9 +230,20 @@ def match_message(parsed, snapshot, mailbox_id=None, conversation_key=None, body
     if not addresses:
         return MatchResult(decision=MALFORMED, direction=direction)
     externals = _priority(parsed, internal_flags, direction)
+    # Recipients past the address cap (a cheap scan of the whole header): they
+    # count for never-log rules and for matching, never for the queue.
+    listed = externals
+    seen = {a.address for a in addresses}
+    extra = [
+        a for a in getattr(parsed, 'overflow', ()) or ()
+        if a.address not in seen
+        and not is_internal(a, snapshot.internal_domains, snapshot.internal_addresses)
+    ]
+    externals = listed + extra
     if not externals:
         return MatchResult(decision=SKIP_INTERNAL, direction=direction)
-    action = capture_rules.message_rule_action(addresses, snapshot.rules, mailbox_id)
+    action = capture_rules.message_rule_action(
+        addresses + list(getattr(parsed, 'overflow', ()) or ()), snapshot.rules, mailbox_id)
     if action in (capture_rules.ACTION_SKIP, capture_rules.ACTION_PRIVATE):
         return MatchResult(decision=SKIP_RULE, direction=direction, rule_action=action)
 
@@ -396,10 +407,10 @@ def match_message(parsed, snapshot, mailbox_id=None, conversation_key=None, body
         else:
             result.unmatched_reason = 'unknown'
         if direction == 'inbound':
-            queue = [a for a in externals if sender is not None and a.address == sender.address]
-            queue = queue or externals[:1]
+            queue = [a for a in listed if sender is not None and a.address == sender.address]
+            queue = queue or listed[:1]
         else:
-            queue = list(externals)
+            queue = list(listed)
         result.queue_addresses = tuple(queue)
         return result
 

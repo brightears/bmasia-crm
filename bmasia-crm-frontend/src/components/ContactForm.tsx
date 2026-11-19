@@ -256,27 +256,14 @@ const ContactForm: React.FC<ContactFormProps> = ({
         receives_invoice_emails: formData.receives_invoice_emails,
       };
 
-      console.log('=== Contact Form Submit ===');
-      console.log('Form Data:', JSON.stringify(formData, null, 2));
-      console.log('Submit Data (mapped for API):', JSON.stringify(submitData, null, 2));
-      console.log('Contact ID:', contact?.id || 'NEW');
-
       if (contact) {
         await ApiService.updateContact(contact.id, submitData);
       } else {
         await ApiService.createContact(submitData);
       }
 
-      console.log('Contact save successful!');
       onSave();
     } catch (err: any) {
-      console.error('=== Contact Save ERROR ===');
-      console.error('Error message:', err.message);
-
-      if (err.response) {
-        console.error('Response status:', err.response.status);
-      }
-
       if (err.response?.data) {
         if (typeof err.response.data === 'object') {
           const fieldErrors: Record<string, string> = {};
@@ -287,7 +274,6 @@ const ContactForm: React.FC<ContactFormProps> = ({
               fieldErrors[field] = err.response.data[field];
             }
           });
-          console.error('Parsed field errors:', fieldErrors);
           setErrors(fieldErrors);
           setError(`Validation error: ${JSON.stringify(fieldErrors)}`);
         } else {
@@ -295,9 +281,8 @@ const ContactForm: React.FC<ContactFormProps> = ({
           setError(errorMsg);
         }
       } else {
-        setError('Failed to save contact. Please check the console for details.');
+        setError('Failed to save contact. Please try again.');
       }
-      console.error('============================');
     } finally {
       setLoading(false);
     }

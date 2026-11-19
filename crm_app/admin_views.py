@@ -2,6 +2,7 @@
 Custom admin views for CRM app
 """
 
+from crm_app.api_errors import mail_failure_text
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
@@ -461,5 +462,5 @@ def send_test_email_view(request):
     except Exception as e:
         return JsonResponse({
             'success': False,
-            'message': f'Error sending test email: {str(e)}'
+            'message': mail_failure_text(request, 'Error sending test email', e)
         })

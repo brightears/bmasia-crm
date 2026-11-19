@@ -23,6 +23,7 @@ import {
 } from '@mui/icons-material';
 import { Contact } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface AudienceSelectorProps {
   selectedContactIds: string[];
@@ -53,7 +54,7 @@ const AudienceSelector: React.FC<AudienceSelectorProps> = ({
       const response = await ApiService.getContacts({ is_active: true, page_size: 1000 });
       setContacts(response.results);
     } catch (err: any) {
-      console.error('Failed to load contacts:', err);
+      logApiError('Failed to load contacts:', err);
       setError('Failed to load contacts');
     } finally {
       setLoading(false);

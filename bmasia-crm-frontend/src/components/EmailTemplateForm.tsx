@@ -36,6 +36,7 @@ import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 import { EmailTemplate, TemplateVariable } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface EmailTemplateFormProps {
   open: boolean;
@@ -290,7 +291,7 @@ const EmailTemplateForm: React.FC<EmailTemplateFormProps> = ({
 
       onSave();
     } catch (err: any) {
-      console.error('Template save error:', err);
+      logApiError('Template save error:', err);
       if (err.response?.data) {
         if (typeof err.response.data === 'object') {
           const fieldErrors: Record<string, string> = {};

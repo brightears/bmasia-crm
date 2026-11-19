@@ -68,7 +68,7 @@ contracttemplate.
 Use these 3 generic tools for all write operations:
 - `create_record(collection, data)` — create a new record (data is a JSON string)
 - `update_record(collection, id, data)` — partial update (only include changed fields)
-- `delete_record(collection, id)` — delete a record
+- `delete_record(collection, id)` — permanently delete a line item or other minor record; refused for company, contact, contract, quote and invoice (the refusal names the update_record to use instead)
 
 Supported collections: company, contact, contract, invoice, quote, opportunity,
 task, zone, clienttechdetail, device, ticket, kbarticle, quotelineitem,
@@ -112,7 +112,9 @@ to recover the raw PDF. On failure returns `{"error": "..."}`.
   terms in notes (internal only). Preserve approved legal text and request a
   clarification for missing issuer, pricing, tax or contractual authority.
 - **Contract status**: Draft → Sent → Active → Renewed/Expired/Cancelled
-- **Invoice status**: Draft → Sent → Paid/Overdue/Void
+- **Invoice status**: Draft → Sent → Overdue, Cancelled or Refunded. Paid is set only by a
+  person in the CRM (Invoices → Mark as paid), which records the payment date and issues the
+  receipt; agents cannot set it. Tell the person which invoice was paid and the payment date.
 - **Quote status**: Draft → Sent → Accepted/Rejected/Expired
 - **Service locations** on contracts are separate from line items — they control
   what appears in the PDF "Locations for Provision of Services" table.
@@ -348,7 +350,7 @@ class InvoiceQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     ]
     search_fields = ['invoice_number', 'notes']
     extra_instructions = (
-        "Status: Draft, Sent, Paid, Overdue, Void, Cancelled. issue_date is the invoice date. "
+        "Status: Draft, Sent, Paid, Overdue, Cancelled, Refunded. issue_date is the invoice date. "
         "There is no stored PDF link: generate_invoice_pdf(id) returns the PDF as base64, and "
         "get_commercial_document_context('invoice', id) returns the full record with no side effects."
     )
@@ -646,7 +648,7 @@ _GUARDED_DOCUMENT_NUMBER_FIELDS = frozenset({'contract_number', 'quote_number', 
 _GUARDED_TERMINAL_STATUSES = {
     'contract': frozenset({'Renewed', 'Expired', 'Cancelled'}),
     'quote': frozenset({'Accepted', 'Rejected', 'Expired'}),
-    'invoice': frozenset({'Paid', 'Cancelled', 'Refunded'}),
+    'invoice': frozenset({'Cancelled', 'Refunded'}),  # Paid: only Mark as paid in the CRM
 }
 # Price and issuer fields of a contract the customer has already received.
 _GUARDED_CONTRACT_PRICING_FIELDS = frozenset({
@@ -1275,7 +1277,7 @@ def update_record(
               - kind=explicit_user_instruction (requested_by norbert, nikki,
                 lyra or theo; source_reference) for a final status (contract
                 Renewed/Expired/Cancelled, quote Accepted/Rejected/Expired,
-                invoice Paid/Cancelled/Refunded) and for price or issuer fields
+                invoice Cancelled/Refunded; Paid cannot be set) and for price or issuer fields
                 on a Sent or Active contract. It also satisfies opportunity
                 value/probability and Won/Lost, which otherwise use
                 kind=explicit_user_commercial with source_thread_id.
@@ -2057,7 +2059,19 @@ def get_commercial_document_context(collection: str, id: str) -> str:
 
 @mcp_server.tool()
 def delete_record(collection: str, id: str) -> str:
-    """Delete a record from a CRM collection.
+    """Delete a record from a CRM collection. The delete is permanent.
+
+    Refused for company, contact, contract, quote and invoice: deleting them erases
+    customer history (a company takes its contacts, contracts, quotes and invoices with
+    it). Instead use update_record:
+      company  -> {"is_active": false}
+      contact  -> {"is_active": false}
+      contract -> {"status": "Cancelled"}
+      quote    -> {"status": "Rejected"} (declined) or {"status": "Expired"}
+      invoice  -> {"status": "Cancelled"}
+    Contract templates and service locations have their own workflows (see the error).
+    Line items (quotelineitem, contractlineitem, invoicelineitem) and the other
+    collections can still be deleted.
 
     Args:
         collection: Collection name (same options as create_record)
@@ -2065,9 +2079,14 @@ def delete_record(collection: str, id: str) -> str:
 
     Returns: Confirmation message or error.
     """
+    from crm_app.services.delete_guards import mcp_delete_refusal
+
     if collection not in _COLLECTION_MAP:
         return f"Error: Unknown collection '{collection}'. Valid: {', '.join(sorted(_COLLECTION_MAP))}"
     _agent_gate.observe(tool='delete_record', verb='delete', collection=collection, record_id=id)
+    refusal = mcp_delete_refusal(collection)
+    if refusal:
+        return refusal
     if collection == 'contracttemplate':
         return (
             "Error: Generic contract-template deletion is blocked. "
@@ -2473,6 +2492,7 @@ def log_activity(
     participants_json: str = '',
     source_ref: str = '',
     source_url: str = '',
+    restricted: bool = False,
 ) -> str:
     """Record one interaction with a customer on the company's timeline.
 
@@ -2500,6 +2520,7 @@ def log_activity(
             RFC 822 Message-ID header (e.g. <CAB12345@mail.example.com>), not a Gmail API
             id. One live activity per company and source_ref.
         source_url: Optional http(s) link to the source.
+        restricted: true when other agents must not read the body (default false).
 
     Returns: JSON {"ok": true, "id", "replayed", ...} or {"ok": false, "status", "code", "detail"}.
     Sends nothing.
@@ -2509,7 +2530,7 @@ def log_activity(
         summary=summary, idempotency_key=idempotency_key, source_system=source_system, body=body,
         contact_id=contact_id, contract_id=contract_id, quote_id=quote_id,
         opportunity_id=opportunity_id, participants_json=participants_json,
-        source_ref=source_ref, source_url=source_url,
+        source_ref=source_ref, source_url=source_url, restricted=restricted,
     )
 
 
@@ -2565,13 +2586,14 @@ def propose_change(
         patch_json: JSON object of field -> proposed value (strings or null).
         evidence_quote: Required for agents and AI. Copy the exact words from the source
             that support the change, verbatim: no paraphrase, no translation. When
-            activity_id points to your logged activity with a body, the quote must occur
+            activity_id points to a logged activity with a body, the quote must occur
             in it word for word (whitespace may differ) or the proposal is refused.
         target_collection, target_id: The record to change (company or contact UUID)
             for field_update and note. Leave target_id empty for new_contact and task.
         company_id: The company for new_contact and task (optional check otherwise).
-        activity_id: An activity you logged yourself that the evidence comes from.
-            Its source becomes the evidence source.
+        activity_id: The logged activity the evidence comes from: one you logged, or one a
+            capture job or a person recorded that is not restricted. Its source becomes
+            the evidence source.
         rationale: One or two sentences on why.
         evidence_source_system / evidence_source_ref / evidence_source_url /
             evidence_occurred_at: Where and when the source said it, when it is not a

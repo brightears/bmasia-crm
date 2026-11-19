@@ -62,6 +62,7 @@ import { useListState, optionValues, idFromList } from '../hooks/useListState';
 import { useListSearchBox } from '../hooks/useListSearchBox';
 import { withListView } from '../hooks/listReturn';
 import { PageHeader, EmptyState, ProductChip } from '../components/ui';
+import { logApiError } from '../utils/logApiError';
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -201,7 +202,7 @@ const Opportunities: React.FC = () => {
       setTotalCount(response.count);
     } catch (err: any) {
       setError('Failed to load opportunities');
-      console.error('Opportunities error:', err);
+      logApiError('Opportunities error:', err);
     } finally {
       setLoading(false);
     }
@@ -221,7 +222,7 @@ const Opportunities: React.FC = () => {
         if (request === pipelineRequest.current) setPipeline({ items: response.results, count: response.count });
       })
       .catch((err) => {
-        console.error('Pipeline error:', err);
+        logApiError('Pipeline error:', err);
         if (request === pipelineRequest.current) setError('Failed to load the pipeline');
       })
       .finally(() => {
@@ -234,7 +235,7 @@ const Opportunities: React.FC = () => {
       const response = await ApiService.getUsers({ page_size: 100 });
       setUsers(response.results);
     } catch (err) {
-      console.error('Failed to load users:', err);
+      logApiError('Failed to load users:', err);
     }
   };
 
@@ -331,7 +332,7 @@ const Opportunities: React.FC = () => {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (err) {
-      console.error('Export error:', err);
+      logApiError('Export error:', err);
       setError('Failed to export PDF');
     } finally {
       setExporting(false);

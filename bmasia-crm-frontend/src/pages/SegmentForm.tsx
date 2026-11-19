@@ -35,6 +35,7 @@ import {
 import { useNavigate, useParams } from 'react-router-dom';
 import { CustomerSegment, SegmentFilterRule, Contact } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 // Field definitions for filter builder
 const COMPANY_FIELDS = [
@@ -124,7 +125,7 @@ const SegmentForm: React.FC = () => {
         setRules(segment.filter_criteria.rules || [{ field: '', operator: 'equals', value: '' }]);
       }
     } catch (err: any) {
-      console.error('Failed to load segment:', err);
+      logApiError('Failed to load segment:', err);
       setError(`Failed to load segment: ${err.response?.data?.detail || err.message}`);
     } finally {
       setLoading(false);
@@ -169,7 +170,7 @@ const SegmentForm: React.FC = () => {
         setPreviewContacts([]);
       }
     } catch (err: any) {
-      console.error('Failed to validate filters:', err);
+      logApiError('Failed to validate filters:', err);
       setPreviewError('Failed to validate filters');
       setPreviewCount(null);
       setPreviewContacts([]);
@@ -261,7 +262,7 @@ const SegmentForm: React.FC = () => {
 
       navigate('/segments');
     } catch (err: any) {
-      console.error('Failed to save segment:', err);
+      logApiError('Failed to save segment:', err);
       setError(`Failed to save segment: ${err.response?.data?.detail || err.message}`);
     } finally {
       setLoading(false);

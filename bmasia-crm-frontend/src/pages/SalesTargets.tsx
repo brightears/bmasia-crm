@@ -39,6 +39,7 @@ import {
   ENTITY_OPTIONS, SERVICE_OPTIONS,
   formatCurrency as formatCurrencyFn, getServiceLabel,
 } from '../constants/entities';
+import { logApiError } from '../utils/logApiError';
 
 interface PeriodData {
   period: string;
@@ -100,7 +101,7 @@ const SalesPerformance: React.FC = () => {
       setLostOpportunities(lostResponse.results);
     } catch (err: any) {
       setError('Failed to load sales performance data');
-      console.error('Sales performance error:', err);
+      logApiError('Sales performance error:', err);
     } finally {
       setLoading(false);
     }
@@ -153,7 +154,7 @@ const SalesPerformance: React.FC = () => {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (err) {
-      console.error('Export error:', err);
+      logApiError('Export error:', err);
       setError('Failed to export PDF');
     } finally {
       setExporting(false);

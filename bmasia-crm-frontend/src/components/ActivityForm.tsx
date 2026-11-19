@@ -40,6 +40,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { OpportunityActivity, Contact, Opportunity, User } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface ActivityFormProps {
   open: boolean;
@@ -144,7 +145,7 @@ const ActivityForm: React.FC<ActivityFormProps> = ({
       const response = await ApiService.getOpportunities({ page_size: 100 });
       setOpportunities(response.results);
     } catch (err) {
-      console.error('Failed to load opportunities:', err);
+      logApiError('Failed to load opportunities:', err);
     } finally {
       setOpportunitiesLoading(false);
     }
@@ -159,7 +160,7 @@ const ActivityForm: React.FC<ActivityFormProps> = ({
         setContacts(response.results);
       }
     } catch (err) {
-      console.error('Failed to load contacts:', err);
+      logApiError('Failed to load contacts:', err);
     } finally {
       setContactsLoading(false);
     }

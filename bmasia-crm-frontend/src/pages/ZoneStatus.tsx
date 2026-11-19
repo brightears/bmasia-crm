@@ -40,6 +40,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import apiService from '../services/api';
 import { Zone } from '../types';
+import { logApiError } from '../utils/logApiError';
 
 type StatusFilter = 'all' | 'online' | 'offline' | 'no_device' | 'pending' | 'expired';
 
@@ -109,7 +110,7 @@ const ZoneStatus: React.FC = () => {
       const response = await apiService.getZones({ page_size: 1000 });
       setZones(response.results || []);
     } catch (err: any) {
-      console.error('Error loading zones:', err);
+      logApiError('Error loading zones:', err);
       setError(err.message || 'Failed to load zones');
     } finally {
       setLoading(false);
@@ -128,7 +129,7 @@ const ZoneStatus: React.FC = () => {
       // Show success message
       alert(result.message || `Synced ${result.synced} zones successfully`);
     } catch (err: any) {
-      console.error('Error syncing zones:', err);
+      logApiError('Error syncing zones:', err);
       setError(err.message || 'Failed to sync zones');
     } finally {
       setSyncing(false);

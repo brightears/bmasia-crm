@@ -3,6 +3,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import InvoiceDetail from './InvoiceDetail';
 import ApiService from '../services/api';
 
+let mockRole = 'Admin';
+jest.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u-1', role: mockRole, is_active: true } }) }));
+
 jest.mock('../services/api', () => {
   const calls: Record<string, any> = {
     getEmailLogs: () => Promise.resolve([]),
@@ -94,4 +97,18 @@ test('a refused "Mark as Sent" shows the server\'s reason', async () => {
   render(<InvoiceDetail open invoice={invoice({ status: 'Draft' })} onClose={jest.fn()} onInvoiceUpdate={jest.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: 'Mark as Sent' }));
   expect(await screen.findByText(reason)).toBeInTheDocument();
+});
+
+test('Sales sees the invoice but not "Mark as Paid" or "Issue Receipt"', () => {
+  mockRole = 'Sales';
+  const { unmount } = render(<InvoiceDetail open invoice={invoice()} onClose={jest.fn()} onInvoiceUpdate={jest.fn()} />);
+  expect(screen.getAllByText('THB 108,000').length).toBeGreaterThan(0);
+  expect(screen.queryByRole('button', { name: 'Mark as Paid' })).not.toBeInTheDocument();
+  unmount();
+  render(
+    <InvoiceDetail open invoice={invoice({ status: 'Paid', paid_date: '2026-11-10', receipt_number: null })}
+      onClose={jest.fn()} onInvoiceUpdate={jest.fn()} />,
+  );
+  expect(screen.queryByRole('button', { name: 'Issue Receipt' })).not.toBeInTheDocument();
+  mockRole = 'Admin';
 });

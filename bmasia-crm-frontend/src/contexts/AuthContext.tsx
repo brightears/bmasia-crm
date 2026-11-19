@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 import { AuthContextType, AuthState, LoginCredentials } from '../types';
 import AuthService, { isSessionRejected } from '../services/authService';
 import { hasPermission, hasRole } from '../utils/permissions';
+import { logApiError } from '../utils/logApiError';
 
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -77,7 +78,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               // Schedule next refresh
               AuthService.scheduleTokenRefresh();
             } catch (error) {
-              console.error('Token refresh failed during initialization:', error);
+              logApiError('Token refresh failed during initialization:', error);
               if (isSessionRejected(error)) {
                 // The server refused the saved session: sign in again.
                 AuthService.clearAuthData();
@@ -115,7 +116,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           setAuthState(prev => ({ ...prev, loading: false }));
         }
       } catch (error) {
-        console.error('Auth initialization error:', error);
+        logApiError('Auth initialization error:', error);
         AuthService.clearAuthData();
         setAuthState(prev => ({ ...prev, loading: false }));
       }
@@ -145,7 +146,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       AuthService.scheduleTokenRefresh();
       console.log('AuthContext: Auth state updated successfully');
     } catch (error) {
-      console.error('AuthContext: Login error:', error);
+      logApiError('AuthContext: Login error:', error);
       setAuthState(prev => ({ ...prev, loading: false }));
       throw error;
     }
@@ -155,7 +156,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       await AuthService.logout();
     } catch (error) {
-      console.error('Logout error:', error);
+      logApiError('Logout error:', error);
     } finally {
       setAuthState({
         user: null,
@@ -177,7 +178,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         tokenExpiry: AuthService.getTokenExpiry(),
       }));
     } catch (error) {
-      console.error('Token refresh failed:', error);
+      logApiError('Token refresh failed:', error);
       await logout();
       throw error;
     }

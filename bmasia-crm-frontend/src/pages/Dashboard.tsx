@@ -56,6 +56,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { PageHeader, SectionCard } from '../components/ui';
 import { brand, status, formatMoney } from '../theme';
 import { moneyLines, negativeMoneyLines, revenueChange, trendCurrencies, trendSeries } from './dashboardMoney';
+import { logApiError } from '../utils/logApiError';
 
 type Tone = 'success' | 'warning' | 'error' | 'info' | 'neutral';
 
@@ -174,7 +175,7 @@ const Dashboard: React.FC = () => {
       setLastRefreshed(new Date());
     } catch (err: any) {
       setError('Failed to load dashboard data');
-      console.error('Dashboard error:', err);
+      logApiError('Dashboard error:', err);
     } finally {
       setLoading(false);
     }

@@ -25,6 +25,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { useNavigate } from 'react-router-dom';
 import { Company, Zone, ClientTechDetail } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface ClientTechDetailFormProps {
   open: boolean;
@@ -217,7 +218,7 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
       const data = await ApiService.getZonesByCompany(companyId);
       setZones(data);
     } catch (err) {
-      console.error('Failed to load zones:', err);
+      logApiError('Failed to load zones:', err);
       setZones([]);
     } finally {
       setZonesLoading(false);
@@ -317,7 +318,7 @@ const ClientTechDetailForm: React.FC<ClientTechDetailFormProps> = ({
       onSave();
       onClose();
     } catch (err: any) {
-      console.error('Failed to save client tech detail:', err);
+      logApiError('Failed to save client tech detail:', err);
       setError(
         err.response?.data?.detail ||
         err.response?.data?.outlet_name?.[0] ||

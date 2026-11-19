@@ -24,6 +24,7 @@ import { Save, Cancel, ArrowBack, Add } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Zone, Company, Device, DEVICE_TYPE_LABELS } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface ZoneFormProps {
   zone?: Zone | null;
@@ -100,7 +101,7 @@ const ZoneForm: React.FC<ZoneFormProps> = ({ zone, mode }) => {
       const companiesResponse = await ApiService.getCompanies({ is_active: true });
       setCompanies(companiesResponse.results || companiesResponse);
     } catch (err: any) {
-      console.error('Load data error:', err);
+      logApiError('Load data error:', err);
       setError('Failed to load form data');
     } finally {
       setLoading(false);
@@ -113,7 +114,7 @@ const ZoneForm: React.FC<ZoneFormProps> = ({ zone, mode }) => {
       const data = await ApiService.getDevicesByCompany(companyId);
       setDevices(data);
     } catch (error) {
-      console.error('Failed to load devices:', error);
+      logApiError('Failed to load devices:', error);
     } finally {
       setLoadingDevices(false);
     }
@@ -132,7 +133,7 @@ const ZoneForm: React.FC<ZoneFormProps> = ({ zone, mode }) => {
       setShowNewDeviceDialog(false);
       setNewDevice({ name: '', device_type: 'pc', model_info: '', notes: '' });
     } catch (error) {
-      console.error('Failed to create device:', error);
+      logApiError('Failed to create device:', error);
     }
   };
 
@@ -191,7 +192,7 @@ const ZoneForm: React.FC<ZoneFormProps> = ({ zone, mode }) => {
 
       navigate(returnTo);
     } catch (err: any) {
-      console.error('Submit error:', err);
+      logApiError('Submit error:', err);
       if (err.response?.data) {
         if (typeof err.response.data === 'object') {
           const fieldErrors: Record<string, string> = {};

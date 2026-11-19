@@ -236,7 +236,9 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'anon': '100/hour',
         'user': '1000/hour'
-    }
+    },
+    # Unexpected errors are logged with a request id; callers get a generic message and the id.
+    'EXCEPTION_HANDLER': 'crm_app.api_errors.api_exception_handler',
 }
 
 # JWT Settings
@@ -348,6 +350,18 @@ CAPTURE_EXTRA_FREEMAIL_DOMAINS = config('CAPTURE_EXTRA_FREEMAIL_DOMAINS', defaul
 # How long capture keeps its run rows and its mailbox access log (days).
 CAPTURE_RUN_RETENTION_DAYS = config('CAPTURE_RUN_RETENTION_DAYS', default=90, cast=int)
 CAPTURE_ACCESS_LOG_RETENTION_DAYS = config('CAPTURE_ACCESS_LOG_RETENTION_DAYS', default=365, cast=int)
+# Gmail credentials for capture (mail_capture/credentials.py). Mode off (the
+# default) makes no credential. keyless: workload identity federation signs as
+# GOOGLE_CAPTURE_SERVICE_ACCOUNT (no key stored). key_file: a service-account
+# key at GOOGLE_CAPTURE_KEY_FILE (a Render secret file path; never the key
+# itself in an environment variable). GOOGLE_CAPTURE_SCOPE is metadata
+# (headers only) or readonly (bodies). GOOGLE_CAPTURE_NEVER_MAILBOXES is a hard
+# deny-list that overrides the mailbox table.
+GOOGLE_CAPTURE_CREDENTIALS_MODE = config('GOOGLE_CAPTURE_CREDENTIALS_MODE', default='off')
+GOOGLE_CAPTURE_SERVICE_ACCOUNT = config('GOOGLE_CAPTURE_SERVICE_ACCOUNT', default='')
+GOOGLE_CAPTURE_KEY_FILE = config('GOOGLE_CAPTURE_KEY_FILE', default='')
+GOOGLE_CAPTURE_SCOPE = config('GOOGLE_CAPTURE_SCOPE', default='metadata')
+GOOGLE_CAPTURE_NEVER_MAILBOXES = config('GOOGLE_CAPTURE_NEVER_MAILBOXES', default='', cast=Csv())
 # Activity log and change-proposal review queue (agent_inbox). Both write
 # surfaces are off by default; while off they answer "not enabled" and the
 # read endpoints still work. Accepting a proposal is always a person's click.
@@ -361,6 +375,9 @@ AGENT_ACTIVITY_DAILY_CAP = config('AGENT_ACTIVITY_DAILY_CAP', default='2000')
 # Extra CRM usernames treated as agent accounts (comma list), on top of the
 # principals in crm_app/agent_policy.py. Agent accounts cannot decide proposals.
 AGENT_INBOX_AGENT_USERNAMES = config('AGENT_INBOX_AGENT_USERNAMES', default='', cast=Csv())
+# The people who may accept or reject change proposals (comma list of CRM
+# usernames). Empty means nobody can review yet. Agent names are ignored.
+CHANGE_PROPOSAL_REVIEWER_USERNAMES = config('CHANGE_PROPOSAL_REVIEWER_USERNAMES', default='', cast=Csv())
 # Dotted path of the mail-capture app's "message purged" signal. When it exists,
 # activities and proposals citing a purged message are redacted
 # (agent_inbox/redaction.py); when it does not, nothing is connected.

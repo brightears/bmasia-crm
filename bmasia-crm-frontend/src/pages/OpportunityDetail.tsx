@@ -43,15 +43,16 @@ import {
   Reply,
 } from '@mui/icons-material';
 import ApiService from '../services/api';
-import { Opportunity, OpportunityActivity, Quote, Contract, Task, ProspectEnrollment, ProspectStepExecution, ProspectReply } from '../types';
+import { Opportunity, Quote, Contract, Task, ProspectEnrollment, ProspectStepExecution, ProspectReply } from '../types';
 import OpportunityForm from '../components/OpportunityForm';
-import ActivityTimeline from '../components/ActivityTimeline';
+import CompanyTimeline from '../components/timeline/CompanyTimeline';
 import ActivityForm from '../components/ActivityForm';
 import { formatCurrency, getServiceLabel } from '../constants/entities';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 import { PageHeader, ProductChip } from '../components/ui';
 import { useListReturnPath } from '../hooks/listReturn';
 import { statusTone, status } from '../theme';
+import { logApiError } from '../utils/logApiError';
 
 const stageConfig = [
   { id: 'Contacted', label: 'Contacted', color: '#2196f3' },
@@ -68,7 +69,8 @@ const OpportunityDetail: React.FC = () => {
   const listPath = useListReturnPath('/opportunities');
 
   const [opportunity, setOpportunity] = useState<Opportunity | null>(null);
-  const [activities, setActivities] = useState<OpportunityActivity[]>([]);
+  // Bumped after an activity is logged so the timeline reloads.
+  const [activityRefresh, setActivityRefresh] = useState(0);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -96,7 +98,7 @@ const OpportunityDetail: React.FC = () => {
       await loadTabData(currentTab);
       setLoading(false);
     } catch (err: any) {
-      console.error('Error loading opportunity:', err);
+      logApiError('Error loading opportunity:', err);
       setError(err.response?.data?.detail || 'Failed to load opportunity');
       setLoading(false);
     }
@@ -104,10 +106,8 @@ const OpportunityDetail: React.FC = () => {
 
   const loadTabData = async (tabIndex: number) => {
     try {
-      if (tabIndex === 1) {
-        const actData = await ApiService.getActivitiesByOpportunity(id!);
-        setActivities(actData);
-      } else if (tabIndex === 2) {
+      // Tab 1 (Activities) loads its own data: the company timeline filtered to this opportunity.
+      if (tabIndex === 2) {
         const quotesData = await ApiService.getQuotes({ opportunity: id });
         setQuotes(quotesData.results || []);
       } else if (tabIndex === 3) {
@@ -129,7 +129,7 @@ const OpportunityDetail: React.FC = () => {
         setReplies(allReplies.filter((r: ProspectReply) => enrollmentIds.has(r.enrollment_id)));
       }
     } catch (err) {
-      console.error('Error loading tab data:', err);
+      logApiError('Error loading tab data:', err);
     }
   };
 
@@ -154,7 +154,7 @@ const OpportunityDetail: React.FC = () => {
 
   const handleActivitySaved = () => {
     setActivityDialogOpen(false);
-    loadTabData(1);
+    setActivityRefresh((n) => n + 1);
   };
 
   const formatDate = (dateString?: string | null) => {
@@ -416,15 +416,13 @@ const OpportunityDetail: React.FC = () => {
                   Log Activity
                 </Button>
               </Box>
-              {activities.length > 0 ? (
-                <ActivityTimeline activities={activities} />
-              ) : (
-                <Box textAlign="center" py={4}>
-                  <Typography variant="body1" color="text.secondary">
-                    No activities recorded yet
-                  </Typography>
-                </Box>
-              )}
+              <CompanyTimeline
+                companyId={opportunity.company}
+                record={{ type: 'opportunity', id: opportunity.id }}
+                refreshKey={activityRefresh}
+                label={`Activity for ${opportunity.name}`}
+                urlState
+              />
             </Box>
           )}
 

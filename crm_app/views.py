@@ -108,15 +108,19 @@ from .serializers import (
     ProspectSequenceSerializer, ProspectSequenceStepSerializer, ProspectEnrollmentSerializer,
     ProspectStepExecutionSerializer, ProspectReplySerializer, AIEmailDraftSerializer
 )
+from .api_errors import (
+    client_error_text, error_response, internal_error_text, mail_failure_text, safe_mail_message, smtp_error_text,
+)
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
     TaskAssigneePermission, ReadOnlyForNonOwner,
-    CommercialDocumentPreviewPermission,
+    CommercialDocumentPreviewPermission, PersonSignedInToWebsite,
 )
 from .rene_auth import (
     IsReneRenewalReaderOrAuthenticatedUser,
     ReneRenewalBearerAuthentication,
 )
+from .permissions import IsFinanceOrAdmin
 
 
 def serialize_audit_changes(obj):
@@ -365,8 +369,17 @@ class BaseModelViewSet(viewsets.ModelViewSet):
         changes = serialize_audit_changes(changes)
         self.log_action('UPDATE', instance, changes)
     
+    def destroy(self, request, *args, **kwargs):
+        """DELETE /{id}/ under the rules in crm_app/services/delete_guards.py (409 when refused)."""
+        from crm_app.services.delete_guards import destroy_one
+        deleted, refusal = destroy_one(self, self.get_object())
+        if not deleted:
+            return Response(refusal, status=status.HTTP_409_CONFLICT)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @transaction.atomic
     def perform_destroy(self, instance):
-        """Add audit logging on delete"""
+        """Add audit logging on delete (one transaction: a refused delete leaves no audit row)"""
         self.log_action('DELETE', instance)
         instance.delete()
     
@@ -415,11 +428,8 @@ class BaseModelViewSet(viewsets.ModelViewSet):
         queryset = self.get_queryset().filter(id__in=ids)
         
         if action_type == 'delete':
-            count = queryset.count()
-            for obj in queryset:
-                self.log_action('DELETE', obj)
-            queryset.delete()
-            return Response({'message': f'{count} records deleted'})
+            from crm_app.services.delete_guards import bulk_delete
+            return bulk_delete(self, queryset, ids)
         
         elif action_type == 'update_status':
             from crm_app.services.bulk_updates import bulk_update_status
@@ -471,11 +481,25 @@ class UserViewSet(BaseModelViewSet):
     ordering_fields = ['username', 'email', 'role', 'date_joined', 'last_login']
     ordering = ['-date_joined']
 
+    # Reads, and the actions that act only on the caller's own account. Every
+    # other action, inherited ones included, changes who may sign in, with which
+    # password or role: staff and a person signed in to the website only.
+    # crm_app/tests/test_user_admin_routes.py fails when an action is added
+    # without being listed here or guarded.
+    OPEN_READ_ACTIONS = frozenset({'list', 'retrieve'})
+    SELF_SERVICE_ACTIONS = frozenset({'me', 'change_password', 'update_smtp', 'test_smtp', 'upload_avatar'})
+
     def get_permissions(self):
-        """Admin required for create/update/delete, authenticated for list/retrieve"""
-        if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            return [IsAdminUser()]
-        return [IsAuthenticated()]
+        if self.action in self.OPEN_READ_ACTIONS or self.action in self.SELF_SERVICE_ACTIONS:
+            return [IsAuthenticated()]
+        return [IsAdminUser(), PersonSignedInToWebsite()]
+
+    @action(detail=False, methods=['post'])
+    def bulk_operations(self, request):
+        """Not available for users: accounts are changed one at a time."""
+        return Response({'error': 'Users are changed one at a time on the Users page; '
+                                  'bulk changes to users are not available.'},
+                        status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     @action(detail=False, methods=['get', 'patch'])
     def me(self, request):
@@ -494,7 +518,9 @@ class UserViewSet(BaseModelViewSet):
                             status=status.HTTP_400_BAD_REQUEST)
         data.pop('username', None)
         # A new password needs the current one, as in change_password.
-        current_password = data.pop('current_password', None)
+        # .get, not .pop: on a multipart body QueryDict.pop returns a list.
+        current_password = request.data.get('current_password')
+        data.pop('current_password', None)
         if data.get('password') and not (
                 current_password and request.user.check_password(current_password)):
             return Response({'current_password': ['Enter your current password to set a new one.']},
@@ -587,7 +613,7 @@ class UserViewSet(BaseModelViewSet):
             })
         except Exception as e:
             return Response(
-                {'success': False, 'error': str(e)},
+                {'success': False, 'error': smtp_error_text(request, e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -624,7 +650,7 @@ class UserViewSet(BaseModelViewSet):
                 'message': f'Test email sent from {user.smtp_email} to {to_email}'
             })
         except Exception as e:
-            return Response({'success': False, 'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success': False, 'error': smtp_error_text(request, e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
     @action(detail=False, methods=["post"], url_path="upload-avatar",
@@ -667,7 +693,7 @@ class UserViewSet(BaseModelViewSet):
             return Response({"avatar_url": data_url})
         except Exception as e:
             return Response(
-                {"error": f"Failed to process image: {str(e)}"}, status=400
+                {"error": internal_error_text(request, e, "The file could not be read as an image")}, status=400
             )
 
 class CompanyViewSet(BaseModelViewSet):
@@ -691,14 +717,9 @@ class CompanyViewSet(BaseModelViewSet):
 
         # For list action, optimize for serialization
         if self.action == 'list':
-            # Prefetch related objects that are used in the serializer
-            queryset = queryset.select_related('parent_company').prefetch_related(
-                'contacts',
-                'zones',
-                'opportunities',
-                'contracts',
-                'child_companies'
-            )
+            # Everything CompanySerializer reads, fetched once per page (no per-row queries).
+            from crm_app.services.list_querysets import company_list_queryset
+            queryset = company_list_queryset(queryset)
         elif self.action == 'retrieve':
             # For detail view, include even more related data
             queryset = queryset.select_related('parent_company').prefetch_related(
@@ -714,26 +735,9 @@ class CompanyViewSet(BaseModelViewSet):
 
         return queryset
 
-    def list(self, request, *args, **kwargs):
-        """Override list method to add error handling"""
-        try:
-            return super().list(request, *args, **kwargs)
-        except Exception as e:
-            # Log the actual Python exception for debugging
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error in CompanyViewSet.list(): {type(e).__name__}: {str(e)}", exc_info=True)
+    # list(): errors are answered by crm_app.api_errors.api_exception_handler (generic message
+    # and a request id; an invalid page is a 404 again instead of a 500).
 
-            # Return meaningful error response instead of 500
-            return Response(
-                {
-                    'error': 'Failed to retrieve companies',
-                    'detail': str(e),
-                    'type': type(e).__name__
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-    
     @action(detail=False, methods=['get'], url_path='simple')
     def simple_list(self, request):
         """Lightweight company list for dropdowns — returns only id, name, billing_entity."""
@@ -854,7 +858,6 @@ class CompanyViewSet(BaseModelViewSet):
                     'id': str(company.id),
                     'name': company.name,
                     'error_type': type(e).__name__,
-                    'error_message': str(e),
                     'industry': company.industry,
                     'country': company.country,
                 }
@@ -899,7 +902,14 @@ class NoteViewSet(BaseModelViewSet):
             queryset = queryset.filter(
                 Q(is_private=False) | Q(author=user)
             )
-        
+
+        # The list sorts every note on created_at (no index) before LIMIT, so joins there
+        # would run over the whole table: it fetches the page's authors, companies and
+        # contacts in three queries instead. A single note is joined.
+        if self.action == 'list':
+            queryset = queryset.prefetch_related('author', 'company', 'contact')
+        else:
+            queryset = queryset.select_related('author', 'company', 'contact')
         return queryset
 
 
@@ -1018,7 +1028,9 @@ class TaskViewSet(BaseModelViewSet):
 
 class OpportunityViewSet(BaseModelViewSet):
     """ViewSet for Opportunity management"""
-    queryset = Opportunity.objects.select_related('company', 'owner').prefetch_related('activities').all()
+    queryset = Opportunity.objects.select_related('company', 'owner').prefetch_related(
+        'activities__user', 'activities__contact',
+    ).all()
     serializer_class = OpportunitySerializer
     search_fields = ['name', 'company__name', 'notes']
     ordering_fields = ['created_at', 'expected_value', 'expected_close_date', 'stage']
@@ -1314,7 +1326,15 @@ class ContractViewSet(BaseModelViewSet):
     ordering_fields = ['created_at', 'start_date', 'end_date', 'value', 'updated_at', 'company__name', 'contract_number']
     ordering = ['-start_date']
     filterset_fields = ['company', 'contract_type', 'status', 'auto_renew', 'is_active', 'contract_category', 'opportunity']
-    
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.action == 'list':
+            # Everything ContractSerializer reads, fetched once per page (no per-row queries).
+            from crm_app.services.list_querysets import contract_list_queryset
+            queryset = contract_list_queryset(queryset)
+        return queryset
+
     @action(detail=False, methods=['get'])
     def expiring_soon(self, request):
         """Get contracts expiring within 30 days"""
@@ -1397,7 +1417,7 @@ class ContractViewSet(BaseModelViewSet):
                 payload = {key: value for key, value in message.items() if key != 'status_code'}
                 return Response(payload, status=response_status)
             return Response(
-                {'error': message},
+                {'error': safe_mail_message(request, message)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -1770,8 +1790,7 @@ class ContractViewSet(BaseModelViewSet):
         except Exception as e:
             return Response(
                 {
-                    'error': 'Failed to retrieve Standard Terms document',
-                    'detail': str(e)
+                    'error': internal_error_text(request, e, 'Failed to retrieve Standard Terms document'),
                 },
                 status=500
             )
@@ -6019,7 +6038,7 @@ and<br/><br/>
                     created_zones.append(zone)
 
                 except Exception as e:
-                    errors.append(f"Zone {i+1}: {str(e)}")
+                    errors.append(f"Zone {i+1}: {internal_error_text(request, e, 'could not be added')}")
 
         # Prepare response
         if errors:
@@ -6299,7 +6318,7 @@ class InvoiceViewSet(BaseModelViewSet):
 
         if not success:
             return Response(
-                {'error': message},
+                {'error': safe_mail_message(request, message)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -6438,7 +6457,7 @@ class InvoiceViewSet(BaseModelViewSet):
 
         if not success:
             return Response(
-                {'error': message},
+                {'error': safe_mail_message(request, message)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -6454,7 +6473,8 @@ class InvoiceViewSet(BaseModelViewSet):
             'receipt_number': invoice.receipt_number,
         })
 
-    @action(detail=False, methods=['get'], url_path='export-quickbooks')
+    @action(detail=False, methods=['get'], url_path='export-quickbooks',
+            permission_classes=[IsAuthenticated, IsFinanceOrAdmin])
     def export_quickbooks(self, request):
         """
         Export invoices as IIF file for QuickBooks Pro 2016 import.
@@ -7123,7 +7143,9 @@ class QuoteViewSet(BaseModelViewSet):
         queryset = super().get_queryset()
 
         if self.action == 'list':
-            queryset = queryset.prefetch_related('line_items')
+            queryset = queryset.prefetch_related(
+                'line_items', 'attachments__uploaded_by', 'activities__user',
+            )
         elif self.action == 'retrieve':
             queryset = queryset.prefetch_related(
                 'line_items',
@@ -7276,7 +7298,7 @@ class QuoteViewSet(BaseModelViewSet):
 
         if not success:
             return Response(
-                {'error': message},
+                {'error': safe_mail_message(request, message)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -7461,7 +7483,7 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['user__username', 'model_name', 'action']
     ordering_fields = ['timestamp', 'action', 'model_name']
     ordering = ['-timestamp']
-    filterset_fields = ['user', 'action', 'model_name']
+    filterset_fields = ['user', 'action', 'model_name', 'record_id']
 
 
 def _sum_by_currency(items, amount):
@@ -7542,7 +7564,9 @@ class DashboardViewSet(viewsets.ViewSet):
         elif user.role == 'Finance':
             pass  # Finance sees all financial data
         elif user.role in ['Tech', 'Music']:
-            tasks = tasks.filter(Q(assigned_to=user) | Q(department=user.role))
+            # Their own tasks and their team's. Task.department was removed as unused
+            # (2026-02-10); a task's team is now the role of the person it is assigned to.
+            tasks = tasks.filter(Q(assigned_to=user) | Q(assigned_to__role=user.role))
             companies = companies.filter(tasks__in=tasks).distinct()
 
         # Calculate statistics
@@ -8632,7 +8656,7 @@ class AutomationViewSet(viewsets.ViewSet):
             )
         except Exception as e:
             return Response(
-                {'error': f'Failed to run command: {str(e)}'},
+                {'error': internal_error_text(request, e, 'Failed to run command')},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -9014,14 +9038,14 @@ class SequenceEnrollmentViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(enrollment)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-        except ValueError as e:
+        except ValueError as e:  # the service's own messages (unknown sequence, unsubscribed, ...)
             return Response(
                 {'error': str(e)},
                 status=status.HTTP_400_BAD_REQUEST
             )
         except Exception as e:
             return Response(
-                {'error': f'Failed to enroll contact: {str(e)}'},
+                {'error': internal_error_text(request, e, 'Failed to enroll contact')},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -9060,7 +9084,7 @@ class SequenceEnrollmentViewSet(viewsets.ModelViewSet):
 
         except Exception as e:
             return Response(
-                {'error': f'Failed to unenroll contact: {str(e)}'},
+                {'error': internal_error_text(request, e, 'Failed to unenroll contact')},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -9116,12 +9140,13 @@ class SequenceEnrollmentViewSet(viewsets.ModelViewSet):
                 pending_execution.refresh_from_db()
                 return Response({
                     'success': False,
-                    'error': pending_execution.error_message or 'Unknown error'
+                    'error': mail_failure_text(request, 'Failed to send the sequence email',
+                                               pending_execution.error_message or 'unknown error'),
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         except Exception as e:
             return Response(
-                {'error': f'Failed to send email: {str(e)}'},
+                {'error': internal_error_text(request, e, 'Failed to send email')},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -9203,10 +9228,7 @@ class CustomerSegmentViewSet(viewsets.ModelViewSet):
                 'segment_type': segment.segment_type,
             })
         except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response(request, e)
 
     @action(detail=True, methods=['post'])
     def recalculate(self, request, pk=None):
@@ -9225,10 +9247,7 @@ class CustomerSegmentViewSet(viewsets.ModelViewSet):
                 'last_calculated_at': segment.last_calculated_at,
             })
         except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response(request, e)
 
     @action(detail=True, methods=['post'])
     def enroll_in_sequence(self, request, pk=None):
@@ -9266,10 +9285,7 @@ class CustomerSegmentViewSet(viewsets.ModelViewSet):
         try:
             members = segment.get_members()
         except Exception as e:
-            return Response(
-                {'error': f'Error getting segment members: {str(e)}'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response(request, e, 'Error getting segment members')
 
         email_service = EmailService()
         enrolled_count = 0
@@ -9298,7 +9314,7 @@ class CustomerSegmentViewSet(viewsets.ModelViewSet):
                 enrolled_count += 1
 
             except Exception as e:
-                errors.append(f'{contact.email}: {str(e)}')
+                errors.append(f"{contact.email}: {internal_error_text(request, e, 'could not be enrolled')}")
                 skipped_count += 1
 
         # Mark segment as used
@@ -9405,10 +9421,13 @@ class CustomerSegmentViewSet(viewsets.ModelViewSet):
                 'preview': ContactSerializer(preview, many=True, context={'request': request}).data
             })
         except Exception as e:
+            reason = client_error_text(e)  # a bad field or value in the criteria: say which
+            if reason:
+                return Response({'valid': False, 'error': reason}, status=status.HTTP_400_BAD_REQUEST)
             return Response({
                 'valid': False,
-                'error': str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+                'error': internal_error_text(request, e, 'These filter criteria could not be applied'),
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # Support Ticket System ViewSets
@@ -9455,6 +9474,10 @@ class TicketViewSet(viewsets.ModelViewSet):
         queryset = queryset.select_related(
             'company', 'contact', 'zone', 'assigned_to', 'created_by'
         ).prefetch_related('comments', 'attachments')
+        if self.action == 'list':
+            # Comment authors, uploaders and comment counts once per page (no per-row queries).
+            from crm_app.services.list_querysets import ticket_list_queryset
+            queryset = ticket_list_queryset(queryset)
 
         return queryset
 
@@ -9493,10 +9516,7 @@ class TicketViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response(request, e)
 
     @action(detail=True, methods=['post'])
     def assign(self, request, pk=None):
@@ -9536,10 +9556,7 @@ class TicketViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response(request, e)
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
@@ -9675,10 +9692,7 @@ class TicketAttachmentViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
         except Exception as e:
-            return Response(
-                {'error': str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return error_response(request, e)
 
 
 # ============================================================================
@@ -10695,7 +10709,7 @@ class AIEmailDraftViewSet(viewsets.ModelViewSet):
             execution.status = 'failed'
             execution.error_message = str(e)
             execution.save()
-            return Response({'error': f'Failed to send: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e, 'Failed to send')}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(AIEmailDraftSerializer(draft).data)
 
@@ -10779,7 +10793,7 @@ class AIEmailDraftViewSet(viewsets.ModelViewSet):
             execution.status = 'failed'
             execution.error_message = str(e)
             execution.save()
-            return Response({'error': f'Failed to send: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e, 'Failed to send')}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response(AIEmailDraftSerializer(draft).data)
 
@@ -11076,6 +11090,14 @@ class ZoneViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'company__name']
     ordering = ['company__name', 'name']
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.action == 'list':
+            # Device and contract links once per page (no per-row queries).
+            from crm_app.services.list_querysets import zone_list_queryset
+            queryset = zone_list_queryset(queryset)
+        return queryset
+
     @action(detail=False, methods=['get'])
     def by_company(self, request):
         """Get zones filtered by company - for equipment form dropdown"""
@@ -11185,7 +11207,7 @@ class ZoneViewSet(viewsets.ModelViewSet):
             })
         except Exception as e:
             return Response(
-                {'error': f'Failed to fetch zones: {str(e)}'},
+                {'error': internal_error_text(request, e, 'Failed to fetch zones')},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -11507,7 +11529,7 @@ class RevenueViewSet(viewsets.ViewSet):
     - GET /api/v1/revenue/year-over-year/?year=2026&compare_year=2025 - YoY comparison
     - GET /api/v1/revenue/events/ - List revenue events
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
 
     @action(detail=False, methods=['get'], url_path='monthly')
     def monthly(self, request):
@@ -11860,7 +11882,7 @@ class RevenueViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response({
                 'success': False,
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'], url_path='generate-snapshots')
@@ -11932,7 +11954,7 @@ class RevenueViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response({
                 'success': False,
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'], url_path='initialize')
@@ -11967,7 +11989,7 @@ class RevenueViewSet(viewsets.ViewSet):
         except Exception as e:
             return Response({
                 'success': False,
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -11981,7 +12003,7 @@ class ARAgingViewSet(viewsets.ViewSet):
     - GET /api/v1/ar-aging/overdue/ - List of overdue invoices
     - GET /api/v1/ar-aging/collection-priority/ - Prioritized collection list
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
 
     @action(detail=False, methods=['get'], url_path='report')
     def report(self, request):
@@ -12016,7 +12038,7 @@ class ARAgingViewSet(viewsets.ViewSet):
             return Response(report)
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='summary')
@@ -12040,7 +12062,7 @@ class ARAgingViewSet(viewsets.ViewSet):
             return Response(summary)
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='overdue')
@@ -12077,7 +12099,7 @@ class ARAgingViewSet(viewsets.ViewSet):
             })
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='collection-priority')
@@ -12112,7 +12134,7 @@ class ARAgingViewSet(viewsets.ViewSet):
             })
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -12580,7 +12602,7 @@ class APAgingViewSet(viewsets.ViewSet):
     - GET /api/v1/ap-aging/payment-priority/ - Prioritized payment list
     - GET /api/v1/ap-aging/monthly-summary/?year=2026&month=1 - Monthly expense summary (for P&L)
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
 
     @action(detail=False, methods=['get'], url_path='report')
     def report(self, request):
@@ -12615,7 +12637,7 @@ class APAgingViewSet(viewsets.ViewSet):
             return Response(report)
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='summary')
@@ -12639,7 +12661,7 @@ class APAgingViewSet(viewsets.ViewSet):
             return Response(summary)
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='overdue')
@@ -12676,7 +12698,7 @@ class APAgingViewSet(viewsets.ViewSet):
             })
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='payment-priority')
@@ -12711,7 +12733,7 @@ class APAgingViewSet(viewsets.ViewSet):
             })
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='monthly-summary')
@@ -12752,7 +12774,7 @@ class APAgingViewSet(viewsets.ViewSet):
             return Response(summary)
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -12766,7 +12788,7 @@ class ProfitLossViewSet(viewsets.ViewSet):
     - GET /api/v1/profit-loss/comparative/?year=2026&month=1&compare_year=2025 - YoY comparison
     - GET /api/v1/profit-loss/trend/?year=2026 - Monthly trend data
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
 
     @action(detail=False, methods=['get'], url_path='monthly')
     def monthly(self, request):
@@ -12811,7 +12833,7 @@ class ProfitLossViewSet(viewsets.ViewSet):
             return Response(pl)
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='ytd')
@@ -12857,7 +12879,7 @@ class ProfitLossViewSet(viewsets.ViewSet):
             return Response(pl)
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='comparative')
@@ -12901,7 +12923,7 @@ class ProfitLossViewSet(viewsets.ViewSet):
             return Response(comparison)
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='trend')
@@ -12944,7 +12966,7 @@ class ProfitLossViewSet(viewsets.ViewSet):
             })
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='export/pdf')
@@ -12997,7 +13019,7 @@ class ProfitLossViewSet(viewsets.ViewSet):
             return response
 
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='export/excel')
     def export_excel(self, request):
@@ -13052,7 +13074,7 @@ class ProfitLossViewSet(viewsets.ViewSet):
             return response
 
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class CashFlowViewSet(viewsets.ViewSet):
@@ -13065,7 +13087,7 @@ class CashFlowViewSet(viewsets.ViewSet):
     - GET /api/v1/cash-flow/ytd/?year=2026&through_month=6 - Year-to-date Cash Flow
     - GET /api/v1/cash-flow/trend/?year=2026 - Monthly trend data
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
 
     @action(detail=False, methods=['get'], url_path='monthly')
     def monthly(self, request):
@@ -13110,7 +13132,7 @@ class CashFlowViewSet(viewsets.ViewSet):
             return Response(cf)
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='ytd')
@@ -13156,7 +13178,7 @@ class CashFlowViewSet(viewsets.ViewSet):
             return Response(cf)
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='trend')
@@ -13194,7 +13216,7 @@ class CashFlowViewSet(viewsets.ViewSet):
             return Response(trend)
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='export/pdf')
@@ -13247,7 +13269,7 @@ class CashFlowViewSet(viewsets.ViewSet):
             return response
 
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='export/excel')
     def export_excel(self, request):
@@ -13302,7 +13324,7 @@ class CashFlowViewSet(viewsets.ViewSet):
             return response
 
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class BalanceSheetViewSet(viewsets.ViewSet):
@@ -13314,7 +13336,7 @@ class BalanceSheetViewSet(viewsets.ViewSet):
     - GET /api/v1/balance-sheet/quarterly/?year=2026&quarter=1 - Quarterly Balance Sheet
     - GET /api/v1/balance-sheet/trend/?year=2026 - Quarterly trend data
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
 
     @action(detail=False, methods=['get'], url_path='quarterly')
     def quarterly(self, request):
@@ -13359,7 +13381,7 @@ class BalanceSheetViewSet(viewsets.ViewSet):
             return Response(bs)
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='trend')
@@ -13397,7 +13419,7 @@ class BalanceSheetViewSet(viewsets.ViewSet):
             return Response(trend)
         except Exception as e:
             return Response({
-                'error': str(e)
+                'error': internal_error_text(request, e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='export/pdf')
@@ -13443,7 +13465,7 @@ class BalanceSheetViewSet(viewsets.ViewSet):
             return response
 
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='export/excel')
     def export_excel(self, request):
@@ -13491,7 +13513,7 @@ class BalanceSheetViewSet(viewsets.ViewSet):
             return response
 
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class RevenueRecognitionViewSet(viewsets.ViewSet):
@@ -13510,7 +13532,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
     - GET  /api/v1/revenue-recognition/deferred-revenue/ - Balance for B/S
     - GET  /api/v1/revenue-recognition/export/excel/   - Export in Pom's format
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
 
     @action(detail=False, methods=['get'], url_path='summary')
     def summary(self, request):
@@ -13537,7 +13559,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             return Response(data)
         except Exception as e:
             logger.exception("Revenue recognition summary error")
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='schedules')
     def schedules(self, request):
@@ -13565,7 +13587,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             return Response(rows)
         except Exception as e:
             logger.exception("Revenue recognition schedules error")
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path=r'schedules/(?P<pk>\d+)')
     def schedule_detail(self, request, pk=None):
@@ -13644,7 +13666,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             return Response(result, status=status.HTTP_201_CREATED)
         except Exception as e:
             logger.exception("Revenue recognition import error")
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'], url_path='generate')
     def generate(self, request):
@@ -13684,7 +13706,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             })
         except Exception as e:
             logger.exception("Revenue recognition generate error")
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'], url_path='regenerate')
     def regenerate(self, request):
@@ -13703,7 +13725,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             return Response({'message': f'Regenerated {count} entries', 'entries': count})
         except Exception as e:
             logger.exception("Revenue recognition regenerate error")
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['patch'], url_path=r'schedules/(?P<pk>\d+)/update')
     def update_schedule(self, request, pk=None):
@@ -13730,7 +13752,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             return Response(result)
         except Exception as e:
             logger.exception("Revenue recognition update error")
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['post'], url_path=r'schedules/(?P<pk>\d+)/cancel')
     def cancel_schedule(self, request, pk=None):
@@ -13745,7 +13767,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             return Response({'error': 'Schedule not found'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             logger.exception("Revenue recognition cancel error")
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='deferred-revenue')
     def deferred_revenue(self, request):
@@ -13776,7 +13798,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             })
         except Exception as e:
             logger.exception("Deferred revenue error")
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='export/excel')
     def export_excel(self, request):
@@ -13813,7 +13835,7 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
             return response
         except Exception as e:
             logger.exception("Revenue accrual export error")
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': internal_error_text(request, e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class EmailLogViewSet(viewsets.ReadOnlyModelViewSet):

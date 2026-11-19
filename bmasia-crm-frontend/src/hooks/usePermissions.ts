@@ -42,8 +42,9 @@ export const usePermissions = () => {
 
     // Role-specific checks
     isSales: () => hasRole(user, 'Sales'),
-    isMarketing: () => hasRole(user, 'Marketing'),
-    isTechSupport: () => hasRole(user, 'Tech Support'),
+    isFinance: () => hasRole(user, 'Finance'),
+    isTech: () => hasRole(user, 'Tech'),
+    isMusic: () => hasRole(user, 'Music'),
     isAdmin: () => hasRole(user, 'Admin'),
 
     // Module access checks
@@ -53,7 +54,7 @@ export const usePermissions = () => {
     canAccessTasks: () => canAccessModule(user, 'tasks'),
     canAccessContracts: () => canAccessModule(user, 'contracts'),
     canAccessInvoices: () => canAccessModule(user, 'invoices'),
-    canAccessAnalytics: () => canAccessModule(user, 'analytics'),
+    canAccessFinanceReports: () => canAccessModule(user, 'finance-reports'),
     canAccessUsers: () => canAccessModule(user, 'users'),
 
     // Entity-specific CRUD operations
@@ -115,8 +116,9 @@ export const useRoleBasedContent = () => {
 
   const getContentByRole = useMemo(() => ({
     forSales: <T,>(content: T): T | null => hasRole(user, 'Sales') ? content : null,
-    forMarketing: <T,>(content: T): T | null => hasRole(user, 'Marketing') ? content : null,
-    forTechSupport: <T,>(content: T): T | null => hasRole(user, 'Tech Support') ? content : null,
+    forFinance: <T,>(content: T): T | null => hasRole(user, 'Finance') ? content : null,
+    forTech: <T,>(content: T): T | null => hasRole(user, 'Tech') ? content : null,
+    forMusic: <T,>(content: T): T | null => hasRole(user, 'Music') ? content : null,
     forAdmin: <T,>(content: T): T | null => hasRole(user, 'Admin') ? content : null,
     forMinimumRole: <T,>(content: T, minRole: string): T | null =>
       hasMinimumRole(user, minRole) ? content : null,
@@ -133,21 +135,21 @@ export const useBusinessPermissions = () => {
 
   return useMemo(() => ({
     // Sales operations
-    canManageSalesPipeline: () => hasPermission(user, 'manage_sales_pipeline') || hasRole(user, ['Sales', 'Admin']),
+    canManageSalesPipeline: () => canAccessModule(user, 'opportunities'),
     canAdvanceOpportunityStage: () => hasPermission(user, 'edit_opportunities'),
-    canCreateQuotes: () => hasPermission(user, 'create_opportunities') && hasMinimumRole(user, 'Sales'),
+    canCreateQuotes: () => canAccessModule(user, 'quotes'),
 
     // Marketing operations
     canViewAnalytics: () => hasPermission(user, 'view_analytics'),
-    canManageCampaigns: () => hasPermission(user, 'manage_campaigns') || hasRole(user, ['Marketing', 'Admin']),
+    canManageCampaigns: () => canAccessModule(user, 'campaigns'),
 
     // Technical operations
     canManageTechnicalSettings: () => hasPermission(user, 'manage_technical_settings'),
-    canViewSystemLogs: () => hasPermission(user, 'view_system_logs') || hasRole(user, ['Tech Support', 'Admin']),
+    canViewSystemLogs: () => hasRole(user, 'Admin'),
 
     // Financial operations
-    canViewFinancialReports: () => hasPermission(user, 'view_financial_reports') || hasMinimumRole(user, 'Marketing'),
-    canManageBilling: () => hasPermission(user, 'manage_billing') || hasRole(user, ['Tech Support', 'Admin']),
+    canViewFinancialReports: () => canAccessModule(user, 'finance-reports'),
+    canManageBilling: () => hasPermission(user, 'invoice-money'),
 
     // Administrative operations
     canManageUsers: () => hasPermission(user, 'manage_users'),

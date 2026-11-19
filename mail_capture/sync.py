@@ -67,8 +67,8 @@ from .models import (
     MailMatch, MailMessage, MailParticipant, UnmatchedSender,
 )
 from .parse import (
-    METADATA_HEADERS, attachment_metadata, clean, extract_body_text, internal_date, is_internal,
-    parse_gmail_message,
+    METADATA_HEADERS, attachment_metadata, clean, domain_in, extract_body_text, internal_date,
+    is_internal, parse_gmail_message,
 )
 from .purge import (
     drop_copies, enforce_label_rules, enforce_rules, message_key, purge_expired_unmatched,
@@ -84,6 +84,7 @@ LEASE_SECONDS = 15 * 60
 MAX_ATTEMPTS = 4
 MAX_MESSAGE_ATTEMPTS = 3
 MAX_FAILED_IDS = 100
+BATCH_SIZE = 50          # messages per Gmail batch request (Gmail allows 100, recommends 50)
 UNMATCHED_TTL = timedelta(days=30)
 SUBJECT_FALLBACK_WINDOW = timedelta(days=30)
 RESYNC_DEFAULT_WINDOW = timedelta(days=7)
@@ -113,6 +114,29 @@ class SyncResult:
     @property
     def disabled(self):
         return self.outcome == 'disabled'
+
+
+# Changes whenever the deployed code changes (Render sets RENDER_GIT_COMMIT);
+# ENGINE_VERSION covers local runs and is raised when this engine changes.
+ENGINE_VERSION = 'mail_capture-2'
+
+
+def code_version():
+    import os
+    return (os.environ.get('RENDER_GIT_COMMIT') or ENGINE_VERSION)[:80]
+
+
+def is_message_data_error(exc):
+    """Only errors about this message's data may fail just that message:
+    the database refusing a value or a constraint, a validation error, a text
+    encoding error. Anything else (a bug in the code, a lost connection, a
+    timeout) is not the message's fault and must stop the run instead."""
+    from django.core.exceptions import ValidationError
+    from django.db import DataError
+    if isinstance(exc, (DataError, IntegrityError, ValidationError, UnicodeError)):
+        return True
+    # psycopg2 refuses NUL characters with a plain ValueError.
+    return isinstance(exc, ValueError) and 'NUL (0x00)' in str(exc)
 
 
 class LeaseLost(Exception):
@@ -260,6 +284,12 @@ class _Runner:
         self.failed_ids = []
         self.run_row = None
         self.access_row = None
+        # Label ids that block NEW capture (every label rule, confirmed or not,
+        # plus the built-in CRM private label) ...
+        self.block_ids = frozenset()
+        self.headers_only_block_ids = frozenset()
+        # ... and those that may remove or strip mail already stored (the
+        # built-in label and confirmed label rules only).
         self.private_ids = frozenset()
         self.headers_only_ids = frozenset()
         self.rules = ()
@@ -270,6 +300,7 @@ class _Runner:
         target[name] = target.get(name, 0) + n
 
     def _call(self, name, *args, **kwargs):
+        units = kwargs.pop('_units', None)
         units_key = name
         if name == 'get_message' and kwargs.get('format') in ('full', 'minimal'):
             units_key = f'get_message_{kwargs["format"]}'
@@ -280,7 +311,7 @@ class _Runner:
             if self.access_row is None:
                 self._open_access_log()
             self.api_calls += 1
-            self.quota_units += QUOTA_UNITS.get(units_key, 1)
+            self.quota_units += units if units is not None else QUOTA_UNITS.get(units_key, 1)
             try:
                 return fn(*args, **kwargs)
             except (GmailRateLimited, GmailServerError):
@@ -408,6 +439,10 @@ class _Runner:
             self._health(None)
             if self.partial:
                 return self._finish('partial', 'stopped early; continues next run')
+            if self.counts.get('failed') or self.counts.get('parked'):
+                return self._finish('ok_with_failures',
+                                    f"{self.counts.get('failed', 0)} failed, "
+                                    f"{self.counts.get('parked', 0)} parked")
             return self._finish('ok')
         except GmailNotFound:
             # The history cursor is too old: resync on the next run.
@@ -448,20 +483,38 @@ class _Runner:
     def _load_labels(self):
         labels = self._call('list_labels') or []
         by_id = {str(item.get('id')): str(item.get('name', '')) for item in labels if isinstance(item, dict)}
-        self.private_ids = capture_rules.private_label_ids(by_id, self.rules, self.mailbox.pk)
-        self.headers_only_ids = capture_rules.headers_only_label_ids(by_id, self.rules, self.mailbox.pk)
+        mb = self.mailbox.pk
+        self.block_ids = capture_rules.private_label_ids(by_id, self.rules, mb)
+        self.headers_only_block_ids = capture_rules.headers_only_label_ids(by_id, self.rules, mb)
+        self.private_ids = capture_rules.private_label_ids(by_id, self.rules, mb, confirmed_only=True)
+        self.headers_only_ids = capture_rules.headers_only_label_ids(by_id, self.rules, mb, confirmed_only=True)
+        # Which of this mailbox's label ids carry each label rule's name: the
+        # admin preview counts stored copies with them before confirmation.
+        rule_names = {r.value.strip().lower() for r in self.rules if r.kind == 'label'}
+        rule_labels = {
+            name: sorted(i for i, label in by_id.items() if label.strip().lower() == name)
+            for name in sorted(rule_names)
+        }
         state = {'private': sorted(self.private_ids), 'headers_only': sorted(self.headers_only_ids)}
-        if not self.dry_run and (self.mailbox.enforced_label_ids or {}) != state:
+        stored = dict(self.mailbox.enforced_label_ids or {})
+        if self.dry_run:
+            return
+        if {k: stored.get(k) for k in state} != state:
             counts = enforce_label_rules(self.mailbox, self.private_ids, self.headers_only_ids,
                                          actor=self.actor)
             self._bump('purged', counts['messages'])
-            CaptureMailbox.objects.filter(pk=self.mailbox.pk).update(enforced_label_ids=state)
+        if stored != dict(state, rule_labels=rule_labels):
+            CaptureMailbox.objects.filter(pk=self.mailbox.pk).update(
+                enforced_label_ids=dict(state, rule_labels=rule_labels))
 
     # -- failures ------------------------------------------------------------
     def _retry_failures(self):
-        """Messages that failed before get another chance, then are parked."""
+        """Messages that failed before get another chance, then are parked.
+        Parked messages are retried again once the code version changes."""
         if self.dry_run:
             return
+        CaptureFailure.objects.filter(mailbox=self.mailbox, parked=True).exclude(
+            code_version=code_version()).update(parked=False, attempts=0)
         gids = list(CaptureFailure.objects.filter(mailbox=self.mailbox, parked=False)
                     .order_by('first_failed_at').values_list('gmail_id', flat=True)[:self.page_size])
         if not gids:
@@ -484,15 +537,17 @@ class _Runner:
         row = CaptureFailure.objects.filter(mailbox=self.mailbox, gmail_id=gmail_id).first()
         if row is None:
             CaptureFailure.objects.create(mailbox=self.mailbox, gmail_id=gmail_id, error=error,
-                                          first_failed_at=now, last_failed_at=now)
+                                          first_failed_at=now, last_failed_at=now,
+                                          code_version=code_version())
         else:
             row.attempts += 1
             row.error = error
             row.last_failed_at = now
+            row.code_version = code_version()
             if row.attempts >= MAX_MESSAGE_ATTEMPTS:
                 row.parked = True
                 self._bump('parked')
-            row.save(update_fields=['attempts', 'error', 'last_failed_at', 'parked'])
+            row.save(update_fields=['attempts', 'error', 'last_failed_at', 'parked', 'code_version'])
         self._bump('failed')
         if gmail_id not in self.failed_ids:
             self.failed_ids.append(gmail_id)
@@ -560,6 +615,10 @@ class _Runner:
         )
         self._bump('listed', len(wanted))
         self._bump('already_known', len(known))
+        todo = [g for g in wanted if g not in known]
+        if self.max_messages is not None:
+            todo = todo[:max(0, self.max_messages - self.fetched_total)]
+        self._plan_fetch(todo)
         done, raws, fetched = [], [], set()
         for record in records:
             ids = [
@@ -635,6 +694,7 @@ class _Runner:
             )
             raws, relabel = [], []
             stopped = False
+            self._plan_fetch([g for g in ids if g not in known])
             for gid in ids:
                 if gid in known:
                     self._bump('already_known')
@@ -703,14 +763,44 @@ class _Runner:
         return {gid for gid in held if gid not in listed}
 
     # -- fetching ------------------------------------------------------------
+    def _plan_fetch(self, gids):
+        """Announce the ids the next loop will ask for, in order, so a client
+        that supports batches can fetch them BATCH_SIZE at a time. Chunks are
+        fetched lazily, so a loop that stops early (bound, max_messages, budget)
+        never fetches far past where it stopped."""
+        self._pending = [g for g in gids if g]
+        self._pending_set = set(self._pending)
+        self._prefetched = {}
+
     def _fetch_one(self, gid):
-        try:
-            raw = self._call('get_message', gid, format='metadata', metadata_headers=list(METADATA_HEADERS))
-        except GmailNotFound:
-            return None  # deleted since it was listed
-        self.messages_read += 1
+        if gid in getattr(self, '_prefetched', {}):
+            raw = self._prefetched.pop(gid)
+        elif getattr(self.client, 'supports_batch', False) and gid in getattr(self, '_pending_set', ()):
+            self._fetch_chunk_from(gid)
+            raw = self._prefetched.pop(gid, None)
+        else:
+            try:
+                raw = self._call('get_message', gid, format='metadata', metadata_headers=list(METADATA_HEADERS))
+            except GmailNotFound:
+                return None  # deleted since it was listed
+            self.messages_read += 1
+        if not isinstance(raw, dict):
+            return None
         self._bump('fetched')
-        return raw if isinstance(raw, dict) else None
+        return raw
+
+    def _fetch_chunk_from(self, gid):
+        start = self._pending.index(gid)
+        chunk = self._pending[start:start + BATCH_SIZE]
+        result = self._call('get_messages', chunk, format='metadata',
+                            metadata_headers=list(METADATA_HEADERS),
+                            _units=QUOTA_UNITS['get_message'] * len(chunk))
+        for item in chunk:
+            self._pending_set.discard(item)
+            message = (result or {}).get(item)
+            if message is not None:
+                self.messages_read += 1
+            self._prefetched[item] = message
 
     # -- planning ------------------------------------------------------------
     def _plan(self, raws):
@@ -734,14 +824,17 @@ class _Runner:
         plans, to_match = [], []
         planned_rfc = set()
         for parsed in parsed_all:
-            decision = capture_rules.copy_decision(parsed.label_ids, self.private_ids)
+            decision = capture_rules.copy_decision(parsed.label_ids, self.block_ids)
             if parsed.gmail_id in existing_copies:
                 plans.append(_Plan(parsed, 'labels', copy_pk=existing_copies[parsed.gmail_id]))
                 self._bump('already_known')
                 continue
             if decision == capture_rules.COPY_PRIVATE:
                 self._bump('skipped_by_rule')
-                plans.append(_Plan(parsed, 'scrub'))
+                if set(parsed.label_ids) & self.private_ids:
+                    # Its queue samples (from earlier, unlabelled sightings) go too,
+                    # but only for the built-in label or a confirmed rule.
+                    plans.append(_Plan(parsed, 'scrub'))
                 continue
             if decision == capture_rules.COPY_SKIP_SYSTEM or parsed.is_bulk:
                 self._bump('skipped_system')
@@ -769,7 +862,7 @@ class _Runner:
                                    sent=parsed.sent_label)
             headers_only = (
                 result.rule_action == capture_rules.ACTION_HEADERS_ONLY
-                or bool(set(parsed.label_ids) & self.headers_only_ids)
+                or bool(set(parsed.label_ids) & self.headers_only_block_ids)
             )
             if result.decision == MALFORMED:
                 self._bump('malformed')
@@ -896,9 +989,9 @@ class _Runner:
                 try:
                     with transaction.atomic():
                         self._apply(plan, now, queue_ops)
-                except LeaseLost:
-                    raise
                 except Exception as exc:
+                    if not is_message_data_error(exc):
+                        raise   # a code, connection or timeout error: abort, cursor unmoved
                     self._record_failure(plan.parsed.gmail_id, exc)
                     continue
                 succeeded.append(plan.parsed.gmail_id)
@@ -910,12 +1003,18 @@ class _Runner:
                     newest = internal
             # Queue rows are locked in address order so two runners never deadlock.
             queue_ops.sort(key=lambda op: op[1].address)
+            queue_failed = set()
             for parsed, item, reason, candidates in queue_ops:
                 try:
                     with transaction.atomic():
                         self._queue_one(parsed, item, reason, candidates, now)
                 except Exception as exc:
-                    self._record_failure(parsed.gmail_id, exc)
+                    if not is_message_data_error(exc):
+                        raise
+                    if parsed.gmail_id not in queue_failed:
+                        queue_failed.add(parsed.gmail_id)
+                        self._record_failure(parsed.gmail_id, exc)
+            succeeded = [gid for gid in succeeded if gid not in queue_failed]
             if succeeded:
                 CaptureFailure.objects.filter(mailbox=self.mailbox, gmail_id__in=succeeded).delete()
             if deleted:
@@ -1060,7 +1159,7 @@ class _Runner:
                     from_name=sender.display_name if sender else '',
                     subject=parsed.subject,
                     direction=result.direction,
-                    flags=parsed.sorted_flags(),
+                    flags=self._message_flags(parsed, result),
                     in_reply_to=parsed.in_reply_to,
                     references=list(parsed.references),
                     has_attachments=bool(plan.attachments if plan.attachments is not None
@@ -1094,6 +1193,16 @@ class _Runner:
                 is_internal=is_internal(item, internal_domains, internal_addresses),
                 contact_id=result.contacts.get(item.address),
             ))
+        # A recipient found only by the overflow scan is kept when it matched
+        # a contact (role unknown between To and Cc: recorded as cc).
+        for item in getattr(parsed, 'overflow', ()) or ():
+            contact_id = result.contacts.get(item.address)
+            if contact_id and ('cc', item.address) not in seen and ('to', item.address) not in seen:
+                seen.add(('cc', item.address))
+                participants.append(MailParticipant(
+                    message=message, role='cc', address=item.address, display_name='',
+                    domain=item.domain, is_internal=False, contact_id=contact_id,
+                ))
         MailParticipant.objects.bulk_create(participants, ignore_conflicts=True)
         self._create_copy(message, parsed)
         for link in result.links:
@@ -1111,6 +1220,22 @@ class _Runner:
         for address, company_id in result.new_contact_candidates:
             queue_ops.append((parsed, address, 'domain_match', (company_id,)))
         self._bump('stored')
+
+    def _message_flags(self, parsed, result):
+        """Parser flags, plus ``dkim_pass_internal`` when a From that claims an
+        internal sender is backed by Gmail's own DKIM verdict for one of our
+        domains (a hint for a later unanswered-clock rule; it changes nothing
+        here: direction still needs the SENT label)."""
+        flags = set(parsed.flags)
+        if result.direction == 'claimed_internal':
+            internal = conf.internal_domains()
+            sender_domain = parsed.from_address.domain if parsed.from_address else ''
+            for domain in parsed.dkim_pass_domains:
+                if (domain_in(domain, internal) and sender_domain
+                        and (sender_domain == domain or sender_domain.endswith('.' + domain))):
+                    flags.add('dkim_pass_internal')
+                    break
+        return sorted(flags)
 
     def _merge_late_parent(self, conversation, message):
         """A reply captured before the message it answers started a
@@ -1160,7 +1285,9 @@ class _Runner:
             'last_message_at': Greatest(Coalesce('last_message_at', sent), sent),
             'updated_at': timezone.now(),
         }
-        side = {'inbound': 'last_inbound_at', 'outbound': 'last_outbound_at'}.get(message.direction)
+        # claimed_internal feeds only the hint field, never last_outbound_at.
+        side = {'inbound': 'last_inbound_at', 'outbound': 'last_outbound_at',
+                'claimed_internal': 'last_claimed_internal_at'}.get(message.direction)
         if side:
             updates[side] = Greatest(Coalesce(side, sent), sent)
         MailConversation.objects.filter(pk=conversation.pk).update(**updates)
@@ -1222,9 +1349,13 @@ class _Runner:
             row.message_keys = pairs
             row.message_count = len({p[0] for p in pairs})
             row.mailboxes = sorted({p[1] for p in pairs})
-            samples = [s for s in (row.samples or []) if isinstance(s, dict)]
+            # A sample never outlives its key: when the oldest key is rotated
+            # out, its subject goes too, so a later purge can always find it.
+            kept = {p[0] for p in pairs}
+            samples = [s for s in (row.samples or []) if isinstance(s, dict) and s.get('k') in kept]
             if sample and not any(s.get('k') == key for s in samples) and len(samples) < MAX_SAMPLES:
-                row.samples = samples + [sample]
+                samples = samples + [sample]
+            row.samples = samples
             changed = True
         for company_id in candidates:
             if str(company_id) not in row.candidate_company_ids:

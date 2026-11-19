@@ -40,6 +40,7 @@ import { CustomerSegment } from '../types';
 import ApiService from '../services/api';
 import EnrollSegmentDialog from '../components/EnrollSegmentDialog';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
+import { logApiError } from '../utils/logApiError';
 
 const Segments: React.FC = () => {
   const navigate = useNavigate();
@@ -61,7 +62,7 @@ const Segments: React.FC = () => {
       const response = await ApiService.getSegments();
       setSegments(response.results || []);
     } catch (err: any) {
-      console.error('Failed to load segments:', err);
+      logApiError('Failed to load segments:', err);
       setError(`Failed to load segments: ${err.response?.data?.detail || err.message || 'Unknown error'}`);
       setSegments([]);
     } finally {
@@ -98,7 +99,7 @@ const Segments: React.FC = () => {
       await loadSegments(); // Refresh the list
       handleMenuClose();
     } catch (err: any) {
-      console.error('Failed to recalculate segment:', err);
+      logApiError('Failed to recalculate segment:', err);
       setError(`Failed to recalculate segment: ${err.response?.data?.detail || err.message}`);
       handleMenuClose();
     }
@@ -121,7 +122,7 @@ const Segments: React.FC = () => {
       await loadSegments(); // Refresh the list
       handleMenuClose();
     } catch (err: any) {
-      console.error('Failed to duplicate segment:', err);
+      logApiError('Failed to duplicate segment:', err);
       setError(`Failed to duplicate segment: ${err.response?.data?.detail || err.message}`);
       handleMenuClose();
     }
@@ -145,7 +146,7 @@ const Segments: React.FC = () => {
       setDeleteDialogOpen(false);
       setSegmentToDelete(null);
     } catch (err: any) {
-      console.error('Failed to delete segment:', err);
+      logApiError('Failed to delete segment:', err);
       setError(`Failed to delete segment: ${err.response?.data?.detail || err.message}`);
     } finally {
       setDeleteLoading(false);

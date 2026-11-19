@@ -42,6 +42,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { EmailCampaignDetail, CampaignRecipient } from '../types';
 import ApiService from '../services/api';
 import CampaignAnalytics from '../components/CampaignAnalytics';
+import { logApiError } from '../utils/logApiError';
 
 const getStatusColor = (
   status: string
@@ -128,7 +129,7 @@ const CampaignDetail: React.FC = () => {
       const campaignData = await ApiService.getCampaign(id);
       setCampaign(campaignData);
     } catch (err: any) {
-      console.error('Campaign detail error:', err);
+      logApiError('Campaign detail error:', err);
       setError('Failed to load campaign details');
     } finally {
       setLoading(false);

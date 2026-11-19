@@ -310,7 +310,11 @@ class Company(TimestampedModel):
 
         Note: this adds contract values regardless of currency (THB and USD together).
         Kept unchanged for existing callers; use active_contract_value_by_currency to show money.
+        The company list annotates the same SUM (services/list_querysets.py) to save a query
+        per row.
         """
+        if hasattr(self, '_list_total_contract_value'):
+            return self._list_total_contract_value or 0
         return self.contracts.filter(is_active=True).aggregate(
             total=models.Sum('value')
         )['total'] or 0
@@ -321,7 +325,23 @@ class Company(TimestampedModel):
 
         Same contracts as total_contract_value (is_active=True). Returns a list sorted by
         currency, e.g. [{'currency': 'THB', 'total': '108000.00'}, {'currency': 'USD', 'total': '2160.00'}].
+        The company list prefetches the active contracts (services/list_querysets.py); they
+        are grouped here the way the query below groups them, and sorted by the rank the
+        database gave each currency in ORDER BY currency (its collation), not by Python.
         """
+        prefetched = getattr(self, '_prefetched_active_contracts', None)
+        if prefetched is not None:
+            totals, rank = {}, {}
+            for contract in prefetched:
+                rank[contract.currency] = contract._currency_order
+                if contract.value is not None:  # SUM skips NULL
+                    totals[contract.currency] = totals.get(contract.currency, 0) + contract.value
+                else:
+                    totals.setdefault(contract.currency, 0)
+            return [
+                {'currency': currency or 'USD', 'total': f"{totals[currency]:.2f}"}
+                for currency in sorted(totals, key=rank.__getitem__)
+            ]
         rows = (
             self.contracts.filter(is_active=True)
             .values('currency')
@@ -2082,7 +2102,21 @@ class Zone(TimestampedModel):
         Among the active links: a link whose contract is Active comes first,
         then the link that started last, then the contract that started last,
         then the link id (so the answer never depends on database row order).
+
+        The zone and company lists prefetch every link of the zone with its contract
+        (services/list_querysets.py); the same order is then applied here.
         """
+        prefetched = getattr(self, '_prefetched_zone_links', None)
+        if prefetched is not None:
+            active = [link for link in prefetched if link.is_active]
+            if not active:
+                return None
+            return min(active, key=lambda link: (
+                0 if link.contract.status == 'Active' else 1,
+                -link.start_date.toordinal(),
+                -link.contract.start_date.toordinal(),
+                link.pk,
+            ))
         from django.db.models import Case, IntegerField, Value, When
         return (
             self.zone_contracts.filter(is_active=True)

@@ -22,6 +22,7 @@ import {
 } from '@mui/icons-material';
 import { CustomerSegment, EmailSequence } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 interface EnrollSegmentDialogProps {
   open: boolean;
@@ -63,7 +64,7 @@ const EnrollSegmentDialog: React.FC<EnrollSegmentDialogProps> = ({
       const response = await ApiService.getEmailSequences({ status: 'active' });
       setSequences(response.results || []);
     } catch (err: any) {
-      console.error('Failed to load sequences:', err);
+      logApiError('Failed to load sequences:', err);
       setError(`Failed to load sequences: ${err.response?.data?.detail || err.message}`);
     } finally {
       setLoadingSequences(false);
@@ -97,7 +98,7 @@ const EnrollSegmentDialog: React.FC<EnrollSegmentDialogProps> = ({
         handleClose();
       }, 2000);
     } catch (err: any) {
-      console.error('Failed to enroll segment:', err);
+      logApiError('Failed to enroll segment:', err);
       setError(`Failed to enroll segment: ${err.response?.data?.detail || err.message}`);
     } finally {
       setLoading(false);

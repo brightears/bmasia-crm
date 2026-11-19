@@ -56,6 +56,7 @@ import { useListSearchBox } from '../hooks/useListSearchBox';
 import { PageHeader, EmptyState } from '../components/ui';
 import EmailSendDialog from '../components/EmailSendDialog';
 import { formatDate as formatDisplayDate, formatMoney, statusTone, visuallyHidden } from '../theme';
+import { apiErrorMessage, logApiError } from '../utils/logApiError';
 
 // Statuses where the contract is locked (terminal states only — Active is editable for date/term changes)
 const LOCKED_STATUSES = ['Renewed', 'Expired', 'Cancelled'];
@@ -176,7 +177,7 @@ const Contracts: React.FC = () => {
       setTotalCount(response.count);
     } catch (err: any) {
       setError('Failed to load contracts');
-      console.error('Contracts error:', err);
+      logApiError('Contracts error:', err);
     } finally {
       setLoading(false);
     }
@@ -228,7 +229,7 @@ const Contracts: React.FC = () => {
         await ApiService.deleteContract(contract.id);
         loadContracts();
       } catch (err) {
-        setError('Failed to delete contract');
+        setError(apiErrorMessage(err, 'Failed to delete contract'));
       }
     }
     setActionMenuAnchor(null);
@@ -302,7 +303,7 @@ const Contracts: React.FC = () => {
       setActionMenuAnchor(null);
     } catch (err) {
       setError('Failed to load contract details');
-      console.error('Error loading contract details:', err);
+      logApiError('Error loading contract details:', err);
     }
   };
 

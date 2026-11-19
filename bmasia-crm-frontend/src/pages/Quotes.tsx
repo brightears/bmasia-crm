@@ -63,6 +63,7 @@ import { formatDate as formatDisplayDate, formatMoney, statusTone, visuallyHidde
 import { PageHeader, EmptyState } from '../components/ui';
 import { useListState, optionValues, idFromList } from '../hooks/useListState';
 import { useListSearchBox } from '../hooks/useListSearchBox';
+import { apiErrorMessage, logApiError } from '../utils/logApiError';
 
 const statusOptions = [
   { value: '', label: 'All Status' },
@@ -173,7 +174,7 @@ const Quotes: React.FC = () => {
         setFormOpen(true);
       })
       .catch((err) => {
-        console.error('Could not open quote for editing:', err);
+        logApiError('Could not open quote for editing:', err);
         setError('Could not open that quote for editing.');
       });
   }, [searchParams, setSearchParams]);
@@ -196,7 +197,7 @@ const Quotes: React.FC = () => {
       setTotalCount(response.count);
     } catch (err: any) {
       setError('Failed to load quotes');
-      console.error('Quotes error:', err);
+      logApiError('Quotes error:', err);
     } finally {
       setLoading(false);
     }
@@ -207,7 +208,7 @@ const Quotes: React.FC = () => {
       const companies = await ApiService.getCompaniesSimple();
       setCompanies(companies as any[]);
     } catch (err) {
-      console.error('Failed to load companies:', err);
+      logApiError('Failed to load companies:', err);
     }
   };
 
@@ -216,7 +217,7 @@ const Quotes: React.FC = () => {
       const response = await ApiService.getContacts({ page_size: 500 });
       setContacts(response.results);
     } catch (err) {
-      console.error('Failed to load contacts:', err);
+      logApiError('Failed to load contacts:', err);
     }
   };
 
@@ -225,7 +226,7 @@ const Quotes: React.FC = () => {
       const response = await ApiService.getOpportunities({ page_size: 100 });
       setOpportunities(response.results);
     } catch (err) {
-      console.error('Failed to load opportunities:', err);
+      logApiError('Failed to load opportunities:', err);
     }
   };
 
@@ -283,7 +284,7 @@ const Quotes: React.FC = () => {
         setSuccess('Quote deleted successfully');
         loadQuotes();
       } catch (err) {
-        setError('Failed to delete quote');
+        setError(apiErrorMessage(err, 'Failed to delete quote'));
       }
     }
     setActionMenuAnchor(null);
@@ -301,7 +302,7 @@ const Quotes: React.FC = () => {
       setActionMenuAnchor(null);
     } catch (err) {
       setError('Failed to load quote details');
-      console.error('Error loading quote details:', err);
+      logApiError('Error loading quote details:', err);
     }
   };
 
