@@ -26,8 +26,9 @@ import { Contact } from '../types';
 export interface EmailSendData {
   recipients: string[];
   cc: string[];
-  subject: string;
-  body: string;
+  /** Left out to have the server use its standard subject and text. */
+  subject?: string;
+  body?: string;
 }
 
 interface EmailSendDialogProps {
@@ -243,13 +244,10 @@ BMAsia Music Team`;
       setLoading(true);
       setError('');
 
-      await onSendEmail({
-        recipients: selectedContacts,
-        cc: allCc,
-        // Empty subject and message: the server uses its standard ones.
-        subject: standardEmail ? '' : subject.trim(),
-        body: standardEmail ? '' : body.trim(),
-      });
+      // In standard mode no subject or message is posted: the server uses its standard ones.
+      await onSendEmail(standardEmail
+        ? { recipients: selectedContacts, cc: allCc }
+        : { recipients: selectedContacts, cc: allCc, subject: subject.trim(), body: body.trim() });
 
       onSendSuccess();
       handleClose();

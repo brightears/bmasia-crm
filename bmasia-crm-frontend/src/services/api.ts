@@ -1889,8 +1889,9 @@ export interface MarkInvoicePaidResult {
 export interface EmailSendData {
   recipients: string[];
   cc: string[];
-  subject: string;
-  body: string;
+  /** Left out to have the server use its standard subject and text. */
+  subject?: string;
+  body?: string;
 }
 
 export interface AutomationStatus {

@@ -112,9 +112,13 @@ def _sent(response):
     }
 
 
+@pytest.mark.parametrize('extra', [{}, {'subject': '', 'body': ''}], ids=['picker', 'empty-keys'])
 @pytest.mark.parametrize('kind', ['invoice', 'quote'])
-def test_a_hand_picked_send_is_the_same_email_as_a_normal_send(company, client, kind):
-    """The picker posts only the recipients (empty subject and text): the server builds the same email."""
+def test_a_hand_picked_send_is_the_same_email_as_a_normal_send(company, client, kind, extra):
+    """The picker posts only the recipients and CC (no subject or text): the server builds the same email.
+
+    Empty subject and text, as an older page posted them, mean the same.
+    """
     _contact(company, 'kim@lotusbay.example.com', contact_type='Billing', is_primary=True)
     if kind == 'invoice':
         record, url = _invoice(company), '/api/v1/invoices/{}/send/'
@@ -126,7 +130,7 @@ def test_a_hand_picked_send_is_the_same_email_as_a_normal_send(company, client, 
     normal = _sent(client.post(url.format(record.pk), {}, format='json'))
     model.objects.filter(pk=record.pk).update(status='Draft')
     picked = _sent(client.post(url.format(record.pk), {
-        'recipients': ['kim@lotusbay.example.com'], 'cc': [], 'subject': '', 'body': ''}, format='json'))
+        'recipients': ['kim@lotusbay.example.com'], 'cc': [], **extra}, format='json'))
     assert normal == picked
     assert normal['to'] == ['kim@lotusbay.example.com']
     assert normal['attachments'] and normal['attachments'][0][0].endswith('.pdf')

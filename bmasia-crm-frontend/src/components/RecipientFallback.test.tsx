@@ -95,7 +95,7 @@ test('the notice links to the contacts and the picker sends the standard email t
   fireEvent.click(screen.getByRole('button', { name: /Send Email/ }));
   await waitFor(() => expect(api.sendInvoiceEmail).toHaveBeenCalledTimes(1));
   const [, data] = api.sendInvoiceEmail.mock.calls[0];
-  expect(data).toEqual({ recipients: ['kim@lotusbay.example.com'], cc: [], subject: '', body: '' });
+  expect(data).toEqual({ recipients: ['kim@lotusbay.example.com'], cc: [] });  // no subject or body keys
   await waitFor(() => expect(onSent).toHaveBeenCalled());
 });
 
