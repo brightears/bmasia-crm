@@ -2,35 +2,25 @@
 
 Decided by how the request is authenticated, not by what the account holds elsewhere:
 - a person: authenticated by a website sign-in (JWT or session) with an account that is not
-  on the agent-name list (crm_app.agent_policy, plus AGENT_INBOX_AGENT_USERNAMES);
+  on the agent-name list (crm_app.permissions.PersonSignedInToWebsite);
 - an agent request: anything else that is authenticated (an API token, an agent account).
 
-The permission classes below gate configuration writes and actions that change many records
-or reach outside the CRM.
+Roles come from crm_app.permissions (one rule); the classes here add "on the website" to them
+for exports, configuration writes and actions that change many records or reach outside the CRM.
 """
-from django.conf import settings
 from rest_framework import permissions
 
-WEBSITE_AUTH_METHODS = frozenset({'jwt', 'session'})
-
-
-def _agent_name(user) -> bool:
-    username = str(getattr(user, 'username', '') or '').strip().casefold()
-    from crm_app import agent_policy
-    if agent_policy.principal_for_username(username) is not None:
-        return True
-    extra = getattr(settings, 'AGENT_INBOX_AGENT_USERNAMES', ()) or ()
-    if isinstance(extra, str):
-        extra = extra.split(',')
-    return username in {str(name).strip().casefold() for name in extra if str(name).strip()}
+from crm_app.permissions import (
+    IsAdminOrStaff, IsAdminRole, IsFinanceOrAdmin, IsSalesOrAdmin, IsTechAdminOrStaff, PersonSignedInToWebsite,
+)
 
 
 def is_website_person(request) -> bool:
+    """A person signed in to the website: crm_app.permissions.PersonSignedInToWebsite."""
     user = getattr(request, 'user', None)
     if user is None or not getattr(user, 'is_authenticated', False):
         return False
-    from crm_app.auth_observability import auth_method
-    return auth_method(request) in WEBSITE_AUTH_METHODS and not _agent_name(user)
+    return PersonSignedInToWebsite().has_permission(request, None)
 
 
 def is_agent_request(request) -> bool:
@@ -38,51 +28,52 @@ def is_agent_request(request) -> bool:
     return bool(user is not None and getattr(user, 'is_authenticated', False) and not is_website_person(request))
 
 
-def _has_role(user, roles) -> bool:
-    return bool(getattr(user, 'is_superuser', False) or getattr(user, 'role', None) in roles)
+class OnWebsite(permissions.BasePermission):
+    """``role_permission`` (a crm_app.permissions role class) and a person signed in to the website."""
 
-
-class _WebsitePersonWith(permissions.BasePermission):
-    roles = None  # None: any role
-    staff = False
-    message = 'This action needs a person signed in to the CRM website.'
+    role_permission = None
+    website_message = 'This action needs a person signed in to the CRM website, not an API token or agent.'
+    message = website_message
 
     def has_permission(self, request, view):
+        if self.role_permission is not None:
+            role = self.role_permission()
+            if not role.has_permission(request, view):
+                self.message = role.message
+                return False
         if not is_website_person(request):
+            self.message = self.website_message
             return False
-        user = request.user
-        if self.staff and getattr(user, 'is_staff', False):
-            return True
-        if self.roles is None:
-            return not self.staff
-        return _has_role(user, self.roles)
+        return True
 
 
-class FinanceOrAdminOnWebsite(_WebsitePersonWith):
-    roles = ('Finance', 'Admin')
-    message = 'This action needs a Finance or Admin user signed in to the CRM website.'
+class WritesOnWebsite(permissions.BasePermission):
+    """Reads pass (the role classes beside it decide); writes need a person on the website."""
+
+    message = OnWebsite.website_message
+
+    def has_permission(self, request, view):
+        return request.method in permissions.SAFE_METHODS or is_website_person(request)
 
 
-class SalesOrAdminOnWebsite(_WebsitePersonWith):
-    roles = ('Sales', 'Admin')
-    message = 'This action needs a Sales or Admin user signed in to the CRM website.'
+class FinanceOrAdminOnWebsite(OnWebsite):
+    role_permission = IsFinanceOrAdmin
 
 
-class AdminOnWebsite(_WebsitePersonWith):
-    roles = ('Admin',)
-    message = 'This action needs an Admin user signed in to the CRM website.'
+class SalesOrAdminOnWebsite(OnWebsite):
+    role_permission = IsSalesOrAdmin
 
 
-class StaffOrTechOnWebsite(_WebsitePersonWith):
-    roles = ('Tech', 'Admin')
-    staff = True
-    message = 'This action needs a staff or Tech user signed in to the CRM website.'
+class AdminOnWebsite(OnWebsite):
+    role_permission = IsAdminRole
 
 
-class StaffOrAdminOnWebsite(_WebsitePersonWith):
-    roles = ('Admin',)
-    staff = True
-    message = 'This action needs a staff or Admin user signed in to the CRM website.'
+class StaffOrTechOnWebsite(OnWebsite):
+    role_permission = IsTechAdminOrStaff
+
+
+class StaffOrAdminOnWebsite(OnWebsite):
+    role_permission = IsAdminOrStaff
 
 
 def agent_may_write(request, collection, method) -> bool:

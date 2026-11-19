@@ -111,7 +111,7 @@ from .serializers import (
 from .services.delete_guards import GuardedDestroyMixin
 from .request_policy import (
     AdminOnWebsite, FinanceOrAdminOnWebsite, PersonForConfigurationWrites, SalesOrAdminOnWebsite,
-    StaffOrAdminOnWebsite, StaffOrTechOnWebsite,
+    StaffOrAdminOnWebsite, StaffOrTechOnWebsite, WritesOnWebsite,
 )
 from .api_errors import (
     client_error_text, error_response, internal_error_text, mail_failure_text, safe_mail_message, smtp_error_text,
@@ -11477,7 +11477,8 @@ class RevenueViewSet(viewsets.ViewSet):
     - GET /api/v1/revenue/year-over-year/?year=2026&compare_year=2025 - YoY comparison
     - GET /api/v1/revenue/events/ - List revenue events
     """
-    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
+    # Reads: the finance role. Writes: the finance role and a person signed in to the website.
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin, WritesOnWebsite]
 
     @action(detail=False, methods=['get'], url_path='monthly')
     def monthly(self, request):
@@ -11951,7 +11952,8 @@ class ARAgingViewSet(viewsets.ViewSet):
     - GET /api/v1/ar-aging/overdue/ - List of overdue invoices
     - GET /api/v1/ar-aging/collection-priority/ - Prioritized collection list
     """
-    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
+    # Reads: the finance role. Writes: the finance role and a person signed in to the website.
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin, WritesOnWebsite]
 
     @action(detail=False, methods=['get'], url_path='report')
     def report(self, request):
@@ -12413,7 +12415,7 @@ class ExpenseEntryViewSet(BaseModelViewSet):
             return ExpenseEntryCreateSerializer
         return ExpenseEntrySerializer
 
-    @action(detail=True, methods=['post'], url_path='approve')
+    @action(detail=True, methods=['post'], url_path='approve', permission_classes=[FinanceOrAdminOnWebsite])
     def approve(self, request, pk=None):
         """POST /api/v1/expenses/{id}/approve/ - Approve expense"""
         expense = self.get_object()
@@ -12431,7 +12433,7 @@ class ExpenseEntryViewSet(BaseModelViewSet):
         serializer = self.get_serializer(expense)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'], url_path='pay')
+    @action(detail=True, methods=['post'], url_path='pay', permission_classes=[FinanceOrAdminOnWebsite])
     def pay(self, request, pk=None):
         """
         POST /api/v1/expenses/{id}/pay/
@@ -12471,7 +12473,7 @@ class ExpenseEntryViewSet(BaseModelViewSet):
         serializer = self.get_serializer(expense)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'], url_path='cancel')
+    @action(detail=True, methods=['post'], url_path='cancel', permission_classes=[FinanceOrAdminOnWebsite])
     def cancel(self, request, pk=None):
         """POST /api/v1/expenses/{id}/cancel/ - Cancel expense"""
         expense = self.get_object()
@@ -12550,7 +12552,8 @@ class APAgingViewSet(viewsets.ViewSet):
     - GET /api/v1/ap-aging/payment-priority/ - Prioritized payment list
     - GET /api/v1/ap-aging/monthly-summary/?year=2026&month=1 - Monthly expense summary (for P&L)
     """
-    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
+    # Reads: the finance role. Writes: the finance role and a person signed in to the website.
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin, WritesOnWebsite]
 
     @action(detail=False, methods=['get'], url_path='report')
     def report(self, request):
@@ -12736,7 +12739,8 @@ class ProfitLossViewSet(viewsets.ViewSet):
     - GET /api/v1/profit-loss/comparative/?year=2026&month=1&compare_year=2025 - YoY comparison
     - GET /api/v1/profit-loss/trend/?year=2026 - Monthly trend data
     """
-    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
+    # Reads: the finance role. Writes: the finance role and a person signed in to the website.
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin, WritesOnWebsite]
 
     @action(detail=False, methods=['get'], url_path='monthly')
     def monthly(self, request):
@@ -13035,7 +13039,8 @@ class CashFlowViewSet(viewsets.ViewSet):
     - GET /api/v1/cash-flow/ytd/?year=2026&through_month=6 - Year-to-date Cash Flow
     - GET /api/v1/cash-flow/trend/?year=2026 - Monthly trend data
     """
-    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
+    # Reads: the finance role. Writes: the finance role and a person signed in to the website.
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin, WritesOnWebsite]
 
     @action(detail=False, methods=['get'], url_path='monthly')
     def monthly(self, request):
@@ -13284,7 +13289,8 @@ class BalanceSheetViewSet(viewsets.ViewSet):
     - GET /api/v1/balance-sheet/quarterly/?year=2026&quarter=1 - Quarterly Balance Sheet
     - GET /api/v1/balance-sheet/trend/?year=2026 - Quarterly trend data
     """
-    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
+    # Reads: the finance role. Writes: the finance role and a person signed in to the website.
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin, WritesOnWebsite]
 
     @action(detail=False, methods=['get'], url_path='quarterly')
     def quarterly(self, request):
@@ -13480,7 +13486,8 @@ class RevenueRecognitionViewSet(viewsets.ViewSet):
     - GET  /api/v1/revenue-recognition/deferred-revenue/ - Balance for B/S
     - GET  /api/v1/revenue-recognition/export/excel/   - Export in Pom's format
     """
-    permission_classes = [IsAuthenticated, IsFinanceOrAdmin]
+    # Reads: the finance role. Writes: the finance role and a person signed in to the website.
+    permission_classes = [IsAuthenticated, IsFinanceOrAdmin, WritesOnWebsite]
 
     @action(detail=False, methods=['get'], url_path='summary')
     def summary(self, request):
