@@ -152,7 +152,7 @@ def test_compact_description_removes_only_the_approved_repeated_copy():
     ) == "Lobby - includes a custom launch workshop"
 
 
-def test_quote_preview_is_a4_multipage_compact_and_omits_internal_notes():
+def test_quote_preview_is_a4_multipage_compact_and_includes_quote_notes():
     reader = _reader(_quote_bytes())
     texts = _page_texts(reader)
     joined = "\n".join(texts)
@@ -163,7 +163,7 @@ def test_quote_preview_is_a4_multipage_compact_and_omits_internal_notes():
     assert joined.count("DRAFT PREVIEW - NOT FOR CUSTOMER") == len(reader.pages)
     assert joined.count("ZONE / DESCRIPTION") >= 2
     assert joined.count(STANDARD_SERVICE_COPY) == 1
-    assert "Internal sales context" not in joined
+    assert "Customer-facing billing options and optional services." in joined
     assert "CUSTOMER REMARKS" not in joined
     assert joined.lower().count(STANDARD_SERVICE_COPY.lower()) == 1
     assert "Venue zone 01: Main lobby" in joined
@@ -196,14 +196,15 @@ def test_invoice_preview_repeats_headers_and_keeps_totals_with_final_item():
         assert sum(token in text for text in lower_texts) == 1
 
 
-def test_quote_internal_notes_are_never_rendered_but_terms_remain_visible():
+def test_quote_notes_and_terms_are_rendered_once():
     quote = sample_quote()
     quote.terms_conditions = "Deliberate customer wording appears exactly once."
-    quote.notes = "INTERNAL-ONLY-QUOTE-NOTE"
+    quote.notes = "Quarterly billing is USD 25,000. Optional AI pack is excluded from the total."
 
     joined = "\n".join(_page_texts(_reader(_quote_bytes(quote))))
     assert joined.count("Deliberate customer wording appears exactly once.") == 1
-    assert "INTERNAL-ONLY-QUOTE-NOTE" not in joined
+    assert joined.count("Quarterly billing is USD 25,000. Optional AI pack is excluded from the total.") == 1
+    assert joined.count("NOTES") == 1
     assert "CUSTOMER REMARKS" not in joined
 
 
@@ -350,7 +351,7 @@ def test_long_payment_terms_flow_across_pages_without_layout_failure():
     assert all("TH-QT-PREVIEW-001" in text for text in _page_texts(reader))
 
 
-def test_even_very_long_internal_notes_never_enter_the_customer_pdf():
+def test_even_very_long_quote_notes_remain_readable_across_pages():
     quote = sample_quote()
     quote.line_items = type(quote.line_items)(quote.line_items.all()[:1])
     quote.notes = " ".join(
@@ -361,8 +362,8 @@ def test_even_very_long_internal_notes_never_enter_the_customer_pdf():
     reader = _reader(_quote_bytes(quote))
     joined = "\n".join(_page_texts(reader))
 
-    assert "Remark 1:" not in joined
-    assert "Remark 500:" not in joined
+    assert "Remark 1:" in joined
+    assert "Remark 500:" in joined
 
 
 def test_exceptionally_long_line_item_splits_only_when_a_page_cannot_hold_it():

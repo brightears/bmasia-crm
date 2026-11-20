@@ -84,6 +84,18 @@ def test_prepared_for_prints_legal_name_with_branch_and_tax_id_like_the_contract
     assert joined.count("Tax ID: 0100000000001") == 1
 
 
+def test_malaysian_company_registration_number_is_not_labelled_as_tax_id():
+    registration_number = "202201012345"
+    joined = _joined(example_company(
+        country="Malaysia",
+        branch="",
+        tax_id=registration_number,
+    ))
+
+    assert f"Company No.: {registration_number}" in joined
+    assert f"Tax ID: {registration_number}" not in joined
+
+
 def test_prepared_for_does_not_repeat_a_branch_already_in_the_legal_name():
     joined = _joined(example_company(legal_entity_name="Example Hotel Co., Ltd. (Branch 00001)"))
 

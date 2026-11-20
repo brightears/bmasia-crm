@@ -140,8 +140,8 @@ def build_quote_pdf_v2(
 ):
     """Render an A4, flow-based quotation and return raw PDF bytes.
 
-    Quote notes are internal CRM context and are never rendered. Explicit
-    schedule and terms fields remain customer-visible in their named sections.
+    Quote notes, schedule and terms are customer-visible in their named
+    sections.
     """
     styles = document_styles()
     duration_months = quote.contract_duration_months or 12
@@ -186,7 +186,9 @@ def build_quote_pdf_v2(
     ]
     tax_id = clean_text(getattr(company, "tax_id", "")).strip()
     if tax_id:
-        customer_lines.append(f"Tax ID: {tax_id}")
+        country = clean_text(getattr(company, "country", "")).strip().casefold()
+        identifier_label = "Company No." if country == "malaysia" else "Tax ID"
+        customer_lines.append(f"{identifier_label}: {tax_id}")
     if quote.contact:
         customer_lines.append(f"Attention: {quote.contact.name}")
         if getattr(quote.contact, "email", ""):
@@ -309,6 +311,14 @@ def build_quote_pdf_v2(
     ))
 
     story.extend(section_start("02", "Payment and terms", styles, minimum_following_height=210))
+    notes = clean_text(getattr(quote, "notes", "")).strip()
+    if notes:
+        story.append(KeepTogether([
+            Paragraph("NOTES", styles["label"]),
+            Spacer(1, 3),
+            Paragraph(html_text(notes), styles["body"]),
+            Spacer(1, 8),
+        ]))
     schedule = clean_text(derive_payment_schedule(quote, format_duration)).strip()
     terms = clean_text(getattr(quote, "terms_conditions", "")).strip() or entity["payment_terms_default"]
     visible_prior = [terms]

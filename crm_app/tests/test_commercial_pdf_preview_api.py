@@ -50,7 +50,7 @@ def _quote(company, user):
         subtotal=Decimal("1300.00"),
         total_value=Decimal("1300.00"),
         currency="USD",
-        notes="Internal quote note.",
+        notes="Customer-visible quote billing options.",
         created_by=user,
     )
 
@@ -98,7 +98,7 @@ def test_quote_preview_is_inline_watermarked_and_side_effect_free():
     assert response["Content-Disposition"].startswith('inline; filename="PREVIEW_ONLY_')
     assert response["Cache-Control"] == "private, no-store, max-age=0"
     assert "DRAFT PREVIEW - NOT FOR CUSTOMER" in text
-    assert "Internal quote note." not in text
+    assert "Customer-visible quote billing options." in text
     assert "CUSTOMER REMARKS" not in text
     assert _write_queries(captured) == []
     assert (QuoteActivity.objects.count(), AuditLog.objects.count(), EmailLog.objects.count()) == counts_before

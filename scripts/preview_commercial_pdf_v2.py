@@ -153,7 +153,7 @@ def sample_quote():
         billing_frequency="annual",
         payment_schedule="Billed annually.",
         terms_conditions="",
-        notes="Internal sales context must not appear on the customer quotation.",
+        notes="Customer-facing billing options and optional services.",
         line_items=RelatedList(items),
     )
 
