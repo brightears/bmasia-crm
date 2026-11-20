@@ -61,6 +61,7 @@ import {
 } from '@mui/icons-material';
 import { Quote, QuoteActivity, EmailLogEntry } from '../types';
 import ApiService from '../services/api';
+import RecipientFallback, { noRecipientMessage } from './RecipientFallback';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
 
 interface QuoteDetailProps {
@@ -83,6 +84,7 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [sendFallback, setSendFallback] = useState<string | null>(null);
   const [quoteDetail, setQuoteDetail] = useState<Quote | null>(null);
   const [activities, setActivities] = useState<QuoteActivity[]>([]);
   const [emailLogs, setEmailLogs] = useState<EmailLogEntry[]>([]);
@@ -130,7 +132,12 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
       onQuoteUpdate();
       loadQuoteDetail();
     } catch (err) {
-      setError('Failed to send quote');
+      const noRecipient = noRecipientMessage(err);
+      if (noRecipient) {
+        setSendFallback(noRecipient);
+      } else {
+        setError('Failed to send quote');
+      }
     } finally {
       setLoading(false);
     }
@@ -746,6 +753,20 @@ const QuoteDetail: React.FC<QuoteDetailProps> = ({
           Close
         </Button>
       </DialogActions>
+      {quoteDetail && sendFallback && (
+        <RecipientFallback
+          open
+          message={sendFallback}
+          documentType="quote"
+          documentId={quoteDetail.id}
+          documentNumber={quoteDetail.quote_number}
+          companyId={quoteDetail.company}
+          companyName={quoteDetail.company_name}
+          onClose={() => setSendFallback(null)}
+          onSendEmail={(data) => ApiService.sendQuoteEmail(quoteDetail.id, data)}
+          onSent={() => { setSendFallback(null); setSuccess('Quote sent'); onQuoteUpdate(); loadQuoteDetail(); }}
+        />
+      )}
     </Dialog>
   );
 };

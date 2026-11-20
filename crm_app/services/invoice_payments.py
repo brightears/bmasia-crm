@@ -118,9 +118,10 @@ _RECEIPT_EMAIL_REASONS = (
 def receipt_email_failure_text(request, invoice, failure):
     """A short reason safe to show; the full failure goes to the server log with a reference."""
     from crm_app.request_ids import request_id_for
+    from crm_app.services.recipients import NoRecipient
 
-    if isinstance(failure, str) and failure in _RECEIPT_EMAIL_REASONS:
-        return failure
+    if isinstance(failure, NoRecipient) or (isinstance(failure, str) and failure in _RECEIPT_EMAIL_REASONS):
+        return str(failure)
     reference = request_id_for(request)
     if isinstance(failure, BaseException):
         from crm_app.services.exception_safety import log_exception

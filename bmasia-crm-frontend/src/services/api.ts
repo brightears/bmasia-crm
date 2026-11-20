@@ -1883,13 +1883,16 @@ export interface MarkInvoicePaidResult {
   receipt_only?: boolean;
   /** 'not_requested', 'sent' or 'failed: …' */
   receipt_email_status: string;
+  /** Set when the receipt was not emailed because no contact is set to receive it. */
+  receipt_email_refusal?: { code: string; kind: string; company_id: string; message: string } | null;
 }
 
 export interface EmailSendData {
   recipients: string[];
   cc: string[];
-  subject: string;
-  body: string;
+  /** Left out to have the server use its standard subject and text. */
+  subject?: string;
+  body?: string;
 }
 
 export interface AutomationStatus {

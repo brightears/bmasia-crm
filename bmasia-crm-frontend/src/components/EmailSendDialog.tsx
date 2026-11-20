@@ -26,8 +26,9 @@ import { Contact } from '../types';
 export interface EmailSendData {
   recipients: string[];
   cc: string[];
-  subject: string;
-  body: string;
+  /** Left out to have the server use its standard subject and text. */
+  subject?: string;
+  body?: string;
 }
 
 interface EmailSendDialogProps {
@@ -47,6 +48,12 @@ interface EmailSendDialogProps {
     startDate?: string;
     endDate?: string;
   };
+  /**
+   * Send the server's standard email for the document (its subject, text and
+   * attachment): only the recipients are chosen here, so the email cannot drift
+   * from a normal send. Subject and message are not shown and not posted.
+   */
+  standardEmail?: boolean;
 }
 
 const EmailSendDialog: React.FC<EmailSendDialogProps> = ({
@@ -60,6 +67,7 @@ const EmailSendDialog: React.FC<EmailSendDialogProps> = ({
   onSendSuccess,
   onSendEmail,
   documentDetails = {},
+  standardEmail = false,
 }) => {
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
   const [ccContacts, setCcContacts] = useState<string[]>([]);
@@ -214,12 +222,12 @@ BMAsia Music Team`;
       return;
     }
 
-    if (!subject.trim()) {
+    if (!standardEmail && !subject.trim()) {
       setError('Please enter a subject');
       return;
     }
 
-    if (!body.trim()) {
+    if (!standardEmail && !body.trim()) {
       setError('Please enter a message body');
       return;
     }
@@ -236,16 +244,19 @@ BMAsia Music Team`;
       setLoading(true);
       setError('');
 
-      await onSendEmail({
-        recipients: selectedContacts,
-        cc: allCc,
-        subject: subject.trim(),
-        body: body.trim(),
-      });
+      // In standard mode no subject or message is posted: the server uses its standard ones.
+      await onSendEmail(standardEmail
+        ? { recipients: selectedContacts, cc: allCc }
+        : { recipients: selectedContacts, cc: allCc, subject: subject.trim(), body: body.trim() });
 
       onSendSuccess();
       handleClose();
     } catch (err: any) {
+      if (standardEmail) {
+        // Never the server's raw text (a mail server's reply); the fixed message instead.
+        setError(`Failed to send ${documentType}`);
+        return;
+      }
       setError(err.response?.data?.error || err.message || 'Failed to send email');
     } finally {
       setLoading(false);
@@ -407,6 +418,11 @@ BMAsia Music Team`;
           />
         </Box>
 
+        {standardEmail ? (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            The standard {documentType} email is sent, with the PDF attached. Only the recipients are chosen here.
+          </Alert>
+        ) : (<>
         {/* Subject */}
         <Box sx={{ mb: 3 }}>
           <TextField
@@ -435,6 +451,7 @@ BMAsia Music Team`;
             helperText="The document will be automatically attached as a PDF"
           />
         </Box>
+        </>)}
 
         {/* Info note */}
         <Alert severity="info" sx={{ mt: 2 }}>

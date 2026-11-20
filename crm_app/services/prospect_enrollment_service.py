@@ -22,16 +22,19 @@ logger = logging.getLogger(__name__)
 
 
 def enrolment_contact(company, named=None):
-    """The contact a prospect sequence is enrolled with; only an active contact is chosen.
+    """The contact a prospect sequence is enrolled with; only a contact still taking automated email.
 
-    The named contact (a quote's own) if active, else the active primary contact,
-    else the first active contact with an email address.
+    That is an active contact with an email address, its master email switch on
+    and not unsubscribed (crm_app.services.recipients.prospect_contact). The named
+    contact (a quote's own) if it qualifies, else the primary contact, else the
+    first other contact by name.
     """
-    if named is not None and named.is_active:
+    from crm_app.services.recipients import eligible_contacts, prospect_contact
+
+    contacts = Contact.objects.filter(company=company)
+    if named is not None and eligible_contacts(contacts, 'prospect').filter(pk=named.pk).exists():
         return named
-    active = Contact.objects.filter(company=company, is_active=True)
-    return (active.filter(is_primary=True).first()
-            or active.filter(email__isnull=False).exclude(email='').first())
+    return prospect_contact(contacts)
 
 
 class ProspectEnrollmentService:

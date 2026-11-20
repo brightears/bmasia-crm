@@ -48,6 +48,10 @@ export const describeMarkPaidResult = (result: MarkInvoicePaidResult): string =>
   if (result.receipt_email_status === 'sent') {
     return `${done}${receipt} The receipt was emailed to the customer.`;
   }
+  if (result.receipt_email_refusal?.code === 'no_recipient') {
+    const reason = result.receipt_email_refusal.message.replace(/\.$/, '');
+    return `${done}${receipt} The receipt was not emailed: ${reason}. Use Send Receipt to choose the recipients.`;
+  }
   if (result.receipt_email_status?.startsWith('failed')) {
     return `${done}${receipt} The receipt email failed; use Send Receipt to try again.`;
   }
