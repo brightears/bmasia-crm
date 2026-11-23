@@ -2326,7 +2326,8 @@ class ContractViewSet(BaseModelViewSet):
     def _build_zones_table(self, contract, zones=None):
         """Build a styled zones Table flowable for PDF insertion.
         Prefers service_locations (new simple model), falls back to legacy Zone objects.
-        Groups by platform (Soundtrack / Beat Breeze) with Service column."""
+        Service locations print in saved order (see _build_service_locations_table);
+        legacy Zone objects are still grouped by platform (Soundtrack / Beat Breeze)."""
         from reportlab.lib import colors
         from reportlab.lib.units import inch
         from reportlab.platypus import Table, TableStyle, Paragraph
@@ -2484,7 +2485,9 @@ class ContractViewSet(BaseModelViewSet):
 
     def _build_service_locations_table(self, contract, service_locations):
         """Build zones table from ContractServiceLocation records (new simple model).
-        Uses warm BMAsia design palette. Supports pagination for large zone counts."""
+        Rows follow the saved sort order, with the Service cell merged only across
+        adjacent rows of the same service. Uses warm BMAsia design palette.
+        Supports pagination for large zone counts."""
         from reportlab.lib import colors
         from reportlab.lib.units import inch
         from reportlab.platypus import Table, TableStyle, Paragraph
@@ -2512,73 +2515,66 @@ class ContractViewSet(BaseModelViewSet):
         zone_header = ['Property', 'Service', 'Zone']
         if has_pricing:
             zone_header.append('Price/Zone')
-        soundtrack_locs = [l for l in loc_list if l.platform == 'soundtrack']
-        beatbreeze_locs = [l for l in loc_list if l.platform == 'beatbreeze']
-        custom_locs = [l for l in loc_list if l.platform == 'custom']
+        # Rows print in their saved order and the zone numbers follow the rows.
+        # Each row's Service cell names its own service; adjacent rows of the
+        # same service share one merged cell. Rows that share a sort_order keep
+        # the former grouping (Soundtrack, Beat Breeze, then custom products in
+        # order of first appearance), so a contract saved without distinct
+        # positions prints as before.
+        def service_group(loc):
+            if loc.platform in platform_labels:
+                return loc.platform, platform_labels[loc.platform]
+            if loc.platform == 'custom':
+                name = self._canonical_product_label(loc.custom_service_name) or 'Custom'
+                return ('custom', name), paragraph_text(name)
+            return None  # unknown platform: not listed, as before
 
-        # Group custom locs by custom_service_name
-        custom_groups = {}
-        for loc in custom_locs:
-            name = self._canonical_product_label(loc.custom_service_name) or 'Custom'
-            custom_groups.setdefault(name, []).append(loc)
+        grouped_locs = [(loc, service_group(loc)) for loc in loc_list]
+        grouped_locs = [(loc, group) for loc, group in grouped_locs if group is not None]
+        tie_rank = {'soundtrack': 0, 'beatbreeze': 1}
+        for _loc, (group_key, _markup) in grouped_locs:
+            tie_rank.setdefault(group_key, len(tie_rank))
+
+        def saved_position(indexed):
+            index, (loc, (group_key, _markup)) = indexed
+            return (getattr(loc, 'sort_order', 0) or 0, tie_rank[group_key], index)
+
+        ordered_locs = [item for _index, item in sorted(enumerate(grouped_locs), key=saved_position)]
 
         zone_data = [zone_header]
         row_idx = 0
         service_spans = []
+        run_key = None
+        run_start = None
 
-        for platform_locs, platform_key in [
-            (soundtrack_locs, 'soundtrack'),
-            (beatbreeze_locs, 'beatbreeze'),
-        ]:
-            if not platform_locs:
+        for loc, (group_key, service_markup) in ordered_locs:
+            zone_names = location_zone_names(loc)
+            if not zone_names:
                 continue
-            group_start = row_idx + 1
-            for idx, loc in enumerate(platform_locs, 1):
+            if group_key != run_key:
+                if run_key is not None and row_idx > run_start:
+                    service_spans.append((run_start, row_idx))
+                run_key = group_key
+                run_start = row_idx + 1
+                service_name = Paragraph(service_markup, prop_style)
+            else:
+                service_name = ''
+            for zone_name in zone_names:
+                row_idx += 1
                 property_name = Paragraph(
                     paragraph_text(contract.property_name or company.name),
                     prop_style,
-                ) if row_idx == 0 else ''
-                service_name = Paragraph(platform_labels[platform_key], prop_style) if idx == 1 else ''
-                for zone_name in location_zone_names(loc):
-                    row_idx += 1
-                    zone_label = Paragraph(paragraph_text(f"Zone {row_idx}: {zone_name}"), prop_style)
-                    row = [property_name, service_name, zone_label]
-                    if has_pricing:
-                        zone_price = loc.price or contract.price_per_zone
-                        price_str = f"{contract.currency} {zone_price:,.2f}" if zone_price else ''
-                        row.append(price_str)
-                    zone_data.append(row)
-                    property_name = ''
-                    service_name = ''
-            group_end = row_idx
-            if group_end > group_start:
-                service_spans.append((group_start, group_end))
-
-        # Render custom product groups
-        for custom_name, locs in custom_groups.items():
-            if not locs:
-                continue
-            group_start = row_idx + 1
-            for idx, loc in enumerate(locs, 1):
-                property_name = Paragraph(
-                    paragraph_text(contract.property_name or company.name),
-                    prop_style,
-                ) if row_idx == 0 else ''
-                service_name = Paragraph(paragraph_text(custom_name), prop_style) if idx == 1 else ''
-                for zone_name in location_zone_names(loc):
-                    row_idx += 1
-                    zone_label = Paragraph(paragraph_text(f"Zone {row_idx}: {zone_name}"), prop_style)
-                    row = [property_name, service_name, zone_label]
-                    if has_pricing:
-                        zone_price = loc.price or contract.price_per_zone
-                        price_str = f"{contract.currency} {zone_price:,.2f}" if zone_price else ''
-                        row.append(price_str)
-                    zone_data.append(row)
-                    property_name = ''
-                    service_name = ''
-            group_end = row_idx
-            if group_end > group_start:
-                service_spans.append((group_start, group_end))
+                ) if row_idx == 1 else ''
+                zone_label = Paragraph(paragraph_text(f"Zone {row_idx}: {zone_name}"), prop_style)
+                row = [property_name, service_name, zone_label]
+                if has_pricing:
+                    zone_price = loc.price or contract.price_per_zone
+                    price_str = f"{contract.currency} {zone_price:,.2f}" if zone_price else ''
+                    row.append(price_str)
+                zone_data.append(row)
+                service_name = ''
+        if run_key is not None and row_idx > run_start:
+            service_spans.append((run_start, row_idx))
 
         zone_count = row_idx
         if has_pricing:
