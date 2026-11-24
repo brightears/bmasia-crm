@@ -2483,6 +2483,24 @@ class ContractViewSet(BaseModelViewSet):
         zone_label = zone_count if zone_count else 'All'
         return f'{service_name} - {zone_label} Zone(s)'
 
+    @staticmethod
+    def _service_location_price_label(contract, loc):
+        """Price/Zone cell for one service-location row.
+
+        A row's own price wins whenever it is stored, including 0: a zero-price
+        row is a zone included at no charge and prints "Included", the label the
+        quotation uses for complimentary items. Only a row with no price of its
+        own (null) falls back to the contract's price_per_zone, so the printed
+        rows add up to the same total the contract pricing check uses
+        (services/contract_service_locations.py).
+        """
+        if loc.price is None:
+            zone_price = contract.price_per_zone
+            return f"{contract.currency} {zone_price:,.2f}" if zone_price else ''
+        if loc.price == 0:
+            return 'Included'
+        return f"{contract.currency} {loc.price:,.2f}"
+
     def _build_service_locations_table(self, contract, service_locations):
         """Build zones table from ContractServiceLocation records (new simple model).
         Rows follow the saved sort order, with the Service cell merged only across
@@ -2568,9 +2586,7 @@ class ContractViewSet(BaseModelViewSet):
                 zone_label = Paragraph(paragraph_text(f"Zone {row_idx}: {zone_name}"), prop_style)
                 row = [property_name, service_name, zone_label]
                 if has_pricing:
-                    zone_price = loc.price or contract.price_per_zone
-                    price_str = f"{contract.currency} {zone_price:,.2f}" if zone_price else ''
-                    row.append(price_str)
+                    row.append(self._service_location_price_label(contract, loc))
                 zone_data.append(row)
                 service_name = ''
         if run_key is not None and row_idx > run_start:
