@@ -36,6 +36,8 @@ from crm_app.contract_pdf_v2 import (
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_BMASIA_CONTACT_TITLE = 'Director of Operations'
+
 # Production ContractTemplate primary key for the maintained Hilton HPA. Keep
 # the exact-name aliases for fixtures and newly seeded environments, but do not
 # let a cosmetic CRM rename turn off the Hilton signing-copy safety policy.
@@ -3818,7 +3820,7 @@ and<br/><br/>
             # BMAsia contact
             bmasia_contact = contract.bmasia_contact_name or "Norbert Platzer"
             bmasia_email = contract.bmasia_contact_email or "norbert@bmasiamusic.com"
-            bmasia_title = contract.bmasia_contact_title or "Managing Director"
+            bmasia_title = contract.bmasia_contact_title or DEFAULT_BMASIA_CONTACT_TITLE
 
             # Customer contact — fall back to company primary contact, then omit the line if still blank
             # FIX 2026-05-05 (Lyra): never print literal "[Customer Contact Name]" / "[Customer Email]" placeholders
@@ -4739,7 +4741,7 @@ and<br/><br/>
             entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
             entity_phone = '+66 2153 3520'
             entity_tax = '0105548025073'
-            entity_contact = 'Norbert Platzer, Managing Director'
+            entity_contact = f'Norbert Platzer, {DEFAULT_BMASIA_CONTACT_TITLE}'
             entity_contact_phone = '+66 2153 3520'
             entity_contact_email = 'norbert@bmasiamusic.com'
         else:  # BMAsia Limited (Hong Kong)
@@ -4747,7 +4749,7 @@ and<br/><br/>
             entity_address = '22nd Floor, Tai Yau Building, 181 Johnston Road, Wanchai, Hong Kong'
             entity_phone = '+66 2153 3520'
             entity_tax = None
-            entity_contact = 'Norbert Platzer, Managing Director'
+            entity_contact = f'Norbert Platzer, {DEFAULT_BMASIA_CONTACT_TITLE}'
             entity_contact_phone = '+66 2153 3520'
             entity_contact_email = 'norbert@bmasiamusic.com'
 
@@ -5322,7 +5324,7 @@ and<br/><br/>
             entity_address = '725 S-Metro Building, Suite 144, Level 20, Sukhumvit Road, Klongtan Nuea Watthana, Bangkok 10110, Thailand'
             entity_phone = '+66 2153 3520'
             entity_tax = '0105548025073'
-            entity_contact = 'Norbert Platzer, Managing Director'
+            entity_contact = f'Norbert Platzer, {DEFAULT_BMASIA_CONTACT_TITLE}'
             entity_contact_phone = '+66 2153 3520'
             entity_contact_email = 'norbert@bmasiamusic.com'
         else:  # BMAsia Limited (Hong Kong)
@@ -5330,7 +5332,7 @@ and<br/><br/>
             entity_address = '22nd Floor, Tai Yau Building, 181 Johnston Road, Wanchai, Hong Kong'
             entity_phone = '+66 2153 3520'
             entity_tax = None
-            entity_contact = 'Norbert Platzer, Managing Director'
+            entity_contact = f'Norbert Platzer, {DEFAULT_BMASIA_CONTACT_TITLE}'
             entity_contact_phone = '+66 2153 3520'
             entity_contact_email = 'norbert@bmasiamusic.com'
 

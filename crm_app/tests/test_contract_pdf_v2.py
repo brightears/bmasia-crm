@@ -169,6 +169,16 @@ def test_standard_contract_keeps_principal_terms_and_explicit_tailoring(contract
     assert "INTERNAL-ONLY-CRM-TRACKING-SENTINEL" not in text
 
 
+def test_standard_contract_contact_fallback_uses_operations_title_without_changing_signatory(contract, client):
+    response = client.get(f"/api/v1/contracts/{contract.pk}/pdf/")
+
+    _assert_a4(response)
+    text = _text(response.content)
+    assert "BMA: Taylor Reed, Director of Operations" in text
+    assert "BMA: Taylor Reed, Managing Director" not in text
+    assert re.search(r"Chris Andrews .*? Director(?: |$)", text)
+
+
 def test_standard_contract_prints_company_branch_and_witness_role(contract, client):
     contract.company.branch = "Branch 00001"
     contract.company.save(update_fields=["branch"])
