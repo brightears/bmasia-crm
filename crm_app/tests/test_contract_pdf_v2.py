@@ -169,6 +169,28 @@ def test_standard_contract_keeps_principal_terms_and_explicit_tailoring(contract
     assert "INTERNAL-ONLY-CRM-TRACKING-SENTINEL" not in text
 
 
+@pytest.mark.parametrize(("end_date", "expected", "excluded"), [
+    (date(2027, 1, 25),
+     "Duration: 2 months from 26 November 2026 to 25 January 2027",
+     "Duration: from 26 November 2026"),
+    (date(2027, 1, 31),
+     "Duration: from 26 November 2026 to 31 January 2027",
+     "Duration: 3 months from 26 November 2026"),
+])
+def test_standard_contract_only_counts_whole_months_in_duration_wording(
+        contract, client, end_date, expected, excluded):
+    contract.start_date = date(2026, 11, 26)
+    contract.end_date = end_date
+    contract.save(update_fields=["start_date", "end_date"])
+
+    response = client.get(f"/api/v1/contracts/{contract.pk}/pdf/")
+
+    _assert_a4(response)
+    text = _text(response.content)
+    assert expected in text
+    assert excluded not in text
+
+
 def test_standard_contract_contact_fallback_uses_operations_title_without_changing_signatory(contract, client):
     response = client.get(f"/api/v1/contracts/{contract.pk}/pdf/")
 

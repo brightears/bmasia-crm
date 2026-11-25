@@ -9,6 +9,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Sum, Count, Avg
 from django.utils import timezone
 from datetime import datetime, timedelta
+from calendar import monthrange
 from django.contrib.auth import login, logout
 from django.contrib.auth.hashers import check_password
 from rest_framework.authtoken.models import Token
@@ -150,13 +151,22 @@ def redact_secret_changes(changes):
 
 
 def _format_duration(start_date, end_date):
-    """Format duration between two dates as human-readable text."""
+    """Format a whole-month inclusive term; partial months use dates only."""
     if not start_date or not end_date:
         return 'As specified'
-    months = ((end_date.year - start_date.year) * 12 +
-             (end_date.month - start_date.month))
-    if end_date.day > start_date.day:
-        months += 1
+    exclusive_end = end_date + timedelta(days=1)
+    months = ((exclusive_end.year - start_date.year) * 12 +
+              (exclusive_end.month - start_date.month))
+    target_index = start_date.year * 12 + start_date.month - 1 + months
+    target_year, target_month_index = divmod(target_index, 12)
+    target_month = target_month_index + 1
+    anniversary = start_date.replace(
+        year=target_year,
+        month=target_month,
+        day=min(start_date.day, monthrange(target_year, target_month)[1]),
+    )
+    if anniversary != exclusive_end:
+        return ''
     if months <= 0:
         return '0 months'
     if months == 1:
@@ -3533,8 +3543,9 @@ and<br/><br/>
             # Clause 4: Duration
             if contract.start_date and contract.end_date:
                 duration_text = _format_duration(contract.start_date, contract.end_date)
+                duration_prefix = f'{duration_text} ' if duration_text else ''
                 elements.append(Paragraph(
-                    f"<b>{clause_num}.</b> Duration: {duration_text} from {contract.start_date.strftime('%d %B %Y')} to {contract.end_date.strftime('%d %B %Y')}"
+                    f"<b>{clause_num}.</b> Duration: {duration_prefix}from {contract.start_date.strftime('%d %B %Y')} to {contract.end_date.strftime('%d %B %Y')}"
                     f"{clause_addition_markup(placed_terms, 'duration', record=contract.pk)}",
                     clause_style
                 ))
@@ -3677,8 +3688,9 @@ and<br/><br/>
                 tcv = _contract_total_contract_value(
                     total_with_tax, contract_duration_months, contract, contract_line_items)
                 duration_label = _format_duration(contract.start_date, contract.end_date)
+                duration_suffix = f' ({duration_label})' if duration_label else ''
                 elements.append(Paragraph(
-                    f"&nbsp;&nbsp;&nbsp;&nbsp;<b>Total Contract Value ({duration_label}):</b> {contract.currency} {tcv:,.2f}",
+                    f"&nbsp;&nbsp;&nbsp;&nbsp;<b>Total Contract Value{duration_suffix}:</b> {contract.currency} {tcv:,.2f}",
                     clause_style
                 ))
 
@@ -4609,7 +4621,8 @@ and<br/><br/>
             years = ma_duration_months / 12
             ma_tcv = float(contract.value) * years
             duration_label = _format_duration(contract.start_date, contract.end_date)
-            details_data.append(['Total Contract Value', f"{currency_symbol}{ma_tcv:,.2f} ({duration_label})"])
+            duration_suffix = f' ({duration_label})' if duration_label else ''
+            details_data.append(['Total Contract Value', f"{currency_symbol}{ma_tcv:,.2f}{duration_suffix}"])
 
         if contract.monthly_value > 0:
             details_data.append(['Monthly Value', f"{currency_symbol}{contract.monthly_value:,.2f}"])
@@ -5082,9 +5095,10 @@ and<br/><br/>
             years = ma_duration_months / 12
             ma_tcv_with_tax = total_with_tax * years
             duration_label = _format_duration(contract.start_date, contract.end_date)
+            duration_suffix = f' ({duration_label})' if duration_label else ''
             elements.append(Spacer(1, 0.1*inch))
             elements.append(Paragraph(
-                f"<b>Total Contract Value ({duration_label}):</b> {currency_symbol}{ma_tcv_with_tax:,.2f}",
+                f"<b>Total Contract Value{duration_suffix}:</b> {currency_symbol}{ma_tcv_with_tax:,.2f}",
                 att_body_style
             ))
 
@@ -5613,9 +5627,10 @@ and<br/><br/>
             years = ma_duration_months / 12
             ma_tcv_with_tax = total_with_tax * years
             duration_label = _format_duration(contract.start_date, contract.end_date)
+            duration_suffix = f' ({duration_label})' if duration_label else ''
             elements.append(Spacer(1, 0.1*inch))
             elements.append(Paragraph(
-                f"<b>Total Contract Value ({duration_label}):</b> {currency_symbol}{ma_tcv_with_tax:,.2f}",
+                f"<b>Total Contract Value{duration_suffix}:</b> {currency_symbol}{ma_tcv_with_tax:,.2f}",
                 body_style
             ))
 
