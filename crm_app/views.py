@@ -28,6 +28,7 @@ import uuid
 from decimal import Decimal
 from crm_app.services.document_context import customer_legal_entity_name, effective_billing_entity
 from crm_app.services.document_entity_filters import filter_document_entity
+from crm_app.services.recipients import NoRecipient, no_recipient_response
 from crm_app.dates import business_today
 from crm_app.contract_pdf_v2 import (
     clause_addition_markup, fill_template_values, literal_hyphens, optional_clause_paragraph, paragraph_text,
@@ -1407,6 +1408,9 @@ class ContractViewSet(BaseModelViewSet):
             request=request   # Critical for per-user SMTP authentication
         )
 
+        refusal = no_recipient_response(message)  # nobody set to receive it: 422 with a code
+        if refusal is not None:
+            return refusal
         if not success:
             if isinstance(message, dict):
                 response_status = message.get('status_code', status.HTTP_409_CONFLICT)
@@ -6326,6 +6330,9 @@ class InvoiceViewSet(BaseModelViewSet):
             request=request   # Critical for per-user SMTP authentication
         )
 
+        refusal = no_recipient_response(message)  # nobody set to receive it: 422 with a code
+        if refusal is not None:
+            return refusal
         if not success:
             return Response(
                 {'error': safe_mail_message(request, message)},
@@ -6418,6 +6425,7 @@ class InvoiceViewSet(BaseModelViewSet):
         self.log_action('UPDATE', invoice, changes)
 
         receipt_email_status = 'not_requested'
+        receipt_email_refusal = None
         if data['send_receipt']:
             try:
                 success, message = EmailService().send_receipt_email(invoice_id=invoice.id, request=request)
@@ -6425,6 +6433,8 @@ class InvoiceViewSet(BaseModelViewSet):
                 success, message = False, exc
             receipt_email_status = 'sent' if success else (
                 f'failed: {receipt_email_failure_text(request, invoice, message)}')
+            if not success and isinstance(message, NoRecipient):
+                receipt_email_refusal = message.body()  # nobody set to receive it; the page matches the code
 
         return Response({
             'message': ('Receipt issued for an invoice already marked paid' if receipt_only
@@ -6433,6 +6443,7 @@ class InvoiceViewSet(BaseModelViewSet):
             'paid_date': invoice.paid_date.isoformat(),
             'receipt_only': receipt_only,
             'receipt_email_status': receipt_email_status,
+            'receipt_email_refusal': receipt_email_refusal,
         })
 
     # GET next-receipt-number was removed: nothing called it, and a number handed out without
@@ -6465,6 +6476,9 @@ class InvoiceViewSet(BaseModelViewSet):
             request=request
         )
 
+        refusal = no_recipient_response(message)  # nobody set to receive it: 422 with a code
+        if refusal is not None:
+            return refusal
         if not success:
             return Response(
                 {'error': safe_mail_message(request, message)},
@@ -7306,6 +7320,9 @@ class QuoteViewSet(BaseModelViewSet):
             request=request   # Critical for per-user SMTP authentication
         )
 
+        refusal = no_recipient_response(message)  # nobody set to receive it: 422 with a code
+        if refusal is not None:
+            return refusal
         if not success:
             return Response(
                 {'error': safe_mail_message(request, message)},

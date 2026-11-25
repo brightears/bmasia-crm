@@ -42,6 +42,7 @@ import {
 } from '@mui/icons-material';
 import { Invoice, EmailLogEntry, Contact } from '../types';
 import ApiService, { MarkInvoicePaidResult } from '../services/api';
+import RecipientFallback, { noRecipientMessage } from './RecipientFallback';
 import EmailSendDialog, { EmailSendData } from './EmailSendDialog';
 import MarkPaidDialog, { describeMarkPaidResult } from './MarkPaidDialog';
 import { formatDate as formatDisplayDate, formatMoney } from '../theme';
@@ -64,6 +65,7 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [sendFallback, setSendFallback] = useState<string | null>(null);
   const [emailLogs, setEmailLogs] = useState<EmailLogEntry[]>([]);
 
   // Receipt email
@@ -108,7 +110,12 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
         .then(setEmailLogs)
         .catch(() => {});
     } catch (err) {
-      setError('Failed to send invoice');
+      const noRecipient = noRecipientMessage(err);
+      if (noRecipient) {
+        setSendFallback(noRecipient);
+      } else {
+        setError('Failed to send invoice');
+      }
     } finally {
       setLoading(false);
     }
@@ -677,6 +684,25 @@ const InvoiceDetail: React.FC<InvoiceDetailProps> = ({
           documentDetails={{
             currency: invoice.currency,
             totalValue: invoice.total_amount,
+          }}
+        />
+      )}
+      {invoice && sendFallback && (
+        <RecipientFallback
+          open
+          message={sendFallback}
+          documentType="invoice"
+          documentId={invoice.id}
+          documentNumber={invoice.invoice_number}
+          companyId={invoice.company}
+          companyName={invoice.company_name}
+          onClose={() => setSendFallback(null)}
+          onSendEmail={(data) => ApiService.sendInvoiceEmail(invoice.id, data)}
+          onSent={() => {
+            setSendFallback(null);
+            setSuccess('Invoice sent');
+            onInvoiceUpdate();
+            ApiService.getEmailLogs({ invoice: invoice.id }).then(setEmailLogs).catch(() => {});
           }}
         />
       )}

@@ -56,8 +56,11 @@ def _contract(company):
 
 
 def _assert_nobody(result):
+    from crm_app.services.recipients import NoRecipient
+
     ok, message = result
-    assert ok is False and 'No recipients found' in message
+    # Nobody is set to receive it: the senders' no-recipient refusal, and nothing sent.
+    assert ok is False and isinstance(message, NoRecipient)
     assert mail.outbox == []
 
 

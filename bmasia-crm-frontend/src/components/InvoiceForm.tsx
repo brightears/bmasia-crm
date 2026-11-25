@@ -42,6 +42,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Invoice, InvoiceLineItem, Company, Contract } from '../types';
 import ApiService from '../services/api';
+import RecipientFallback, { noRecipientMessage } from './RecipientFallback';
 import DocumentIssuerField from './DocumentIssuerField';
 import { DOCUMENT_BILLING_ENTITIES, effectiveBillingEntity, issuerPaymentTerms, documentValidationMessage } from '../utils/documentTailoring';
 import { documentZoneLinks } from '../utils/contractZones';
@@ -128,6 +129,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [sendFallback, setSendFallback] = useState<{ invoice: Invoice; message: string } | null>(null);
   const dialogContentRef = useRef<HTMLDivElement>(null);
 
   // Form fields
@@ -589,6 +591,14 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
         try {
           await ApiService.sendInvoice(savedInvoice.id);
         } catch (emailError) {
+          // The invoice is saved either way. When no contact is set to receive
+          // invoices, say so and let the user choose the recipients.
+          const noRecipient = noRecipientMessage(emailError);
+          if (noRecipient) {
+            onSave(savedInvoice);
+            setSendFallback({ invoice: savedInvoice, message: noRecipient });
+            return;
+          }
           logApiError('Failed to send invoice email:', emailError);
           // Don't fail the entire operation if email fails
         }
@@ -597,7 +607,7 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
       onSave(savedInvoice);
       onClose();
     } catch (err: any) {
-      console.error('Invoice save error:', err.response?.data || err.message);
+      logApiError('Invoice save error:', err);
       // Parse DRF field-level errors (e.g. {"company": ["This field is required."]})
       setError(documentValidationMessage(err.response?.data, 'Failed to save invoice'));
     } finally {
@@ -1102,6 +1112,20 @@ const InvoiceForm: React.FC<InvoiceFormProps> = ({
           {loading ? 'Saving...' : mode === 'create' ? 'Create Invoice' : 'Update Invoice'}
         </Button>
       </DialogActions>
+      {sendFallback && (
+        <RecipientFallback
+          open
+          message={`The invoice is saved but was not sent. ${sendFallback.message}`}
+          documentType="invoice"
+          documentId={sendFallback.invoice.id}
+          documentNumber={sendFallback.invoice.invoice_number}
+          companyId={sendFallback.invoice.company}
+          companyName={sendFallback.invoice.company_name}
+          onClose={() => { setSendFallback(null); onClose(); }}
+          onSendEmail={(data) => ApiService.sendInvoiceEmail(sendFallback.invoice.id, data)}
+          onSent={() => { setSendFallback(null); onClose(); }}
+        />
+      )}
     </Dialog>
   );
 };
