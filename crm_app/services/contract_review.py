@@ -20,8 +20,38 @@ from crm_app.services.rene_phase2 import (
 from crm_app.services.rene_phase2_common import rfc3339
 
 
+FINAL_CONTRACT_NUMBER = re.compile(r'(?:HK|TH)-CT\d{5,}')
+
+
 class ContractReviewError(ValueError):
     """The requested review cannot be prepared without changing its scope."""
+
+
+def _render_numbered_sent_contract(contract, render_pdf):
+    """Render a Sent contract that already carries its final number.
+
+    The caller holds the row lock and has checked expected_version. Nothing is
+    reserved and nothing is written: a revised Sent contract only needs its
+    current PDF, under the number the customer already has.
+    """
+    if FINAL_CONTRACT_NUMBER.fullmatch(contract.contract_number or '') is None:
+        raise ContractReviewError(
+            'A Sent contract without a final HK-CT/TH-CT number needs reconciliation; '
+            'no number is reserved for a Sent contract.'
+        )
+    if contract.renewed_from_id and contract.renewed_from.company_id != contract.company_id:
+        raise ContractReviewError('Renewal and predecessor must belong to the same company.')
+    response = render_pdf(contract)
+    if response.status_code != 200 or not response.content.startswith(b'%PDF-'):
+        raise ContractReviewError('Contract PDF generation failed; nothing was changed.')
+    return response, {
+        'contract_id': str(contract.id),
+        'contract_number': contract.contract_number,
+        'status': contract.status,
+        'sent_date': contract.sent_date.isoformat() if contract.sent_date else None,
+        'updated_at': rfc3339(contract.updated_at),
+        'customer_delivery_performed': False,
+    }
 
 
 def generate_numbered_renewal_review(contract_id, expected_version, render_pdf):
@@ -39,6 +69,10 @@ def generate_numbered_contract_review(contract_id, expected_version, render_pdf,
     The contract row remains locked through rendering. A failed PDF rolls back
     the reservation; successful retries reuse the already reserved number.
     No save signals, lifecycle transitions, or customer delivery are invoked.
+
+    A Sent contract that already carries its final number is rendered under the
+    same lock and version check without reserving or writing anything (not for
+    renewal-only calls, which stay Draft-only). Other statuses are refused.
     """
     try:
         expected = parse_datetime(expected_version) if isinstance(expected_version, str) else None
@@ -56,8 +90,15 @@ def generate_numbered_contract_review(contract_id, expected_version, render_pdf,
         raise ContractReviewError('stale_read: contract changed; read it again before preparing the review PDF.')
     if require_renewal and (contract.status != 'Draft' or not contract.renewed_from_id):
         raise ContractReviewError('Numbered renewal review requires an existing linked renewal in Draft status.')
+    if contract.status == 'Sent':
+        return _render_numbered_sent_contract(contract, render_pdf)
     if contract.status != 'Draft':
-        raise ContractReviewError('A final number can be reserved only for a Draft contract.')
+        raise ContractReviewError(
+            f'A final number can be reserved only for a Draft contract; this contract is '
+            f'{contract.status}. Only a Sent contract that already carries its final number can be '
+            f're-rendered here, because a fresh PDF of a {contract.status} contract can differ from '
+            f'the signed copy.'
+        )
     if contract.renewed_from_id and contract.renewed_from.company_id != contract.company_id:
         raise ContractReviewError('Renewal and predecessor must belong to the same company.')
     if contract.sent_date is not None:
@@ -89,7 +130,7 @@ def generate_numbered_contract_review(contract_id, expected_version, render_pdf,
                 'post_version': rfc3339(contract.updated_at),
             },
         )
-    elif re.fullmatch(r'(?:HK|TH)-CT\d{5,}', number) is None:
+    elif FINAL_CONTRACT_NUMBER.fullmatch(number) is None:
         raise ContractReviewError('The existing contract number needs reconciliation before review preparation.')
 
     response = render_pdf(contract)

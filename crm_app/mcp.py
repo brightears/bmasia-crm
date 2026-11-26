@@ -2325,6 +2325,12 @@ def generate_contract_pdf(
     reserve_final_number=True does the same for any Draft contract, new or
     renewal: use it for the customer-ready PDF so the customer receives the
     permanent HK-CT/TH-CT number that the later Sent record keeps.
+
+    A Sent contract that already has its HK-CT/TH-CT number (for example after
+    a revision) renders through the same reserve_final_number=True call with
+    the current expected_version: nothing is reserved and no field changes.
+    A Sent contract without a final number, and Active, Renewed, Expired or
+    Cancelled contracts, are refused. reserve_renewal_number stays Draft-only.
     """
     from django.test import RequestFactory
     from crm_app.models import Contract
