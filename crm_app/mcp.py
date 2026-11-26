@@ -360,7 +360,8 @@ class QuoteQuery(_CaseInsensitiveFilters, ModelQueryToolset):
     model = Quote
     fields = [
         'id', 'quote_number', 'company', 'contact', 'opportunity', 'status', 'quote_type',
-        'valid_from', 'valid_until', 'subtotal', 'tax_amount', 'discount_amount', 'total_value', 'currency',
+        'valid_from', 'valid_until', 'sent_date',
+        'subtotal', 'tax_amount', 'discount_amount', 'total_value', 'currency',
         'billing_entity', 'billing_frequency', 'contract_duration_months', 'payment_schedule',
         'terms_conditions', 'notes', 'created_at', 'updated_at',
     ]

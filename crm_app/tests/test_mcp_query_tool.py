@@ -105,6 +105,7 @@ def data():
     opportunity = Opportunity.objects.create(company=resort, name='Query Spa upgrade',
                                              expected_value=Decimal('750.00'))
     quote = Quote.objects.create(company=hotel, contact=contact, quote_number='TH-QT-QUERY-1',
+                                 status='Sent', sent_date=date(2026, 11, 2),
                                  valid_from=date(2026, 11, 1), valid_until=date(2026, 12, 1))
     task = Task.objects.create(company=hotel, title='Query follow up', related_contact=contact,
                                related_contract=active, related_opportunity=opportunity)
@@ -150,7 +151,7 @@ def test_newly_published_fields_are_in_the_schema():
         'contract': {'tax_rate', 'tax_amount', 'discount_percentage'},
         'invoice': {'issue_date', 'discount_amount'},
         'opportunity': {'expected_value'},
-        'quote': {'contact', 'tax_amount', 'discount_amount'},
+        'quote': {'contact', 'tax_amount', 'discount_amount', 'sent_date'},
         'task': {'related_contact', 'related_contract', 'related_opportunity'},
         'zone': {'status', 'platform', 'is_orphaned', 'device', 'device_name', 'last_seen_online'},
     }
@@ -185,6 +186,15 @@ def test_pdf_guidance_on_document_collections():
 def test_match_on_contract_status(data):
     rows = run_query('contract', [{'$match': {'status': 'Sent'}}, {'$project': {'contract_number': 1}}])
     assert rows == [{'contract_number': 'HK-CT-QUERY-2'}]
+
+
+def test_query_quote_send_bookkeeping(data):
+    rows = run_query('quote', [{'$project': {'quote_number': 1, 'status': 1, 'sent_date': 1}}])
+    assert rows == [{
+        'quote_number': 'TH-QT-QUERY-1',
+        'status': 'Sent',
+        'sent_date': '2026-11-02',
+    }]
 
 
 def test_lookup_contract_to_company_with_projection(data):

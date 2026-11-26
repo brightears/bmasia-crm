@@ -235,7 +235,6 @@ FIELD_ALIASES = {
     ('contract', 'documents'): ('hint', _DOCUMENTS_HINT),
     ('contract', 'quote'): ('hint', "a contract's source quote is not published; query quote by company"),
     ('contract', 'source_quote'): ('hint', "a contract's source quote is not published; query quote by company"),
-    ('quote', 'sent_date'): ('hint', 'quote send dates are not published; status shows whether it was sent'),
     ('*', 'payment_method'): ('hint', 'payment method is not published; use status and paid_date on invoice'),
 }
 

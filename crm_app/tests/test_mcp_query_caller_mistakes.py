@@ -363,7 +363,6 @@ NEW_HINTS = {
                                "with contract = the contract's id",
     ('contract', 'quote'): "a contract's source quote is not published; query quote by company",
     ('contract', 'source_quote'): "a contract's source quote is not published; query quote by company",
-    ('quote', 'sent_date'): 'quote send dates are not published; status shows whether it was sent',
     ('invoice', 'payment_method'): 'payment method is not published; use status and paid_date on invoice',
 }
 
