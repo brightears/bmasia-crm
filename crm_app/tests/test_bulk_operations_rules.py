@@ -732,6 +732,7 @@ ACTION_RULES = {
     ('prospect-enrollments', 'resume'): 'rule: one',
     ('ai-email-drafts', 'approve'): 'rule: one draft', ('ai-email-drafts', 'edit_and_approve'): 'rule: one draft',
     ('ai-email-drafts', 'reject'): 'rule: one draft',
+    ('research-leads', 'approve'): 'rule: one lead, a person', ('research-leads', 'reject'): 'rule: one lead, a person',
     # support
     ('tickets', 'add_comment'): 'rule: one ticket', ('tickets', 'assign'): 'rule: one ticket',
     ('kb/articles', 'add_attachment'): 'rule: one article', ('kb/articles', 'link_to_ticket'): 'rule: one link',

@@ -10,6 +10,7 @@ import {
   HistoryEduOutlined,
   TaskAltOutlined,
   MarkEmailReadOutlined,
+  TravelExploreOutlined,
   TrackChangesOutlined,
   ReceiptLongOutlined,
   ShowChartOutlined,
@@ -82,6 +83,7 @@ export const buildNavGroups = (
     title: 'Sales',
     items: [
       { text: 'Opportunities', icon: <TrendingUp />, path: '/opportunities' },
+      { text: 'AI lead research', icon: <TravelExploreOutlined />, path: '/research-leads' },
       { text: 'Quotes', icon: <RequestQuoteOutlined />, path: '/quotes' },
       { text: 'Contracts', icon: <HistoryEduOutlined />, path: '/contracts' },
       { text: 'Renewals', icon: <AutorenewOutlined />, path: '/renewals' },

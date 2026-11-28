@@ -12,7 +12,8 @@ import {
   APAgingReport, APAgingSummary, OverdueExpense, MonthlyExpenseSummary,
   PLStatement, PLComparative, PLTrendData,
   EmailLogEntry,
-  CareTouch
+  CareTouch,
+  ResearchLead
 } from '../types';
 import { authApi } from './authService';
 import { TimelinePage, TimelineQuery, timelineParams } from '../components/timeline/timelineModel';
@@ -1798,6 +1799,27 @@ class ApiService {
 
   async getAIEmailDraftPendingCount(): Promise<{ count: number }> {
     const response = await authApi.get('/ai-email-drafts/pending_count/');
+    return response.data;
+  }
+
+  // AI lead research (weekly routine proposes leads; a person approves them)
+  async getResearchLeads(params?: Record<string, string | number>): Promise<{ results: ResearchLead[]; count: number } | ResearchLead[]> {
+    const response = await authApi.get('/research-leads/', { params });
+    return response.data;
+  }
+
+  async approveResearchLead(id: string, data?: { service_type?: 'beatbreeze' | 'soundtrack' }): Promise<ResearchLead & { sequence_enrollment_requested: boolean }> {
+    const response = await authApi.post(`/research-leads/${id}/approve/`, data || {});
+    return response.data;
+  }
+
+  async rejectResearchLead(id: string, reason?: string): Promise<ResearchLead> {
+    const response = await authApi.post(`/research-leads/${id}/reject/`, { reason: reason || '' });
+    return response.data;
+  }
+
+  async getResearchLeadPendingCount(): Promise<{ count: number }> {
+    const response = await authApi.get('/research-leads/pending_count/');
     return response.data;
   }
 

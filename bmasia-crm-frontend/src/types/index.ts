@@ -1851,6 +1851,41 @@ export interface ProspectReply {
   created_at: string;
 }
 
+export interface ResearchLead {
+  id: string;
+  run: string | null;
+  status: 'new' | 'approved' | 'rejected';
+  venue_name: string;
+  brand_or_group: string;
+  segment: 'hotel' | 'retail' | 'qsr' | 'fnb' | 'other';
+  segment_display: string;
+  country: string;
+  city: string;
+  opening_timeframe: string;
+  signal: string;
+  source_urls: string[];
+  website: string;
+  estimated_zones: number | null;
+  suggested_product: 'beatbreeze' | 'soundtrack';
+  suggested_product_display: string;
+  fit_reason: string;
+  decision_maker_name: string;
+  decision_maker_title: string;
+  contact_email: string;
+  personal_hook: string;
+  score: number;
+  matched_company: string | null;
+  matched_company_name: string | null;
+  opportunity: string | null;
+  opportunity_name: string | null;
+  reviewed_by: string | number | null;
+  reviewed_by_name: string | null;
+  reviewed_at: string | null;
+  rejection_reason: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AIEmailDraft {
   id: string;
   execution: string;

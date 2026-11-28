@@ -713,6 +713,7 @@ class Opportunity(TimestampedModel):
         ('Partner', 'Partner'),
         ('Direct Mail', 'Direct Mail'),
         ('Webinar', 'Webinar'),
+        ('AI Research', 'AI Research'),
         ('Other', 'Other'),
     ]
 
@@ -5852,3 +5853,95 @@ class CareTouch(models.Model):
 
     def __str__(self):
         return f"{self.kind} {self.occurred_at:%Y-%m-%d} ({self.source})"
+
+
+class LeadResearchRun(TimestampedModel):
+    """One run of the weekly lead-research routine (Claude + web search).
+
+    A run only proposes leads. Nothing it finds becomes a company, contact or
+    opportunity, and nothing is emailed, until a person approves the lead.
+    """
+    STATUS_CHOICES = [
+        ('running', 'Running'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='running')
+    segments = models.JSONField(default=list, blank=True, help_text="Segments searched, e.g. ['hotel', 'retail', 'qsr']")
+    countries = models.JSONField(default=list, blank=True)
+    model = models.CharField(max_length=100, blank=True)
+    leads_proposed = models.IntegerField(default=0)
+    leads_saved = models.IntegerField(default=0)
+    duplicates_skipped = models.IntegerField(default=0)
+    web_searches = models.IntegerField(default=0)
+    input_tokens = models.IntegerField(default=0)
+    output_tokens = models.IntegerField(default=0)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True)
+    triggered_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='lead_research_runs')
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Lead research {self.created_at:%Y-%m-%d} ({self.status}, {self.leads_saved} leads)"
+
+
+class ResearchLead(TimestampedModel):
+    """A venue opening or expansion found by the research routine, waiting for review."""
+    SEGMENT_CHOICES = [
+        ('hotel', 'Hotel / Resort'),
+        ('retail', 'Retail'),
+        ('qsr', 'Quick Service Restaurant'),
+        ('fnb', 'Restaurant / Bar / Cafe'),
+        ('other', 'Other'),
+    ]
+    STATUS_CHOICES = [
+        ('new', 'New'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+    PRODUCT_CHOICES = [
+        ('beatbreeze', 'Beat Breeze'),
+        ('soundtrack', 'Soundtrack'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    run = models.ForeignKey(LeadResearchRun, on_delete=models.SET_NULL, null=True, blank=True, related_name='leads')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='new', db_index=True)
+
+    venue_name = models.CharField(max_length=255)
+    brand_or_group = models.CharField(max_length=255, blank=True)
+    segment = models.CharField(max_length=20, choices=SEGMENT_CHOICES, default='other')
+    country = models.CharField(max_length=100, blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    opening_timeframe = models.CharField(max_length=100, blank=True, help_text="As reported, e.g. 'Q2 2027' or 'opened Nov 2026'")
+    signal = models.TextField(help_text="What happened: opening, rebrand, renovation, new outlets")
+    source_urls = models.JSONField(default=list, blank=True)
+    website = models.URLField(blank=True)
+    estimated_zones = models.IntegerField(null=True, blank=True)
+    suggested_product = models.CharField(max_length=20, choices=PRODUCT_CHOICES, default='beatbreeze')
+    fit_reason = models.TextField(blank=True)
+    decision_maker_name = models.CharField(max_length=255, blank=True)
+    decision_maker_title = models.CharField(max_length=255, blank=True)
+    contact_email = models.EmailField(blank=True, help_text="Only a publicly listed business address")
+    personal_hook = models.TextField(blank=True, help_text="A specific detail to open the outreach with")
+    score = models.IntegerField(default=0, help_text="Fit score 0-100 from the research model")
+    dedupe_key = models.CharField(max_length=255, db_index=True)
+
+    matched_company = models.ForeignKey('Company', on_delete=models.SET_NULL, null=True, blank=True, related_name='research_leads')
+    opportunity = models.ForeignKey('Opportunity', on_delete=models.SET_NULL, null=True, blank=True, related_name='research_leads')
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_research_leads')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ['-score', '-created_at']
+        indexes = [
+            models.Index(fields=['status', '-score']),
+        ]
+
+    def __str__(self):
+        return f"{self.venue_name} ({self.get_segment_display()}, {self.status})"
