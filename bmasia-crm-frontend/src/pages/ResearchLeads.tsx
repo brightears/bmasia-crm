@@ -25,6 +25,7 @@ import { CheckCircle, Cancel, TravelExploreOutlined } from '@mui/icons-material'
 import { Link as RouterLink } from 'react-router-dom';
 import { ResearchLead } from '../types';
 import ApiService from '../services/api';
+import { logApiError } from '../utils/logApiError';
 
 type LeadStatus = ResearchLead['status'] | '';
 
@@ -78,7 +79,7 @@ const ResearchLeads: React.FC = () => {
       const data = await ApiService.getResearchLeads(params);
       setLeads(Array.isArray(data) ? data : data.results);
     } catch (err) {
-      console.error('Failed to load research leads', err);
+      logApiError('Failed to load research leads', err);
       setError('Could not load research leads.');
     } finally {
       setLoading(false);
@@ -101,7 +102,7 @@ const ResearchLeads: React.FC = () => {
       );
       await load();
     } catch (err) {
-      console.error('Approve failed', err);
+      logApiError('Approve research lead failed', err);
       setToast('Could not approve this lead.');
     } finally {
       setBusyId(null);
@@ -117,7 +118,7 @@ const ResearchLeads: React.FC = () => {
       setRejecting(null);
       await load();
     } catch (err) {
-      console.error('Reject failed', err);
+      logApiError('Reject research lead failed', err);
       setToast('Could not reject this lead.');
     } finally {
       setBusyId(null);
