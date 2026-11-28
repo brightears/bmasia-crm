@@ -102,6 +102,8 @@ router.register(r'prospect-sequences', views.ProspectSequenceViewSet, basename='
 router.register(r'prospect-enrollments', views.ProspectEnrollmentViewSet, basename='prospect-enrollment')
 router.register(r'prospect-replies', views.ProspectReplyViewSet, basename='prospect-reply')
 router.register(r'ai-email-drafts', views.AIEmailDraftViewSet, basename='ai-email-draft')
+router.register(r'research-leads', views.ResearchLeadViewSet, basename='research-lead')
+router.register(r'lead-research-runs', views.LeadResearchRunViewSet, basename='lead-research-run')
 
 # The API URLs are now determined automatically by the router.
 urlpatterns = [

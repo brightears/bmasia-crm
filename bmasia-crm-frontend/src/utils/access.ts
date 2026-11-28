@@ -75,6 +75,7 @@ export const MENU_PATH_MODULE: Record<string, PageModule> = {
   '/renewals': 'contracts',
   '/tasks': 'tasks',
   '/ai-drafts': 'opportunities',
+  '/research-leads': 'prospect-sequences',
   '/targets': 'targets',
   '/invoices': 'invoices',
   '/revenue': 'finance-reports',

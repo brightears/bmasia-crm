@@ -59,6 +59,7 @@ import ActionCenter from './pages/ActionCenter';
 import NeedsFixing from './pages/NeedsFixing';
 import ProspectSequences from './pages/ProspectSequences';
 import AIEmailDrafts from './pages/AIEmailDrafts';
+import ResearchLeads from './pages/ResearchLeads';
 // import LoadingSkeleton from './components/LoadingSkeleton';
 import NotFoundPage from './pages/NotFound';
 import ReviewQueue from './pages/review/ReviewQueue';
@@ -209,6 +210,14 @@ function App() {
           element={
             <ProtectedRoute requiredModule="opportunities">
               <AIEmailDrafts />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/research-leads"
+          element={
+            <ProtectedRoute requiredModule="prospect-sequences">
+              <ResearchLeads />
             </ProtectedRoute>
           }
         />

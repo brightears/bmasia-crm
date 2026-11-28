@@ -89,6 +89,7 @@ from .models import (
     ProspectSequence, ProspectSequenceStep, ProspectEnrollment, ProspectStepExecution,
     ProspectReply, AIEmailDraft,
     RevenueRecognitionSchedule, RevenueRecognitionEntry,
+    LeadResearchRun, ResearchLead,
 )
 from .serializers import (
     UserSerializer, CompanySerializer, ContactSerializer, NoteSerializer,
@@ -109,7 +110,8 @@ from .serializers import (
     VendorSerializer, ExpenseCategorySerializer, RecurringExpenseSerializer, ExpenseEntrySerializer, ExpenseEntryCreateSerializer,
     EmailLogSerializer,
     ProspectSequenceSerializer, ProspectSequenceStepSerializer, ProspectEnrollmentSerializer,
-    ProspectStepExecutionSerializer, ProspectReplySerializer, AIEmailDraftSerializer
+    ProspectStepExecutionSerializer, ProspectReplySerializer, AIEmailDraftSerializer,
+    ResearchLeadSerializer, LeadResearchRunSerializer,
 )
 from .services.delete_guards import GuardedDestroyMixin
 from .request_policy import (
@@ -122,7 +124,7 @@ from .api_errors import (
 from .permissions import (
     RoleBasedPermission, DepartmentPermission, CompanyAccessPermission,
     TaskAssigneePermission, ReadOnlyForNonOwner,
-    CommercialDocumentPreviewPermission, PersonSignedInToWebsite,
+    CommercialDocumentPreviewPermission, PersonSignedInToWebsite, IsSalesOrAdmin,
 )
 from .rene_auth import (
     IsReneRenewalReaderOrAuthenticatedUser,
@@ -13940,3 +13942,59 @@ def email_tracking_pixel(request, token):
     response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response['Pragma'] = 'no-cache'
     return response
+
+
+class ResearchLeadViewSet(viewsets.ReadOnlyModelViewSet):
+    """Leads proposed by the weekly lead-research routine, for a person to approve or reject.
+
+    Approving creates the company, contact (only with a published business email)
+    and opportunity, then lets the existing new_opportunity prospect sequences
+    enroll it; their AI emails still wait in AI Email Drafts. Nothing is sent here.
+    """
+    queryset = ResearchLead.objects.select_related(
+        'matched_company', 'opportunity', 'reviewed_by', 'run',
+    ).all()
+    serializer_class = ResearchLeadSerializer
+    permission_classes = [IsAuthenticated, IsSalesOrAdmin, WritesOnWebsite]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter, filters.SearchFilter]
+    filterset_fields = ['status', 'segment', 'country', 'suggested_product', 'run']
+    search_fields = ['venue_name', 'brand_or_group', 'city', 'signal']
+    ordering_fields = ['score', 'created_at']
+    ordering = ['-score', '-created_at']
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        from .services.lead_research_service import approve_lead
+        lead = self.get_object()
+        service_type = request.data.get('service_type') or None
+        if service_type not in (None, 'beatbreeze', 'soundtrack'):
+            return Response({'error': 'service_type must be beatbreeze or soundtrack'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            lead, enrolled = approve_lead(lead, request.user, service_type=service_type)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        data = dict(ResearchLeadSerializer(lead).data)
+        data['sequence_enrollment_requested'] = bool(enrolled)
+        return Response(data)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        from .services.lead_research_service import reject_lead
+        lead = self.get_object()
+        try:
+            lead = reject_lead(lead, request.user, request.data.get('reason', ''))
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(ResearchLeadSerializer(lead).data)
+
+    @action(detail=False, methods=['get'])
+    def pending_count(self, request):
+        return Response({'count': ResearchLead.objects.filter(status='new').count()})
+
+
+class LeadResearchRunViewSet(viewsets.ReadOnlyModelViewSet):
+    """History of lead-research runs (counts, tokens used, errors)."""
+    queryset = LeadResearchRun.objects.all()
+    serializer_class = LeadResearchRunSerializer
+    permission_classes = [IsAuthenticated, IsSalesOrAdmin]

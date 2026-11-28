@@ -22,7 +22,8 @@ from .models import (
     ContractServiceLocation,
     EmailLog,
     ProspectSequence, ProspectSequenceStep, ProspectEnrollment, ProspectStepExecution,
-    ProspectReply, AIEmailDraft
+    ProspectReply, AIEmailDraft,
+    LeadResearchRun, ResearchLead,
 )
 
 
@@ -2998,3 +2999,42 @@ class AIEmailDraftSerializer(serializers.ModelSerializer):
 
     def get_step_number(self, obj):
         return obj.execution.step.step_number
+
+
+class ResearchLeadSerializer(serializers.ModelSerializer):
+    """Read-only view of a proposed lead; review happens through the approve/reject actions."""
+
+    segment_display = serializers.CharField(source='get_segment_display', read_only=True)
+    suggested_product_display = serializers.CharField(source='get_suggested_product_display', read_only=True)
+    matched_company_name = serializers.CharField(source='matched_company.name', read_only=True, default=None)
+    opportunity_name = serializers.CharField(source='opportunity.name', read_only=True, default=None)
+    reviewed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ResearchLead
+        fields = [
+            'id', 'run', 'status', 'venue_name', 'brand_or_group', 'segment', 'segment_display',
+            'country', 'city', 'opening_timeframe', 'signal', 'source_urls', 'website',
+            'estimated_zones', 'suggested_product', 'suggested_product_display', 'fit_reason',
+            'decision_maker_name', 'decision_maker_title', 'contact_email', 'personal_hook',
+            'score', 'matched_company', 'matched_company_name', 'opportunity', 'opportunity_name',
+            'reviewed_by', 'reviewed_by_name', 'reviewed_at', 'rejection_reason',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
+
+    def get_reviewed_by_name(self, obj):
+        if not obj.reviewed_by:
+            return None
+        return obj.reviewed_by.get_full_name() or obj.reviewed_by.username
+
+
+class LeadResearchRunSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LeadResearchRun
+        fields = [
+            'id', 'status', 'segments', 'countries', 'model', 'leads_proposed', 'leads_saved',
+            'duplicates_skipped', 'web_searches', 'input_tokens', 'output_tokens',
+            'finished_at', 'error_message', 'created_at',
+        ]
+        read_only_fields = fields

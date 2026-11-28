@@ -59,6 +59,7 @@ const leadSourceOptions = [
   'Partner',
   'Direct Mail',
   'Webinar',
+  'AI Research',
   'Other',
 ];
 

@@ -7,7 +7,7 @@ describe('menu by role (from the role table)', () => {
   const all = paths('Admin');
 
   it('shows everything to Admin and only Today to an account with no role', () => {
-    expect(all.length).toBe(31);
+    expect(all.length).toBe(32);
     expect(all).toEqual(buildNavGroups(0).flatMap((g) => g.items.map((i) => i.path)));
     expect(paths(undefined)).toEqual(['/today']);
     expect(paths('')).toEqual(['/today']);
