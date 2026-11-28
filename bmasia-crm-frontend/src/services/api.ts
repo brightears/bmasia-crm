@@ -12,7 +12,8 @@ import {
   APAgingReport, APAgingSummary, OverdueExpense, MonthlyExpenseSummary,
   PLStatement, PLComparative, PLTrendData,
   EmailLogEntry,
-  CareTouch
+  CareTouch,
+  WinBackCandidate, WinBackPage, WinBackSummary, ChurnInsightReport
 } from '../types';
 import { authApi } from './authService';
 import { TimelinePage, TimelineQuery, timelineParams } from '../components/timeline/timelineModel';
@@ -1798,6 +1799,62 @@ class ApiService {
 
   async getAIEmailDraftPendingCount(): Promise<{ count: number }> {
     const response = await authApi.get('/ai-email-drafts/pending_count/');
+    return response.data;
+  }
+
+  // Win-back (churned customers)
+  async getWinBackCandidates(params?: { status?: string; product?: string; open?: string; page?: number; page_size?: number }): Promise<WinBackPage> {
+    const response = await authApi.get('/winback-candidates/', { params });
+    return response.data;
+  }
+
+  async getWinBackSummary(): Promise<WinBackSummary> {
+    const response = await authApi.get('/winback-candidates/summary/');
+    return response.data;
+  }
+
+  async scanWinBack(data: { product: string; window_days: number }): Promise<{ created: number; already_listed: number }> {
+    const response = await authApi.post('/winback-candidates/scan/', data);
+    return response.data;
+  }
+
+  async draftWinBack(id: string, data: { offer?: string; instructions?: string }): Promise<WinBackCandidate> {
+    const response = await authApi.post(`/winback-candidates/${id}/draft/`, data);
+    return response.data;
+  }
+
+  async approveWinBack(id: string, data: { subject: string; body_html: string }): Promise<WinBackCandidate> {
+    const response = await authApi.post(`/winback-candidates/${id}/approve/`, data);
+    return response.data;
+  }
+
+  async skipWinBack(id: string, note?: string): Promise<WinBackCandidate> {
+    const response = await authApi.post(`/winback-candidates/${id}/skip/`, { note });
+    return response.data;
+  }
+
+  async recordWinBackFeedback(id: string, data: { text: string; source: string }): Promise<WinBackCandidate> {
+    const response = await authApi.post(`/winback-candidates/${id}/feedback/`, data);
+    return response.data;
+  }
+
+  async setWinBackOutcome(id: string, data: { outcome: 'won_back' | 'lost'; note?: string }): Promise<WinBackCandidate> {
+    const response = await authApi.post(`/winback-candidates/${id}/outcome/`, data);
+    return response.data;
+  }
+
+  async setWinBackContact(id: string, contact: string): Promise<WinBackCandidate> {
+    const response = await authApi.patch(`/winback-candidates/${id}/`, { contact });
+    return response.data;
+  }
+
+  async getChurnInsights(): Promise<{ results?: ChurnInsightReport[] } | ChurnInsightReport[]> {
+    const response = await authApi.get('/churn-insights/');
+    return response.data;
+  }
+
+  async generateChurnInsights(data: { product: string; window_days: number }): Promise<ChurnInsightReport> {
+    const response = await authApi.post('/churn-insights/generate/', data);
     return response.data;
   }
 

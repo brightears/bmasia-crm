@@ -11,6 +11,7 @@ from .cara_api import CaraCapabilitiesView, CaraCustomerCareView
 from .cara_care_writes import CaraCareSummaryView, CaraTouchCreateView
 from .timeline_views import CompanyTimelineView
 from .renewals_views import RenewalsView
+from .winback_views import ChurnInsightReportViewSet, WinBackCandidateViewSet
 from .data_quality_views import DataQualityCheckView, DataQualitySummaryView
 
 # Create a router and register our viewsets
@@ -102,6 +103,8 @@ router.register(r'prospect-sequences', views.ProspectSequenceViewSet, basename='
 router.register(r'prospect-enrollments', views.ProspectEnrollmentViewSet, basename='prospect-enrollment')
 router.register(r'prospect-replies', views.ProspectReplyViewSet, basename='prospect-reply')
 router.register(r'ai-email-drafts', views.AIEmailDraftViewSet, basename='ai-email-draft')
+router.register(r'winback-candidates', WinBackCandidateViewSet, basename='winback-candidate')
+router.register(r'churn-insights', ChurnInsightReportViewSet, basename='churn-insight')
 
 # The API URLs are now determined automatically by the router.
 urlpatterns = [

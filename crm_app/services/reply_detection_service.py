@@ -51,9 +51,12 @@ class ReplyDetectionService:
     def is_configured(self):
         return bool(self.reply_email and self.imap_password)
 
-    def check_for_replies(self, dry_run=False, lookback_hours=24):
+    def check_for_replies(self, dry_run=False, lookback_hours=24, winback_only=False):
         """
         Main entry point — poll IMAP for replies to prospect sequence emails.
+
+        With ``winback_only`` only replies to win-back emails are recorded; prospect
+        enrollments are left alone (their cron is off while Lyra handles outreach).
 
         Returns:
             dict with counts: {detected, matched, classified, actions_taken}
@@ -83,7 +86,7 @@ class ReplyDetectionService:
 
             for email_id in email_ids:
                 try:
-                    self._process_email(conn, email_id, stats, dry_run)
+                    self._process_email(conn, email_id, stats, dry_run, winback_only=winback_only)
                 except Exception as e:
                     logger.error(f"Error processing IMAP email {email_id}: {e}")
 
@@ -96,7 +99,7 @@ class ReplyDetectionService:
 
         return stats
 
-    def _process_email(self, conn, email_id, stats, dry_run):
+    def _process_email(self, conn, email_id, stats, dry_run, winback_only=False):
         """Process a single email from IMAP"""
         from crm_app.models import ProspectReply
 
@@ -139,12 +142,20 @@ class ReplyDetectionService:
         except Exception:
             received_at = timezone.now()
 
+        if winback_only:
+            self._record_winback_reply(in_reply_to, references, from_email, subject,
+                                       body_text, message_id, stats, dry_run)
+            return
+
         # Match to outbound email
         outbound_log, enrollment = self._match_to_outbound(
             in_reply_to, references, from_email, subject
         )
 
         if not enrollment:
+            if self._record_winback_reply(in_reply_to, references, from_email, subject,
+                                          body_text, message_id, stats, dry_run):
+                return
             logger.debug(f"No matching enrollment for reply from {from_email}: {subject}")
             return
 
@@ -182,6 +193,30 @@ class ReplyDetectionService:
         actions = self._execute_auto_actions(reply, enrollment)
         if actions:
             stats['actions_taken'] += 1
+
+    def _record_winback_reply(self, in_reply_to, references, from_email, subject,
+                              body_text, message_id, stats, dry_run):
+        """A reply to a win-back email becomes that candidate's feedback (classified by Claude)."""
+        from crm_app.models import WinBackCandidate
+        from crm_app.services import winback_service
+
+        if WinBackCandidate.objects.filter(reply_message_id__contains=message_id).exists():
+            return True
+        candidate = winback_service.match_reply(in_reply_to, references, from_email)
+        if candidate is None:
+            return False
+        stats['matched'] += 1
+        if dry_run:
+            logger.info(f"[DRY RUN] Would record win-back reply from {from_email} on {candidate.id}")
+            return True
+        text = f"Subject: {subject}\n\n{body_text}" if subject else body_text
+        if candidate.feedback_text:
+            text = f"{candidate.feedback_text}\n\n---\n{text}"
+        winback_service.record_feedback(
+            candidate, text, source='email_reply', message_id=message_id,
+        )
+        stats['classified'] += 1
+        return True
 
     def _match_to_outbound(self, in_reply_to, references, from_email, subject):
         """

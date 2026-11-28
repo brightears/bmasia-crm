@@ -17,6 +17,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 from .models import (
+    WinBackCandidate, ChurnInsightReport,
     User, Company, Contact, Note, Task, TaskComment, AuditLog, AgentRequest,
     Opportunity, OpportunityActivity, Contract, ContractLineItem, Invoice, InvoiceLineItem, Zone, ContractZone,
     EmailTemplate, EmailLog, EmailCampaign, CampaignRecipient, DocumentAttachment,
@@ -4059,6 +4060,21 @@ class AIEmailDraftAdmin(admin.ModelAdmin):
     list_display = ['subject', 'status', 'reviewer', 'reviewed_at', 'expires_at', 'auto_approved']
     list_filter = ['status', 'auto_approved']
     search_fields = ['subject']
+    readonly_fields = ['id', 'created_at', 'updated_at']
+
+
+@admin.register(WinBackCandidate)
+class WinBackCandidateAdmin(admin.ModelAdmin):
+    list_display = ['company', 'product', 'churned_on', 'status', 'churn_reason', 'sent_at']
+    list_filter = ['status', 'product', 'churn_reason']
+    search_fields = ['company__name', 'contact__email']
+    raw_id_fields = ['company', 'churned_contract', 'contact', 'email_log', 'reviewer']
+    readonly_fields = ['id', 'created_at', 'updated_at', 'sent_at', 'reviewer', 'reviewed_at', 'email_log']
+
+
+@admin.register(ChurnInsightReport)
+class ChurnInsightReportAdmin(admin.ModelAdmin):
+    list_display = ['created_at', 'product', 'window_days', 'candidate_count', 'feedback_count']
     readonly_fields = ['id', 'created_at', 'updated_at']
 
 

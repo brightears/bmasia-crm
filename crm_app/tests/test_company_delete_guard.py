@@ -33,7 +33,7 @@ KNOWN_COMPANY_CASCADES = [
     'crm_app.CustomerSegment.static_companies', 'crm_app.Device.company', 'crm_app.DocumentAttachment.company',
     'crm_app.EmailCampaign.company', 'crm_app.EmailLog.company', 'crm_app.Invoice.company', 'crm_app.Note.company',
     'crm_app.Opportunity.company', 'crm_app.Quote.company', 'crm_app.SequenceEnrollment.company',
-    'crm_app.Task.company', 'crm_app.Ticket.company', 'crm_app.Zone.company',
+    'crm_app.Task.company', 'crm_app.Ticket.company', 'crm_app.WinBackCandidate.company', 'crm_app.Zone.company',
     'mail_capture.CompanyDomain.company',
 ]
 # Relations that block a company delete at the database (the agent inbox keeps its log).

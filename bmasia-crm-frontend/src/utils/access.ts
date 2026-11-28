@@ -38,6 +38,7 @@ export const MODULE_ROLES = {
   invoices: COMMERCIAL,
   'finance-reports': FINANCE, // revenue, receivables, payables, P&L, cash flow, balance sheet, revenue recognition
   'prospect-sequences': SALES,
+  'win-back': SALES, // churned-customer win-back (server: Sales and Admin)
   campaigns: SALES, // also email templates and segments
   'email-automations': ADMIN,
   tickets: SUPPORT, // also help articles, music zones and site tech details
@@ -75,6 +76,7 @@ export const MENU_PATH_MODULE: Record<string, PageModule> = {
   '/renewals': 'contracts',
   '/tasks': 'tasks',
   '/ai-drafts': 'opportunities',
+  '/win-back': 'win-back',
   '/targets': 'targets',
   '/invoices': 'invoices',
   '/revenue': 'finance-reports',

@@ -1874,3 +1874,81 @@ export interface AIEmailDraft {
   step_number: number;
   created_at: string;
 }
+
+// Win-back (churned customers): crm_app/winback_views.py
+export type WinBackStatus =
+  | 'identified' | 'needs_contact' | 'pending_review' | 'sent'
+  | 'replied' | 'won_back' | 'lost' | 'skipped';
+
+export type WinBackProduct = 'beatbreeze' | 'soundtrack' | 'other';
+
+export interface WinBackCandidate {
+  id: string;
+  company: string;
+  company_name: string;
+  company_industry: string;
+  company_country: string;
+  contact: string | null;
+  contact_name: string;
+  contact_email: string;
+  churned_contract: string | null;
+  contract_number: string;
+  product: WinBackProduct;
+  product_display: string;
+  churned_on: string;
+  churn_signal: string;
+  zones: number;
+  annual_value: string | null;
+  currency: string;
+  status: WinBackStatus;
+  status_display: string;
+  offer: string;
+  draft_subject: string;
+  draft_body_html: string;
+  personalisation_notes: string;
+  drafted_at: string | null;
+  ai_model: string;
+  final_subject: string;
+  final_body_html: string;
+  reviewer_name: string;
+  reviewed_at: string | null;
+  sent_at: string | null;
+  send_error: string;
+  feedback_text: string;
+  feedback_source: string;
+  feedback_received_at: string | null;
+  churn_reason: string;
+  churn_reason_display: string;
+  churn_reason_detail: string;
+  sentiment: string;
+  win_back_likelihood: string;
+  suggested_next_step: string;
+  outcome_notes: string;
+  closed_at: string | null;
+}
+
+export interface WinBackPage {
+  count?: number;
+  results?: WinBackCandidate[];
+}
+
+export interface WinBackSummary {
+  by_status: Record<string, number>;
+  by_reason: Record<string, number>;
+  pending_review: number;
+  default_offer: string;
+}
+
+export interface ChurnInsightReport {
+  id: string;
+  window_days: number;
+  product: string;
+  candidate_count: number;
+  feedback_count: number;
+  reason_counts: Record<string, number>;
+  stats: Record<string, unknown>;
+  summary: string;
+  plan_markdown: string;
+  ai_model: string;
+  created_at: string;
+}

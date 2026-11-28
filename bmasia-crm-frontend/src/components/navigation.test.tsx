@@ -7,7 +7,7 @@ describe('menu by role (from the role table)', () => {
   const all = paths('Admin');
 
   it('shows everything to Admin and only Today to an account with no role', () => {
-    expect(all.length).toBe(31);
+    expect(all.length).toBe(32);
     expect(all).toEqual(buildNavGroups(0).flatMap((g) => g.items.map((i) => i.path)));
     expect(paths(undefined)).toEqual(['/today']);
     expect(paths('')).toEqual(['/today']);
@@ -21,6 +21,7 @@ describe('menu by role (from the role table)', () => {
     expect(sales).toContain('/email-templates');
     expect(sales).toContain('/contract-templates');
     expect(sales).toContain('/renewals');
+    expect(sales).toContain('/win-back');
     expect(sales).not.toContain('/finance/pl');
     expect(sales).not.toContain('/revenue');
     expect(sales).not.toContain('/users');
@@ -33,6 +34,7 @@ describe('menu by role (from the role table)', () => {
     expect(finance).toContain('/finance/balance-sheet');
     expect(finance).toContain('/contracts');
     expect(finance).not.toContain('/campaigns');
+    expect(finance).not.toContain('/win-back');
     expect(finance).not.toContain('/tickets');
     expect(finance).not.toContain('/users');
   });

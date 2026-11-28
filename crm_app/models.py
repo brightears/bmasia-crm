@@ -2335,6 +2335,7 @@ class EmailLog(TimestampedModel):
         ('contract_followup', 'Contract Follow-up'),
         ('sequence', 'Prospect Sequence'),
         ('receipt_send', 'Receipt/Tax Invoice Sent'),
+        ('winback', 'Win-back Outreach'),
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -5852,3 +5853,146 @@ class CareTouch(models.Model):
 
     def __str__(self):
         return f"{self.kind} {self.occurred_at:%Y-%m-%d} ({self.source})"
+
+
+# ============================================================
+# Win-back (churned customer recovery)
+# ============================================================
+
+WINBACK_PRODUCT_CHOICES = [
+    ('beatbreeze', 'Beat Breeze'),
+    ('soundtrack', 'Soundtrack Your Brand'),
+    ('other', 'Other / unknown'),
+]
+
+CHURN_REASON_CHOICES = [
+    ('price', 'Price / budget'),
+    ('music', 'Music selection or quality'),
+    ('technical', 'Technical or player issues'),
+    ('service', 'Service or support'),
+    ('competitor', 'Switched to a competitor'),
+    ('free_alternative', 'Switched to a free or unlicensed source'),
+    ('venue_closed', 'Venue closed or sold'),
+    ('ownership_change', 'New owner or management'),
+    ('renovation', 'Renovation or temporary closure'),
+    ('licensing', 'Licensing confusion'),
+    ('no_longer_needed', 'No longer needs background music'),
+    ('other', 'Other'),
+    ('unknown', 'Unknown'),
+]
+
+
+class WinBackCandidate(TimestampedModel):
+    """One churned customer the win-back agent found, and everything that happened next.
+
+    Claude drafts the email; a person signed in to the website must approve it before
+    anything is sent (``services.winback_service.approve_and_send``). Nothing in this
+    module sends on its own.
+    """
+    STATUS_CHOICES = [
+        ('identified', 'Identified'),
+        ('needs_contact', 'Needs a contact'),
+        ('pending_review', 'Draft waiting for review'),
+        ('sent', 'Sent'),
+        ('replied', 'Replied'),
+        ('won_back', 'Won back'),
+        ('lost', 'Lost'),
+        ('skipped', 'Skipped'),
+    ]
+    OPEN_STATUSES = ('identified', 'needs_contact', 'pending_review', 'sent', 'replied')
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='winback_candidates')
+    churned_contract = models.ForeignKey(
+        Contract, on_delete=models.SET_NULL, null=True, blank=True, related_name='winback_candidates',
+    )
+    contact = models.ForeignKey(
+        Contact, on_delete=models.SET_NULL, null=True, blank=True, related_name='winback_candidates',
+    )
+    product = models.CharField(max_length=20, choices=WINBACK_PRODUCT_CHOICES, default='other')
+    churned_on = models.DateField(help_text='Contract end, cancellation or churn date')
+    churn_signal = models.CharField(max_length=40, blank=True, help_text='Which record showed the churn')
+    zones = models.IntegerField(default=0)
+    annual_value = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    currency = models.CharField(max_length=3, blank=True)
+
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='identified', db_index=True)
+
+    # Claude's draft and the reviewer's version
+    offer = models.CharField(max_length=500, blank=True, help_text='Offer the draft was asked to make')
+    draft_subject = models.CharField(max_length=500, blank=True)
+    draft_body_html = models.TextField(blank=True)
+    personalisation_notes = models.TextField(blank=True, help_text="Claude's note on what it personalised and why")
+    drafted_at = models.DateTimeField(null=True, blank=True)
+    ai_model = models.CharField(max_length=100, blank=True)
+    final_subject = models.CharField(max_length=500, blank=True)
+    final_body_html = models.TextField(blank=True)
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='reviewed_winbacks',
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    email_log = models.ForeignKey(
+        EmailLog, on_delete=models.SET_NULL, null=True, blank=True, related_name='winback_candidates',
+    )
+    send_error = models.TextField(blank=True)
+
+    # Feedback: why they left
+    feedback_text = models.TextField(blank=True, help_text='What the customer said (reply, call notes)')
+    feedback_source = models.CharField(max_length=20, blank=True, help_text="'email_reply', 'call', 'manual'")
+    feedback_received_at = models.DateTimeField(null=True, blank=True)
+    reply_message_id = models.TextField(blank=True, help_text='Message-IDs of replies already recorded')
+    churn_reason = models.CharField(max_length=20, choices=CHURN_REASON_CHOICES, default='unknown')
+    churn_reason_detail = models.CharField(max_length=500, blank=True)
+    sentiment = models.CharField(max_length=20, blank=True)
+    win_back_likelihood = models.CharField(max_length=20, blank=True)
+    suggested_next_step = models.CharField(max_length=500, blank=True)
+
+    outcome_notes = models.TextField(blank=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-churned_on']
+        indexes = [
+            models.Index(fields=['status', '-churned_on']),
+            models.Index(fields=['product', 'status']),
+            models.Index(fields=['churn_reason']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['company', 'churned_contract'],
+                name='winback_one_candidate_per_churned_contract',
+            ),
+        ]
+        verbose_name = 'Win-back candidate'
+        verbose_name_plural = 'Win-back candidates'
+
+    def __str__(self):
+        return f"{self.company.name} ({self.get_status_display()})"
+
+
+class ChurnInsightReport(TimestampedModel):
+    """Claude's analysis of why customers left, with a 5-step improvement plan."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    window_days = models.IntegerField(default=183)
+    product = models.CharField(max_length=20, blank=True, help_text='Blank = all products')
+    candidate_count = models.IntegerField(default=0)
+    feedback_count = models.IntegerField(default=0)
+    reason_counts = models.JSONField(default=dict, blank=True)
+    stats = models.JSONField(default=dict, blank=True)
+    summary = models.TextField(blank=True)
+    plan_markdown = models.TextField(blank=True)
+    ai_model = models.CharField(max_length=100, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='churn_insight_reports',
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Churn insight report'
+        verbose_name_plural = 'Churn insight reports'
+
+    def __str__(self):
+        return f"Churn insights {self.created_at:%Y-%m-%d} ({self.product or 'all'})"
