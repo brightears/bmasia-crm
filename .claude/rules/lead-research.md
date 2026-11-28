@@ -45,7 +45,7 @@ tokens and agents may read the queue only.
 - Needs `ANTHROPIC_API_KEY` (already used by `ai_service.py`).
 - The cron is not created by code: add a Render cron (Singapore) running
   `python manage.py research_new_venues` weekly, e.g. Monday 01:00 UTC (08:00 Bangkok).
-- Each run is roughly 30-45 web searches plus tokens; `LeadResearchRun` records
+- Each run is up to 4 web searches per requested lead (60 for 15) plus tokens; `LeadResearchRun` records
   searches and token counts per run.
 
 ## Outreach after approval
