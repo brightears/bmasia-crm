@@ -145,6 +145,9 @@ class ReplyDetectionService:
         )
 
         if not enrollment:
+            if self._record_winback_reply(in_reply_to, references, from_email, subject,
+                                          body_text, message_id, stats, dry_run):
+                return
             logger.debug(f"No matching enrollment for reply from {from_email}: {subject}")
             return
 
@@ -182,6 +185,30 @@ class ReplyDetectionService:
         actions = self._execute_auto_actions(reply, enrollment)
         if actions:
             stats['actions_taken'] += 1
+
+    def _record_winback_reply(self, in_reply_to, references, from_email, subject,
+                              body_text, message_id, stats, dry_run):
+        """A reply to a win-back email becomes that candidate's feedback (classified by Claude)."""
+        from crm_app.models import WinBackCandidate
+        from crm_app.services import winback_service
+
+        if WinBackCandidate.objects.filter(reply_message_id__contains=message_id).exists():
+            return True
+        candidate = winback_service.match_reply(in_reply_to, references, from_email)
+        if candidate is None:
+            return False
+        stats['matched'] += 1
+        if dry_run:
+            logger.info(f"[DRY RUN] Would record win-back reply from {from_email} on {candidate.id}")
+            return True
+        text = f"Subject: {subject}\n\n{body_text}" if subject else body_text
+        if candidate.feedback_text:
+            text = f"{candidate.feedback_text}\n\n---\n{text}"
+        winback_service.record_feedback(
+            candidate, text, source='email_reply', message_id=message_id,
+        )
+        stats['classified'] += 1
+        return True
 
     def _match_to_outbound(self, in_reply_to, references, from_email, subject):
         """

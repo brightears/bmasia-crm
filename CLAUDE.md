@@ -16,6 +16,7 @@
 | Finance module | `.claude/rules/finance-module.md` |
 | Implementation history | `.claude/rules/implementation-history.md` |
 | Finance plan | `.claude/plans/memoized-churning-bird.md` |
+| Win-back agent | `.claude/rules/winback-agent.md` |
 
 ## Production URLs
 

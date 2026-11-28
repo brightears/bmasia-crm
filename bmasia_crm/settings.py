@@ -326,6 +326,13 @@ EMAIL_AUTOMATION_MANUAL_SEND_ENABLED = os.environ.get('EMAIL_AUTOMATION_MANUAL_S
 # Anthropic / Claude API Configuration
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 
+# Win-back agent (crm_app/services/winback_service.py). Claude drafts; a person sends.
+WINBACK_AI_MODEL = os.environ.get('WINBACK_AI_MODEL', 'claude-opus-5-5')
+WINBACK_DEFAULT_OFFER = os.environ.get('WINBACK_DEFAULT_OFFER', '2 months free when they sign a new 12-month plan')
+WINBACK_SENDER_NAME = os.environ.get('WINBACK_SENDER_NAME', 'Norbert Platzer')
+WINBACK_SENDER_TITLE = os.environ.get('WINBACK_SENDER_TITLE', 'Director of Operations, BMAsia')
+WINBACK_REPLY_TO = os.environ.get('WINBACK_REPLY_TO', '')
+
 # Prospect reply detection (IMAP)
 PROSPECT_REPLY_EMAIL = config('PROSPECT_REPLY_EMAIL', default='norbert@bmasiamusic.com')
 PROSPECT_REPLY_IMAP_PASSWORD = config('PROSPECT_REPLY_IMAP_PASSWORD', default='')
