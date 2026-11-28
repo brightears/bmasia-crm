@@ -249,3 +249,35 @@ def test_insights_report_saved(pending):
 def test_insights_need_candidates():
     with pytest.raises(WinBackError):
         winback_service.generate_insights(today=TODAY)
+
+
+def test_reply_checker_records_winback_reply_only(pending):
+    from email.message import EmailMessage
+    from crm_app.services.reply_detection_service import ReplyDetectionService
+
+    log = EmailLog.objects.create(company=pending.company, contact=pending.contact, email_type='winback',
+                                  from_email='a@b.c', to_email=pending.contact.email, subject='s',
+                                  body_html='b', status='sent', message_id='<wb1@bmasia>')
+    pending.status = 'sent'
+    pending.email_log = log
+    pending.save()
+
+    msg = EmailMessage()
+    msg['From'] = pending.contact.email
+    msg['Subject'] = 'Re: We miss you'
+    msg['Message-ID'] = '<reply1@client>'
+    msg['In-Reply-To'] = '<wb1@bmasia>'
+    msg['Date'] = 'Fri, 27 Nov 2026 10:00:00 +0700'
+    msg.set_content('Honestly the price went up and we closed one outlet.')
+    conn = mock.Mock()
+    conn.fetch.return_value = ('OK', [(b'1', msg.as_bytes())])
+
+    service = ReplyDetectionService()
+    stats = {'detected': 0, 'matched': 0, 'classified': 0, 'actions_taken': 0}
+    with mock.patch.object(winback_service, '_ask_claude', return_value=(FEEDBACK, 'm')):
+        service._process_email(conn, b'1', stats, dry_run=False, winback_only=True)
+        service._process_email(conn, b'1', stats, dry_run=False, winback_only=True)  # seen already
+    pending.refresh_from_db()
+    assert pending.status == 'replied' and pending.churn_reason == 'price'
+    assert pending.feedback_text.count('price went up') == 1
+    assert stats['matched'] == 1

@@ -7,6 +7,7 @@ Usage:
     python manage.py check_prospect_replies
     python manage.py check_prospect_replies --dry-run
     python manage.py check_prospect_replies --lookback 48
+    python manage.py check_prospect_replies --winback-only   # only replies to win-back emails
 """
 
 import logging
@@ -30,6 +31,11 @@ class Command(BaseCommand):
             default=24,
             help='Hours to look back for emails (default: 24)',
         )
+        parser.add_argument(
+            '--winback-only',
+            action='store_true',
+            help='Only record replies to win-back emails; leave prospect sequences alone',
+        )
 
     def handle(self, *args, **options):
         from crm_app.services.reply_detection_service import ReplyDetectionService
@@ -51,7 +57,8 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Checking IMAP inbox ({service.reply_email}) for replies...")
 
-        stats = service.check_for_replies(dry_run=dry_run, lookback_hours=lookback)
+        stats = service.check_for_replies(dry_run=dry_run, lookback_hours=lookback,
+                                          winback_only=options['winback_only'])
 
         self.stdout.write(self.style.SUCCESS(
             f"Done: {stats['detected']} detected, {stats['matched']} matched, "

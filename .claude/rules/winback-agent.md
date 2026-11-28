@@ -12,7 +12,7 @@ after a person approves it, learns why they left, and writes a 5-step improvemen
 | API | `crm_app/winback_views.py`: `/api/v1/winback-candidates/` (`scan`, `draft`, `approve`, `skip`, `feedback`, `outcome`, `summary`) and `/api/v1/churn-insights/` (`generate`) |
 | Page | `bmasia-crm-frontend/src/pages/WinBack.tsx` at `/win-back` (Sales menu, Sales and Admin roles) |
 | Cron-friendly command | `python manage.py winback_scan [--product beatbreeze] [--draft] [--limit 20] [--dry-run]` |
-| Replies | `reply_detection_service._record_winback_reply` (runs inside `check_prospect_replies`) |
+| Replies | `reply_detection_service._record_winback_reply`; run `python manage.py check_prospect_replies --winback-only` on a schedule (the prospect cron is off since 30 Mar 2026, so nothing reads replies until a cron runs this) |
 
 ## Rules
 
